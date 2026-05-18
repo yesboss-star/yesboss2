@@ -1,0 +1,84 @@
+import logging
+from pymongo import MongoClient
+from pymongo.database import Database
+from .config import settings
+
+logger = logging.getLogger("yesboss.database")
+
+client: MongoClient = None
+db: Database = None
+
+
+def connect_mongodb():
+    global client, db
+    if not settings.MONGODB_URI:
+        logger.warning("MongoDB URI not configured")
+        return None
+
+    try:
+        client = MongoClient(settings.MONGODB_URI, serverSelectionTimeoutMS=5000)
+        client.admin.command("ping")
+        
+        uri = settings.MONGODB_URI
+        if "yb1.kf8ash8.mongodb.net" in uri:
+            db = client["yesboss_db"]
+        else:
+            db = client.get_default_database()
+        
+        _ensure_collections(db)
+        logger.info("MongoDB connected to %s", db.name)
+        return db
+    except Exception as e:
+        logger.error("MongoDB connection failed: %s", str(e))
+        return None
+
+
+def _ensure_collections(db: Database):
+    collections = db.list_collection_names()
+    required = ["users", "organizations", "employees", "goals", "tasks", "workflows", "task_outcomes", "bottlenecks", "learning_patterns", "documents", "conversations", "uploads"]
+    for col in required:
+        if col not in collections:
+            db.create_collection(col)
+            logger.info("Created collection: %s", col)
+    
+    _ensure_indexes(db)
+
+
+def _ensure_indexes(db: Database):
+    try:
+        db.organizations.create_index("domain")
+        db.organizations.create_index("industry")
+        
+        db.employees.create_index("email")
+        db.employees.create_index("organization_id")
+        db.employees.create_index("department")
+        db.employees.create_index([("organization_id", 1), ("department", 1)])
+        
+        db.tasks.create_index("organization_id")
+        db.tasks.create_index("assignee_email")
+        db.tasks.create_index("status")
+        db.tasks.create_index([("organization_id", 1), ("status", 1)])
+        
+        db.goals.create_index("organization_id")
+        db.goals.create_index("department")
+        
+        db.workflows.create_index("organization_id")
+        db.workflows.create_index([("organization_id", 1), ("created_at", -1)])
+        
+        logger.info("Database indexes created")
+    except Exception as e:
+        logger.warning(f"Index creation warning: {e}")
+
+
+def get_database() -> Database:
+    if db is None:
+        return connect_mongodb()
+    return db
+
+
+def close_mongodb():
+    global client
+    if client:
+        client.close()
+        client = None
+        logger.info("MongoDB disconnected")

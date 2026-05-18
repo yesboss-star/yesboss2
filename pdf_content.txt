@@ -1,0 +1,928 @@
+YESBOSS — Complete MVP Product Documentation 
+ 
+YESBOSS — COMPLETE MVP PRODUCT DOCUMENTATION 
+ 
+SCREEN 1 — LANDING PAGE 
+ 
+DISPLAY 
+• Hero section 
+• “AI Business Operating System” 
+• AI insight previews 
+• Dashboard previews 
+• Integrations section 
+• Testimonials 
+• FAQ 
+• Start Free 
+• Login 
+ 
+TECH USED 
+• Next.js 
+• TailwindCSS 
+• ShadCN 
+• Framer Motion 
+ 
+ 
+SCREEN 2 — SIGNUP / LOGIN PAGE 
+ 
+DISPLAY 
+Signup Fields 
+• Full Name 
+• Phone Number 
+• Email (OPTIONAL initially but recommended) 
+• OTP Verification 
+• Password 
+• Confirm Password 
+ 
+Role Selection 
+• Owner 
+• Employee 
+ 
+IMPORTANT FLOW 
+ 
+EMAIL IS OPTIONAL INITIALLY 
+ 
+BUT: 
+If user provides: 
+• Email 
+OR 
+• Company domain 
+ 
+The AI immediately starts: 
+PRE-ORG INTELLIGENCE ANALYSIS 
+before onboarding starts. 
+ 
+WHAT HAPPENS 
+ 
+Example: 
+founder@teslaauto.in 
+ 
+AI extracts: 
+teslaauto.in 
+ 
+Then starts: 
+• Web scraping 
+• Company intelligence 
+• Industry detection 
+• Kaggle pattern matching 
+ 
+BEFORE onboarding. 
+ 
+TECH USED 
+• Next.js 
+• Supabase Auth 
+• Redis 
+• MongoDB 
+ 
+OTP SYSTEM 
+• Supabase OTP 
+ 
+ 
+SCREEN 3 — OWNER CHECK LOGIC 
+ 
+VERY IMPORTANT 
+ 
+ONLY OWNERS SEE: 
+• Organization Onboarding 
+ 
+Employees DO NOT. 
+ 
+FLOW 
+ 
+If Role = Owner 
+↓ 
+Show Org Onboarding 
+ 
+If Role = Employee 
+↓ 
+Show Employee Self-Onboarding 
+ 
+ 
+SCREEN 4 — PRE-AI ORGANIZATION INTELLIGENCE ENGINE 
+ 
+THIS STARTS AUTOMATICALLY 
+BEFORE showing onboarding. 
+ 
+AI STARTS ANALYZING USING: 
+• Domain/email 
+• Web scraping 
+• Internet data 
+• Kaggle datasets 
+• Public company intelligence 
+ 
+WEB SCRAPER USES 
+• Playwright 
+• BeautifulSoup 
+• Firecrawl 
+ 
+SCRAPES 
+• Homepage 
+• About page 
+• Services 
+• Metadata 
+• Careers 
+• Blogs 
+• Social links 
+ 
+KAGGLE DATASETS USED FOR 
+• Industry patterns 
+• Micro-vertical intelligence 
+• Common workflows 
+• Operational pain points 
+• Business benchmarking 
+• Department structures 
+ 
+MASTER AGENT NOW TRAINS CONTEXT 
+ 
+Before asking user anything: 
+The system first: 
+• Scrapes 
+• Analyzes 
+• Compares with industry datasets 
+• Enriches company intelligence 
+• Creates preliminary org understanding 
+ 
+AI USED 
+ 
+MAIN BRAIN 
+• Qwen 14B 
+ 
+API ENRICHMENT 
+GPT 
+Used for: 
+• Structured business reasoning 
+ 
+Claude 
+Used for: 
+• Long-context company analysis 
+ 
+Grok 
+Used for: 
+• Internet trend enrichment 
+ 
+MASTER AGENT USES 
+• LangGraph 
+• CrewAI 
+ 
+WHAT MASTER AGENT DOES 
+Analyzes: 
+“How much does the AI already understand?” 
+ 
+Then decides: 
+• How many onboarding questions are needed 
+• How much time should be requested from user 
+ 
+ 
+SCREEN 5 — AI TIME REQUEST SCREEN 
+ 
+AI asks: 
+“We already understood most of your organization. 
+We only need 2 minutes.” 
+ 
+OR 
+ 
+“We need around 7 minutes to understand your business deeply.” 
+ 
+IMPORTANT 
+TIME IS NOT FIXED 
+ 
+MASTER AGENT DECIDES IT DYNAMICALLY BASED ON: 
+• Scraper confidence 
+• Kaggle similarity confidence 
+• Org completeness 
+• Industry understanding 
+• Detected workflows 
+ 
+OPTIONS 
+• Continue 
+• Later 
+ 
+IF USER CHOOSES LATER 
+ 
+AI creates: 
+• Starter dashboard 
+• Estimated insights 
+• Missing-data placeholders 
+ 
+WITHOUT hallucinating. 
+ 
+ 
+SCREEN 6 — DYNAMIC AI FILE REQUEST SCREEN 
+ 
+THIS IS NOT STATIC 
+ 
+AI decides: 
+WHICH FILES TO ASK FOR 
+ 
+BASED ON: 
+• Industry 
+• Micro-vertical 
+• Missing intelligence 
+• Workflow gaps 
+• Detected org type 
+ 
+EXAMPLES 
+ 
+Manufacturing 
+AI asks: 
+• Inventory sheets 
+• Dispatch reports 
+• Vendor reports 
+ 
+Agency 
+AI asks: 
+• Client pipeline 
+• Project tracker 
+• Campaign reports 
+ 
+Influencer 
+AI asks: 
+• Audience analytics 
+• Sponsorship reports 
+• Engagement metrics 
+ 
+FILE PROCESSING FLOW 
+ 
+Upload 
+↓ 
+OCR 
+↓ 
+Chunking 
+↓ 
+Embedding 
+↓ 
+AI Analysis 
+ 
+TECH USED 
+• PaddleOCR 
+• PyMuPDF 
+• Qdrant 
+• Claude 
+• Qwen 
+ 
+STORED IN 
+• MongoDB 
+• Qdrant 
+ 
+ 
+SCREEN 7 — SOCIAL PRESENCE DETECTION 
+ 
+DISPLAY 
+ 
+AI auto-detects: 
+• LinkedIn 
+• Instagram 
+• Facebook 
+• YouTube 
+• X 
+ 
+User only confirms/edit. 
+ 
+TECH USED 
+• Web scraping 
+• Firecrawl 
+• GPT 
+ 
+ 
+SCREEN 8 — PERSONA + ORGANIZATIONAL INTELLIGENCE CHAT 
+ 
+THIS IS: 
+CONTINUOUS CONVERSATIONAL ONBOARDING 
+ 
+NOT static forms. 
+ 
+FLOW 
+ 
+AI asks: 
+• Leadership questions 
+• Operational questions 
+• Bottleneck questions 
+• Workflow questions 
+ 
+IMPORTANT 
+ 
+QUESTIONS ARE GENERATED FROM: 
+• Previous answers 
+• Org understanding 
+• Uploaded docs 
+• Industry type 
+• Behavioral analysis 
+ 
+EXAMPLE 
+ 
+“What slows growth most?” 
+ 
+User: 
+“Delayed approvals.” 
+ 
+AI next asks: 
+“Are approvals centralized under founders?” 
+ 
+MOST IMPORTANT FEATURE 
+ 
+After every answer AI asks: 
+“Would you like to answer more questions so YesBoss can understand your company 
+better?” 
+ 
+IF USER SAYS YES 
+ 
+Conversation continues infinitely like: 
+• Google Assistant 
+• Conversational AI 
+ 
+Until: 
+• User closes session 
+ 
+MASTER AGENT CONTROLS: 
+• Question depth 
+• Direction 
+• Conversation flow 
+• Intelligence gathering 
+ 
+TECH USED 
+• LangGraph 
+• CrewAI 
+• Qwen 
+• GPT 
+• Claude 
+ 
+STORED IN 
+• MongoDB 
+• Qdrant 
+ 
+ 
+SCREEN 9 — CREATE NOW OR LATER SCREEN 
+ 
+After onboarding + persona intelligence: 
+ 
+AI asks: 
+“Would you like to create your operational workspace now or later?” 
+ 
+OPTIONS 
+ 
+Create Now 
+Creates: 
+• Org workspace 
+• Dashboards 
+• AI memory 
+• Workflows 
+• Suggestions 
+ 
+Create Later 
+Saves: 
+• Onboarding intelligence 
+• AI memory 
+• Organization understanding 
+ 
+Allows continuation later. 
+ 
+ 
+SCREEN 10 — GOAL CREATION SCREEN 
+ 
+DISPLAY 
+• Goal title 
+• Description 
+• Priority 
+• Timeline 
+• Suggested department 
+• Suggested assignee 
+• AI-generated tasks 
+ 
+AI FLOW 
+ 
+Goal Entered 
+↓ 
+Goal Agent 
+↓ 
+Dependency Analysis 
+↓ 
+Department Detection 
+↓ 
+Task Generation 
+ 
+AI USED 
+• Qwen 
+• GPT 
+ 
+ 
+SCREEN 11 — TASK EXECUTION SCREEN 
+ 
+DISPLAY 
+• Task lists 
+• Approvals 
+• Reviewers 
+• Dependencies 
+• Timelines 
+• Escalations 
+ 
+REALTIME SYSTEM 
+• Socket.IO 
+• Redis 
+ 
+ 
+SCREEN 12 — AI DASHBOARD 
+ 
+DISPLAY 
+ 
+Dynamic dashboards based on: 
+• Industry 
+• Org maturity 
+• Uploaded docs 
+• AI confidence 
+• Workflows 
+ 
+DASHBOARD MODULES 
+• Founder dashboard 
+• Finance dashboard 
+• Operations dashboard 
+• Productivity dashboard 
+• Workflow dashboard 
+ 
+AI INSIGHT CARDS 
+ 
+Examples: 
+• “Approval delays affecting execution speed.” 
+• “Inventory turnover slowing.” 
+ 
+AI USED 
+• Qwen 
+• GPT 
+• Grok 
+ 
+ 
+SCREEN 13 — EXECUTIVE AI CHAT 
+ 
+MOST IMPORTANT SCREEN 
+ 
+DISPLAY 
+ 
+Conversational COO AI 
+ 
+Example: 
+“How do I improve collections?” 
+ 
+FLOW 
+ 
+User Query 
+↓ 
+Master Agent 
+↓ 
+Select Expert Agents 
+↓ 
+Use Qwen + GPT + Claude + Grok 
+↓ 
+Combine Intelligence 
+↓ 
+Generate Final Executive Answer 
+ 
+EXPERT AGENTS 
+• Finance agent 
+• Operations agent 
+• Workflow agent 
+• Forecasting agent 
+• Industry intelligence agent 
+• Org understanding agent 
+ 
+MASTER AGENT TECH 
+• LangGraph 
+• CrewAI 
+ 
+ 
+SCREEN 14 — CONTINUOUS LEARNING ENGINE (BACKGROUND) 
+ 
+NOT visible. 
+ 
+THIS is the real AI moat. 
+ 
+COLLECTS 
+• User workflows 
+• Org structures 
+• Task outcomes 
+• Failures 
+• Operational bottlenecks 
+• Industry patterns 
+• Internet business intelligence 
+• Kaggle datasets 
+• AI feedback 
+ 
+TRAINING FLOW 
+ 
+Internet Data 
++ 
+User Org Data 
++ 
+Kaggle Datasets 
+↓ 
+Cleaning Pipeline 
+↓ 
+Instruction Dataset 
+↓ 
+LoRA Fine-Tuning 
+↓ 
+Industry Adapter 
+↓ 
+Deploy Updated Adapter 
+ 
+TRAINING STACK 
+• PyTorch 
+• HuggingFace 
+• PEFT 
+• Unsloth 
+ 
+IMPORTANT 
+ 
+YOU ARE TRAINING: 
+INDUSTRY-SPECIALIZED ADAPTERS 
+ 
+Examples: 
+• manufacturing_adapter 
+• agency_adapter 
+• creator_adapter 
+• retail_adapter 
+ 
+NOT the entire foundation model. 
+ 
+FINAL MVP ARCHITECTURE 
+ 
+Next.js Frontend 
+↓ 
+FastAPI Backend 
+↓ 
+Master Agent (LangGraph) 
+↓ 
+Expert Agents (CrewAI) 
+↓ 
+Qwen Main Brain 
+↓ 
+GPT + Claude + Grok APIs 
+↓ 
+MongoDB + Qdrant + Redis 
+↓ 
+Continuous Learning + LoRA Training 
+ 
+FINAL PRODUCT REALITY 
+ 
+YESBOSS IS: 
+• Continuously Learning 
+• Multi-Agent 
+• Business Intelligence Operating System 
+ 
+NOT: 
+• A normal SaaS app 
+ 
+ 
+YESBOSS — EMPLOYEE ONBOARDING FLOW (COMPLETE MVP) 
+ 
+IMPORTANT 
+ 
+Employee onboarding is COMPLETELY DIFFERENT from owner onboarding. 
+ 
+Employees should NOT: 
+• Create organization intelligence 
+• Upload strategic business docs 
+• Manage org setup 
+• Configure company structure 
+ 
+Instead employee onboarding focuses on: 
+• Role understanding 
+• Reporting hierarchy 
+• Behavioral understanding 
+• Workflow integration 
+• Productivity intelligence 
+ 
+ 
+EMPLOYEE FLOW 
+ 
+Signup/Login 
+↓ 
+Organization Detection 
+↓ 
+Employee Self-Onboarding 
+↓ 
+Reporting Structure Setup 
+↓ 
+Persona Intelligence Chat 
+↓ 
+Workspace Creation 
+↓ 
+Task Dashboard 
+ 
+ 
+SCREEN E1 — EMPLOYEE SIGNUP / LOGIN 
+ 
+DISPLAY 
+• Full Name 
+• Phone Number 
+• Email (optional initially) 
+• OTP verification 
+• Password 
+• Confirm Password 
+ 
+Role: 
+• Employee 
+ 
+TECH USED 
+• Next.js 
+• Supabase Auth 
+• MongoDB 
+ 
+IMPORTANT AI FEATURE 
+ 
+When employee enters: 
+• Email 
+OR 
+• Domain 
+ 
+AI tries to detect organization automatically. 
+ 
+EXAMPLE 
+ 
+rahul@teslaauto.in 
+ 
+AI detects: 
+Organization: 
+Tesla Auto 
+ 
+HOW? 
+Using: 
+• Email domain 
+• Org database 
+• Scraped company domains 
+ 
+IF ORG FOUND 
+Employee joins existing org. 
+ 
+IF ORG NOT FOUND 
+ 
+DISPLAY 
+“Could not detect organization.” 
+ 
+Then show: 
+• Organization search box 
+• Manual org entry 
+ 
+TECH USED 
+• Qwen 
+• MongoDB 
+• Domain intelligence 
+ 
+ 
+SCREEN E2 — EMPLOYEE SELF-ONBOARDING 
+ 
+DISPLAY 
+ 
+QUESTIONS 
+ 
+Department 
+(Text input + AI suggestions) 
+ 
+Examples: 
+• Sales 
+• Operations 
+• Finance 
+• Marketing 
+ 
+“Who are you reporting to?” 
+ 
+Input: 
+• Manager name 
+• AI employee suggestions 
+ 
+“Is someone reporting to you?” 
+ 
+OPTIONS 
+• Yes 
+• No 
+ 
+IF YES 
+ 
+Show: 
+• Add employee names 
+ 
+This helps build: 
+ORGANIZATIONAL HIERARCHY GRAPH 
+ 
+STORED IN 
+• MongoDB 
+ 
+AI USED 
+• Qwen 
+ 
+ 
+SCREEN E3 — EMPLOYEE TIME CONSENT SCREEN 
+ 
+DISPLAY 
+ 
+AI asks: 
+“Would you like to spend 2–3 minutes helping YesBoss understand how you work?” 
+ 
+OPTIONS 
+• Continue 
+• Skip 
+ 
+IMPORTANT 
+ 
+TIME IS DECIDED BY MASTER AGENT 
+ 
+Based on: 
+• Role 
+• Department 
+• Reporting level 
+• Org maturity 
+• Existing employee data 
+ 
+TECH USED 
+• LangGraph 
+• CrewAI 
+• Qwen 
+ 
+IF USER SKIPS 
+ 
+System still creates: 
+• Employee workspace 
+• Task dashboard 
+• Basic profile 
+ 
+ 
+SCREEN E4 — EMPLOYEE PERSONA INTELLIGENCE CHAT 
+ 
+THIS IS: 
+Conversational AI onboarding 
+ 
+NOT forms. 
+ 
+AI ASKS QUESTIONS BASED ON: 
+• Department 
+• Role 
+• Manager 
+• Workflows 
+• Previous employee answers 
+ 
+EXAMPLES 
+• “What usually slows your work?” 
+• “How do you prefer receiving tasks?” 
+• “What part of your workflow takes most time?” 
+ 
+IMPORTANT 
+Questions dynamically evolve. 
+ 
+FLOW 
+ 
+Previous Answer 
+↓ 
+Master Agent 
+↓ 
+Context Understanding 
+↓ 
+Generate Next Question 
+ 
+GOOGLE ASSISTANT STYLE FLOW 
+ 
+After every answer AI asks: 
+“Would you like to answer more questions so YesBoss can understand your workflow 
+better?” 
+ 
+IF YES 
+ 
+Conversation continues infinitely until: 
+• Session closed 
+• Employee exits 
+ 
+AI LEARNS 
+• Work style 
+• Communication preference 
+• Productivity behavior 
+• Operational bottlenecks 
+• Reporting behavior 
+ 
+STORED IN 
+• MongoDB 
+• Qdrant 
+ 
+ 
+SCREEN E5 — EMPLOYEE WORKSPACE CREATION 
+ 
+After onboarding: 
+ 
+AI asks: 
+“Would you like to create your workspace now or later?” 
+ 
+IF NOW 
+ 
+Creates: 
+• Dashboard 
+• Task view 
+• Notifications 
+• Reporting view 
+• Workflow suggestions 
+ 
+ 
+SCREEN E6 — EMPLOYEE DASHBOARD 
+ 
+DISPLAY 
+• Assigned tasks 
+• Pending reviews 
+• Team updates 
+• AI productivity insights 
+• Workflow suggestions 
+• Priority alerts 
+ 
+REALTIME SYSTEM 
+• Socket.IO 
+• Redis 
+ 
+AI INSIGHT CARDS 
+ 
+Examples: 
+• “Approval delays affecting your task completion.” 
+• “You complete operational tasks faster in morning hours.” 
+ 
+AI USED 
+• Qwen 
+• GPT 
+ 
+ 
+SCREEN E7 — EMPLOYEE AI ASSISTANT 
+ 
+DISPLAY 
+ 
+Employee conversational assistant. 
+ 
+EXAMPLES 
+• “How should I prioritize today’s tasks?” 
+• “Summarize pending approvals.” 
+• “What is blocking my workflow?” 
+ 
+MASTER AGENT FLOW 
+ 
+Employee Query 
+↓ 
+Master Agent 
+↓ 
+Workflow Agent 
+↓ 
+Task Agent 
+↓ 
+Persona Agent 
+↓ 
+Generate Response 
+ 
+TECH USED 
+• LangGraph 
+• CrewAI 
+• Qwen 
+• GPT 
+ 
+ 
+EMPLOYEE LEARNING SYSTEM 
+ 
+Employee actions become learning signals. 
+ 
+COLLECTS 
+• Task completion 
+• Response timing 
+• Workflow bottlenecks 
+• Approvals 
+• Communication behavior 
+• Productivity patterns 
+ 
+USED FOR 
+• Org intelligence 
+• Workflow optimization 
+• Future training datasets 
+• Productivity recommendations 
+ 
+ 
+FINAL EMPLOYEE ARCHITECTURE 
+ 
+Employee Signup 
+↓ 
+Org Detection 
+↓ 
+Hierarchy Setup 
+↓ 
+Persona Intelligence 
+↓ 
+Workspace Creation 
+↓ 
+Task Dashboard 
+↓ 
+Continuous Workflow Learning 
+ 
+ 
+FINAL DIFFERENCE 
+ 
+OWNER FLOW 
+ 
+Focus: 
+• Organizational intelligence 
+• Business understanding 
+• Strategic workflows 
+ 
+EMPLOYEE FLOW 
+ 
+Focus: 
+• Workflow intelligence 
+• Productivity understanding 
+• Execution optimization 
+ 
+That separation is VERY important for YesBoss. 
