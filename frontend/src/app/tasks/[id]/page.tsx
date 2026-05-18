@@ -105,7 +105,7 @@ export default function TaskDetailPage() {
   };
 
   const relatedGoal = currentTask?.goal_id ? goals.find(g => g.id === currentTask.goal_id) : null;
-  const isOwner = user?.user_metadata?.role === "owner";
+  const isOwner = (user as any)?.user_metadata?.role === "owner";
 
   if (!currentTask && loading) {
     return (

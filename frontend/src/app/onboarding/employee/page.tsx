@@ -483,7 +483,7 @@ export default function EmployeeOnboarding() {
 
           <div className="flex items-center gap-4">
             <span className="text-sm text-text-muted">
-              {user?.email || user?.phone}
+              {user?.email || (user as any)?.phone}
             </span>
             <button
               onClick={signOut}

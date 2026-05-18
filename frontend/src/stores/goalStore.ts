@@ -67,7 +67,11 @@ export const useGoalStore = create<GoalState>()(
           const response = await fetch(`${API_URL}/goals?organization_id=${orgId}`);
           if (!response.ok) throw new Error("Failed to fetch goals");
           const result = await response.json();
-          set({ goals: result.goals || [], loading: false });
+          const goals = (result.goals || []).map((g: any) => ({
+            ...g,
+            id: g._id || g.id,
+          }));
+          set({ goals, loading: false });
         } catch (error: any) {
           set({ error: error.message, loading: false });
         }
@@ -83,11 +87,15 @@ export const useGoalStore = create<GoalState>()(
           });
           if (!response.ok) throw new Error("Failed to create goal");
           const result = await response.json();
+          const goal = {
+            ...result.goal,
+            id: result.goal._id || result.goal.id,
+          };
           set((state) => ({
-            goals: [result.goal, ...state.goals],
+            goals: [goal, ...state.goals],
             loading: false,
           }));
-          return result.goal;
+          return goal;
         } catch (error: any) {
           set({ error: error.message, loading: false });
           throw error;
@@ -159,12 +167,20 @@ export const useGoalStore = create<GoalState>()(
           const response = await fetch(`${API_URL}/goals/${goalId}`);
           if (!response.ok) throw new Error("Failed to fetch goal");
           const result = await response.json();
+          const goal = {
+            ...result.goal,
+            id: result.goal._id || result.goal.id,
+          };
+          const tasks = (result.tasks || []).map((t: any) => ({
+            ...t,
+            id: t._id || t.id,
+          }));
           set({
-            currentGoal: result.goal,
-            tasks: result.tasks || [],
+            currentGoal: goal,
+            tasks,
             loading: false,
           });
-          return { goal: result.goal, tasks: result.tasks || [] };
+          return { goal, tasks };
         } catch (error: any) {
           set({ error: error.message, loading: false });
           throw error;

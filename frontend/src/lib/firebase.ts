@@ -13,3 +13,4 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
+export const RECAPTCHA_SITE_KEY = "6Lep7u8sAAAAAMCEeg8_Ef4an34SWBZy-Ncynxdj";

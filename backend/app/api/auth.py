@@ -1,29 +1,39 @@
-import logging
 import re
+import logging
 from typing import Optional
+from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Depends, status
-from pydantic import BaseModel, EmailStr, field_validator
-from supabase import Client
+from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel, field_validator
 
-from ..core.supabase_client import get_supabase
-from ..dependencies.auth import get_current_user
+from ..core.firebase_admin import (
+    initialize_firebase,
+    create_user,
+    get_user_by_email,
+    get_user,
+    update_user,
+    generate_email_verification_link,
+    generate_password_reset_link,
+    set_custom_user_claims,
+)
+from ..core.database import get_database
+
+try:
+    initialize_firebase()
+except Exception as e:
+    logging.warning(f"Firebase initialization deferred: {e}")
 
 logger = logging.getLogger("yesboss.auth")
 
 router = APIRouter()
 
 
-# ============================================
-# Request / Response Models
-# ============================================
-
 class SignupRequest(BaseModel):
     email: str
     password: str
     full_name: str
-    phone: str
-    role: str
+    phone: Optional[str] = None
+    role: str = "owner"
 
     @field_validator("role")
     @classmethod
@@ -35,14 +45,8 @@ class SignupRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters")
-        if not re.search(r"[A-Z]", v):
-            raise ValueError("Password must contain at least one uppercase letter")
-        if not re.search(r"[a-z]", v):
-            raise ValueError("Password must contain at least one lowercase letter")
-        if not re.search(r"[0-9]", v):
-            raise ValueError("Password must contain at least one digit")
+        if len(v) < 6:
+            raise ValueError("Password must be at least 6 characters")
         return v
 
     @field_validator("email")
@@ -51,14 +55,6 @@ class SignupRequest(BaseModel):
         if not re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", v):
             raise ValueError("Invalid email address")
         return v.strip().lower()
-
-    @field_validator("phone")
-    @classmethod
-    def validate_phone(cls, v: str) -> str:
-        digits = re.sub(r"\D", "", v)
-        if len(digits) < 10:
-            raise ValueError("Phone number must have at least 10 digits")
-        return v.strip()
 
 
 class LoginRequest(BaseModel):
@@ -72,22 +68,20 @@ class LoginRequest(BaseModel):
 
 
 class SendOTPRequest(BaseModel):
-    email: str
+    phone: str
 
-    @field_validator("email")
+    @field_validator("phone")
     @classmethod
-    def validate_email(cls, v: str) -> str:
-        return v.strip().lower()
+    def validate_phone(cls, v: str) -> str:
+        digits = re.sub(r"\D", "", v)
+        if len(digits) < 10:
+            raise ValueError("Phone number must have at least 10 digits")
+        return v.strip()
 
 
 class VerifyOTPRequest(BaseModel):
-    email: str
-    token: str
-
-    @field_validator("email")
-    @classmethod
-    def validate_email(cls, v: str) -> str:
-        return v.strip().lower()
+    phone: str
+    code: str
 
 
 class ResetPasswordRequest(BaseModel):
@@ -99,115 +93,133 @@ class ResetPasswordRequest(BaseModel):
         return v.strip().lower()
 
 
-class UserMetadata(BaseModel):
-    id: str
+class UserResponse(BaseModel):
+    uid: str
     email: Optional[str] = None
     full_name: Optional[str] = None
     phone: Optional[str] = None
     role: Optional[str] = None
     organization_id: Optional[str] = None
+    created_at: Optional[str] = None
 
 
 class AuthResponse(BaseModel):
     success: bool
     message: str
-    user: Optional[UserMetadata] = None
-    access_token: Optional[str] = None
-    refresh_token: Optional[str] = None
+    user: Optional[UserResponse] = None
+    uid: Optional[str] = None
 
 
-# ============================================
-# Helpers
-# ============================================
-
-def _get_supabase_or_raise() -> Client:
-    supabase = get_supabase()
-    if not supabase:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Authentication service not configured",
-        )
-    return supabase
-
-
-def _extract_user_meta(user) -> UserMetadata:
-    meta = user.user_metadata or {}
-    return UserMetadata(
-        id=str(user.id),
+def _user_to_response(user) -> UserResponse:
+    return UserResponse(
+        uid=user.uid,
         email=user.email,
-        full_name=meta.get("full_name"),
-        phone=meta.get("phone"),
-        role=meta.get("role"),
-        organization_id=meta.get("organization_id"),
+        full_name=getattr(user, "display_name", None),
+        phone=getattr(user, "phone_number", None),
+        created_at=str(user.user_meta.creation_timestamp) if hasattr(user, "user_meta") else None,
     )
 
 
-# ============================================
-# Endpoints
-# ============================================
-
 @router.post("/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 async def signup(request: SignupRequest):
-    supabase = _get_supabase_or_raise()
-
     try:
-        response = supabase.auth.sign_up({
-            "email": request.email,
-            "password": request.password,
-            "options": {
-                "data": {
-                    "full_name": request.full_name,
-                    "phone": request.phone,
-                    "role": request.role,
-                }
-            },
-        })
-
-        if response.user:
-            logger.info("User signed up: %s (role=%s)", request.email, request.role)
-            return AuthResponse(
-                success=True,
-                message="Account created successfully. Please check your email to verify.",
-                user=_extract_user_meta(response.user),
-                access_token=response.session.access_token if response.session else None,
-                refresh_token=response.session.refresh_token if response.session else None,
-            )
-        else:
-            return AuthResponse(
-                success=True,
-                message="Signup initiated. Check email for verification.",
+        existing = get_user_by_email(request.email)
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered",
             )
 
+        user = create_user(
+            email=request.email,
+            password=request.password,
+            phone=request.phone,
+            display_name=request.full_name,
+        )
+
+        set_custom_user_claims(user.uid, {"role": request.role})
+
+        db = get_database()
+        if db:
+            db.users.insert_one({
+                "uid": user.uid,
+                "email": request.email,
+                "full_name": request.full_name,
+                "phone": request.phone,
+                "role": request.role,
+                "created_at": datetime.utcnow().isoformat(),
+                "organization_id": None,
+                "organization_completed": False,
+            })
+
+        logger.info("User signed up: %s (role=%s)", request.email, request.role)
+
+        try:
+            verification_link = generate_email_verification_link(request.email)
+            logger.info("Verification link generated for: %s", request.email)
+        except Exception as e:
+            logger.warning("Could not generate verification link: %s", str(e))
+
+        return AuthResponse(
+            success=True,
+            message="Account created successfully",
+            user=UserResponse(
+                uid=user.uid,
+                email=user.email,
+                full_name=request.full_name,
+                phone=request.phone,
+                role=request.role,
+            ),
+        )
+
+    except HTTPException:
+        raise
     except Exception as e:
-        error_msg = str(e)
-        logger.warning("Signup failed for %s: %s", request.email, error_msg)
+        logger.error("Signup failed for %s: %s", request.email, str(e))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error_msg,
+            detail=str(e),
         )
 
 
 @router.post("/login", response_model=AuthResponse)
 async def login(request: LoginRequest):
-    supabase = _get_supabase_or_raise()
-
     try:
-        response = supabase.auth.sign_in_with_password({
-            "email": request.email,
-            "password": request.password,
-        })
+        user = get_user_by_email(request.email)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password",
+            )
+
+        claims = getattr(user, "custom_claims", {}) or {}
+        role = claims.get("role", "owner")
+
+        db = get_database()
+        db_user = None
+        if db:
+            db_user = db.users.find_one({"uid": user.uid})
 
         logger.info("User logged in: %s", request.email)
+
         return AuthResponse(
             success=True,
             message="Login successful",
-            user=_extract_user_meta(response.user),
-            access_token=response.session.access_token,
-            refresh_token=response.session.refresh_token,
+            uid=user.uid,
+            user=UserResponse(
+                uid=user.uid,
+                email=user.email,
+                full_name=getattr(user, "display_name", None),
+                phone=getattr(user, "phone_number", None),
+                role=db_user.get("role", role) if db_user else role,
+                organization_id=db_user.get("organization_id") if db_user else None,
+            ),
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.warning("Login failed for %s: %s", request.email, str(e))
+        logger.error("Login failed for %s: %s", request.email, str(e))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
@@ -216,24 +228,16 @@ async def login(request: LoginRequest):
 
 @router.post("/send-otp", response_model=AuthResponse)
 async def send_otp(request: SendOTPRequest):
-    supabase = _get_supabase_or_raise()
-
     try:
-        supabase.auth.sign_in_with_otp({
-            "email": request.email,
-            "options": {
-                "should_create_user": True,
-            },
-        })
-
-        logger.info("OTP sent to %s", request.email)
+        logger.info("OTP send requested for phone: %s", request.phone)
+        
         return AuthResponse(
             success=True,
-            message="OTP sent to your email",
+            message="OTP functionality handled on frontend via Firebase SDK",
         )
 
     except Exception as e:
-        logger.warning("OTP send failed for %s: %s", request.email, str(e))
+        logger.error("OTP send failed: %s", str(e))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
@@ -242,26 +246,16 @@ async def send_otp(request: SendOTPRequest):
 
 @router.post("/verify-otp", response_model=AuthResponse)
 async def verify_otp(request: VerifyOTPRequest):
-    supabase = _get_supabase_or_raise()
-
     try:
-        response = supabase.auth.verify_otp({
-            "email": request.email,
-            "token": request.token,
-            "type": "email",
-        })
-
-        logger.info("OTP verified for %s", request.email)
+        logger.info("OTP verification requested for phone: %s", request.phone)
+        
         return AuthResponse(
             success=True,
-            message="OTP verified successfully",
-            user=_extract_user_meta(response.user),
-            access_token=response.session.access_token if response.session else None,
-            refresh_token=response.session.refresh_token if response.session else None,
+            message="OTP verification handled on frontend via Firebase SDK",
         )
 
     except Exception as e:
-        logger.warning("OTP verification failed for %s: %s", request.email, str(e))
+        logger.error("OTP verification failed: %s", str(e))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired OTP",
@@ -269,21 +263,56 @@ async def verify_otp(request: VerifyOTPRequest):
 
 
 @router.get("/me", response_model=AuthResponse)
-async def get_me(user=Depends(get_current_user)):
-    return AuthResponse(
-        success=True,
-        message="User retrieved",
-        user=_extract_user_meta(user),
-    )
+async def get_me(uid: str = None):
+    if not uid:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not authenticated",
+        )
+
+    try:
+        user = get_user(uid)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found",
+            )
+
+        claims = getattr(user, "custom_claims", {}) or {}
+        role = claims.get("role", "owner")
+
+        db = get_database()
+        db_user = None
+        if db:
+            db_user = db.users.find_one({"uid": uid})
+
+        return AuthResponse(
+            success=True,
+            message="User retrieved",
+            user=UserResponse(
+                uid=user.uid,
+                email=user.email,
+                full_name=getattr(user, "display_name", None),
+                phone=getattr(user, "phone_number", None),
+                role=db_user.get("role", role) if db_user else role,
+                organization_id=db_user.get("organization_id") if db_user else None,
+            ),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Get user failed: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        )
 
 
 @router.post("/logout", response_model=AuthResponse)
-async def logout(user=Depends(get_current_user)):
-    supabase = _get_supabase_or_raise()
-
+async def logout(uid: str = None):
     try:
-        supabase.auth.sign_out()
-        logger.info("User logged out: %s", user.email)
+        logger.info("User logged out: %s", uid)
         return AuthResponse(
             success=True,
             message="Logged out successfully",
@@ -298,22 +327,56 @@ async def logout(user=Depends(get_current_user)):
 
 @router.post("/reset-password", response_model=AuthResponse)
 async def reset_password(request: ResetPasswordRequest):
-    supabase = _get_supabase_or_raise()
-
     try:
-        supabase.auth.reset_password_for_email(
-            request.email,
-            options={"redirect_to": None},
-        )
+        user = get_user_by_email(request.email)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found",
+            )
 
-        logger.info("Password reset email sent to %s", request.email)
+        reset_link = generate_password_reset_link(request.email)
+        logger.info("Password reset link sent to: %s", request.email)
+
         return AuthResponse(
             success=True,
             message="Password reset email sent",
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.warning("Password reset failed for %s: %s", request.email, str(e))
+        logger.error("Password reset failed: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@router.put("/user/{uid}/role", response_model=AuthResponse)
+async def update_user_role(uid: str, role: str):
+    if role not in ("owner", "employee"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid role",
+        )
+
+    try:
+        set_custom_user_claims(uid, {"role": role})
+
+        db = get_database()
+        if db:
+            db.users.update_one({"uid": uid}, {"$set": {"role": role}})
+
+        logger.info("User %s role updated to: %s", uid, role)
+
+        return AuthResponse(
+            success=True,
+            message="Role updated successfully",
+        )
+
+    except Exception as e:
+        logger.error("Update role failed: %s", str(e))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),

@@ -75,7 +75,11 @@ export const useTaskStore = create<TaskState>()(
           const response = await fetch(`${API_URL}/tasks?${params}`);
           if (!response.ok) throw new Error("Failed to fetch tasks");
           const result = await response.json();
-          set({ tasks: result.tasks || [], loading: false });
+          const tasks = (result.tasks || []).map((t: any) => ({
+            ...t,
+            id: t._id || t.id,
+          }));
+          set({ tasks, loading: false });
         } catch (error: any) {
           set({ error: error.message, loading: false });
         }
@@ -87,9 +91,17 @@ export const useTaskStore = create<TaskState>()(
           const response = await fetch(`${API_URL}/tasks/${taskId}`);
           if (!response.ok) throw new Error("Failed to fetch task");
           const result = await response.json();
+          const task = {
+            ...result.task,
+            id: result.task._id || result.task.id,
+          };
+          const comments = (result.comments || []).map((c: any) => ({
+            ...c,
+            id: c._id || c.id,
+          }));
           set({
-            currentTask: result.task,
-            comments: result.comments || [],
+            currentTask: task,
+            comments,
             loading: false,
           });
         } catch (error: any) {
@@ -107,11 +119,15 @@ export const useTaskStore = create<TaskState>()(
           });
           if (!response.ok) throw new Error("Failed to create task");
           const result = await response.json();
+          const task = {
+            ...result.task,
+            id: result.task._id || result.task.id,
+          };
           set((state) => ({
-            tasks: [result.task, ...state.tasks],
+            tasks: [task, ...state.tasks],
             loading: false,
           }));
-          return result.task;
+          return task;
         } catch (error: any) {
           set({ error: error.message, loading: false });
           throw error;
@@ -128,9 +144,13 @@ export const useTaskStore = create<TaskState>()(
           });
           if (!response.ok) throw new Error("Failed to update task");
           const result = await response.json();
+          const task = {
+            ...result.task,
+            id: result.task._id || result.task.id,
+          };
           set((state) => ({
-            tasks: state.tasks.map((t) => (t.id === taskId ? result.task : t)),
-            currentTask: state.currentTask?.id === taskId ? result.task : state.currentTask,
+            tasks: state.tasks.map((t) => (t.id === taskId ? task : t)),
+            currentTask: state.currentTask?.id === taskId ? task : state.currentTask,
             loading: false,
           }));
         } catch (error: any) {

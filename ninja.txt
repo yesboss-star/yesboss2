@@ -1,0 +1,42 @@
+Task Plan: 39 Steps
+Phase	                   Steps                         	Status
+Setup (1-4)         	Project, Env, DB, Auth	            Done
+Frontend (5-9)      	Landing, Login, UI, State       	Not started
+Backend (10-14)	        FastAPI, APIs, Upload	            Partially done
+AI Core (15-21)	        Scraper, Agents, Files          	Not started
+Owner (22-26)	        Onboarding, Goals, Dashboard	    Not started
+Employee (27-32)	    Self-onboarding, Workspace      	Not started
+Finish (33-39)	        Testing, Security, Deploy	        Not started
+
+
+Task Plan: 39 Steps   Frontend
+Phase	                   Steps                         	Status
+Setup (1-4)         	Project, Env, DB, Auth	            Done
+Frontend (5-9)      	Landing, Login, UI, State       	done
+Backend (10-14)	        FastAPI, APIs, Upload	            done
+AI Core (15-21)	        Scraper, Agents, Files          	done
+Owner (22-26)	        Onboarding, Goals, Dashboard	    done
+Employee (27-32)	    Self-onboarding, Workspace      	done
+Finish (33-39)	        Testing, Security, Deploy	        Not started
+
+# list of pending steps 
+
+Step	 Description	Status
+3	       Database Setup	MongoDB not connected
+7	       Role-Based Navigation	Not end-to-end tested
+9	       State Management	Integration incomplete
+34	End-to-End Testing	Not done
+35	AI Response Quality Check	Not done
+36	Performance Optimization	Not done
+37	Security Audit	Not done
+38	Deployment Preparation	Not done
+39	Deployment	Not done
+
+
+hey for database waht we using 
+Based on your project, you're using:
+
+Database	Purpose	Status
+MongoDB Atlas	Main database (users, orgs, employees, goals, tasks, conversations)	✅ Connected
+Qdrant Cloud	Vector database (embeddings, AI memory, semantic search)	✅ Connected
+Supabase	Authentication (OTP, JWT tokens)	✅ Connected   

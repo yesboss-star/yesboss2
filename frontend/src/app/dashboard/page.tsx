@@ -210,7 +210,7 @@ export default function DashboardPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold">
-              Welcome back, {user?.user_metadata?.full_name || user?.email?.split("@")[0]}
+              Welcome back, {(user as any)?.user_metadata?.full_name || user?.email?.split("@")[0]}
             </h1>
             <p className="text-text-muted mt-1">
               {role === "employee" 

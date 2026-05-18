@@ -89,7 +89,7 @@ export default function TaskCard({ task, showGoal = false, onStatusChange }: Tas
     }
   };
 
-  const isOwner = user?.user_metadata?.role === "owner";
+  const isOwner = (user as any)?.user_metadata?.role === "owner";
 
   return (
     <div 

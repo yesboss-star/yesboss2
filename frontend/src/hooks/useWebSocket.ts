@@ -14,6 +14,7 @@ interface UseWebSocketOptions {
 interface WebSocketMessage {
   type: string;
   data?: any;
+  user_id?: string;
 }
 
 export function useWebSocket(options: UseWebSocketOptions) {

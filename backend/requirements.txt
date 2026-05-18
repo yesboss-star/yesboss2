@@ -30,3 +30,4 @@ langchain-text-splitters
 python-socketio
 python-socketio[asyncio]
 aiohttp
+firebase-admin

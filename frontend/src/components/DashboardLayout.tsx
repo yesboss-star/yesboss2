@@ -156,10 +156,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       <div className="p-3 border-t border-border">
         <div className={`flex items-center gap-3 ${sidebarOpen ? "px-3 py-2" : "justify-center"}`}>
-          <Avatar size="sm" fallback={user?.email?.charAt(0) || user?.phone?.charAt(0) || "U"} />
+          <Avatar size="sm" fallback={user?.email?.charAt(0) || (user as any)?.phone?.charAt(0) || "U"} />
           {sidebarOpen && (
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">{user?.email || user?.phone}</p>
+              <p className="text-sm font-medium truncate">{user?.email || (user as any)?.phone}</p>
               <p className="text-xs text-text-muted capitalize">{role}</p>
             </div>
           )}
@@ -242,7 +242,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <DropdownMenuContent align="end">
                   <DropdownMenuLabel>
                     <div className="flex flex-col">
-                      <span>{user?.email || user?.phone}</span>
+                      <span>{user?.email || (user as any)?.phone}</span>
                       <span className="text-xs text-text-muted capitalize">{role} role</span>
                     </div>
                   </DropdownMenuLabel>

@@ -2,11 +2,13 @@ import { type NextRequest, NextResponse } from "next/server";
 
 const protectedRoutes = ["/dashboard", "/onboarding"];
 const authRoutes = ["/login", "/signup"];
+const onboardingRoutes = ["/onboarding/owner", "/onboarding/employee"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isProtected = protectedRoutes.some((route) => pathname.startsWith(route));
   const isAuthRoute = authRoutes.some((route) => pathname.startsWith(route));
+  const isOnboardingRoute = onboardingRoutes.some((route) => pathname.startsWith(route));
 
   const token = request.cookies.get("yesboss_token")?.value;
   const userStr = request.cookies.get("yesboss_user")?.value;
@@ -14,6 +16,7 @@ export async function middleware(request: NextRequest) {
   const hasAuth = token || userStr;
   const user = userStr ? JSON.parse(userStr) : null;
   const role = user?.role;
+  const orgCompleted = user?.organization_completed;
 
   if (isProtected && !hasAuth) {
     const redirectUrl = new URL("/login", request.url);
@@ -25,7 +28,11 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
-  if (pathname === "/dashboard" && role) {
+  if (isOnboardingRoute && orgCompleted) {
+    return NextResponse.redirect(new URL("/dashboard", request.url));
+  }
+
+  if (pathname === "/dashboard" && role && !orgCompleted) {
     if (role === "owner") {
       return NextResponse.redirect(new URL("/onboarding/owner", request.url));
     }

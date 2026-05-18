@@ -8,8 +8,6 @@ from bson import ObjectId
 
 router = APIRouter()
 
-SUPABASEAnon = None
-
 
 class GoalCreate(BaseModel):
     title: str
@@ -51,20 +49,6 @@ async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user)
     org_id = goal.organization_id or get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
-    
-    goal_doc = {
-        "title": goal.title,
-        "description": goal.description,
-        "priority": goal.priority,
-        "timeline": goal.timeline,
-        "department": goal.department,
-        "assignee_id": goal.assignee_id,
-        "organization_id": org_id,
-        "created_by": current_user.get("user_id"),
-        "status": "active",
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow(),
-    }
     
     user_id = getattr(current_user, 'id', None) or str(current_user) if current_user else None
     

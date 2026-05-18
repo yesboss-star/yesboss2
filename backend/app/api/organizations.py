@@ -1,9 +1,10 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 from ..core.database import get_database
 from ..core.supabase_client import get_supabase
+from ..dependencies.auth import get_current_user
 
 router = APIRouter()
 
@@ -22,7 +23,7 @@ class OrganizationUpdate(BaseModel):
     size: Optional[str] = None
 
 @router.post("")
-async def create_organization(request: OrganizationCreate):
+async def create_organization(request: OrganizationCreate, current_user: Optional[dict] = Depends(get_current_user)):
     db = get_database()
     if not db:
         raise HTTPException(status_code=500, detail="Database not configured")
