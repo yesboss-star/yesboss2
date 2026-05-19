@@ -60,6 +60,20 @@ async def get_profile(domain: str, enrich: bool = False, provider: str = "openai
     return {"profile": profile}
 
 
+@router.post("/company/search")
+async def search_company(request: AnalyzeFromEmailRequest):
+    if not request.email or len(request.email) < 2:
+        raise HTTPException(status_code=400, detail="Company name must be at least 2 characters")
+    
+    from ..core.intelligence import search_company_info
+    
+    try:
+        result = await search_company_info(request.email)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 class DepartmentSuggestionsRequest(BaseModel):
     email: str | None = None
     role: str | None = None

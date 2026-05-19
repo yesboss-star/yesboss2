@@ -27,6 +27,30 @@ import Link from "next/link";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
+const PERSONAL_EMAIL_DOMAINS = [
+  "gmail.com",
+  "outlook.com",
+  "hotmail.com",
+  "yahoo.com",
+  "icloud.com",
+  "aol.com",
+  "protonmail.com",
+  "mail.com",
+  "zoho.com",
+  "yandex.com",
+  "gmx.com",
+  "live.com",
+  "msn.com",
+  "me.com",
+  "mac.com",
+  "icloud.com",
+];
+
+const isPersonalEmailDomain = (domain: string): boolean => {
+  const cleanDomain = domain.toLowerCase().trim();
+  return PERSONAL_EMAIL_DOMAINS.includes(cleanDomain);
+};
+
 type OnboardingStep = "welcome" | "time-request" | "org-details" | "ai-scan" | "file-upload" | "social" | "chat" | "create-now-later" | "complete";
 
 interface IndustryOption {
@@ -217,15 +241,16 @@ export default function OwnerOnboarding() {
 
   const [aiTimeMinutes, setAiTimeMinutes] = useState<number>(2);
   const [analyzingIndustry, setAnalyzingIndustry] = useState(false);
-  const [industrySuggestions, setIndustrySuggestions] = useState<IndustryOption[]>([]);
+  const [domainAnalyzed, setDomainAnalyzed] = useState(false);
+  const [companySuggestions, setCompanySuggestions] = useState<any[]>([]);
+  const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
   const [showIndustryDropdown, setShowIndustryDropdown] = useState(false);
-  const [customIndustryInput, setCustomIndustryInput] = useState("");
-  const [microVerticals, setMicroVerticals] = useState<string[]>([]);
   const [selectedMicroVertical, setSelectedMicroVertical] = useState("");
 
   const [orgData, setOrgData] = useState({
     name: "",
     domain: "",
+    website_url: "",
     industry: "",
     size: "",
     micro_vertical: "",
@@ -236,10 +261,84 @@ export default function OwnerOnboarding() {
       const extractedDomain = userEmail.split("@")[1] || "";
       if (extractedDomain) {
         setOrgData(prev => ({ ...prev, domain: extractedDomain }));
-        analyzeIndustryFromDomain(extractedDomain);
+        if (!isPersonalEmailDomain(extractedDomain)) {
+          analyzeIndustryFromDomain(extractedDomain);
+        }
       }
     }
   }, [userEmail]);
+
+  const searchCompanySuggestions = async (query: string) => {
+    if (query.length < 2) {
+      setCompanySuggestions([]);
+      setShowCompanyDropdown(false);
+      return;
+    }
+    
+    try {
+      const response = await fetch(`${API_URL}/intelligence/company/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: query }),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log("Company search response:", data);
+        
+        if (data.name && data.name !== "Not Found" && !data.not_found) {
+          const suggestions = [];
+          if (data.name) suggestions.push(data);
+          if (data.suggested_companies && Array.isArray(data.suggested_companies)) {
+            suggestions.push(...data.suggested_companies);
+          }
+          
+          if (suggestions.length > 0) {
+            setCompanySuggestions(suggestions.slice(0, 5));
+            setShowCompanyDropdown(true);
+          } else {
+            setCompanySuggestions([]);
+            setShowCompanyDropdown(false);
+          }
+        } else {
+          setCompanySuggestions([]);
+          setShowCompanyDropdown(false);
+        }
+      } else {
+        console.error("API error:", response.status);
+        setCompanySuggestions([]);
+      }
+    } catch (error) {
+      console.error("Failed to search company:", error);
+      setCompanySuggestions([]);
+    }
+  };
+
+  const handleCompanySelect = (company: any) => {
+    let domain = company.domain || "";
+    if (domain && !domain.startsWith("http")) {
+      domain = `https://${domain}`;
+    }
+    
+    setOrgData(prev => ({
+      ...prev,
+      name: company.name || prev.name,
+      domain: company.domain || prev.domain,
+      website_url: company.website_url || domain || prev.website_url,
+      industry: company.industry || prev.industry,
+      size: company.size || prev.size,
+    }));
+    
+    if (company.micro_vertical) {
+      setSelectedMicroVertical(company.micro_vertical);
+    }
+    
+    setShowCompanyDropdown(false);
+    setCompanySuggestions([]);
+    if (company.domain || company.website_url) {
+      setDomainAnalyzed(true);
+    }
+  };
 
   const analyzeIndustryFromDomain = async (domain: string) => {
     setAnalyzingIndustry(true);
@@ -251,32 +350,27 @@ export default function OwnerOnboarding() {
       });
       
       if (response.ok) {
-        const data = await response.json();
-        if (data.industry) {
+        const responseData = await response.json();
+        console.log("API Response:", responseData);
+        
+        const data = responseData.profile || responseData;
+        
+        if (data) {
           setOrgData(prev => ({
             ...prev,
-            industry: data.industry,
             name: data.company_name || prev.name,
-            size: data.company_size || prev.size,
+            domain: domain,
+            website_url: data.website_url || `https://${domain}`,
+            industry: data.industry || prev.industry,
+            size: data.size || prev.size,
           }));
-          
-          const verticals = INDUSTRY_MICRO_VERTICALS[data.industry] || [];
-          setMicroVerticals(verticals);
           
           if (data.micro_vertical) {
+            console.log("Setting micro_vertical:", data.micro_vertical);
             setSelectedMicroVertical(data.micro_vertical);
-          } else if (verticals.length > 0) {
-            setSelectedMicroVertical(verticals[0]);
           }
-        }
-        
-        if (data.suggested_industries?.length) {
-          const suggestions: IndustryOption[] = data.suggested_industries.map((ind: string) => ({
-            label: ind,
-            value: ind,
-            micro_verticals: INDUSTRY_MICRO_VERTICALS[ind] || [],
-          }));
-          setIndustrySuggestions(suggestions);
+          
+          setDomainAnalyzed(true);
         }
       }
     } catch (error) {
@@ -286,34 +380,12 @@ export default function OwnerOnboarding() {
     }
   };
 
-  const searchIndustrySuggestions = async (query: string) => {
-    if (query.length < 2) {
-      setIndustrySuggestions([]);
-      return;
-    }
-    
-    const allIndustries = Object.keys(INDUSTRY_MICRO_VERTICALS);
-    const matched = allIndustries
-      .filter(ind => ind.toLowerCase().includes(query.toLowerCase()))
-      .map(ind => ({
-        label: ind,
-        value: ind,
-        micro_verticals: INDUSTRY_MICRO_VERTICALS[ind] || [],
-      }));
-    
-    setIndustrySuggestions(matched.slice(0, 3));
-  };
-
   const handleIndustrySelect = (industry: string) => {
     setOrgData(prev => ({
       ...prev,
       industry,
-      micro_vertical: "",
     }));
-    setMicroVerticals(INDUSTRY_MICRO_VERTICALS[industry] || []);
-    setSelectedMicroVertical("");
     setShowIndustryDropdown(false);
-    setCustomIndustryInput("");
   };
 
   const processDomain = (domain: string) => {
@@ -342,7 +414,7 @@ export default function OwnerOnboarding() {
       const domain = processDomain(orgData.domain);
       const org = await createOrganization({
         name: orgData.name || domain.split(".")[0],
-        domain,
+        domain: domain || "",
         industry: orgData.industry || "Technology",
         size: orgData.size || "1-10",
       });
@@ -368,7 +440,11 @@ export default function OwnerOnboarding() {
         ...org,
         createdAt: org.createdAt,
       });
-      setStep("ai-scan");
+      if (domainAnalyzed) {
+        setStep("ai-scan");
+      } else {
+        router.push("/dashboard");
+      }
     } catch (error) {
       console.error("Failed to create organization:", error);
       alert("Failed to create organization. Please try again.");
@@ -613,24 +689,64 @@ export default function OwnerOnboarding() {
               <h1 className="text-3xl font-bold mb-2">
                 Welcome, <span className="gradient-text">{userName}</span>!
               </h1>
-              <p className="text-text-muted">
-                We detected your company from your email. Let&apos;s build your AI Business OS.
-              </p>
-            </div>
-
-            <div className="glass rounded-xl p-6 text-left mb-8">
-              <div className="flex items-center gap-3 mb-3">
-                <Globe className="w-5 h-5 text-primary" />
-                <span className="font-medium">Detected Domain</span>
-              </div>
-              <p className="text-lg font-semibold">{orgData.domain || "Detecting..."}</p>
-              {analyzingIndustry && (
-                <div className="flex items-center gap-2 mt-2 text-text-muted">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span className="text-sm">Analyzing your company...</span>
-                </div>
+              {!isPersonalEmailDomain(orgData.domain) ? (
+                <p className="text-text-muted">
+                  We detected your company from your email. Let&apos;s build your AI Business OS.
+                </p>
+              ) : (
+                <p className="text-text-muted">
+                  We&apos;ll help you build your AI Business OS. Enter your company website to auto-detect, or skip for manual setup.
+                </p>
               )}
             </div>
+
+            {!isPersonalEmailDomain(orgData.domain) ? (
+              <div className="glass rounded-xl p-6 text-left mb-8">
+                <div className="flex items-center gap-3 mb-3">
+                  <Globe className="w-5 h-5 text-primary" />
+                  <span className="font-medium">Detected Domain</span>
+                </div>
+                <p className="text-lg font-semibold">{orgData.domain || "Detecting..."}</p>
+                {analyzingIndustry && (
+                  <div className="flex items-center gap-2 mt-2 text-text-muted">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span className="text-sm">Analyzing your company...</span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="glass rounded-xl p-6 text-left mb-8">
+                <div className="flex items-center gap-3 mb-3">
+                  <Building2 className="w-5 h-5 text-primary" />
+                  <span className="font-medium">No Company Domain Detected</span>
+                </div>
+                <p className="text-sm text-text-muted mb-4">
+                  You&apos;re using a personal email ({orgData.domain}). That&apos;s fine! Enter your company website below to auto-detect your organization, or skip and add details manually.
+                </p>
+                <input
+                  type="text"
+                  value={orgData.domain}
+                  onChange={(e) => {
+                    let domain = e.target.value;
+                    if (!domain.startsWith("http://") && !domain.startsWith("https://") && !domain.startsWith("www.")) {
+                      domain = domain.replace(/^(https?:\/\/)?(www\.)?/, "");
+                    }
+                    setOrgData(prev => ({ ...prev, domain }));
+                    if (domain && !isPersonalEmailDomain(domain) && domain.includes(".")) {
+                      analyzeIndustryFromDomain(domain);
+                    }
+                  }}
+                  placeholder="Enter your company website (e.g., acme.com)"
+                  className="w-full px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
+                />
+                {analyzingIndustry && (
+                  <div className="flex items-center gap-2 mt-3 text-text-muted">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span className="text-sm">Analyzing your company...</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             <button
               onClick={handleWelcomeContinue}
@@ -706,110 +822,103 @@ export default function OwnerOnboarding() {
                 Tell us about your <span className="gradient-text">organization</span>
               </h1>
               <p className="text-text-muted">
-                We auto-detected your industry. You can adjust or add details.
+                {domainAnalyzed ? "We auto-detected your company details. You can adjust or add more." : "Enter your company details below."}
               </p>
             </div>
 
             <div className="space-y-5">
               <div>
-                <label className="block text-sm font-medium mb-2">Company Name</label>
-                <input
-                  type="text"
-                  value={orgData.name}
-                  onChange={(e) => setOrgData({ ...orgData, name: e.target.value })}
-                  placeholder="Acme Corporation"
-                  className="w-full px-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">Website Domain</label>
-                <div className="relative">
-                  <Globe className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
-                  <input
-                    type="text"
-                    value={orgData.domain}
-                    onChange={(e) => setOrgData({ ...orgData, domain: e.target.value })}
-                    placeholder="acme.com"
-                    className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
-                  />
-                </div>
-              </div>
-
-              <div>
                 <label className="block text-sm font-medium mb-2">
-                  Industry {analyzingIndustry && <span className="text-primary">(Auto-detected)</span>}
+                  Company Name
+                  {domainAnalyzed && <span className="text-emerald-400 text-xs ml-2">(Auto-detected)</span>}
                 </label>
                 <div className="relative">
-                  <div 
-                    className="w-full px-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm cursor-pointer flex items-center justify-between"
-                    onClick={() => setShowIndustryDropdown(!showIndustryDropdown)}
-                  >
-                    <span className={orgData.industry ? "" : "text-text-muted"}>
-                      {orgData.industry || "Select industry"}
-                    </span>
-                    <ChevronDown className="w-5 h-5 text-text-muted" />
-                  </div>
-                  
-                  {showIndustryDropdown && (
-                    <div className="absolute top-full left-0 right-0 mt-2 bg-surface border border-border rounded-xl shadow-lg z-50 max-h-80 overflow-y-auto">
-                      <div className="p-3 border-b border-border">
-                        <div className="relative">
-                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
-                          <input
-                            type="text"
-                            placeholder="Type to search..."
-                            value={customIndustryInput}
-                            onChange={(e) => {
-                              setCustomIndustryInput(e.target.value);
-                              searchIndustrySuggestions(e.target.value);
-                            }}
-                            className="w-full pl-10 pr-4 py-2 rounded-lg bg-background border border-border text-sm focus:border-primary focus:outline-none"
-                          />
-                        </div>
-                      </div>
-                      
-                      {industrySuggestions.map((ind, i) => (
+                  <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
+                  <input
+                    type="text"
+                    value={orgData.name}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setOrgData(prev => ({ ...prev, name: value }));
+                      if (value.length >= 2) {
+                        searchCompanySuggestions(value);
+                      } else {
+                        setCompanySuggestions([]);
+                        setShowCompanyDropdown(false);
+                      }
+                    }}
+                    onFocus={() => {
+                      if (orgData.name.length >= 2 && companySuggestions.length > 0) {
+                        setShowCompanyDropdown(true);
+                      }
+                    }}
+                    placeholder="Start typing company name..."
+                    className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
+                  />
+                  {showCompanyDropdown && companySuggestions.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 mt-2 bg-surface border border-border rounded-xl shadow-lg z-50 max-h-60 overflow-y-auto">
+                      {companySuggestions.map((company, i) => (
                         <button
                           key={i}
-                          onClick={() => handleIndustrySelect(ind.value)}
-                          className="w-full px-4 py-3 text-left hover:bg-surface-light transition-colors"
+                          onClick={() => handleCompanySelect(company)}
+                          className="w-full px-4 py-3 text-left hover:bg-surface-light transition-colors border-b border-border last:border-b-0"
                         >
-                          <span className="font-medium text-sm">{ind.label}</span>
+                          <div className="font-medium text-sm">{company.name}</div>
+                          <div className="text-xs text-text-muted flex items-center gap-2">
+                            {company.domain && <span>{company.domain}</span>}
+                            {company.industry && <span className="text-primary">• {company.industry}</span>}
+                          </div>
                         </button>
                       ))}
-                      
-                      {industrySuggestions.length === 0 && customIndustryInput && (
-                        <div className="px-4 py-3 text-sm text-text-muted">
-                          No exact match. Using custom: {customIndustryInput}
-                        </div>
-                      )}
                     </div>
                   )}
                 </div>
               </div>
 
-              {microVerticals.length > 0 && (
-                <div>
-                  <label className="block text-sm font-medium mb-2">Micro-Vertical</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {microVerticals.slice(0, 6).map((vertical, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        onClick={() => setSelectedMicroVertical(vertical)}
-                        className={`p-3 rounded-xl border-2 text-sm transition-all cursor-pointer text-left ${
-                          selectedMicroVertical === vertical
-                            ? "border-primary bg-primary/10"
-                            : "border-border hover:border-border-light"
-                        }`}
-                      >
-                        {vertical}
-                      </button>
-                    ))}
-                  </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">
+                  Website URL {domainAnalyzed && <span className="text-emerald-400 text-xs">(Auto-detected)</span>}
+                </label>
+                <div className="relative">
+                  <Globe className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
+                  <input
+                    type="text"
+                    value={orgData.website_url || `https://${orgData.domain}`}
+                    onChange={(e) => setOrgData({ ...orgData, website_url: e.target.value })}
+                    placeholder="https://www.yourcompany.com"
+                    className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
+                  />
                 </div>
-              )}
+                <p className="text-xs text-text-muted mt-1">Official company website URL</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">
+                  Industry {domainAnalyzed && <span className="text-emerald-400 text-xs">(Auto-detected)</span>}
+                </label>
+                <input
+                  type="text"
+                  value={orgData.industry}
+                  onChange={(e) => setOrgData({ ...orgData, industry: e.target.value })}
+                  placeholder="e.g., IT Services, Healthcare Technology, Fintech, etc."
+                  className="w-full px-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
+                />
+                <p className="text-xs text-text-muted mt-1">AI-detected industry. Type any industry or edit the auto-detected value.</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">
+                  Micro-Vertical {domainAnalyzed && selectedMicroVertical && <span className="text-emerald-400 text-xs">(Auto-detected)</span>}
+                </label>
+                <input
+                  type="text"
+                  value={selectedMicroVertical}
+                  onChange={(e) => setSelectedMicroVertical(e.target.value)}
+                  placeholder="e.g., AI/ML, SaaS, Cybersecurity, E-commerce, etc."
+                  className="w-full px-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
+                />
+                <p className="text-xs text-text-muted mt-1">More specific focus area within the industry.</p>
+              </div>
 
               <div>
                 <label className="block text-sm font-medium mb-2">Company Size</label>
@@ -829,7 +938,7 @@ export default function OwnerOnboarding() {
 
               <button
                 onClick={handleOrgDetailsSubmit}
-                disabled={!orgData.name || !orgData.domain || !orgData.industry}
+                disabled={!orgData.name}
                 className="w-full py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 Continue

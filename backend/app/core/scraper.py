@@ -23,6 +23,7 @@ async def scrape_company(domain: str) -> dict:
     
     result = {
         "domain": domain,
+        "name": "",
         "homepage_content": "",
         "about": "",
         "services": [],
@@ -39,6 +40,18 @@ async def scrape_company(domain: str) -> dict:
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, "html.parser")
+        
+        title = soup.find("title")
+        if title:
+            result["name"] = title.get_text(strip=True).split("|")[0].split("-")[0].strip()
+        
+        og_title = soup.find("meta", property="og:title")
+        if og_title and og_title.get("content"):
+            result["name"] = og_title["content"].strip()
+        
+        h1_tag = soup.find("h1")
+        if h1_tag and not result["name"]:
+            result["name"] = h1_tag.get_text(strip=True)
         
         for script in soup(["script", "style"]):
             script.decompose()
@@ -155,7 +168,7 @@ async def scrape_company_data(domain: str) -> dict:
         content = result.get("homepage_content", "") + " " + result.get("about", "")
         content_lower = content.lower()
         
-        name = domain.split(".")[0].replace("-", " ").replace("_", " ").title()
+        name = result.get("name") or domain.split(".")[0].replace("-", " ").replace("_", " ").title()
         
         industry = "Technology"
         industry_patterns = {
@@ -188,7 +201,7 @@ async def scrape_company_data(domain: str) -> dict:
             size = "500+"
         
         return {
-            "name": name,
+            "name": result.get("name") or name,
             "description": content[:500],
             "industry": industry,
             "size": size,
