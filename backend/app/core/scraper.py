@@ -127,6 +127,42 @@ async def scrape_company(domain: str) -> dict:
     return result
 
 
+async def scrape_with_searapi(domain: str, api_key: str) -> dict:
+    """Scrape using SearAPI"""
+    try:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        base_url = f"https://{domain}"
+        
+        response = requests.post(
+            "https://api.searapi.com/scrape",
+            headers=headers,
+            json={"url": base_url, "extract": ["title", "description", "content", "social"]},
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                "domain": domain,
+                "name": data.get("title", ""),
+                "homepage_content": data.get("content", ""),
+                "about": data.get("description", ""),
+                "services": data.get("services", []),
+                "social_links": data.get("social_links", {}),
+                "searapi_result": True
+            }
+        else:
+            logger.warning(f"SearAPI failed with status {response.status_code}")
+            return None
+    except Exception as e:
+        logger.error(f"SearAPI error: {e}")
+        return None
+
+
 async def scrape_with_firecrawl(domain: str, api_key: Optional[str] = None) -> dict:
     if not api_key:
         return await scrape_company(domain)
@@ -161,7 +197,27 @@ def extract_social_links_from_text(text: str) -> dict:
 
 
 async def scrape_company_data(domain: str) -> dict:
-    """Scrape company data for industry detection"""
+    """Scrape company data for industry detection - uses multiple sources"""
+    from ..core.config import settings
+    
+    searapi_key = getattr(settings, 'SEAR_API_KEY', None)
+    
+    if searapi_key:
+        searapi_result = await scrape_with_searapi(domain, searapi_key)
+        if searapi_result:
+            content = searapi_result.get("homepage_content", "") + " " + searapi_result.get("about", "")
+            name = searapi_result.get("name") or domain.split(".")[0].replace("-", " ").replace("_", " ").title()
+            
+            return {
+                "name": searapi_result.get("name") or name,
+                "description": content[:500],
+                "industry": searapi_result.get("industry", "Technology"),
+                "micro_vertical": searapi_result.get("micro_vertical", ""),
+                "size": searapi_result.get("size", "1-10"),
+                "social_links": searapi_result.get("social_links", {}),
+                "scraper": "searapi"
+            }
+    
     try:
         result = await scrape_company(domain)
         
@@ -192,20 +248,14 @@ async def scrape_company_data(domain: str) -> dict:
                 industry = ind
                 break
         
-        size = "1-10"
-        if any(x in content_lower for x in ["100 employees", "200 employees", "500 employees"]):
-            size = "51-200"
-        elif any(x in content_lower for x in ["50 employees", "100+"]):
-            size = "11-50"
-        elif any(x in content_lower for x in ["500+", "1000", "enterprise"]):
-            size = "500+"
-        
         return {
             "name": result.get("name") or name,
             "description": content[:500],
             "industry": industry,
-            "size": size,
+            "micro_vertical": result.get("services", [])[:3] if result.get("services") else "",
+            "size": "1-10",
             "social_links": result.get("social_links", {}),
+            "scraper": "beautifulsoup"
         }
     except Exception as e:
         logger.error(f"Failed to scrape company data: {e}")
@@ -213,6 +263,8 @@ async def scrape_company_data(domain: str) -> dict:
             "name": domain.split(".")[0].title(),
             "description": "",
             "industry": "Technology",
+            "micro_vertical": "",
             "size": "1-10",
             "social_links": {},
+            "scraper": "fallback"
         }

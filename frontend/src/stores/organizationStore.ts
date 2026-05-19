@@ -9,6 +9,7 @@ interface Organization {
   domain: string;
   industry: string;
   size: string;
+  micro_vertical?: string;
   logo?: string;
   createdAt: string;
 }
@@ -34,7 +35,7 @@ interface OrganizationState {
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setSocialLinks: (links: SocialLinks) => void;
-  createOrganization: (data: { name: string; domain: string; industry: string; size: string }) => Promise<Organization>;
+  createOrganization: (data: { name: string; domain: string; industry: string; size: string; micro_vertical?: string }) => Promise<Organization>;
   updateSocialLinks: (orgId: string, links: SocialLinks) => Promise<void>;
   detectSocialPresence: (domain: string) => Promise<SocialLinks>;
   fetchOrganizationByEmail: (email: string) => Promise<Organization | null>;

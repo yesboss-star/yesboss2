@@ -7,6 +7,7 @@ class OrganizationCreate(BaseModel):
     domain: Optional[str] = None
     industry: Optional[str] = None
     size: Optional[str] = None
+    micro_vertical: Optional[str] = None
 
 class OrganizationResponse(BaseModel):
     id: str
@@ -14,6 +15,7 @@ class OrganizationResponse(BaseModel):
     domain: Optional[str]
     industry: Optional[str]
     size: Optional[str]
+    micro_vertical: Optional[str] = None
     created_at: datetime
 
 class EmployeeResponse(BaseModel):

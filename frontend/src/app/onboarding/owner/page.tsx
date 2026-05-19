@@ -53,107 +53,12 @@ const isPersonalEmailDomain = (domain: string): boolean => {
 
 type OnboardingStep = "welcome" | "time-request" | "org-details" | "ai-scan" | "file-upload" | "social" | "chat" | "create-now-later" | "complete";
 
-interface IndustryOption {
-  label: string;
-  value: string;
-  micro_verticals?: string[];
-}
-
 interface SocialLink {
   platform: string;
   url: string;
   detected: boolean;
   icon: React.ReactNode;
 }
-
-const INDUSTRY_MICRO_VERTICALS: Record<string, string[]> = {
-  "Technology": [
-    "Software Development",
-    "SaaS / Cloud Services",
-    "AI / Machine Learning",
-    "Cybersecurity",
-    "Fintech",
-    "Edtech",
-    "Healthtech",
-    "E-commerce Platforms",
-  ],
-  "Finance": [
-    "Banking",
-    "Insurance",
-    "Wealth Management",
-    "Investment Banking",
-    "Microfinance",
-    "Accounting",
-    "Payment Processing",
-  ],
-  "Healthcare": [
-    "Hospitals & Clinics",
-    "Pharmaceuticals",
-    "Medical Devices",
-    "Telehealth",
-    "Healthcare IT",
-    "Biotechnology",
-    "Mental Health",
-  ],
-  "Retail": [
-    "E-commerce",
-    "Fashion & Apparel",
-    "Electronics",
-    "Food & Grocery",
-    "Home & Furniture",
-    "Beauty & Cosmetics",
-    "Sports & Outdoors",
-  ],
-  "Manufacturing": [
-    "Automotive",
-    "Electronics",
-    "Textiles & Garments",
-    "Food Processing",
-    "Machinery",
-    "Chemicals",
-    "Pharmaceutical Manufacturing",
-    "Metal & Steel",
-  ],
-  "Education": [
-    "K-12 Education",
-    "Higher Education",
-    "Online Learning",
-    "EdTech",
-    "Training & Development",
-    "Coaching & Mentoring",
-  ],
-  "Consulting": [
-    "Management Consulting",
-    "IT Consulting",
-    "Financial Consulting",
-    "HR Consulting",
-    "Marketing Consulting",
-    "Legal Consulting",
-  ],
-  "Real Estate": [
-    "Residential",
-    "Commercial",
-    "Property Management",
-    "Real Estate Development",
-    "Construction",
-    "Architecture",
-  ],
-  "Media & Entertainment": [
-    "Content Creation",
-    "Film & TV",
-    "Music",
-    "Gaming",
-    "Advertising",
-    "Publishing",
-  ],
-  "Logistics": [
-    "Transportation",
-    "Warehousing",
-    "Supply Chain",
-    "Last Mile Delivery",
-    "Freight Forwarding",
-  ],
-};
 
 const INDUSTRY_FILE_SUGGESTIONS: Record<string, string[]> = {
   "Technology": [
@@ -218,6 +123,124 @@ const INDUSTRY_FILE_SUGGESTIONS: Record<string, string[]> = {
   ],
 };
 
+const ALL_INDUSTRIES = [
+  "Technology & Software",
+  "IT Services & Consulting",
+  "Artificial Intelligence & Machine Learning",
+  "SaaS / Cloud Computing",
+  "Cybersecurity",
+  "E-commerce & Online Retail",
+  "Fintech & Payment Solutions",
+  "Banking & Financial Services",
+  "Insurance & Risk Management",
+  "Investment & Wealth Management",
+  "Healthcare & Life Sciences",
+  "Healthcare Technology (HealthTech)",
+  "Pharmaceuticals & Biotech",
+  "Medical Devices & Equipment",
+  "Telemedicine & Digital Health",
+  "Education & EdTech",
+  "Online Learning & E-Learning",
+  "Higher Education",
+  "Training & Development",
+  "Manufacturing & Industrial",
+  "Automotive & Electric Vehicles",
+  "Aerospace & Defense",
+  "Electronics & Semiconductors",
+  "Retail & Consumer Goods",
+  "Fashion & Apparel",
+  "Food & Beverage",
+  "Beauty & Cosmetics",
+  "Sports & Fitness",
+  "Real Estate & Property",
+  "Construction & Infrastructure",
+  "Architecture & Interior Design",
+  "Media & Entertainment",
+  "Film & Television",
+  "Music & Audio",
+  "Gaming & Esports",
+  "Publishing & Content",
+  "Advertising & Marketing",
+  "Digital Marketing & SEO",
+  "Public Relations & Communications",
+  "Logistics & Supply Chain",
+  "Transportation & Mobility",
+  "Travel & Tourism",
+  "Hospitality & Hotels",
+  "Restaurants & Food Services",
+  "Legal Services & Law",
+  "Accounting & Taxation",
+  "HR & Recruitment",
+  "Staffing & Outsourcing",
+  "Non-profit & NGO",
+  "Government & Public Sector",
+  "Energy & Utilities",
+  "Oil & Gas",
+  "Renewable Energy & Sustainability",
+  "Agriculture & AgTech",
+  "Environment & Climate",
+  "Telecommunications",
+  "Broadcasting & Media",
+  "Sports Management",
+  "Event Management",
+  "Non-governmental Organization",
+  "Social Enterprise",
+  "Research & Development",
+  "Science & Laboratories",
+];
+
+const COMMON_MICRO_VERTICALS = [
+  "Custom Software Development",
+  "Mobile App Development",
+  "Web Development",
+  "Cloud Services & Migration",
+  "Data Analytics & Business Intelligence",
+  "Machine Learning & AI Solutions",
+  "DevOps & Infrastructure",
+  "API Development & Integration",
+  "E-commerce Platforms",
+  "Payment Processing",
+  "Digital Marketing",
+  "Content Management Systems",
+  "Project Management Tools",
+  "Customer Relationship Management (CRM)",
+  "Enterprise Resource Planning (ERP)",
+  "Human Resources (HR) Software",
+  "Telehealth & Remote Care",
+  "Electronic Health Records (EHR)",
+  "Medical Imaging & Diagnostics",
+  "Drug Discovery & Research",
+  "Online Education Platforms",
+  "Corporate Training",
+  "Skill Development",
+  "Fintech Solutions",
+  "Blockchain & Crypto",
+  "Insurtech",
+  "Supply Chain Management",
+  "Warehouse Management",
+  "Fleet Management",
+  "Last Mile Delivery",
+  "Social Media & Networking",
+  "Video Streaming & OTT",
+  "Online Gaming",
+  "Virtual Reality (VR) & Augmented Reality (AR)",
+  "Internet of Things (IoT)",
+  "Robotics & Automation",
+  "Electric Vehicles & Charging",
+  "Smart Buildings & Homes",
+  "Clean Energy Solutions",
+  "Waste Management",
+  "Water Treatment",
+  "Agriculture Technology",
+  "Food Technology",
+  "B2B Services",
+  "B2C Services",
+  "Marketplace & Platforms",
+  "Subscription Services",
+  "Managed Services",
+  "Consulting & Advisory",
+];
+
 export default function OwnerOnboarding() {
   const { user, signOut } = useAuth();
   const { setOrganization, createOrganization, detectSocialPresence } = useOrganizationStore();
@@ -239,27 +262,70 @@ export default function OwnerOnboarding() {
   const [showContinueChat, setShowContinueChat] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [aiTimeMinutes, setAiTimeMinutes] = useState<number>(2);
+  const [aiTimeMinutes] = useState<number>(2);
   const [analyzingIndustry, setAnalyzingIndustry] = useState(false);
   const [domainAnalyzed, setDomainAnalyzed] = useState(false);
-  const [companySuggestions, setCompanySuggestions] = useState<any[]>([]);
+  const [companySuggestions, setCompanySuggestions] = useState<{name: string; domain?: string; industry?: string; website_url?: string; micro_vertical?: string}[]>([]);
   const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
-  const [showIndustryDropdown, setShowIndustryDropdown] = useState(false);
-  const [selectedMicroVertical, setSelectedMicroVertical] = useState("");
+  const [industryInput, setIndustryInput] = useState("");
+  const [microVerticalInput, setMicroVerticalInput] = useState("");
+  const [showIndustrySuggestions, setShowIndustrySuggestions] = useState(false);
+  const [showMicroVerticalSuggestions, setShowMicroVerticalSuggestions] = useState(false);
 
   const [orgData, setOrgData] = useState({
     name: "",
     domain: "",
     website_url: "",
-    industry: "",
-    size: "",
+    industries: [] as string[],
+    size: "1-10",
     micro_vertical: "",
   });
 
+  const analyzeIndustryFromDomain = async (domain: string) => {
+    setAnalyzingIndustry(true);
+    try {
+      const response = await fetch(`${API_URL}/intelligence/analyze/domain`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ domain }),
+      });
+      
+      if (response.ok) {
+        const responseData = await response.json();
+        console.log("API Response:", responseData);
+        
+        const data = responseData.profile || responseData;
+        
+        if (data) {
+          const detectedIndustry = data.industry || "";
+          const detectedMicroVertical = data.micro_vertical || "";
+          const detectedIndustries = detectedIndustry ? [detectedIndustry] : [];
+          
+          setOrgData(prev => ({
+            ...prev,
+            name: data.company_name || prev.name,
+            domain: domain,
+            website_url: data.website_url || `https://${domain}`,
+            industries: detectedIndustries,
+            size: data.size || prev.size || "1-10",
+            micro_vertical: detectedMicroVertical,
+          }));
+          
+          console.log("Setting industry:", detectedIndustry, "micro_vertical:", detectedMicroVertical);
+          setDomainAnalyzed(true);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to analyze industry:", error);
+    } finally {
+      setAnalyzingIndustry(false);
+    }
+  };
+
   useEffect(() => {
-    if (userEmail && !orgData.domain) {
+    if (userEmail) {
       const extractedDomain = userEmail.split("@")[1] || "";
-      if (extractedDomain) {
+      if (extractedDomain && extractedDomain !== orgData.domain) {
         setOrgData(prev => ({ ...prev, domain: extractedDomain }));
         if (!isPersonalEmailDomain(extractedDomain)) {
           analyzeIndustryFromDomain(extractedDomain);
@@ -314,78 +380,31 @@ export default function OwnerOnboarding() {
     }
   };
 
-  const handleCompanySelect = (company: any) => {
+  const handleCompanySelect = (company: {name: string; domain?: string; industry?: string; website_url?: string; micro_vertical?: string; size?: string}) => {
     let domain = company.domain || "";
     if (domain && !domain.startsWith("http")) {
       domain = `https://${domain}`;
     }
+    
+    const companyIndustries = company.industry ? [company.industry] : [];
     
     setOrgData(prev => ({
       ...prev,
       name: company.name || prev.name,
       domain: company.domain || prev.domain,
       website_url: company.website_url || domain || prev.website_url,
-      industry: company.industry || prev.industry,
-      size: company.size || prev.size,
+      industries: companyIndustries.length > 0 ? companyIndustries : prev.industries,
+      size: company.size || prev.size || "1-10",
+      micro_vertical: company.micro_vertical || prev.micro_vertical,
     }));
-    
-    if (company.micro_vertical) {
-      setSelectedMicroVertical(company.micro_vertical);
-    }
     
     setShowCompanyDropdown(false);
     setCompanySuggestions([]);
+    setIndustryInput("");
+    setMicroVerticalInput("");
     if (company.domain || company.website_url) {
       setDomainAnalyzed(true);
     }
-  };
-
-  const analyzeIndustryFromDomain = async (domain: string) => {
-    setAnalyzingIndustry(true);
-    try {
-      const response = await fetch(`${API_URL}/intelligence/analyze/domain`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ domain }),
-      });
-      
-      if (response.ok) {
-        const responseData = await response.json();
-        console.log("API Response:", responseData);
-        
-        const data = responseData.profile || responseData;
-        
-        if (data) {
-          setOrgData(prev => ({
-            ...prev,
-            name: data.company_name || prev.name,
-            domain: domain,
-            website_url: data.website_url || `https://${domain}`,
-            industry: data.industry || prev.industry,
-            size: data.size || prev.size,
-          }));
-          
-          if (data.micro_vertical) {
-            console.log("Setting micro_vertical:", data.micro_vertical);
-            setSelectedMicroVertical(data.micro_vertical);
-          }
-          
-          setDomainAnalyzed(true);
-        }
-      }
-    } catch (error) {
-      console.error("Failed to analyze industry:", error);
-    } finally {
-      setAnalyzingIndustry(false);
-    }
-  };
-
-  const handleIndustrySelect = (industry: string) => {
-    setOrgData(prev => ({
-      ...prev,
-      industry,
-    }));
-    setShowIndustryDropdown(false);
   };
 
   const processDomain = (domain: string) => {
@@ -397,8 +416,51 @@ export default function OwnerOnboarding() {
   };
 
   const getFileSuggestions = () => {
-    const industry = orgData.industry || "Technology";
+    const industry = orgData.industries[0] || "Technology";
     return INDUSTRY_FILE_SUGGESTIONS[industry] || INDUSTRY_FILE_SUGGESTIONS["Technology"];
+  };
+
+  const addIndustry = (industry: string) => {
+    if (industry && !orgData.industries.includes(industry)) {
+      setOrgData(prev => ({
+        ...prev,
+        industries: [...prev.industries, industry],
+      }));
+    }
+    setIndustryInput("");
+    setShowIndustrySuggestions(false);
+  };
+
+  const removeIndustry = (industry: string) => {
+    setOrgData(prev => ({
+      ...prev,
+      industries: prev.industries.filter(i => i !== industry),
+    }));
+  };
+
+  const addMicroVertical = (mv: string) => {
+    setOrgData(prev => ({
+      ...prev,
+      micro_vertical: mv || prev.micro_vertical,
+    }));
+    setMicroVerticalInput("");
+    setShowMicroVerticalSuggestions(false);
+  };
+
+  const getFilteredIndustries = () => {
+    if (!industryInput.trim()) return ALL_INDUSTRIES.slice(0, 10);
+    const query = industryInput.toLowerCase();
+    return ALL_INDUSTRIES.filter(ind => 
+      ind.toLowerCase().includes(query) && !orgData.industries.includes(ind)
+    ).slice(0, 8);
+  };
+
+  const getFilteredMicroVerticals = () => {
+    if (!microVerticalInput.trim()) return COMMON_MICRO_VERTICALS.slice(0, 8);
+    const query = microVerticalInput.toLowerCase();
+    return COMMON_MICRO_VERTICALS.filter(mv => 
+      mv.toLowerCase().includes(query) && !mv.includes(orgData.micro_vertical)
+    ).slice(0, 8);
   };
 
   const handleWelcomeContinue = async () => {
@@ -415,8 +477,9 @@ export default function OwnerOnboarding() {
       const org = await createOrganization({
         name: orgData.name || domain.split(".")[0],
         domain: domain || "",
-        industry: orgData.industry || "Technology",
+        industry: orgData.industries[0] || "Technology",
         size: orgData.size || "1-10",
+        micro_vertical: orgData.micro_vertical,
       });
       setOrgId(org.id);
       router.push("/dashboard");
@@ -432,8 +495,9 @@ export default function OwnerOnboarding() {
       const org = await createOrganization({
         name: orgData.name,
         domain,
-        industry: orgData.industry,
-        size: orgData.size,
+        industry: orgData.industries[0] || "Technology",
+        size: orgData.size || "1-10",
+        micro_vertical: orgData.micro_vertical,
       });
       setOrgId(org.id);
       setOrganization({
@@ -573,7 +637,7 @@ export default function OwnerOnboarding() {
         body: JSON.stringify({
           message: userMessage,
           organization_id: orgId,
-          context: { industry: orgData.industry, size: orgData.size, micro_vertical: selectedMicroVertical },
+          context: { industries: orgData.industries, size: orgData.size, micro_vertical: orgData.micro_vertical },
         }),
       });
       
@@ -894,30 +958,117 @@ export default function OwnerOnboarding() {
 
               <div>
                 <label className="block text-sm font-medium mb-2">
-                  Industry {domainAnalyzed && <span className="text-emerald-400 text-xs">(Auto-detected)</span>}
+                  Industry {domainAnalyzed && orgData.industries.length > 0 && <span className="text-emerald-400 text-xs ml-2">(Auto-detected)</span>}
                 </label>
-                <input
-                  type="text"
-                  value={orgData.industry}
-                  onChange={(e) => setOrgData({ ...orgData, industry: e.target.value })}
-                  placeholder="e.g., IT Services, Healthcare Technology, Fintech, etc."
-                  className="w-full px-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
-                />
-                <p className="text-xs text-text-muted mt-1">AI-detected industry. Type any industry or edit the auto-detected value.</p>
+                <div className="space-y-3">
+                  {orgData.industries.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {orgData.industries.map((ind, i) => (
+                        <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-sm">
+                          {ind}
+                          <button onClick={() => removeIndustry(ind)} className="hover:bg-primary/20 rounded-full p-0.5 cursor-pointer">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="relative">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={industryInput}
+                        onChange={(e) => {
+                          setIndustryInput(e.target.value);
+                          setShowIndustrySuggestions(true);
+                        }}
+                        onFocus={() => setShowIndustrySuggestions(true)}
+                        onBlur={() => setTimeout(() => setShowIndustrySuggestions(false), 200)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && industryInput.trim()) {
+                            addIndustry(industryInput.trim());
+                          }
+                        }}
+                        placeholder="Type to search or add industry..."
+                        className="flex-1 px-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
+                      />
+                      <button
+                        onClick={() => {
+                          if (industryInput.trim()) {
+                            addIndustry(industryInput.trim());
+                          }
+                        }}
+                        className="px-4 py-3.5 rounded-xl bg-primary hover:bg-primary-light text-white font-medium transition-colors cursor-pointer"
+                      >
+                        <span className="text-lg">+</span>
+                      </button>
+                    </div>
+                    {showIndustrySuggestions && (
+                      <div className="absolute top-full left-0 right-0 mt-2 bg-surface border border-border rounded-xl shadow-lg z-50 max-h-60 overflow-y-auto">
+                        {getFilteredIndustries().map((ind, i) => (
+                          <button
+                            key={i}
+                            onClick={() => addIndustry(ind)}
+                            className="w-full px-4 py-3 text-left hover:bg-surface-light transition-colors border-b border-border last:border-b-0 text-sm"
+                          >
+                            {ind}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
 
               <div>
                 <label className="block text-sm font-medium mb-2">
-                  Micro-Vertical {domainAnalyzed && selectedMicroVertical && <span className="text-emerald-400 text-xs">(Auto-detected)</span>}
+                  Micro-Vertical {domainAnalyzed && orgData.micro_vertical && <span className="text-emerald-400 text-xs ml-2">(Auto-detected)</span>}
                 </label>
-                <input
-                  type="text"
-                  value={selectedMicroVertical}
-                  onChange={(e) => setSelectedMicroVertical(e.target.value)}
-                  placeholder="e.g., AI/ML, SaaS, Cybersecurity, E-commerce, etc."
-                  className="w-full px-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
-                />
-                <p className="text-xs text-text-muted mt-1">More specific focus area within the industry.</p>
+                <div className="relative">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={microVerticalInput}
+                      onChange={(e) => {
+                        setMicroVerticalInput(e.target.value);
+                        setShowMicroVerticalSuggestions(true);
+                      }}
+                      onFocus={() => setShowMicroVerticalSuggestions(true)}
+                      onBlur={() => setTimeout(() => setShowMicroVerticalSuggestions(false), 200)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && microVerticalInput.trim()) {
+                          addMicroVertical(microVerticalInput.trim());
+                        }
+                      }}
+                      placeholder="e.g., Custom Software, SaaS, AI Solutions..."
+                      className="flex-1 px-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
+                    />
+                    <button
+                      onClick={() => {
+                        if (microVerticalInput.trim()) {
+                          addMicroVertical(microVerticalInput.trim());
+                        }
+                      }}
+                      className="px-4 py-3.5 rounded-xl bg-purple-500 hover:bg-purple-600 text-white font-medium transition-colors cursor-pointer"
+                    >
+                      <span className="text-lg">+</span>
+                    </button>
+                  </div>
+                  {showMicroVerticalSuggestions && (
+                    <div className="absolute top-full left-0 right-0 mt-2 bg-surface border border-border rounded-xl shadow-lg z-50 max-h-60 overflow-y-auto">
+                      {getFilteredMicroVerticals().map((mv, i) => (
+                        <button
+                          key={i}
+                          onClick={() => addMicroVertical(mv)}
+                          className="w-full px-4 py-3 text-left hover:bg-surface-light transition-colors border-b border-border last:border-b-0 text-sm"
+                        >
+                          {mv}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-text-muted mt-1">Click suggestion or type + click +</p>
               </div>
 
               <div>
@@ -927,7 +1078,6 @@ export default function OwnerOnboarding() {
                   onChange={(e) => setOrgData({ ...orgData, size: e.target.value })}
                   className="w-full px-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm appearance-none cursor-pointer"
                 >
-                  <option value="">Select size</option>
                   <option value="1-10">1-10 employees</option>
                   <option value="11-50">11-50 employees</option>
                   <option value="51-200">51-200 employees</option>
@@ -1027,7 +1177,7 @@ export default function OwnerOnboarding() {
           <div className="max-w-xl mx-auto">
             <div className="text-center mb-8">
               <h1 className="text-3xl font-bold mb-2">
-                Upload <span className="gradient-text">{orgData.industry}</span> documents
+                Upload <span className="gradient-text">{orgData.industries[0] || "your industry"}</span> documents
               </h1>
               <p className="text-text-muted">
                 Based on your industry, we suggest these document types:
@@ -1035,7 +1185,7 @@ export default function OwnerOnboarding() {
             </div>
 
             <div className="glass rounded-xl p-4 mb-6">
-              <h3 className="font-semibold mb-3 text-sm">Suggested for {orgData.industry}:</h3>
+              <h3 className="font-semibold mb-3 text-sm">Suggested for {orgData.industries[0] || "your industry"}:</h3>
               <div className="space-y-2">
                 {getFileSuggestions().map((file, i) => (
                   <div key={i} className="flex items-center gap-2 text-sm text-text-muted">
@@ -1174,7 +1324,7 @@ export default function OwnerOnboarding() {
                   }
                   setChatMessages([{ 
                     role: "assistant", 
-                    content: `Hi! I've analyzed ${orgData.name || "your company"}'s web presence. Based on my analysis, you're in the ${orgData.industry || "technology"} space with ${selectedMicroVertical || ""} focus. ${orgData.size || "a growing"} team. What are your top 3 business priorities this quarter?` 
+                    content: `Hi! I've analyzed ${orgData.name || "your company"}'s web presence. Based on my analysis, you're in the ${orgData.industries[0] || "technology"} space${orgData.micro_vertical ? ` with focus on ${orgData.micro_vertical}` : ""}. ${orgData.size || "a growing"} team. What are your top 3 business priorities this quarter?` 
                   }]);
                   setStep("chat");
                 }}
@@ -1361,7 +1511,7 @@ export default function OwnerOnboarding() {
               {[
                 { label: "AI Agents Active", value: "6" },
                 { label: "Documents Processed", value: uploadedFiles.length.toString() },
-                { label: "Industry", value: orgData.industry },
+                { label: "Industry", value: orgData.industries[0] || "Not set" },
                 { label: "Workflows Created", value: "3" },
               ].map((stat, i) => (
                 <div key={i} className="glass rounded-xl p-6">

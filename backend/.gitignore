@@ -39,3 +39,7 @@ logs/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# firebase credientials
+
+backend/firebase-credentials.json
