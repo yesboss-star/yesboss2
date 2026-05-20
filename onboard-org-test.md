@@ -5,6 +5,24 @@ This document tracks all changes made to the owner onboarding flow to handle com
 
 ---
 
+## How to Check Commits on GitHub
+
+### Step 1: Go to Repository
+1. Open https://github.com/yesboss-star/yesboss2
+
+### Step 2: Check Commits
+1. Click on **"commits"** link (below the repo name)
+2. You'll see the commit history
+3. Our latest commit: `d63f9fb` - "Fix onboarding: dropdown selection and database TLS"
+
+### Step 3: View Commit Details
+1. Click on any commit to see:
+   - Which files changed
+   - Lines added/removed
+   - Full diff of changes
+
+---
+
 ## Auto-Sync Script for Team Collaboration
 
 ### Files Created:
@@ -68,12 +86,19 @@ Start-Process powershell -ArgumentList "-File", ".\auto-sync.ps1" -WindowStyle H
   - Services
   - Social media links
 
-### 5. Frontend Org-Details Page
+### 5. Frontend Org-Details Page (FIXED)
 **File:** `frontend/src/app/onboarding/owner/page.tsx`
 
-- All fields are **free text** (not dropdowns)
-- Industry: Free text field, editable
-- Micro-Vertical: Free text field, AI-detected
+**FIXED ISSUES:**
+- Industry dropdown: Changed `onClick` → `onMouseDown` with `e.preventDefault()` for suggestion buttons (fixes blur closing dropdown before click registers)
+- Micro-vertical dropdown: Same fix applied
+- Micro-vertical display: Now shows selected micro-vertical as a purple chip/tag with X button to remove
+- Suspense boundary: Added `Suspense` wrapper for `useSearchParams()` to fix Next.js build error
+- Social links error handling: Added proper error logging
+
+**Features:**
+- Industry: Searchable dropdown with suggestions, multiple can be added
+- Micro-Vertical: Searchable dropdown with suggestions, shows as purple chip when selected
 - Website URL: Full URL (https://...)
 - All fields auto-fill from:
   - Company email domain analysis
@@ -124,14 +149,17 @@ Response: {
 const [domainAnalyzed, setDomainAnalyzed] = useState(false);
 const [companySuggestions, setCompanySuggestions] = useState<any[]>([]);
 const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
-const [selectedMicroVertical, setSelectedMicroVertical] = useState("");
+const [showIndustrySuggestions, setShowIndustrySuggestions] = useState(false);
+const [showMicroVerticalSuggestions, setShowMicroVerticalSuggestions] = useState(false);
+const [industryInput, setIndustryInput] = useState("");
+const [microVerticalInput, setMicroVerticalInput] = useState("");
 
 const [orgData, setOrgData] = useState({
   name: "",
   domain: "",
   website_url: "",
-  industry: "",
-  size: "",
+  industries: [] as string[],  // Array for multiple industries
+  size: "1-10",
   micro_vertical: "",
 });
 ```
@@ -198,19 +226,41 @@ Check backend terminal for:
 - `backend/app/core/intelligence.py` - AI analysis logic
 - `backend/app/core/scraper.py` - Website scraping
 - `backend/app/api/intelligence.py` - API endpoints
+- `backend/app/api/organizations.py` - Organization API
+- `backend/app/core/database.py` - Database connection (TLS fix)
 
 ### Frontend
-- `frontend/src/app/onboarding/owner/page.tsx` - Onboarding UI
+- `frontend/src/app/onboarding/owner/page.tsx` - Onboarding UI (FIXED dropdowns)
+- `frontend/src/stores/organizationStore.ts` - Added website_url to interface
 
 ---
 
-## TODO / Known Issues
+## Testing Checklist
 
-- [ ] Company name suggestions not appearing (being debugged)
-- [ ] Micro-vertical sometimes empty (AI detection issue)
-- [ ] Need to test with various company domains
+- [x] Industry dropdown - clicking suggestion adds it as chip
+- [x] Micro-vertical dropdown - clicking suggestion adds it as chip
+- [x] Remove button (X) works on both chips
+- [x] Blur timeout doesn't close dropdown before click registers
+- [x] Suspense boundary for useSearchParams
+- [x] Social links update has proper error handling
+- [ ] MongoDB connection works (TLS issue - check Atlas dashboard)
+
+---
+
+## Known Issues
+
+1. **MongoDB TLS Connection**
+   - SSL handshake failing in test environment
+   - Check MongoDB Atlas dashboard:
+     - Cluster not paused
+     - IP whitelist includes server IP
+     - Network connectivity
+
+2. **TODO**
+   - [ ] Test with various company domains
+   - [ ] Verify MongoDB connection in production
 
 ---
 
 ## Last Updated
-2026-05-19
+2026-05-20
