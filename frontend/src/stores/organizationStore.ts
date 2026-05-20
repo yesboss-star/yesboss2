@@ -7,6 +7,7 @@ interface Organization {
   id: string;
   name: string;
   domain: string;
+  website_url?: string;
   industry: string;
   size: string;
   micro_vertical?: string;
@@ -35,7 +36,7 @@ interface OrganizationState {
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setSocialLinks: (links: SocialLinks) => void;
-  createOrganization: (data: { name: string; domain: string; industry: string; size: string; micro_vertical?: string }) => Promise<Organization>;
+  createOrganization: (data: { name: string; domain: string; industry: string; size: string; micro_vertical?: string; website_url?: string }) => Promise<Organization>;
   updateSocialLinks: (orgId: string, links: SocialLinks) => Promise<void>;
   detectSocialPresence: (domain: string) => Promise<SocialLinks>;
   fetchOrganizationByEmail: (email: string) => Promise<Organization | null>;
@@ -78,12 +79,22 @@ export const useOrganizationStore = create<OrganizationState>()(
             },
             body: JSON.stringify({ ...data, owner_id: user?.uid }),
           });
-          if (!response.ok) throw new Error("Failed to create organization");
+          
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || "Failed to create organization");
+          }
+          
           const result = await response.json();
+          const orgId = result?.organization?._id || result?.organization?.id || result?.id;
           const org = {
-            id: result.organization._id,
-            ...result.organization,
-            createdAt: result.organization.created_at,
+            id: orgId,
+            name: result?.organization?.name || data.name,
+            domain: result?.organization?.domain || data.domain,
+            industry: result?.organization?.industry || data.industry,
+            size: result?.organization?.size || data.size,
+            website_url: result?.organization?.website_url || data.website_url,
+            createdAt: result?.organization?.created_at || new Date().toISOString(),
           };
           set({ organization: org, loading: false });
           return org;

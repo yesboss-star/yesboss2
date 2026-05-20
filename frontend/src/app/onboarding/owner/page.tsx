@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { Suspense, useState, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganizationStore } from "@/stores/organizationStore";
@@ -242,6 +242,14 @@ const COMMON_MICRO_VERTICALS = [
 ];
 
 export default function OwnerOnboarding() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-background"><div className="text-text-muted">Loading...</div></div>}>
+      <OwnerOnboardingContent />
+    </Suspense>
+  );
+}
+
+function OwnerOnboardingContent() {
   const { user, signOut } = useAuth();
   const { setOrganization, createOrganization, detectSocialPresence } = useOrganizationStore();
   const router = useRouter();
@@ -1003,13 +1011,16 @@ export default function OwnerOnboarding() {
                         <span className="text-lg">+</span>
                       </button>
                     </div>
-                    {showIndustrySuggestions && (
+                    {showIndustrySuggestions && getFilteredIndustries().length > 0 && (
                       <div className="absolute top-full left-0 right-0 mt-2 bg-surface border border-border rounded-xl shadow-lg z-50 max-h-60 overflow-y-auto">
                         {getFilteredIndustries().map((ind, i) => (
                           <button
                             key={i}
-                            onClick={() => addIndustry(ind)}
-                            className="w-full px-4 py-3 text-left hover:bg-surface-light transition-colors border-b border-border last:border-b-0 text-sm"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              addIndustry(ind);
+                            }}
+                            className="w-full px-4 py-3 text-left hover:bg-surface-light transition-colors border-b border-border last:border-b-0 text-sm cursor-pointer"
                           >
                             {ind}
                           </button>
@@ -1024,49 +1035,64 @@ export default function OwnerOnboarding() {
                 <label className="block text-sm font-medium mb-2">
                   Micro-Vertical {domainAnalyzed && orgData.micro_vertical && <span className="text-emerald-400 text-xs ml-2">(Auto-detected)</span>}
                 </label>
-                <div className="relative">
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={microVerticalInput}
-                      onChange={(e) => {
-                        setMicroVerticalInput(e.target.value);
-                        setShowMicroVerticalSuggestions(true);
-                      }}
-                      onFocus={() => setShowMicroVerticalSuggestions(true)}
-                      onBlur={() => setTimeout(() => setShowMicroVerticalSuggestions(false), 200)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && microVerticalInput.trim()) {
-                          addMicroVertical(microVerticalInput.trim());
-                        }
-                      }}
-                      placeholder="e.g., Custom Software, SaaS, AI Solutions..."
-                      className="flex-1 px-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
-                    />
-                    <button
-                      onClick={() => {
-                        if (microVerticalInput.trim()) {
-                          addMicroVertical(microVerticalInput.trim());
-                        }
-                      }}
-                      className="px-4 py-3.5 rounded-xl bg-purple-500 hover:bg-purple-600 text-white font-medium transition-colors cursor-pointer"
-                    >
-                      <span className="text-lg">+</span>
-                    </button>
-                  </div>
-                  {showMicroVerticalSuggestions && (
-                    <div className="absolute top-full left-0 right-0 mt-2 bg-surface border border-border rounded-xl shadow-lg z-50 max-h-60 overflow-y-auto">
-                      {getFilteredMicroVerticals().map((mv, i) => (
-                        <button
-                          key={i}
-                          onClick={() => addMicroVertical(mv)}
-                          className="w-full px-4 py-3 text-left hover:bg-surface-light transition-colors border-b border-border last:border-b-0 text-sm"
-                        >
-                          {mv}
+                <div className="space-y-3">
+                  {orgData.micro_vertical && (
+                    <div className="flex flex-wrap gap-2">
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500/10 text-purple-500 text-sm">
+                        {orgData.micro_vertical}
+                        <button onClick={() => setOrgData(prev => ({ ...prev, micro_vertical: "" }))} className="hover:bg-purple-500/20 rounded-full p-0.5 cursor-pointer">
+                          <X className="w-3.5 h-3.5" />
                         </button>
-                      ))}
+                      </span>
                     </div>
                   )}
+                  <div className="relative">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={microVerticalInput}
+                        onChange={(e) => {
+                          setMicroVerticalInput(e.target.value);
+                          setShowMicroVerticalSuggestions(true);
+                        }}
+                        onFocus={() => setShowMicroVerticalSuggestions(true)}
+                        onBlur={() => setTimeout(() => setShowMicroVerticalSuggestions(false), 300)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && microVerticalInput.trim()) {
+                            addMicroVertical(microVerticalInput.trim());
+                          }
+                        }}
+                        placeholder="e.g., Custom Software, SaaS, AI Solutions..."
+                        className="flex-1 px-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
+                      />
+                      <button
+                        onClick={() => {
+                          if (microVerticalInput.trim()) {
+                            addMicroVertical(microVerticalInput.trim());
+                          }
+                        }}
+                        className="px-4 py-3.5 rounded-xl bg-purple-500 hover:bg-purple-600 text-white font-medium transition-colors cursor-pointer"
+                      >
+                        <span className="text-lg">+</span>
+                      </button>
+                    </div>
+                    {showMicroVerticalSuggestions && getFilteredMicroVerticals().length > 0 && (
+                      <div className="absolute top-full left-0 right-0 mt-2 bg-surface border border-border rounded-xl shadow-lg z-50 max-h-60 overflow-y-auto">
+                        {getFilteredMicroVerticals().map((mv, i) => (
+                          <button
+                            key={i}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              addMicroVertical(mv);
+                            }}
+                            className="w-full px-4 py-3 text-left hover:bg-surface-light transition-colors border-b border-border last:border-b-0 text-sm cursor-pointer"
+                          >
+                            {mv}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <p className="text-xs text-text-muted mt-1">Click suggestion or type + click +</p>
               </div>
@@ -1311,16 +1337,19 @@ export default function OwnerOnboarding() {
               </button>
               <button
                 onClick={() => {
-                  const links: any = {};
+                  const links: Record<string, string> = {};
                   socialLinksList.forEach(s => {
-                    if (s.url) links[s.platform.toLowerCase().replace(" / x", "_").replace(" ", "_")] = s.url;
+                    if (s.url) {
+                      const key = s.platform.toLowerCase().replace(/\s*\/\s*x/i, "_").replace(/\s+/g, "_");
+                      links[key] = s.url;
+                    }
                   });
                   if (orgId) {
                     fetch(`${API_URL}/organizations/${orgId}`, {
                       method: "PUT",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ social_links: links }),
-                    }).catch(console.error);
+                    }).catch((err) => console.error("Social links update failed:", err));
                   }
                   setChatMessages([{ 
                     role: "assistant", 

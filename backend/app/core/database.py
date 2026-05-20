@@ -16,11 +16,32 @@ def connect_mongodb():
         return None
 
     try:
-        client = MongoClient(settings.MONGODB_URI, serverSelectionTimeoutMS=5000)
+        from pymongo import MongoClient
+        import urllib.parse
+        
+        mongo_uri = settings.MONGODB_URI
+        
+        parsed = urllib.parse.urlparse(mongo_uri)
+        if parsed.scheme == "mongodb+srv":
+            client = MongoClient(
+                mongo_uri,
+                serverSelectionTimeoutMS=15000,
+                connectTimeoutMS=15000,
+                tls=True,
+                tlsAllowInvalidCertificates=True,
+            )
+        else:
+            client = MongoClient(
+                mongo_uri,
+                serverSelectionTimeoutMS=15000,
+                connectTimeoutMS=15000,
+                tls=True,
+                tlsAllowInvalidCertificates=True,
+            )
+        
         client.admin.command("ping")
         
-        uri = settings.MONGODB_URI
-        if "yb1.kf8ash8.mongodb.net" in uri:
+        if "yb1.kf8ash8.mongodb.net" in mongo_uri:
             db = client["yesboss_db"]
         else:
             db = client.get_default_database()

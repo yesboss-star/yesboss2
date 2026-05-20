@@ -4,14 +4,16 @@ from typing import Optional
 from datetime import datetime
 from ..core.database import get_database
 from ..core.supabase_client import get_supabase
-from ..dependencies.auth import get_current_user
+from ..dependencies.auth import get_current_user, get_current_user_optional
 
 router = APIRouter()
 
 class OrganizationCreate(BaseModel):
     name: str
     domain: Optional[str] = None
+    website_url: Optional[str] = None
     industry: Optional[str] = None
+    micro_vertical: Optional[str] = ""
     size: Optional[str] = None
     owner_id: Optional[str] = None
     social_links: Optional[dict] = None
@@ -19,19 +21,23 @@ class OrganizationCreate(BaseModel):
 class OrganizationUpdate(BaseModel):
     name: Optional[str] = None
     domain: Optional[str] = None
+    website_url: Optional[str] = None
     industry: Optional[str] = None
+    micro_vertical: Optional[str] = None
     size: Optional[str] = None
 
 @router.post("")
-async def create_organization(request: OrganizationCreate, current_user: Optional[dict] = Depends(get_current_user)):
+async def create_organization(request: OrganizationCreate, current_user: Optional[dict] = Depends(get_current_user_optional)):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     org_doc = {
         "name": request.name,
         "domain": request.domain,
+        "website_url": request.website_url,
         "industry": request.industry,
+        "micro_vertical": request.micro_vertical,
         "size": request.size,
         "owner_id": request.owner_id,
         "social_links": request.social_links or {},
