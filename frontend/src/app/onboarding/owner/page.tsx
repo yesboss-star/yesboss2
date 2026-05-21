@@ -61,65 +61,793 @@ interface SocialLink {
 }
 
 const INDUSTRY_FILE_SUGGESTIONS: Record<string, string[]> = {
-  "Technology": [
+  "Technology & Software": [
     "Technical architecture docs",
     "Product roadmaps",
     "Code repositories overview",
     "Tech stack documentation",
+    "Software requirements specifications",
+    "API documentation",
   ],
-  "Finance": [
+  "IT Services & Consulting": [
+    "Client project summaries",
+    "Service level agreements",
+    "Resource allocation plans",
+    "Case studies",
+    "Consulting frameworks",
+  ],
+  "Artificial Intelligence & Machine Learning": [
+    "Model architecture docs",
+    "Training datasets overview",
+    "AI ethics guidelines",
+    "Performance benchmarks",
+    "Research papers",
+  ],
+  "SaaS / Cloud Computing": [
+    "Subscription metrics",
+    "Infrastructure diagrams",
+    "SLA documents",
+    "Customer onboarding guides",
+    "Feature release notes",
+  ],
+  "Cybersecurity": [
+    "Security audit reports",
+    "Threat assessment docs",
+    "Compliance certifications",
+    "Incident response plans",
+    "Penetration test results",
+  ],
+  "E-commerce & Online Retail": [
+    "Product catalogs",
+    "Sales analytics reports",
+    "Customer segmentation data",
+    "Inventory management sheets",
+    "Return/refund policies",
+  ],
+  "Fintech & Payment Solutions": [
+    "Transaction flow diagrams",
+    "Compliance documentation",
+    "Security audit reports",
+    "User acquisition metrics",
+    "Financial projections",
+  ],
+  "Banking & Financial Services": [
     "Financial statements (P&L, Balance Sheet)",
     "Cash flow reports",
-    "Budget templates",
-    "Investment portfolios",
+    "Risk assessment documents",
+    "Regulatory compliance docs",
+    "Customer portfolio data",
   ],
-  "Healthcare": [
+  "Insurance & Risk Management": [
+    "Policy documents",
+    "Claims processing workflows",
+    "Risk assessment models",
+    "Actuarial reports",
+    "Customer retention data",
+  ],
+  "Investment & Wealth Management": [
+    "Investment portfolios",
+    "Market analysis reports",
+    "Client financial plans",
+    "Performance benchmarks",
+    "Regulatory filings",
+  ],
+  "Healthcare & Life Sciences": [
     "Patient flow diagrams",
     "Staff scheduling templates",
     "Medical inventory records",
     "Compliance documentation",
+    "Clinical trial data",
   ],
-  "Retail": [
-    "Inventory management sheets",
-    "Sales reports",
-    "Supplier lists",
-    "Customer purchase history",
+  "Healthcare Technology (HealthTech)": [
+    "EHR integration docs",
+    "Telehealth platform specs",
+    "HIPAA compliance docs",
+    "Patient engagement metrics",
+    "Medical device certifications",
   ],
-  "Manufacturing": [
-    "Production schedules",
+  "Pharmaceuticals & Biotech": [
+    "Drug development pipelines",
+    "Clinical trial reports",
+    "Regulatory submission docs",
+    "Manufacturing SOPs",
     "Quality control reports",
-    "Equipment maintenance logs",
-    "Supplier/vendor reports",
   ],
-  "Education": [
+  "Medical Devices & Equipment": [
+    "Product specifications",
+    "FDA/CE certification docs",
+    "Manufacturing processes",
+    "Clinical validation reports",
+    "Distribution agreements",
+  ],
+  "Telemedicine & Digital Health": [
+    "Platform architecture docs",
+    "Patient consent forms",
+    "Telehealth guidelines",
+    "User engagement metrics",
+    "Data privacy policies",
+  ],
+  "Education & EdTech": [
     "Curriculum documents",
     "Student enrollment data",
     "Teacher/staff schedules",
     "Assessment results",
+    "Learning analytics reports",
   ],
-  "Consulting": [
-    "Project timelines",
-    "Client deliverables",
-    "Resource allocation",
-    "Case studies",
+  "Online Learning & E-Learning": [
+    "Course catalogs",
+    "Student engagement metrics",
+    "Content development plans",
+    "Platform usage analytics",
+    "Certification frameworks",
   ],
-  "Real Estate": [
+  "Higher Education": [
+    "Academic program docs",
+    "Admission statistics",
+    "Research publications",
+    "Faculty profiles",
+    "Accreditation documents",
+  ],
+  "Training & Development": [
+    "Training curriculum",
+    "Skill assessment tools",
+    "Participant feedback reports",
+    "Certification programs",
+    "Corporate training plans",
+  ],
+  "Manufacturing & Industrial": [
+    "Production schedules",
+    "Quality control reports",
+    "Equipment maintenance logs",
+    "Supplier/vendor reports",
+    "Safety compliance docs",
+  ],
+  "Automotive & Electric Vehicles": [
+    "Vehicle specifications",
+    "Supply chain documents",
+    "Safety test reports",
+    "Manufacturing processes",
+    "Regulatory compliance docs",
+  ],
+  "Aerospace & Defense": [
+    "Engineering specifications",
+    "Safety certifications",
+    "Contract documents",
+    "Testing protocols",
+    "Compliance reports",
+  ],
+  "Electronics & Semiconductors": [
+    "Circuit designs",
+    "Manufacturing specs",
+    "Quality assurance reports",
+    "Supply chain docs",
+    "Product testing results",
+  ],
+  "Retail & Consumer Goods": [
+    "Inventory management sheets",
+    "Sales reports",
+    "Supplier lists",
+    "Customer purchase history",
+    "Merchandising plans",
+  ],
+  "Fashion & Apparel": [
+    "Design portfolios",
+    "Seasonal collections",
+    "Supplier agreements",
+    "Sales trend reports",
+    "Brand guidelines",
+  ],
+  "Food & Beverage": [
+    "Recipe documentation",
+    "Supply chain records",
+    "Quality control reports",
+    "Nutritional information",
+    "Distribution agreements",
+  ],
+  "Beauty & Cosmetics": [
+    "Product formulations",
+    "Regulatory compliance docs",
+    "Marketing campaigns",
+    "Sales analytics",
+    "Supplier agreements",
+  ],
+  "Sports & Fitness": [
+    "Training programs",
+    "Member analytics",
+    "Facility schedules",
+    "Equipment inventories",
+    "Partnership agreements",
+  ],
+  "Real Estate & Property": [
     "Property listings",
     "Lease agreements",
     "Maintenance schedules",
     "Tenant records",
+    "Market analysis reports",
+  ],
+  "Construction & Infrastructure": [
+    "Project blueprints",
+    "Contractor agreements",
+    "Safety compliance docs",
+    "Budget estimates",
+    "Progress reports",
+  ],
+  "Architecture & Interior Design": [
+    "Design portfolios",
+    "Project specifications",
+    "Client briefs",
+    "Material specifications",
+    "Budget documents",
   ],
   "Media & Entertainment": [
     "Content calendars",
     "Audience analytics",
     "Campaign performance reports",
     "Content rights documents",
+    "Production schedules",
   ],
-  "Logistics": [
+  "Film & Television": [
+    "Production schedules",
+    "Script documents",
+    "Budget breakdowns",
+    "Distribution agreements",
+    "Talent contracts",
+  ],
+  "Music & Audio": [
+    "Track catalogs",
+    "Licensing agreements",
+    "Royalty statements",
+    "Production schedules",
+    "Artist contracts",
+  ],
+  "Gaming & Esports": [
+    "Game design documents",
+    "Player analytics",
+    "Monetization strategies",
+    "Development roadmaps",
+    "Tournament schedules",
+  ],
+  "Publishing & Content": [
+    "Editorial calendars",
+    "Content guidelines",
+    "Readership analytics",
+    "Author contracts",
+    "Distribution plans",
+  ],
+  "Advertising & Marketing": [
+    "Campaign briefs",
+    "Client portfolios",
+    "Performance reports",
+    "Media buying plans",
+    "Creative assets",
+  ],
+  "Digital Marketing & SEO": [
+    "SEO audit reports",
+    "Content calendars",
+    "Campaign analytics",
+    "Keyword research docs",
+    "Client case studies",
+  ],
+  "Public Relations & Communications": [
+    "Press release archives",
+    "Media coverage reports",
+    "Crisis communication plans",
+    "Client portfolios",
+    "Stakeholder maps",
+  ],
+  "Logistics & Supply Chain": [
     "Route maps",
     "Fleet management data",
     "Shipping manifests",
     "Warehouse inventory",
+    "Vendor contracts",
+  ],
+  "Transportation & Mobility": [
+    "Fleet schedules",
+    "Route optimization docs",
+    "Maintenance logs",
+    "Regulatory compliance",
+    "Customer analytics",
+  ],
+  "Travel & Tourism": [
+    "Booking analytics",
+    "Destination guides",
+    "Vendor agreements",
+    "Customer feedback reports",
+    "Seasonal pricing strategies",
+  ],
+  "Hospitality & Hotels": [
+    "Occupancy reports",
+    "Guest feedback data",
+    "Staff schedules",
+    "Vendor contracts",
+    "Revenue management docs",
+  ],
+  "Restaurants & Food Services": [
+    "Menu documentation",
+    "Supplier agreements",
+    "Health inspection reports",
+    "Staff schedules",
+    "Sales analytics",
+  ],
+  "Legal Services & Law": [
+    "Case files",
+    "Legal research docs",
+    "Client agreements",
+    "Compliance checklists",
+    "Court filing templates",
+  ],
+  "Accounting & Taxation": [
+    "Financial statements",
+    "Tax filing documents",
+    "Audit reports",
+    "Client portfolios",
+    "Compliance checklists",
+  ],
+  "HR & Recruitment": [
+    "Job descriptions",
+    "Candidate pipelines",
+    "Interview frameworks",
+    "Employee handbooks",
+    "Compensation benchmarks",
+  ],
+  "Staffing & Outsourcing": [
+    "Client requirements docs",
+    "Candidate databases",
+    "Service level agreements",
+    "Billing schedules",
+    "Quality metrics",
+  ],
+  "Non-profit & NGO": [
+    "Grant applications",
+    "Impact reports",
+    "Donor databases",
+    "Program evaluations",
+    "Financial statements",
+  ],
+  "Government & Public Sector": [
+    "Policy documents",
+    "Budget allocations",
+    "Public records",
+    "Compliance reports",
+    "Service delivery metrics",
+  ],
+  "Energy & Utilities": [
+    "Infrastructure maps",
+    "Consumption reports",
+    "Regulatory filings",
+    "Maintenance schedules",
+    "Environmental impact docs",
+  ],
+  "Oil & Gas": [
+    "Exploration reports",
+    "Production data",
+    "Safety compliance docs",
+    "Environmental assessments",
+    "Supply chain docs",
+  ],
+  "Renewable Energy & Sustainability": [
+    "Project feasibility studies",
+    "Environmental impact docs",
+    "Energy production data",
+    "Regulatory permits",
+    "Investment proposals",
+  ],
+  "Agriculture & AgTech": [
+    "Crop management plans",
+    "Soil analysis reports",
+    "Supply chain docs",
+    "Yield data",
+    "Regulatory compliance",
+  ],
+  "Environment & Climate": [
+    "Environmental assessments",
+    "Climate data reports",
+    "Regulatory filings",
+    "Research publications",
+    "Conservation plans",
+  ],
+  "Telecommunications": [
+    "Network architecture docs",
+    "Service level agreements",
+    "Customer analytics",
+    "Infrastructure maps",
+    "Regulatory compliance",
+  ],
+  "Broadcasting & Media": [
+    "Programming schedules",
+    "Audience analytics",
+    "Content rights docs",
+    "Advertising contracts",
+    "Production budgets",
+  ],
+  "Sports Management": [
+    "Athlete contracts",
+    "Event schedules",
+    "Sponsorship agreements",
+    "Performance metrics",
+    "Marketing plans",
+  ],
+  "Event Management": [
+    "Event timelines",
+    "Vendor contracts",
+    "Budget breakdowns",
+    "Attendee analytics",
+    "Venue specifications",
+  ],
+  "Non-governmental Organization": [
+    "Project proposals",
+    "Impact assessments",
+    "Donor reports",
+    "Financial statements",
+    "Compliance documents",
+  ],
+  "Social Enterprise": [
+    "Impact metrics",
+    "Business plans",
+    "Funding proposals",
+    "Community engagement docs",
+    "Financial reports",
+  ],
+  "Research & Development": [
+    "Research proposals",
+    "Experiment logs",
+    "Publication records",
+    "Patent applications",
+    "Funding documents",
+  ],
+  "Science & Laboratories": [
+    "Lab protocols",
+    "Research data",
+    "Safety documentation",
+    "Equipment inventories",
+    "Quality control reports",
+  ],
+};
+
+const MICRO_VERTICAL_FILE_SUGGESTIONS: Record<string, string[]> = {
+  "Custom Software Development": [
+    "Software architecture diagrams",
+    "Client project portfolios",
+    "Development process docs",
+    "Technology stack documentation",
+    "Client testimonials",
+  ],
+  "Mobile App Development": [
+    "App store listings",
+    "UI/UX design files",
+    "User analytics reports",
+    "App architecture docs",
+    "Release notes",
+  ],
+  "Web Development": [
+    "Website architecture docs",
+    "Client portfolio sites",
+    "Performance reports",
+    "SEO audit documents",
+    "Design mockups",
+  ],
+  "Cloud Services & Migration": [
+    "Cloud architecture diagrams",
+    "Migration plans",
+    "Cost optimization reports",
+    "Security assessments",
+    "SLA documents",
+  ],
+  "Data Analytics & Business Intelligence": [
+    "Dashboard screenshots",
+    "Data pipeline docs",
+    "Client case studies",
+    "Analytics frameworks",
+    "Sample reports",
+  ],
+  "Machine Learning & AI Solutions": [
+    "Model architecture docs",
+    "Training data samples",
+    "Performance benchmarks",
+    "Use case documents",
+    "AI ethics guidelines",
+  ],
+  "DevOps & Infrastructure": [
+    "CI/CD pipeline docs",
+    "Infrastructure diagrams",
+    "Monitoring dashboards",
+    "Incident response plans",
+    "Security policies",
+  ],
+  "API Development & Integration": [
+    "API documentation",
+    "Integration guides",
+    "Architecture diagrams",
+    "Testing reports",
+    "Client case studies",
+  ],
+  "E-commerce Platforms": [
+    "Platform feature docs",
+    "Merchant onboarding guides",
+    "Payment integration docs",
+    "Analytics dashboards",
+    "Security certifications",
+  ],
+  "Payment Processing": [
+    "Payment flow diagrams",
+    "Security certifications",
+    "Compliance documents",
+    "Transaction reports",
+    "Integration guides",
+  ],
+  "Digital Marketing": [
+    "Campaign portfolios",
+    "ROI reports",
+    "Content calendars",
+    "Client case studies",
+    "Analytics dashboards",
+  ],
+  "Content Management Systems": [
+    "CMS architecture docs",
+    "Plugin/extension docs",
+    "User guides",
+    "Security assessments",
+    "Performance benchmarks",
+  ],
+  "Project Management Tools": [
+    "Feature documentation",
+    "User guides",
+    "Integration docs",
+    "Customer feedback",
+    "Roadmap documents",
+  ],
+  "Customer Relationship Management (CRM)": [
+    "CRM workflow docs",
+    "Integration guides",
+    "Customer journey maps",
+    "Analytics reports",
+    "Security certifications",
+  ],
+  "Enterprise Resource Planning (ERP)": [
+    "Module documentation",
+    "Implementation guides",
+    "Integration specs",
+    "Client case studies",
+    "Security assessments",
+  ],
+  "Human Resources (HR) Software": [
+    "Feature documentation",
+    "Compliance guides",
+    "Integration docs",
+    "User manuals",
+    "Security certifications",
+  ],
+  "Telehealth & Remote Care": [
+    "Platform architecture docs",
+    "HIPAA compliance docs",
+    "Patient flow diagrams",
+    "Security assessments",
+    "User guides",
+  ],
+  "Electronic Health Records (EHR)": [
+    "EHR system specs",
+    "Interoperability docs",
+    "Compliance certifications",
+    "Data migration plans",
+    "User training materials",
+  ],
+  "Medical Imaging & Diagnostics": [
+    "Imaging protocols",
+    "Diagnostic accuracy reports",
+    "Regulatory approvals",
+    "Integration guides",
+    "Clinical validation docs",
+  ],
+  "Drug Discovery & Research": [
+    "Research protocols",
+    "Clinical trial data",
+    "Regulatory submissions",
+    "Lab notebooks",
+    "Patent applications",
+  ],
+  "Online Education Platforms": [
+    "Course catalogs",
+    "Student analytics",
+    "Content development plans",
+    "Platform architecture docs",
+    "User engagement reports",
+  ],
+  "Corporate Training": [
+    "Training curriculum",
+    "Assessment tools",
+    "Participant feedback",
+    "ROI reports",
+    "Certification frameworks",
+  ],
+  "Skill Development": [
+    "Skill frameworks",
+    "Learning paths",
+    "Assessment tools",
+    "Progress tracking docs",
+    "Certification programs",
+  ],
+  "Fintech Solutions": [
+    "Product documentation",
+    "Security audits",
+    "Compliance certifications",
+    "User acquisition data",
+    "Financial projections",
+  ],
+  "Blockchain & Crypto": [
+    "Whitepapers",
+    "Smart contract audits",
+    "Tokenomics docs",
+    "Security assessments",
+    "Technical architecture",
+  ],
+  "Insurtech": [
+    "Product documentation",
+    "Underwriting guidelines",
+    "Claims processing flows",
+    "Compliance docs",
+    "Customer analytics",
+  ],
+  "Supply Chain Management": [
+    "Supply chain maps",
+    "Vendor contracts",
+    "Inventory reports",
+    "Logistics optimization docs",
+    "Risk assessments",
+  ],
+  "Warehouse Management": [
+    "Warehouse layouts",
+    "Inventory reports",
+    "Process documentation",
+    "Equipment specs",
+    "Safety protocols",
+  ],
+  "Fleet Management": [
+    "Fleet inventory",
+    "Maintenance schedules",
+    "Route optimization docs",
+    "Driver management policies",
+    "Compliance reports",
+  ],
+  "Last Mile Delivery": [
+    "Delivery route maps",
+    "Driver schedules",
+    "Customer feedback data",
+    "Performance metrics",
+    "Technology integration docs",
+  ],
+  "Social Media & Networking": [
+    "Platform architecture docs",
+    "User growth metrics",
+    "Content moderation policies",
+    "Engagement analytics",
+    "Monetization strategies",
+  ],
+  "Video Streaming & OTT": [
+    "Content library docs",
+    "Streaming architecture",
+    "User analytics",
+    "Content licensing agreements",
+    "Monetization plans",
+  ],
+  "Online Gaming": [
+    "Game design documents",
+    "Player analytics",
+    "Monetization strategies",
+    "Technical architecture",
+    "Community guidelines",
+  ],
+  "Virtual Reality (VR) & Augmented Reality (AR)": [
+    "Experience design docs",
+    "Technical specifications",
+    "User testing reports",
+    "Hardware requirements",
+    "Content pipelines",
+  ],
+  "Internet of Things (IoT)": [
+    "Device specifications",
+    "Network architecture",
+    "Security protocols",
+    "Data flow diagrams",
+    "Use case documents",
+  ],
+  "Robotics & Automation": [
+    "Robot specifications",
+    "Integration guides",
+    "Safety protocols",
+    "Performance benchmarks",
+    "Use case documents",
+  ],
+  "Electric Vehicles & Charging": [
+    "Vehicle specifications",
+    "Charging infrastructure docs",
+    "Battery technology docs",
+    "Regulatory compliance",
+    "Market analysis",
+  ],
+  "Smart Buildings & Homes": [
+    "System architecture docs",
+    "Device integration guides",
+    "Security protocols",
+    "User manuals",
+    "Energy efficiency reports",
+  ],
+  "Clean Energy Solutions": [
+    "Project feasibility studies",
+    "Energy production data",
+    "Environmental impact docs",
+    "Regulatory permits",
+    "Investment proposals",
+  ],
+  "Waste Management": [
+    "Collection schedules",
+    "Processing facility docs",
+    "Environmental compliance",
+    "Recycling reports",
+    "Equipment inventories",
+  ],
+  "Water Treatment": [
+    "Treatment process docs",
+    "Quality testing reports",
+    "Infrastructure maps",
+    "Regulatory compliance",
+    "Environmental impact docs",
+  ],
+  "Agriculture Technology": [
+    "Crop management plans",
+    "Sensor data reports",
+    "Yield predictions",
+    "Equipment specifications",
+    "Market analysis",
+  ],
+  "Food Technology": [
+    "Product formulations",
+    "Quality control reports",
+    "Supply chain docs",
+    "Regulatory compliance",
+    "Market research",
+  ],
+  "B2B Services": [
+    "Service catalogs",
+    "Client case studies",
+    "SLA documents",
+    "Pricing strategies",
+    "Partnership agreements",
+  ],
+  "B2C Services": [
+    "Product catalogs",
+    "Customer analytics",
+    "Marketing plans",
+    "Sales reports",
+    "User feedback data",
+  ],
+  "Marketplace & Platforms": [
+    "Platform architecture docs",
+    "Seller onboarding guides",
+    "Transaction flow docs",
+    "Trust & safety policies",
+    "Growth metrics",
+  ],
+  "Subscription Services": [
+    "Subscription plans",
+    "Churn analysis reports",
+    "Customer lifecycle docs",
+    "Revenue metrics",
+    "Feature roadmaps",
+  ],
+  "Managed Services": [
+    "Service catalogs",
+    "SLA documents",
+    "Monitoring reports",
+    "Client onboarding guides",
+    "Security policies",
+  ],
+  "Consulting & Advisory": [
+    "Consulting frameworks",
+    "Client deliverables",
+    "Case studies",
+    "Industry reports",
+    "Methodology documents",
   ],
 };
 
@@ -424,8 +1152,14 @@ function OwnerOnboardingContent() {
   };
 
   const getFileSuggestions = () => {
-    const industry = orgData.industries[0] || "Technology";
-    return INDUSTRY_FILE_SUGGESTIONS[industry] || INDUSTRY_FILE_SUGGESTIONS["Technology"];
+    const industry = orgData.industries[0] || "Technology & Software";
+    const microVertical = orgData.micro_vertical || "";
+    
+    const industrySuggestions = INDUSTRY_FILE_SUGGESTIONS[industry] || INDUSTRY_FILE_SUGGESTIONS["Technology & Software"];
+    const microVerticalSuggestions = microVertical ? (MICRO_VERTICAL_FILE_SUGGESTIONS[microVertical] || []) : [];
+    
+    const combined = [...microVerticalSuggestions, ...industrySuggestions];
+    return [...new Set(combined)].slice(0, 8);
   };
 
   const addIndustry = (industry: string) => {
@@ -485,7 +1219,7 @@ function OwnerOnboardingContent() {
       const org = await createOrganization({
         name: orgData.name || domain.split(".")[0],
         domain: domain || "",
-        industry: orgData.industries[0] || "Technology",
+        industry: orgData.industries[0] || "Technology & Software",
         size: orgData.size || "1-10",
         micro_vertical: orgData.micro_vertical,
       });
@@ -503,7 +1237,7 @@ function OwnerOnboardingContent() {
       const org = await createOrganization({
         name: orgData.name,
         domain,
-        industry: orgData.industries[0] || "Technology",
+        industry: orgData.industries[0] || "Technology & Software",
         size: orgData.size || "1-10",
         micro_vertical: orgData.micro_vertical,
       });
@@ -529,11 +1263,26 @@ function OwnerOnboardingContent() {
     const domain = processDomain(orgData.domain);
     
     try {
-      const response = await fetch(`${API_URL}/scrape/company`, {
+      const response = await fetch(`${API_URL}/scrape/scrape`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ domain }),
       });
+
+      const data = await response.json();
+      console.log("Scrape response social_links:", data.social_links);
+      let socialFromScan = data.social_links || {};
+      
+      const platforms = [
+        { platform: "LinkedIn", url: socialFromScan.linkedin || "", detected: !!socialFromScan.linkedin, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "Twitter / X", url: socialFromScan.twitter || "", detected: !!socialFromScan.twitter, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "Instagram", url: socialFromScan.instagram || "", detected: !!socialFromScan.instagram, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "Facebook", url: socialFromScan.facebook || "", detected: !!socialFromScan.facebook, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "YouTube", url: socialFromScan.youtube || "", detected: !!socialFromScan.youtube, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "TikTok", url: socialFromScan.tiktok || "", detected: !!socialFromScan.tiktok, icon: <Link2 className="w-5 h-5" /> },
+      ];
+      setSocialLinksList(platforms);
+      console.log("Social links set:", platforms.filter(p => p.url));
 
       const interval = setInterval(() => {
         setScanProgress((prev) => {
@@ -615,6 +1364,7 @@ function OwnerOnboardingContent() {
         { platform: "Instagram", url: links.instagram || "", detected: !!links.instagram, icon: <Link2 className="w-5 h-5" /> },
         { platform: "Facebook", url: links.facebook || "", detected: !!links.facebook, icon: <Link2 className="w-5 h-5" /> },
         { platform: "YouTube", url: links.youtube || "", detected: !!links.youtube, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "TikTok", url: links.tiktok || "", detected: !!links.tiktok, icon: <Link2 className="w-5 h-5" /> },
       ];
       setSocialLinksList(platforms);
     } catch (error) {
@@ -625,6 +1375,7 @@ function OwnerOnboardingContent() {
         { platform: "Instagram", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
         { platform: "Facebook", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
         { platform: "YouTube", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "TikTok", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
       ]);
     }
   };
@@ -1198,7 +1949,7 @@ function OwnerOnboardingContent() {
           </div>
         )}
 
-        {/* STEP 5: FILE UPLOAD (Industry-Specific) */}
+        {/* STEP 5: FILE UPLOAD (Industry + Micro-Vertical Specific) */}
         {step === "file-upload" && (
           <div className="max-w-xl mx-auto">
             <div className="text-center mb-8">
@@ -1206,12 +1957,18 @@ function OwnerOnboardingContent() {
                 Upload <span className="gradient-text">{orgData.industries[0] || "your industry"}</span> documents
               </h1>
               <p className="text-text-muted">
-                Based on your industry, we suggest these document types:
+                {orgData.micro_vertical 
+                  ? `Based on your industry (${orgData.industries[0] || "Technology"}) and micro-vertical (${orgData.micro_vertical}), we suggest these document types:`
+                  : `Based on your industry, we suggest these document types:`
+                }
               </p>
             </div>
 
             <div className="glass rounded-xl p-4 mb-6">
-              <h3 className="font-semibold mb-3 text-sm">Suggested for {orgData.industries[0] || "your industry"}:</h3>
+              <h3 className="font-semibold mb-3 text-sm">
+                Suggested for {orgData.industries[0] || "your industry"}
+                {orgData.micro_vertical ? ` + ${orgData.micro_vertical}` : ""}:
+              </h3>
               <div className="space-y-2">
                 {getFileSuggestions().map((file, i) => (
                   <div key={i} className="flex items-center gap-2 text-sm text-text-muted">
@@ -1270,7 +2027,9 @@ function OwnerOnboardingContent() {
               </button>
               <button
                 onClick={() => {
-                  handleSocialDetection();
+                  if (socialLinksList.length === 0) {
+                    handleSocialDetection();
+                  }
                   setStep("social");
                 }}
                 className="flex-1 py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 flex items-center justify-center gap-2"
@@ -1290,7 +2049,7 @@ function OwnerOnboardingContent() {
                 Connect your <span className="gradient-text">social presence</span>
               </h1>
               <p className="text-text-muted">
-                We detected these social profiles for {orgData.name || "your company"}. Confirm or edit.
+                Pre-filled from AI scan. Edit any field to update.
               </p>
             </div>
 
@@ -1308,19 +2067,15 @@ function OwnerOnboardingContent() {
                   </div>
                   <div className="flex-1">
                     <p className="text-sm font-medium">{social.platform}</p>
-                    {social.detected ? (
-                      <p className="text-xs text-text-muted">{social.url}</p>
-                    ) : (
-                      <input
-                        type="text"
-                        placeholder="Add URL (optional)"
-                        value={social.url}
-                        onChange={(e) => updateSocialLink(i, e.target.value)}
-                        className="w-full mt-1 px-3 py-1.5 rounded-lg bg-surface border border-border text-xs focus:border-primary focus:outline-none"
-                      />
-                    )}
+                    <input
+                      type="text"
+                      placeholder={`Add ${social.platform} URL`}
+                      value={social.url}
+                      onChange={(e) => updateSocialLink(i, e.target.value)}
+                      className="w-full mt-1 px-3 py-1.5 rounded-lg bg-surface border border-border text-xs focus:border-primary focus:outline-none"
+                    />
                   </div>
-                  {social.detected && (
+                  {social.detected && social.url && (
                     <CheckCircle className="w-5 h-5 text-emerald-400" />
                   )}
                 </div>
@@ -1336,7 +2091,7 @@ function OwnerOnboardingContent() {
                 Back
               </button>
               <button
-                onClick={() => {
+                onClick={async () => {
                   const links: Record<string, string> = {};
                   socialLinksList.forEach(s => {
                     if (s.url) {
@@ -1345,11 +2100,15 @@ function OwnerOnboardingContent() {
                     }
                   });
                   if (orgId) {
-                    fetch(`${API_URL}/organizations/${orgId}`, {
-                      method: "PUT",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ social_links: links }),
-                    }).catch((err) => console.error("Social links update failed:", err));
+                    try {
+                      await fetch(`${API_URL}/organizations/${orgId}`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ social_links: links }),
+                      });
+                    } catch {
+                      // Silently skip if backend is not available
+                    }
                   }
                   setChatMessages([{ 
                     role: "assistant", 

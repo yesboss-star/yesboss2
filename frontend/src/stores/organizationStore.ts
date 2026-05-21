@@ -21,6 +21,7 @@ interface SocialLinks {
   instagram?: string;
   facebook?: string;
   youtube?: string;
+  tiktok?: string;
 }
 
 interface OrganizationState {
@@ -129,8 +130,20 @@ export const useOrganizationStore = create<OrganizationState>()(
           });
           if (!response.ok) throw new Error("Failed to detect social presence");
           const result = await response.json();
-          set({ socialLinks: result.social_links || {}, loading: false });
-          return result.social_links || {};
+          
+          const links: SocialLinks = {};
+          if (Array.isArray(result.social_links)) {
+            result.social_links.forEach((item: any) => {
+              if (item.url) {
+                links[item.platform] = item.url;
+              }
+            });
+          } else if (result.social_links) {
+            Object.assign(links, result.social_links);
+          }
+          
+          set({ socialLinks: links, loading: false });
+          return links;
         } catch (error: any) {
           set({ error: error.message, loading: false });
           return {};

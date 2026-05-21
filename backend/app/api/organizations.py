@@ -25,6 +25,7 @@ class OrganizationUpdate(BaseModel):
     industry: Optional[str] = None
     micro_vertical: Optional[str] = None
     size: Optional[str] = None
+    social_links: Optional[dict] = None
 
 @router.post("")
 async def create_organization(request: OrganizationCreate, current_user: Optional[dict] = Depends(get_current_user_optional)):
