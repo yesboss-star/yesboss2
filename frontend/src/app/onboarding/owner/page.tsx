@@ -1328,7 +1328,8 @@ function OwnerOnboardingContent() {
       const file = files[i];
       const formData = new FormData();
       formData.append("file", file);
-      if (orgId) formData.append("organization_id", orgId);
+      formData.append("org_id", orgId || "temp");
+      formData.append("user_id", user?.uid || "temp");
 
       try {
         const response = await fetch(`${API_URL}/files/process`, {
@@ -1342,9 +1343,17 @@ function OwnerOnboardingContent() {
               f.name === file.name ? { ...f, processed: true } : f
             )
           );
+        } else {
+          const errorData = await response.json().catch(() => null);
+          console.error("File upload failed:", response.status, errorData);
+          setUploadedFiles(prev => 
+            prev.map((f, idx) => 
+              f.name === file.name ? { ...f, processed: true } : f
+            )
+          );
         }
       } catch (error) {
-        console.error("File upload failed:", error);
+        console.error("File upload error:", error);
         setUploadedFiles(prev => 
           prev.map((f, idx) => 
             f.name === file.name ? { ...f, processed: true } : f
