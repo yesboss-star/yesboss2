@@ -51,7 +51,15 @@ const isPersonalEmailDomain = (domain: string): boolean => {
   return PERSONAL_EMAIL_DOMAINS.includes(cleanDomain);
 };
 
-type OnboardingStep = "welcome" | "time-request" | "org-details" | "ai-scan" | "file-upload" | "social" | "chat" | "create-now-later" | "complete";
+type OnboardingStep = "welcome" | "time-request" | "org-details" | "ai-scan" | "file-upload" | "social" | "persona-popup" | "persona-time" | "persona-question" | "persona-more-time" | "create-now-later" | "complete";
+
+interface PersonaQuestion {
+  question: string;
+  options: string[];
+  time_estimate: number;
+  ask_more_time: boolean;
+  question_number: number;
+}
 
 interface SocialLink {
   platform: string;
@@ -996,6 +1004,12 @@ function OwnerOnboardingContent() {
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [showContinueChat, setShowContinueChat] = useState(false);
+
+  const [personaTimeEstimate, setPersonaTimeEstimate] = useState(3);
+  const [currentQuestion, setCurrentQuestion] = useState<PersonaQuestion | null>(null);
+  const [personaAnswers, setPersonaAnswers] = useState<{ question: string; answer: string }[]>([]);
+  const [personaCustomAnswer, setPersonaCustomAnswer] = useState("");
+  const [personaLoading, setPersonaLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [aiTimeMinutes] = useState<number>(2);
@@ -1368,25 +1382,163 @@ function OwnerOnboardingContent() {
     try {
       const links = await detectSocialPresence(domain);
       const platforms = [
-        { platform: "LinkedIn", url: links.linkedin || "", detected: !!links.linkedin, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "Twitter / X", url: links.twitter || "", detected: !!links.twitter, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "Instagram", url: links.instagram || "", detected: !!links.instagram, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "Facebook", url: links.facebook || "", detected: !!links.facebook, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "YouTube", url: links.youtube || "", detected: !!links.youtube, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "TikTok", url: links.tiktok || "", detected: !!links.tiktok, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "LinkedIn", url: links.linkedin || "", detected: !!links.linkedin, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "Twitter / X", url: links.twitter || "", detected: !!links.twitter, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "Instagram", url: links.instagram || "", detected: !!links.instagram, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "Facebook", url: links.facebook || "", detected: !!links.facebook, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "YouTube", url: links.youtube || "", detected: !!links.youtube, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "TikTok", url: links.tiktok || "", detected: !!links.tiktok, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
       ];
       setSocialLinksList(platforms);
     } catch (error) {
       console.error("Social detection failed:", error);
       setSocialLinksList([
-        { platform: "LinkedIn", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "Twitter / X", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "Instagram", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "Facebook", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "YouTube", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "TikTok", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "LinkedIn", url: "", detected: false, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "Twitter / X", url: "", detected: false, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "Instagram", url: "", detected: false, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "Facebook", url: "", detected: false, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "YouTube", url: "", detected: false, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "TikTok", url: "", detected: false, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
       ]);
     }
+  };
+
+  const handlePersonaStart = () => {
+    setStep("persona-popup");
+  };
+
+  const handlePersonaPopupYes = () => {
+    setStep("persona-time");
+  };
+
+  const handlePersonaPopupNo = () => {
+    setStep("create-now-later");
+  };
+
+  const handlePersonaTimeYes = async () => {
+    setPersonaLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/chatbot/persona/generate-question`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          org_name: orgData.name,
+          industry: orgData.industries[0] || "",
+          micro_vertical: orgData.micro_vertical,
+          company_size: orgData.size,
+          previous_answers: personaAnswers,
+          question_count: personaAnswers.length,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setPersonaTimeEstimate(data.time_estimate || 3);
+        setCurrentQuestion(data);
+        setPersonaCustomAnswer("");
+        setStep("persona-question");
+      }
+    } catch (error) {
+      console.error("Failed to generate persona question:", error);
+      setCurrentQuestion({
+        question: "What are your top business priorities this quarter?",
+        options: ["Growth and revenue", "Operational efficiency", "Team and culture"],
+        time_estimate: 3,
+        ask_more_time: false,
+        question_number: 1,
+      });
+      setStep("persona-question");
+    } finally {
+      setPersonaLoading(false);
+    }
+  };
+
+  const handlePersonaTimeNo = () => {
+    setStep("create-now-later");
+  };
+
+  const handlePersonaAnswer = async (answer: string) => {
+    if (!currentQuestion) return;
+
+    const newAnswer = { question: currentQuestion.question, answer };
+    const updatedAnswers = [...personaAnswers, newAnswer];
+    setPersonaAnswers(updatedAnswers);
+    setPersonaCustomAnswer("");
+
+    if (currentQuestion.need_more_time) {
+      setStep("persona-more-time");
+      return;
+    }
+
+    if (updatedAnswers.length >= 5) {
+      setStep("create-now-later");
+      return;
+    }
+
+    setPersonaLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/chatbot/persona/generate-question`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          org_name: orgData.name,
+          industry: orgData.industries[0] || "",
+          micro_vertical: orgData.micro_vertical,
+          company_size: orgData.size,
+          previous_answers: updatedAnswers,
+          question_count: updatedAnswers.length,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setCurrentQuestion(data);
+        setPersonaCustomAnswer("");
+      } else {
+        setCurrentQuestion(null);
+        setStep("create-now-later");
+      }
+    } catch (error) {
+      console.error("Failed to generate next question:", error);
+      setCurrentQuestion(null);
+      setStep("create-now-later");
+    } finally {
+      setPersonaLoading(false);
+    }
+  };
+
+  const handlePersonaMoreTimeYes = async () => {
+    setPersonaLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/chatbot/persona/generate-question`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          org_name: orgData.name,
+          industry: orgData.industries[0] || "",
+          micro_vertical: orgData.micro_vertical,
+          company_size: orgData.size,
+          previous_answers: personaAnswers,
+          question_count: personaAnswers.length,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setCurrentQuestion(data);
+        setPersonaCustomAnswer("");
+        setStep("persona-question");
+      }
+    } catch (error) {
+      console.error("Failed to generate question:", error);
+      setStep("create-now-later");
+    } finally {
+      setPersonaLoading(false);
+    }
+  };
+
+  const handlePersonaMoreTimeNo = () => {
+    setStep("create-now-later");
   };
 
   const handleSendMessage = async () => {
@@ -1453,11 +1605,15 @@ function OwnerOnboardingContent() {
     { id: "ai-scan", label: "AI Scan", icon: Sparkles },
     { id: "file-upload", label: "Documents", icon: Upload },
     { id: "social", label: "Social", icon: Globe },
-    { id: "chat", label: "AI Chat", icon: Users },
+    { id: "persona-popup", label: "Persona", icon: Users },
+    { id: "persona-time", label: "Persona", icon: Users },
+    { id: "persona-question", label: "Persona", icon: Users },
+    { id: "persona-more-time", label: "Persona", icon: Users },
     { id: "complete", label: "Done", icon: CheckCircle },
   ];
 
-  const currentStepIndex = steps.findIndex((s) => s.id === step);
+  const personaSteps = ["persona-popup", "persona-time", "persona-question", "persona-more-time"];
+  const currentStepIndex = personaSteps.includes(step) ? 6 : steps.findIndex((s) => s.id === step);
 
   return (
     <div className="min-h-screen bg-background">
@@ -2119,11 +2275,7 @@ function OwnerOnboardingContent() {
                       // Silently skip if backend is not available
                     }
                   }
-                  setChatMessages([{ 
-                    role: "assistant", 
-                    content: `Hi! I've analyzed ${orgData.name || "your company"}'s web presence. Based on my analysis, you're in the ${orgData.industries[0] || "technology"} space${orgData.micro_vertical ? ` with focus on ${orgData.micro_vertical}` : ""}. ${orgData.size || "a growing"} team. What are your top 3 business priorities this quarter?` 
-                  }]);
-                  setStep("chat");
+                  setStep("persona-popup");
                 }}
                 className="flex-1 py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 flex items-center justify-center gap-2"
               >
@@ -2134,93 +2286,127 @@ function OwnerOnboardingContent() {
           </div>
         )}
 
-        {/* STEP 7: CHAT (Infinite Loop) */}
-        {step === "chat" && (
-          <div className="max-w-2xl mx-auto">
-            <div className="text-center mb-8">
+        {/* STEP 7: PERSONA POPUP */}
+        {step === "persona-popup" && (
+          <div className="max-w-xl mx-auto text-center">
+            <div className="mb-8">
+              <div className="w-20 h-20 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-6">
+                <Users className="w-10 h-10 text-primary" />
+              </div>
               <h1 className="text-3xl font-bold mb-2">
-                Meet your <span className="gradient-text">AI Business Analyst</span>
+                Do you have <span className="gradient-text">a few minutes</span>?
               </h1>
               <p className="text-text-muted">
-                Ask anything about your business. The AI will learn from your answers to build a deeper understanding.
+                YesBoss has analyzed your company. Would you like to spend a few minutes answering questions so we can understand your company better and create your personalized dashboard?
               </p>
             </div>
 
-            <div className="glass rounded-2xl overflow-hidden mb-6">
-              <div className="p-6 space-y-4 max-h-96 overflow-y-auto">
-                {chatMessages.map((msg, i) => (
-                  <div key={i} className={`flex gap-3 ${msg.role === "user" ? "justify-end" : ""}`}>
-                    {msg.role !== "user" && (
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center flex-shrink-0">
-                        <span className="text-xs text-white font-bold">AI</span>
-                      </div>
-                    )}
-                    <div className={`rounded-lg px-4 py-2 text-sm max-w-md ${msg.role === "user" ? "bg-primary/20" : "glass-light"}`}>
-                      {msg.content}
-                    </div>
-                    {msg.role === "user" && (
-                      <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
-                        <span className="text-xs text-primary font-bold">U</span>
-                      </div>
-                    )}
-                  </div>
-                ))}
-                {chatLoading && (
-                  <div className="flex gap-3">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center flex-shrink-0">
-                      <span className="text-xs text-white font-bold">AI</span>
-                    </div>
-                    <div className="glass-light rounded-lg px-4 py-2 text-sm max-w-md">
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    </div>
-                  </div>
-                )}
+            <div className="flex gap-3">
+              <button
+                onClick={handlePersonaPopupNo}
+                className="flex-1 py-4 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer"
+              >
+                No, thanks
+              </button>
+              <button
+                onClick={handlePersonaPopupYes}
+                className="flex-1 py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 flex items-center justify-center gap-2"
+              >
+                Yes, continue
+                <ArrowRight className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 8: PERSONA TIME REQUEST */}
+        {step === "persona-time" && (
+          <div className="max-w-xl mx-auto text-center">
+            <div className="mb-8">
+              <div className="w-20 h-20 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-6">
+                <Clock className="w-10 h-10 text-primary" />
               </div>
+              <h1 className="text-3xl font-bold mb-2">
+                We need <span className="gradient-text">~{personaTimeEstimate} minutes</span>
+              </h1>
+              <p className="text-text-muted">
+                Based on our analysis of {orgData.name || "your company"}, we need a few minutes to understand your leadership style and priorities. This data will be used to create your personalized dashboard.
+              </p>
+            </div>
 
-              {/* INFINITE LOOP PROMPT */}
-              {showContinueChat && !chatLoading && (
-                <div className="border-t border-border p-4 bg-primary/5">
-                  <p className="text-sm text-center mb-3 text-text-muted">
-                    Would you like to answer more questions so YesBoss can understand your company better?
-                  </p>
-                  <div className="flex gap-3 justify-center">
-                    <button
-                      onClick={handleContinueChatYes}
-                      className="px-6 py-2 rounded-xl bg-primary hover:bg-primary-light text-white font-medium transition-all cursor-pointer"
-                    >
-                      Yes, continue
-                    </button>
-                    <button
-                      onClick={handleContinueChatNo}
-                      className="px-6 py-2 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer"
-                    >
-                      No, thanks
-                    </button>
-                  </div>
-                </div>
-              )}
+            <div className="flex gap-3">
+              <button
+                onClick={handlePersonaTimeNo}
+                className="flex-1 py-4 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer"
+              >
+                No, thanks
+              </button>
+              <button
+                onClick={handlePersonaTimeYes}
+                disabled={personaLoading}
+                className="flex-1 py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {personaLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Yes, let's go"}
+                <ArrowRight className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        )}
 
-              {!showContinueChat && (
-                <div className="border-t border-border p-4">
-                  <div className="flex gap-3">
-                    <input
-                      type="text"
-                      placeholder="Ask anything about your business..."
-                      value={chatInput}
-                      onChange={(e) => setChatInput(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
-                      className="flex-1 px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm"
-                    />
-                    <button 
-                      onClick={handleSendMessage}
-                      disabled={chatLoading || !chatInput.trim()}
-                      className="px-6 py-3 rounded-xl bg-accent hover:bg-accent-hover text-white font-medium transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                    >
-                      <Send className="w-4 h-4" />
-                    </button>
+        {/* STEP 9: PERSONA QUESTION */}
+        {step === "persona-question" && currentQuestion && (
+          <div className="max-w-xl mx-auto">
+            <div className="text-center mb-8">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-sm mb-4">
+                <Sparkles className="w-4 h-4" />
+                Question {currentQuestion.question_number}
+              </div>
+              <h1 className="text-2xl font-bold mb-2">
+                {currentQuestion.question}
+              </h1>
+            </div>
+
+            <div className="space-y-3 mb-8">
+              {currentQuestion.options.map((option, i) => (
+                <button
+                  key={i}
+                  onClick={() => handlePersonaAnswer(option)}
+                  className="w-full p-4 rounded-xl glass hover:bg-primary/10 hover:border-primary text-left transition-all cursor-pointer border border-transparent"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary font-medium text-sm">
+                      {i + 1}
+                    </div>
+                    <span className="font-medium">{option}</span>
                   </div>
-                </div>
-              )}
+                </button>
+              ))}
+
+              <div className="relative">
+                <input
+                  type="text"
+                  value={personaCustomAnswer}
+                  onChange={(e) => setPersonaCustomAnswer(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && personaCustomAnswer.trim()) {
+                      handlePersonaAnswer(personaCustomAnswer.trim());
+                    }
+                  }}
+                  placeholder="Or write your own answer..."
+                  className="w-full px-4 py-4 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
+                />
+                <button
+                  onClick={() => {
+                    if (personaCustomAnswer.trim()) {
+                      handlePersonaAnswer(personaCustomAnswer.trim());
+                    }
+                  }}
+                  disabled={!personaCustomAnswer.trim()}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-2 rounded-lg bg-primary hover:bg-primary-light text-white text-sm font-medium transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             <div className="flex gap-3">
@@ -2232,10 +2418,50 @@ function OwnerOnboardingContent() {
                 Back
               </button>
               <button
-                onClick={() => setStep("create-now-later")}
-                className="flex-1 py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 flex items-center justify-center gap-2"
+                onClick={handlePersonaTimeNo}
+                className="flex-1 py-4 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer"
               >
-                Continue
+                Skip to dashboard
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step === "persona-question" && personaLoading && (
+          <div className="max-w-xl mx-auto text-center">
+            <Loader2 className="w-10 h-10 animate-spin mx-auto mb-4 text-primary" />
+            <p className="text-text-muted">Generating next question...</p>
+          </div>
+        )}
+
+        {/* STEP 10: PERSONA MORE TIME */}
+        {step === "persona-more-time" && (
+          <div className="max-w-xl mx-auto text-center">
+            <div className="mb-8">
+              <div className="w-20 h-20 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-6">
+                <Clock className="w-10 h-10 text-primary" />
+              </div>
+              <h1 className="text-3xl font-bold mb-2">
+                Do you have <span className="gradient-text">more time</span>?
+              </h1>
+              <p className="text-text-muted">
+                We&apos;ve learned a lot so far! Would you like to answer a few more questions to help YesBoss understand your company even better?
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={handlePersonaMoreTimeNo}
+                className="flex-1 py-4 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer"
+              >
+                No, thanks
+              </button>
+              <button
+                onClick={handlePersonaMoreTimeYes}
+                disabled={personaLoading}
+                className="flex-1 py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {personaLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Yes, continue"}
                 <ArrowRight className="w-5 h-5" />
               </button>
             </div>
@@ -2309,7 +2535,7 @@ function OwnerOnboardingContent() {
                 { label: "AI Agents Active", value: "6" },
                 { label: "Documents Processed", value: uploadedFiles.length.toString() },
                 { label: "Industry", value: orgData.industries[0] || "Not set" },
-                { label: "Workflows Created", value: "3" },
+                { label: "Persona Insights", value: personaAnswers.length.toString() },
               ].map((stat, i) => (
                 <div key={i} className="glass rounded-xl p-6">
                   <div className="text-3xl font-bold text-primary">{stat.value}</div>
@@ -2319,7 +2545,20 @@ function OwnerOnboardingContent() {
             </div>
 
             <button
-              onClick={() => router.push("/dashboard")}
+              onClick={async () => {
+                if (orgId && personaAnswers.length > 0) {
+                  try {
+                    await fetch(`${API_URL}/organizations/${orgId}`, {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ persona_answers: personaAnswers }),
+                    });
+                  } catch {
+                    // Silently skip
+                  }
+                }
+                router.push("/dashboard");
+              }}
               className="w-full py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 flex items-center justify-center gap-2 text-lg"
             >
               Go to Dashboard

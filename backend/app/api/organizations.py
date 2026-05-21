@@ -17,6 +17,7 @@ class OrganizationCreate(BaseModel):
     size: Optional[str] = None
     owner_id: Optional[str] = None
     social_links: Optional[dict] = None
+    persona_answers: Optional[list] = None
 
 class OrganizationUpdate(BaseModel):
     name: Optional[str] = None
@@ -26,6 +27,7 @@ class OrganizationUpdate(BaseModel):
     micro_vertical: Optional[str] = None
     size: Optional[str] = None
     social_links: Optional[dict] = None
+    persona_answers: Optional[list] = None
 
 @router.post("")
 async def create_organization(request: OrganizationCreate, current_user: Optional[dict] = Depends(get_current_user_optional)):
@@ -42,6 +44,7 @@ async def create_organization(request: OrganizationCreate, current_user: Optiona
         "size": request.size,
         "owner_id": request.owner_id,
         "social_links": request.social_links or {},
+        "persona_answers": request.persona_answers or [],
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
     }

@@ -146,236 +146,146 @@ class PersonaQuestionsRequest(BaseModel):
     organization_name: Optional[str] = None
 
 
-PERSONA_QUESTIONS = {
-    "Engineering": [
-        "What's your preferred way to receive task updates and progress reports?",
-        "What's typically the biggest bottleneck or challenge you face in your daily workflow?",
-        "How do you prefer to communicate with your team - async messages, daily standups, or ad-hoc chats?",
-        "What tools do you primarily use for code reviews and project tracking?",
-    ],
-    "Marketing": [
-        "How do you prefer to track campaign progress and receive updates on your projects?",
-        "What's your biggest challenge when launching campaigns or content?",
-        "How do you prefer to receive feedback on creative work - detailed notes or quick approvals?",
-        "What metrics matter most to you in measuring campaign success?",
-    ],
-    "Sales": [
-        "How do you prefer to receive leads and track your pipeline updates?",
-        "What's the most challenging part of your sales workflow?",
-        "How do you prefer to get updates on prospect activities and follow-ups?",
-        "What information helps you most in closing deals faster?",
-    ],
-    "Operations": [
-        "How do you prefer to receive task updates and coordinate with your team?",
-        "What's typically the biggest bottleneck in your daily operations?",
-        "How do you prefer to handle approvals and sign-offs?",
-        "What metrics help you most in tracking operational efficiency?",
-    ],
-    "Finance": [
-        "How do you prefer to receive financial report updates and approval requests?",
-        "What's your biggest challenge when managing financial workflows?",
-        "How do you prefer to communicate about budgets and forecasts?",
-        "What tools do you use most for financial tracking and reporting?",
-    ],
-}
-
-DEFAULT_QUESTIONS = [
-    "What's your preferred way to receive task updates and project notifications?",
-    "What's typically the biggest challenge or bottleneck in your daily workflow?",
-    "How do you prefer to communicate with your manager and team?",
-    "What tools do you primarily use for your daily work?",
-]
+class PersonaQuestionGenerateRequest(BaseModel):
+    org_name: Optional[str] = ""
+    industry: Optional[str] = ""
+    micro_vertical: Optional[str] = ""
+    company_size: Optional[str] = ""
+    website_content: Optional[str] = ""
+    uploaded_files_summary: Optional[str] = ""
+    social_links: Optional[dict] = {}
+    previous_answers: Optional[list[dict]] = []
+    question_count: int = 0
+    provider: str = "gemini"
 
 
-@router.post("/persona-questions")
-async def get_persona_questions(request: PersonaQuestionsRequest):
-    dept = request.department or "default"
-    questions = PERSONA_QUESTIONS.get(dept, DEFAULT_QUESTIONS)
+@router.post("/persona/generate-question")
+async def generate_persona_question(request: PersonaQuestionGenerateRequest):
+    from ..core.ai_client import get_ai_response
     
-    first_question = questions[0]
+    num_answers = len(request.previous_answers or [])
     
-    if request.organization_name and request.department and request.role:
-        first_question = f"Welcome to {request.organization_name}! I see you're in {request.department} as a {request.role or 'team member'}. {first_question}"
-    elif request.department:
-        first_question = f"I see you're in the {request.department} department. {first_question}"
-    
-    return {
-        "message": first_question,
-        "all_questions": questions,
-        "department": request.department
-    }
+    if num_answers == 0:
+        prompt = f"""You are YesBoss, an AI business co-founder building a deep understanding of this person to create their personalized operational dashboard.
 
+COMPANY CONTEXT:
+- Company: {request.org_name or "Unknown"}
+- Industry: {request.industry or "Not specified"}
+- Micro-vertical: {request.micro_vertical or "Not specified"}
+- Company size: {request.company_size or "Not specified"}
+- Website: {request.website_content or "Not analyzed"}
+- Social presence: {request.social_links or "None detected"}
 
-class PersonaResponseRequest(BaseModel):
-    messages: list[dict]
-    context: Optional[dict] = None
+You are meeting this person for the first time. Ask ONE genuine, thoughtful question that helps you understand WHO they are as a leader — not what they do, but how they think, what drives them, what keeps them up at night.
 
+This is NOT a survey. This is a real conversation starter.
 
-@router.post("/persona-response")
-async def process_persona_response(request: PersonaResponseRequest):
-    user_messages = [m["content"] for m in request.messages if m.get("role") == "user"]
-    last_message = user_messages[-1] if user_messages else ""
-    
-    context = request.context or {}
-    department = context.get("department", "")
-    role = context.get("role", "")
-    
-    follow_up_questions = {
-        "Engineering": [
-            "Got it - daily digests with priorities it is! How about communication - do you prefer async updates or real-time sync?",
-            "Thanks for sharing! One more question - what's typically the biggest bottleneck or challenge you face in your daily workflow?",
-            "Great insight! How do you prefer to receive feedback on your work - detailed reviews or quick approvals?",
-            "Perfect! What's your preferred way to coordinate with your manager for task assignments?",
-        ],
-        "Marketing": [
-            "Thanks for that insight! What about campaign coordination - how do you prefer to track deadlines and deliverables?",
-            "Got it! What's typically your biggest challenge when launching campaigns or content?",
-            "Interesting! How do you prefer to handle feedback on creative work?",
-            "Great! What metrics matter most to you in measuring your success?",
-        ],
-        "Sales": [
-            "Understood! How do you prefer to track your pipeline and deal progress?",
-            "Thanks for sharing! What's typically the biggest challenge in your sales workflow?",
-            "Got it! How do you prefer to receive updates on prospect activities?",
-            "Great! What information helps you most in closing deals faster?",
-        ],
-        "Operations": [
-            "Thanks! How do you prefer to handle coordination with different teams?",
-            "Got it! What's typically the biggest bottleneck in your daily operations?",
-            "Interesting! How do you prefer to manage approvals and sign-offs?",
-            "Great! What metrics help you most in tracking efficiency?",
-        ],
-        "Finance": [
-            "Got it! How do you prefer to handle approval workflows and reviews?",
-            "Thanks! What's your biggest challenge when managing financial processes?",
-            "Understood! How do you prefer to communicate about budgets and forecasts?",
-            "Great! What tools do you use most for financial tracking?",
-        ],
-    }
-    
-    questions = follow_up_questions.get(department, DEFAULT_QUESTIONS)
-    num_responses = len(user_messages)
-    
-    if num_responses < len(questions):
-        response = questions[num_responses]
+Return ONLY valid JSON:
+{{
+    "question": "A genuine, human question about their leadership style, priorities, or challenges",
+    "options": ["Realistic option 1", "Realistic option 2", "Realistic option 3"],
+    "time_estimate": 3,
+    "need_more_time": false
+}}
+
+Rules:
+- Question must feel like a real conversation, not a form
+- Options should reflect actual leadership archetypes or decision-making styles
+- time_estimate: 2-5 minutes based on how much context we still need
+- need_more_time: false for first question"""
     else:
-        response = "Thank you for sharing all that information! I've learned about your work style and preferences. You can now proceed to your dashboard where your AI assistant will help you work more effectively. Feel free to chat with me anytime about tasks, priorities, or workflow optimization!"
+        answers_text = "\n".join([f"Q: {a.get('question', '')}\nA: {a.get('answer', '')}" for a in request.previous_answers[-5:]])
+        
+        prompt = f"""You are YesBoss, an AI business co-founder in an ongoing conversation. You've been learning about this person through their answers.
+
+COMPANY CONTEXT:
+- Company: {request.org_name or "Unknown"}
+- Industry: {request.industry or "Not specified"}
+
+CONVERSATION SO FAR:
+{answers_text}
+
+Based on their LAST answer, generate ONE follow-up question that goes deeper into what they revealed. This should feel like a natural continuation — like you're genuinely interested in understanding them better.
+
+If their last answer revealed something interesting (a pain point, a priority, a leadership style), ask about THAT specifically.
+If they gave a generic answer, try a different angle to get to something real.
+
+Return ONLY valid JSON:
+{{
+    "question": "A natural follow-up based on their last answer",
+    "options": ["Option that connects to their answer", "Another relevant option", "A different angle option"],
+    "time_estimate": {max(1, 4 - num_answers)},
+    "need_more_time": {num_answers >= 2 and num_answers <= 4}
+}}
+
+Rules:
+- Question MUST connect to their previous answer
+- Options should branch differently based on what they said
+- time_estimate decreases as we learn more (1-3 min)
+- need_more_time: true only if you genuinely feel we need more depth (typically after 2-4 questions)
+- After 5+ questions, need_more_time should be false
+- Keep it conversational, never robotic"""
     
-    return {
-        "response": response,
-        "message_count": num_responses,
-        "is_complete": num_responses >= 4
-    }
-
-
-class EmployeeAssistantRequest(BaseModel):
-    message: str
-    context: Optional[dict] = None
-
-
-@router.post("/employee-assistant")
-async def employee_assistant(request: EmployeeAssistantRequest):
-    message = request.message.lower()
-    context = request.context or {}
-    
-    response = ""
-    
-    if any(w in message for w in ["prioritize", "priority", "today", "focus", "important"]):
-        response = f"""Based on your current workload, here's how I'd recommend prioritizing:
-
-**High Priority:**
-1. Any tasks marked "urgent" or "high" priority
-2. Tasks with approaching deadlines (next 2 days)
-3. Items assigned directly by your manager
-
-**Medium Priority:**
-1. Tasks due this week
-2. Collaborative tasks waiting on others
-
-**Low Priority:**
-1. Tasks marked "low" priority
-2. Optional improvements or enhancements
-
-💡 *Pro tip: Block 2 hours each morning for your most important task.*"""
-    
-    elif any(w in message for w in ["approval", "pending", "review", "approve"]):
-        response = """You currently have pending items waiting for your review:
-
-**Action Required:**
-• Review expense reports (2 pending)
-• Approve time-off requests (1 pending)
-
-**Quick Actions:**
-• Click "Approve" for routine requests
-• Click "Details" for items needing more attention
-
-💡 *Timely approvals keep your team moving forward!*"""
-    
-    elif any(w in message for w in ["block", "stuck", "blocking", "bottleneck"]):
-        response = """Let me help identify potential workflow blockers:
-
-**Common Blockers to Check:**
-1. **Waiting on others** - Dependencies not yet completed
-2. **Missing information** - Awaiting specs or details
-3. **Resource constraints** - Tools, access, or time
-4. **Decisions pending** - Waiting for approvals
-
-💡 *Tip: Check your task details for dependency status. If stuck, consider reaching out to your manager or the task owner.*"""
-    
-    elif any(w in message for w in ["deadline", "due", "week", "today", "tomorrow"]):
-        response = """Here's your upcoming deadline overview:
-
-**Due Soon (Today/Tomorrow):**
-• Review Q2 marketing report (High)
-
-**Due This Week:**
-• Update client presentation (Medium)
-• Complete team meeting notes (Low)
-
-**Total: 3 tasks this week**
-
-💡 *You have good bandwidth. Consider starting with the high-priority item.*"""
-    
-    elif any(w in message for w in ["team", "update", "news", "announcement"]):
-        response = """Recent team activity:
-
-**Today:**
-• Sarah Johnson completed 'Website redesign sprint 3'
-
-**This Week:**
-• Mike Brown reached 85% of Q2 target
-• New project kickoff: Mobile App v2.0
-
-**Announcements:**
-• Team meeting moved to Thursday 2pm
-
-💡 *Stay connected with your team through regular check-ins!*"""
-    
-    elif any(w in message for w in ["help", "what can you", "capabilities", "what do"]):
-        response = """I'm here to help! I can assist with:
-
-• **Task Prioritization** - "What should I work on today?"
-• **Approval Summaries** - "What approvals are pending?"
-• **Blocker Identification** - "What's blocking my work?"
-• **Deadline Tracking** - "What's due this week?"
-• **Team Updates** - "Any recent team news?"
-
-Just ask me anything about your work!"""
-    
-    else:
-        response = f"""I'd be happy to help! Based on your question, here are some things I can assist with:
-
-• **Task Management** - Prioritize your daily tasks
-• **Approvals** - Review pending items waiting for you
-• **Workflow** - Identify what's blocking your progress
-• **Deadlines** - See what's due soon
-• **Team** - Stay updated on team activity
-
-What would you like to focus on? You can also ask me specific questions like:
-- "How should I prioritize today's tasks?"
-- "What's blocking my workflow?"
-- "Summarize my pending approvals"
-
-💡 *I'm learning your preferences to provide better personalized help!*"""
-
-    return {"response": response}
+    try:
+        response = await get_ai_response(
+            prompt=prompt,
+            system_prompt="You are an empathetic business analyst having a real conversation. Generate ONE thoughtful question with 3 realistic options. Return ONLY valid JSON.",
+            provider=request.provider,
+            temperature=0.8,
+            max_tokens=400
+        )
+        
+        import json
+        import re
+        
+        json_str = response.strip()
+        if '{' in json_str and '}' in json_str:
+            start = json_str.find('{')
+            end = json_str.rfind('}') + 1
+            json_str = json_str[start:end]
+            
+        data = json.loads(json_str)
+        
+        return {
+            "question": data.get("question", "What matters most to you in how you lead your team?"),
+            "options": data.get("options", ["Empowering others to decide", "Setting clear direction myself", "Collaborative decision-making"]),
+            "time_estimate": data.get("time_estimate", 3),
+            "need_more_time": data.get("need_more_time", False),
+            "question_number": num_answers + 1
+        }
+    except Exception as e:
+        fallback_questions = [
+            {
+                "question": "What matters most to you in how you lead your team?",
+                "options": ["Empowering others to decide", "Setting clear direction myself", "Collaborative decision-making"],
+                "time_estimate": 3,
+                "need_more_time": False,
+            },
+            {
+                "question": "When things get stressful, what's your instinct — take control or step back and trust your team?",
+                "options": ["Take control and drive things forward", "Step back and let the team handle it", "Find a balance between both"],
+                "time_estimate": 2,
+                "need_more_time": True,
+            },
+            {
+                "question": "What's the one thing you wish you could delegate but haven't found the right person for yet?",
+                "options": ["Strategic decisions", "Day-to-day operations", "Client/customer relationships"],
+                "time_estimate": 2,
+                "need_more_time": False,
+            },
+            {
+                "question": "If you could change one thing about how your company operates tomorrow, what would it be?",
+                "options": ["Communication and transparency", "Speed of execution", "Quality of work"],
+                "time_estimate": 1,
+                "need_more_time": False,
+            },
+            {
+                "question": "What does success look like for you personally in the next year?",
+                "options": ["Growing the business significantly", "Building a self-sustaining team", "Achieving better work-life balance"],
+                "time_estimate": 1,
+                "need_more_time": False,
+            },
+        ]
+        
+        idx = min(num_answers, len(fallback_questions) - 1)
+        return {**fallback_questions[idx], "question_number": num_answers + 1}
