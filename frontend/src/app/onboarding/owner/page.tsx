@@ -1238,7 +1238,7 @@ function OwnerOnboardingContent() {
         micro_vertical: orgData.micro_vertical,
       });
       setOrgId(org.id);
-      router.push("/dashboard");
+      setStep("file-upload");
     } catch (error) {
       console.error("Failed to create organization:", error);
       setStep("org-details");
@@ -2104,7 +2104,7 @@ function OwnerOnboardingContent() {
                 </button>
 
                 <button
-                  onClick={() => setStep("file-upload")}
+                  onClick={() => setStep("persona-popup")}
                   className="text-sm text-text-muted hover:text-foreground transition-colors cursor-pointer"
                 >
                   Skip for now →
