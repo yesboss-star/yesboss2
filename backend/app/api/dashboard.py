@@ -263,7 +263,7 @@ async def get_dashboard_insights(
     current_user = Depends(get_current_user)
 ):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     org_id = get_user_org_id(current_user)
@@ -289,7 +289,7 @@ async def get_dashboard_modules(
     current_user = Depends(get_current_user)
 ):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     org_id = get_user_org_id(current_user)
@@ -321,7 +321,7 @@ async def get_module_metrics(
     current_user = Depends(get_current_user)
 ):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     org_id = get_user_org_id(current_user)

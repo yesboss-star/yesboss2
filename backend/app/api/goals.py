@@ -43,7 +43,7 @@ def get_user_org_id(user) -> Optional[str]:
 @router.post("")
 async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user)):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     org_id = goal.organization_id or get_user_org_id(current_user)
@@ -81,7 +81,7 @@ async def list_goals(
     current_user = Depends(get_current_user)
 ):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     organization_id = org_id or get_user_org_id(current_user)
@@ -107,7 +107,7 @@ async def list_goals(
 @router.get("/{goal_id}")
 async def get_goal(goal_id: str, current_user = Depends(get_current_user)):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     goal = db.goals.find_one({"_id": ObjectId(goal_id)})
@@ -127,7 +127,7 @@ async def get_goal(goal_id: str, current_user = Depends(get_current_user)):
 @router.put("/{goal_id}")
 async def update_goal(goal_id: str, goal: GoalUpdate, current_user = Depends(get_current_user)):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     update_data = {k: v for k, v in goal.model_dump().items() if v is not None}
@@ -147,7 +147,7 @@ async def update_goal(goal_id: str, goal: GoalUpdate, current_user = Depends(get
 @router.delete("/{goal_id}")
 async def delete_goal(goal_id: str, current_user = Depends(get_current_user)):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     db.goals.delete_one({"_id": ObjectId(goal_id)})
@@ -159,7 +159,7 @@ async def delete_goal(goal_id: str, current_user = Depends(get_current_user)):
 @router.post("/generate-tasks")
 async def generate_tasks_from_goal(request: TaskGenerate, current_user = Depends(get_current_user)):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     goal = db.goals.find_one({"_id": ObjectId(request.goal_id)})

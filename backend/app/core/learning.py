@@ -24,7 +24,7 @@ class ContinuousLearning:
 
     def record_workflow(self, organization_id: str, workflow_data: dict) -> dict:
         db = self._get_db()
-        if not db:
+        if db is None:
             logger.warning("Database not available for workflow recording")
             return {"success": False, "error": "Database not available"}
 
@@ -80,7 +80,7 @@ class ContinuousLearning:
 
     def record_task_outcome(self, organization_id: str, task_data: dict) -> dict:
         db = self._get_db()
-        if not db:
+        if db is None:
             return {"success": False, "error": "Database not available"}
 
         try:
@@ -111,7 +111,7 @@ class ContinuousLearning:
 
     def record_bottleneck(self, organization_id: str, bottleneck_data: dict) -> dict:
         db = self._get_db()
-        if not db:
+        if db is None:
             return {"success": False, "error": "Database not available"}
 
         try:
@@ -139,7 +139,7 @@ class ContinuousLearning:
 
     def record_pattern(self, organization_id: str, pattern_data: dict) -> dict:
         db = self._get_db()
-        if not db:
+        if db is None:
             return {"success": False, "error": "Database not available"}
 
         try:
@@ -179,7 +179,7 @@ class ContinuousLearning:
 
     def analyze_workflow_efficiency(self, organization_id: str, days: int = 30) -> dict:
         db = self._get_db()
-        if not db:
+        if db is None:
             return {"efficiency": 0, "insights": []}
 
         try:
@@ -218,7 +218,7 @@ class ContinuousLearning:
 
     def get_bottlenecks(self, organization_id: str) -> list:
         db = self._get_db()
-        if not db:
+        if db is None:
             return []
 
         try:
@@ -237,7 +237,7 @@ class ContinuousLearning:
 
     def get_patterns(self, organization_id: str, pattern_type: Optional[str] = None) -> list:
         db = self._get_db()
-        if not db:
+        if db is None:
             return []
 
         try:

@@ -338,7 +338,7 @@ class SyncUserRequest(BaseModel):
 async def sync_user(request: SyncUserRequest):
     try:
         db = get_database()
-        if not db:
+        if db is None:
             raise HTTPException(status_code=500, detail="Database not configured")
 
         existing = db.users.find_one({"uid": request.uid})

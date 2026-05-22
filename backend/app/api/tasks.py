@@ -45,7 +45,7 @@ class TaskComment(BaseModel):
 @router.post("")
 async def create_task(task: TaskCreate, current_user = Depends(get_current_user)):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     org_id = get_user_org_id(current_user)
@@ -88,7 +88,7 @@ async def list_tasks(
     current_user = Depends(get_current_user)
 ):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     organization_id = org_id or get_user_org_id(current_user)
@@ -118,7 +118,7 @@ async def list_tasks(
 @router.get("/{task_id}")
 async def get_task(task_id: str, current_user = Depends(get_current_user)):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     task = db.tasks.find_one({"_id": ObjectId(task_id)})
@@ -138,7 +138,7 @@ async def get_task(task_id: str, current_user = Depends(get_current_user)):
 @router.put("/{task_id}")
 async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get_current_user)):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     update_data = {k: v for k, v in task.model_dump().items() if v is not None}
@@ -158,7 +158,7 @@ async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get
 @router.delete("/{task_id}")
 async def delete_task(task_id: str, current_user = Depends(get_current_user)):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     db.tasks.delete_one({"_id": ObjectId(task_id)})
@@ -170,7 +170,7 @@ async def delete_task(task_id: str, current_user = Depends(get_current_user)):
 @router.post("/{task_id}/comments")
 async def add_comment(task_id: str, comment: TaskComment, current_user = Depends(get_current_user)):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     task = db.tasks.find_one({"_id": ObjectId(task_id)})
@@ -197,7 +197,7 @@ async def add_comment(task_id: str, comment: TaskComment, current_user = Depends
 @router.post("/{task_id}/approve")
 async def approve_task(task_id: str, current_user = Depends(get_current_user)):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     task = db.tasks.find_one({"_id": ObjectId(task_id)})
@@ -220,7 +220,7 @@ async def approve_task(task_id: str, current_user = Depends(get_current_user)):
 @router.post("/{task_id}/complete")
 async def complete_task(task_id: str, current_user = Depends(get_current_user)):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     task = db.tasks.find_one({"_id": ObjectId(task_id)})

@@ -24,7 +24,7 @@ class EmployeeUpdate(BaseModel):
 @router.get("")
 async def list_employees(org_id: Optional[str] = None, search: Optional[str] = None):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     query = {}
@@ -48,7 +48,7 @@ async def list_employees(org_id: Optional[str] = None, search: Optional[str] = N
 @router.get("/{employee_id}")
 async def get_employee(employee_id: str):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     from bson import ObjectId
@@ -63,7 +63,7 @@ async def get_employee(employee_id: str):
 @router.post("")
 async def create_employee(request: EmployeeCreate):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     emp_doc = {
@@ -86,7 +86,7 @@ async def create_employee(request: EmployeeCreate):
 @router.put("/{employee_id}")
 async def update_employee(employee_id: str, request: EmployeeUpdate):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     from bson import ObjectId
@@ -106,7 +106,7 @@ async def update_employee(employee_id: str, request: EmployeeUpdate):
 @router.delete("/{employee_id}")
 async def delete_employee(employee_id: str):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     from bson import ObjectId
@@ -117,7 +117,7 @@ async def delete_employee(employee_id: str):
 @router.get("/by-domain/{domain}")
 async def find_employee_by_domain(domain: str):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     employees = list(db.employees.find({"email": {"$regex": f"@{domain}$"}}))
@@ -144,7 +144,7 @@ class EmployeePersonaRequest(BaseModel):
 @router.post("/persona")
 async def save_employee_persona(request: EmployeePersonaRequest):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     if not request.email:
@@ -201,7 +201,7 @@ async def save_employee_persona(request: EmployeePersonaRequest):
 @router.get("/tasks")
 async def get_employee_tasks(org_id: str, email: str | None = None):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     query = {"organization_id": org_id}

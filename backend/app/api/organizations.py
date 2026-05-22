@@ -57,7 +57,7 @@ async def create_organization(request: OrganizationCreate, current_user: Optiona
 @router.get("/{org_id}")
 async def get_organization(org_id: str):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     from bson import ObjectId
@@ -72,7 +72,7 @@ async def get_organization(org_id: str):
 @router.put("/{org_id}")
 async def update_organization(org_id: str, request: OrganizationUpdate):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     from bson import ObjectId
@@ -93,7 +93,7 @@ async def update_organization(org_id: str, request: OrganizationUpdate):
 @router.get("")
 async def list_organizations(search: Optional[str] = None, limit: int = 20):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     query = {}
@@ -115,7 +115,7 @@ async def list_organizations(search: Optional[str] = None, limit: int = 20):
 @router.get("/by-domain/{domain}")
 async def get_organization_by_domain(domain: str):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     domain = domain.lower()
@@ -130,7 +130,7 @@ async def get_organization_by_domain(domain: str):
 @router.get("/{org_id}/employees")
 async def get_organization_employees(org_id: str):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     from bson import ObjectId
@@ -144,7 +144,7 @@ async def get_organization_employees(org_id: str):
 @router.delete("/{org_id}")
 async def delete_organization(org_id: str):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     from bson import ObjectId

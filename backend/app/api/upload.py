@@ -27,7 +27,7 @@ async def process_upload(
     file: UploadFile = File(...)
 ):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     if file_type not in ["pdf", "excel", "image"]:
@@ -60,7 +60,7 @@ async def process_upload(
 @router.get("")
 async def list_files(organization_id: Optional[str] = None):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     query = {}
@@ -77,7 +77,7 @@ async def list_files(organization_id: Optional[str] = None):
 @router.get("/{file_id}")
 async def get_file(file_id: str):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     from bson import ObjectId
@@ -92,7 +92,7 @@ async def get_file(file_id: str):
 @router.delete("/{file_id}")
 async def delete_file(file_id: str):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     from bson import ObjectId

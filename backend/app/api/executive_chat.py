@@ -200,7 +200,7 @@ def synthesize_responses(query: str, expert_responses: List[ExpertResponse]) -> 
 @router.post("/chat")
 async def executive_chat(request: ChatRequest, current_user = Depends(get_current_user)):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     org_id = get_user_org_id(current_user)
@@ -251,7 +251,7 @@ async def get_chat_history(
     current_user = Depends(get_current_user)
 ):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     org_id = get_user_org_id(current_user)
@@ -274,7 +274,7 @@ async def save_chat_message(
     current_user = Depends(get_current_user)
 ):
     db = get_database()
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     org_id = get_user_org_id(current_user)
