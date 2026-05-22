@@ -325,6 +325,68 @@ async def logout(uid: str = None):
         )
 
 
+class SyncUserRequest(BaseModel):
+    uid: str
+    email: Optional[str] = None
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+    role: str = "owner"
+    phone_verified: bool = False
+
+
+@router.post("/sync-user", response_model=AuthResponse)
+async def sync_user(request: SyncUserRequest):
+    try:
+        db = get_database()
+        if not db:
+            raise HTTPException(status_code=500, detail="Database not configured")
+
+        existing = db.users.find_one({"uid": request.uid})
+        now = datetime.utcnow().isoformat()
+
+        user_doc = {
+            "uid": request.uid,
+            "email": request.email or "",
+            "full_name": request.full_name or "",
+            "phone": request.phone or "",
+            "role": request.role,
+            "phone_verified": request.phone_verified,
+            "organization_id": None,
+            "organization_completed": False,
+            "updated_at": now,
+        }
+
+        if existing:
+            db.users.update_one({"uid": request.uid}, {"$set": user_doc})
+            logger.info("User synced (updated): %s", request.email)
+        else:
+            user_doc["created_at"] = now
+            db.users.insert_one(user_doc)
+            logger.info("User synced (created): %s", request.email)
+
+        return AuthResponse(
+            success=True,
+            message="User synced to database",
+            uid=request.uid,
+            user=UserResponse(
+                uid=request.uid,
+                email=request.email,
+                full_name=request.full_name,
+                phone=request.phone,
+                role=request.role,
+            ),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Sync user failed: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        )
+
+
 @router.post("/reset-password", response_model=AuthResponse)
 async def reset_password(request: ResetPasswordRequest):
     try:

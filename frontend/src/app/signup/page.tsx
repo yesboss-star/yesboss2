@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Eye, EyeOff, User, Mail, Lock, Phone, Shield, CheckCircle, AlertCircle, Loader2, MessageSquare, ArrowRight } from "lucide-react";
 import { auth, RECAPTCHA_SITE_KEY } from "@/lib/firebase";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult } from "firebase/auth";
 
@@ -210,6 +212,12 @@ export default function SignupPage() {
         role: role,
         phone_verified: otpVerified,
       };
+
+      await fetch(`${API_URL}/auth/sync-user`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(userData),
+      });
       
       localStorage.setItem("yesboss_user", JSON.stringify(userData));
       localStorage.setItem("yesboss_role", role);

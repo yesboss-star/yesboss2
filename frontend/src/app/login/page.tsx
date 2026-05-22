@@ -7,6 +7,8 @@ import { ArrowLeft, Eye, EyeOff, Mail, Lock, AlertCircle, Loader2, CheckCircle }
 import { auth } from "@/lib/firebase";
 import { signInWithEmailAndPassword } from "firebase/auth";
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+
 export default function LoginPage() {
   const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
@@ -44,7 +46,14 @@ export default function LoginPage() {
       );
 
       const storedUser = localStorage.getItem("yesboss_user");
-      const userData = storedUser ? JSON.parse(storedUser) : { uid: userCredential.user.uid, email: formData.email, role: "owner" };
+      let userData = storedUser ? JSON.parse(storedUser) : { uid: userCredential.user.uid, email: formData.email, role: "owner" };
+      userData = { ...userData, uid: userData.uid || userCredential.user.uid, email: userData.email || formData.email };
+      
+      await fetch(`${API_URL}/auth/sync-user`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid: userData.uid, email: userData.email, full_name: userData.full_name || "", role: userData.role || "owner", phone_verified: true }),
+      });
       
       document.cookie = `yesboss_token=true; path=/; max-age=86400`;
       document.cookie = `yesboss_user=${JSON.stringify(userData)}; path=/; max-age=86400`;
