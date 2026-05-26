@@ -5,13 +5,14 @@ from datetime import datetime
 logger = logging.getLogger("yesboss.chatbot")
 
 from .ai_client import get_ai_response, get_chat_response
+from .config import settings
 from .database import get_database
 from .qdrant import get_qdrant_client
 
 
 class OnboardingChatbot:
-    def __init__(self, provider: str = "openai"):
-        self.provider = provider
+    def __init__(self, provider: Optional[str] = None):
+        self.provider = provider or settings.DEFAULT_AI_PROVIDER
         self.questions_flow = [
             {"topic": "company_description", "question": "What does your company do? What products or services do you offer?"},
             {"topic": "industry", "question": "What industry are you in? How would you describe your market position?"},
@@ -65,7 +66,7 @@ If they ask for help or advice, provide concise actionable suggestions."""
         company_profile: dict,
         answered_topics: List[str],
         conversation_history: List[dict],
-        provider: str = "openai",
+        provider: Optional[str] = None,
     ) -> dict:
         answered_topics = answered_topics or []
         

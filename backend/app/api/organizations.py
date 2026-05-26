@@ -13,7 +13,9 @@ class OrganizationCreate(BaseModel):
     domain: Optional[str] = None
     website_url: Optional[str] = None
     industry: Optional[str] = None
+    industries: Optional[list] = None
     micro_vertical: Optional[str] = ""
+    micro_verticals: Optional[list] = None
     size: Optional[str] = None
     owner_id: Optional[str] = None
     social_links: Optional[dict] = None
@@ -24,7 +26,9 @@ class OrganizationUpdate(BaseModel):
     domain: Optional[str] = None
     website_url: Optional[str] = None
     industry: Optional[str] = None
+    industries: Optional[list] = None
     micro_vertical: Optional[str] = None
+    micro_verticals: Optional[list] = None
     size: Optional[str] = None
     social_links: Optional[dict] = None
     persona_answers: Optional[list] = None
@@ -40,7 +44,9 @@ async def create_organization(request: OrganizationCreate, current_user: Optiona
         "domain": request.domain,
         "website_url": request.website_url,
         "industry": request.industry,
+        "industries": request.industries or ([request.industry] if request.industry else []),
         "micro_vertical": request.micro_vertical,
+        "micro_verticals": request.micro_verticals or ([request.micro_vertical] if request.micro_vertical else []),
         "size": request.size,
         "owner_id": request.owner_id,
         "social_links": request.social_links or {},

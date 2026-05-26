@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from typing import Optional
 from ..agents.master_agent import run_master_agent, get_initial_state
 
 router = APIRouter()
@@ -8,14 +9,14 @@ router = APIRouter()
 class InitializeAgentRequest(BaseModel):
     user_id: str
     company_profile: dict = None
-    provider: str = "openai"
+    provider: Optional[str] = None
 
 
 class ChatRequest(BaseModel):
     user_id: str
     message: str
     company_profile: dict = None
-    provider: str = "openai"
+    provider: Optional[str] = None
 
 
 class AgentResponse(BaseModel):

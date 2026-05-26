@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from typing import Optional
 from ..core.intelligence import (
     analyze_company_from_email,
     analyze_company_from_domain,
@@ -13,13 +14,13 @@ router = APIRouter()
 class AnalyzeFromEmailRequest(BaseModel):
     email: str
     enrich_with_ai: bool = False
-    ai_provider: str = "openai"
+    ai_provider: Optional[str] = None
 
 
 class AnalyzeFromDomainRequest(BaseModel):
     domain: str
     enrich_with_ai: bool = False
-    ai_provider: str = "openai"
+    ai_provider: Optional[str] = None
 
 
 @router.post("/analyze/email")
@@ -50,7 +51,7 @@ async def analyze_from_domain(request: AnalyzeFromDomainRequest):
 
 
 @router.get("/profile/{domain}")
-async def get_profile(domain: str, enrich: bool = False, provider: str = "openai"):
+async def get_profile(domain: str, enrich: bool = False, provider: Optional[str] = None):
     domain = domain.replace("https://", "").replace("http://", "").split("/")[0]
     profile = await build_pre_org_profile(domain)
     

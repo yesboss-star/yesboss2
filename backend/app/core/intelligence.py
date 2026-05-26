@@ -13,52 +13,99 @@ async def analyze_company_from_domain(domain: str) -> dict:
     logger.info("Analyzing domain: %s", domain)
 
     from .ai_client import get_ai_response
+    from .scraper import scrape_company_data
+    import json, re
 
+    scraped = None
+    try:
+        scraped = await scrape_company_data(domain)
+    except Exception as e:
+        logger.warning("Scrape failed for %s: %s", domain, e)
+
+    company_name = domain.split(".")[0].title()
     industry = "Technology"
-    micro_vertical = ""
+    micro_verticals = []
+    description = ""
+    website_url = f"https://{domain}"
+
+    homepage_text = (scraped.get("description") or "") if scraped else ""
+    if not homepage_text and scraped:
+        homepage_text = scraped.get("description", "")
 
     try:
-        ai_prompt = f"Domain: {domain}. Return JSON: {{\"industry\":\"...\",\"micro_vertical\":\"...\"}}"
+        ctx = f"Domain: {domain}"
+        if scraped:
+            scraped_name = scraped.get("name") or ""
+            scraped_desc = (scraped.get("description") or "")[:2000]
+            ctx = f"""Domain: {domain}
+Scraped company name: {scraped_name}
+Website content: {scraped_desc}"""
+
+        ai_prompt = f"""{ctx}
+
+Based on the above, return JSON with EXACT company details:
+{{
+    "company_name": "Full legal company name (with Pvt Ltd, Inc, LLC, GmbH etc if present). If only short name found, just the short name.",
+    "industry": "One primary industry category",
+    "micro_verticals": ["List", "of", "specific", "niche", "verticals", "within", "this", "industry"],
+    "website_url": "Full website URL"
+}}
+
+Rules:
+- company_name: Extract from scraped title/h1/og:title first. Fallback to domain name.
+- industry: Be specific (e.g. 'Automotive & Electric Vehicles', 'Fintech & Payment Solutions', 'SaaS / Cloud Computing')
+- micro_verticals: Array of 1-5 specific sub-niches based on industry (e.g. for Automotive: ['Auto Parts Manufacturing', 'EV Charging Infrastructure', 'Fleet Management'])
+- Use the exact industry names from the standard list provided."""
 
         response = await get_ai_response(
             prompt=ai_prompt,
-            system_prompt="Industry analyst. Reply with valid JSON only.",
-            provider="qwen",
-            model="qwen2.5:0.5b",
+            system_prompt="You are an industry analyst. Return ONLY valid JSON. No markdown.",
             temperature=0.1,
-            max_tokens=100
+            max_tokens=500
         )
 
-        import json, re
         json_str = response.strip()
         json_str = re.sub(r'^```(?:json)?\s*', '', json_str)
         json_str = re.sub(r'\s*```$', '', json_str)
 
-        try:
-            parsed = json.loads(json_str)
-            if isinstance(parsed, dict):
-                industry = parsed.get("industry", "Technology") or "Technology"
-                micro_vertical = parsed.get("micro_vertical", "") or ""
-        except json.JSONDecodeError:
-            ind_match = re.search(r'"industry"\s*:\s*"([^"]+)"', json_str)
-            micro_match = re.search(r'"micro_vertical"\s*:\s*"([^"]*)"', json_str)
-            if ind_match:
-                industry = ind_match.group(1)
-            if micro_match:
-                micro_vertical = micro_match.group(1)
+        if '{' in json_str and '}' in json_str:
+            start = json_str.find('{')
+            end = json_str.rfind('}') + 1
+            json_str = json_str[start:end]
 
-        logger.info("Detected - Industry: %s, Micro-vertical: %s", industry, micro_vertical)
+        parsed = json.loads(json_str) if json_str else {}
+        if isinstance(parsed, dict):
+            ai_name = parsed.get("company_name", "")
+            if ai_name and ai_name.lower() != domain.replace("www.", "").split(".")[0].lower():
+                company_name = ai_name
+            industry = parsed.get("industry", industry) or industry
+            micro_verticals = parsed.get("micro_verticals", [])
+            if not isinstance(micro_verticals, list):
+                micro_verticals = [micro_verticals] if micro_verticals else []
+            website_url = parsed.get("website_url", website_url) or website_url
+
+        logger.info("Detected - Name: %s, Industry: %s, Verticals: %s", company_name, industry, micro_verticals)
     except Exception as e:
         logger.error("AI domain analysis failed: %s", e)
+        if scraped and scraped.get("name"):
+            company_name = scraped["name"]
+        if scraped and scraped.get("industry"):
+            industry = scraped["industry"]
+        if scraped and scraped.get("micro_vertical"):
+            mv = scraped["micro_vertical"]
+            micro_verticals = [mv] if isinstance(mv, str) else (mv if isinstance(mv, list) else [])
 
     return {
-        "company_name": domain.split(".")[0].title(),
+        "company_name": company_name,
         "industry": industry,
-        "micro_vertical": micro_vertical,
+        "micro_verticals": micro_verticals,
+        "micro_vertical": micro_verticals[0] if micro_verticals else "",
+        "website_url": website_url,
+        "description": description or (scraped.get("description") if scraped else ""),
     }
 
 
-async def enrich_profile_with_ai(profile: dict, provider: str = "openai") -> dict:
+async def enrich_profile_with_ai(profile: dict, provider: Optional[str] = None) -> dict:
     logger.info("Enriching profile with %s", provider)
     profile["enriched"] = True
     profile["ai_provider"] = provider
@@ -107,19 +154,36 @@ async def analyze_goal_department(title: str, description: str = "", industry: s
     logger.info("Analyzing department for goal: %s", title)
     from .ai_client import get_ai_response
 
-    prompt = f"{title}:{description or title}:{industry or 'General'} -> department?"
+    prompt = f"""Given a business goal, determine the most appropriate department responsible for it.
+
+Goal title: {title}
+Goal description: {description or title}
+Company industry: {industry or 'General'}
+
+Examples:
+- "Increase monthly recurring revenue by 25%" → Sales
+- "Reduce customer churn rate below 5%" → Customer Support
+- "Launch new mobile app version with offline mode" → Engineering
+- "Improve brand awareness in APAC region" → Marketing
+- "Reduce operational costs by 15%" → Operations
+- "Implement new payroll compliance system" → Finance
+- "Hire 10 senior engineers by Q3" → Human Resources
+- "Redesign user onboarding flow to improve conversion" → Product
+- "Rebuild company website and design system" → Design
+- "File 5 new patents for core technology" → R&D
+
+Return ONLY the department name, nothing else."""
 
     response = await get_ai_response(
         prompt=prompt,
-        system_prompt="Reply with ONE department word only. Engineering/Marketing/Sales/Operations/Finance/HR/Product/Design/Support/R&D/Legal.",
-        provider="qwen",
-        model="qwen2.5:0.5b",
-        temperature=0.1,
-        max_tokens=20
+        system_prompt="You classify goals into departments. Reply with ONE department word only: Engineering, Marketing, Sales, Operations, Finance, Human Resources, Product, Design, Customer Support, R&D, Supply Chain, or Legal. Do not add any explanation.",
+        temperature=0.2,
+        max_tokens=30
     )
 
     department = response.strip().replace('"', "").replace("'", "").replace(".", "").replace("\n", "").strip()
-    return department if department else ""
+    valid = {"Engineering", "Marketing", "Sales", "Operations", "Finance", "Human Resources", "Product", "Design", "Customer Support", "R&D", "Supply Chain", "Legal"}
+    return department if department in valid else ""
 
 
 async def generate_goal_suggestions(industry: str, micro_vertical: str, count: int = 4) -> list:
@@ -131,8 +195,6 @@ async def generate_goal_suggestions(industry: str, micro_vertical: str, count: i
     response = await get_ai_response(
         prompt=prompt,
         system_prompt="You are a business consultant. Return ONLY valid JSON array. No markdown.",
-        provider="qwen",
-        model="qwen2.5:0.5b",
         temperature=0.3,
         max_tokens=800
     )
@@ -205,11 +267,11 @@ IMPORTANT RULES:
 
 If you find a real company, return:
 {{
-    "name": "Exact verified company name",
+    "name": "Exact verified company name (with Pvt Ltd, Inc, LLC, GmbH etc if applicable)",
     "domain": "www.realcompany.com",
     "website_url": "https://www.realcompany.com",
     "industry": "What industry they actually work in",
-    "micro_vertical": "Their specific niche or focus",
+    "micro_verticals": ["Their specific niches or focus areas (1-5 items)"],
     "description": "What they actually do",
     "found": true
 }}
@@ -223,8 +285,6 @@ If you cannot find verified information:
         response = await get_ai_response(
             prompt=ai_prompt,
             system_prompt="You are a precise company researcher. Return ONLY valid, parseable JSON. Be extremely conservative - only return found:true if you are 100% confident about the company. Do NOT make up companies.",
-            provider="qwen",
-            model="qwen2.5:0.5b",
             temperature=0.1,
             max_tokens=600
         )
@@ -257,10 +317,19 @@ If you cannot find verified information:
                         result["social_links"] = scraped_data["social_links"]
                     if scraped_data.get("name") and scraped_data.get("name") != result.get("name"):
                         result["name"] = scraped_data["name"]
-                    if scraped_data.get("micro_vertical") and not result.get("micro_vertical"):
+                    if scraped_data.get("micro_verticals") and not result.get("micro_verticals"):
+                        result["micro_verticals"] = scraped_data["micro_verticals"]
+                    elif scraped_data.get("micro_vertical") and not result.get("micro_vertical"):
                         result["micro_vertical"] = scraped_data["micro_vertical"]
             except Exception as e:
                 logger.warning(f"Scraping failed: {e}")
+        
+        micro_verticals = result.get("micro_verticals", [])
+        if not isinstance(micro_verticals, list) and result.get("micro_vertical"):
+            micro_verticals = [result["micro_vertical"]]
+        if isinstance(micro_verticals, list) and len(micro_verticals) > 0:
+            result["micro_verticals"] = micro_verticals
+            result["micro_vertical"] = micro_verticals[0]
         
         logger.info(f"Company search result: {result}")
         return result

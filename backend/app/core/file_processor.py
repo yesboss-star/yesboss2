@@ -164,56 +164,41 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVE
     return chunks
 
 
-async def generate_embeddings(texts: List[str], provider: str = "openai") -> List[List[float]]:
-    from .ai_client import get_ai_response
+async def generate_embeddings(texts: List[str], provider: Optional[str] = None) -> List[List[float]]:
+    from .config import settings
+    resolved_provider = provider or settings.DEFAULT_AI_PROVIDER
     
     embeddings = []
     
-    if provider == "openai":
-        try:
-            from openai import AsyncOpenAI
-            from .config import settings
-            
-            client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-            
+    try:
+        from openai import AsyncOpenAI
+        
+        if resolved_provider == "xai":
+            api_key = settings.XAI_API_KEY
+            base_url = settings.XAI_BASE_URL
+        elif resolved_provider == "openai":
+            api_key = settings.OPENAI_API_KEY
+            base_url = None
+        elif resolved_provider == "qwen":
+            api_key = settings.QWEN_API_KEY
+            base_url = settings.QWEN_BASE_URL
+        else:
+            api_key = None
+            base_url = None
+        
+        if api_key:
+            client = AsyncOpenAI(api_key=api_key, base_url=base_url)
             for text in texts:
                 response = await client.embeddings.create(
                     model="text-embedding-3-small",
                     input=text[:8000]
                 )
                 embeddings.append(response.data[0].embedding)
-        except Exception as e:
-            logger.error(f"OpenAI embedding failed: {e}")
+        else:
             for text in texts:
                 embeddings.append([0.0] * 1536)
-    elif provider == "qwen":
-        from .config import settings
-        try:
-            import httpx
-            
-            url = f"{settings.QWEN_BASE_URL}/embeddings"
-            headers = {
-                "Authorization": f"Bearer {settings.QWEN_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            
-            for text in texts:
-                payload = {
-                    "model": "nomic-embed-text",
-                    "input": text[:8000]
-                }
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(url, json=payload, headers=headers, timeout=30.0)
-                    if response.status_code == 200:
-                        data = response.json()
-                        embeddings.append(data["data"][0]["embedding"])
-                    else:
-                        embeddings.append([0.0] * 768)
-        except Exception as e:
-            logger.error(f"Qwen embedding failed: {e}")
-            for text in texts:
-                embeddings.append([0.0] * 768)
-    else:
+    except Exception as e:
+        logger.error(f"Embedding failed with {resolved_provider}: {e}")
         for text in texts:
             embeddings.append([0.0] * 1536)
     
@@ -255,7 +240,7 @@ async def process_file(
     filename: str,
     org_id: str,
     user_id: str,
-    provider: str = "openai"
+    provider: Optional[str] = None
 ) -> Dict[str, Any]:
     logger.info(f"Processing file: {filename} for org: {org_id}")
     
@@ -343,7 +328,7 @@ async def search_documents(
     org_id: str,
     query: str,
     top_k: int = 5,
-    provider: str = "openai"
+    provider: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     logger.info(f"Searching documents for org: {org_id}, query: {query}")
     

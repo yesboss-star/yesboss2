@@ -11,7 +11,7 @@ router = APIRouter()
 class StartChatRequest(BaseModel):
     user_id: str
     company_profile: Optional[dict] = None
-    provider: str = "openai"
+    provider: Optional[str] = None
 
 
 class ChatMessageRequest(BaseModel):
@@ -21,7 +21,7 @@ class ChatMessageRequest(BaseModel):
     company_profile: Optional[dict] = None
     answered_topics: Optional[list[str]] = None
     conversation_history: Optional[list[dict]] = None
-    provider: str = "openai"
+    provider: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -151,30 +151,51 @@ class PersonaQuestionGenerateRequest(BaseModel):
     industry: Optional[str] = ""
     micro_vertical: Optional[str] = ""
     company_size: Optional[str] = ""
+    domain: Optional[str] = ""
     website_content: Optional[str] = ""
     uploaded_files_summary: Optional[str] = ""
     social_links: Optional[dict] = {}
     previous_answers: Optional[list[dict]] = []
     question_count: int = 0
-    provider: str = "qwen"
+    provider: Optional[str] = None
 
 
 @router.post("/persona/generate-question")
 async def generate_persona_question(request: PersonaQuestionGenerateRequest):
     from ..core.ai_client import get_ai_response
     
+    website_content = request.website_content or ""
+    if not website_content and request.domain:
+        try:
+            from ..core.scraper import scrape_company_data
+            scraped = await scrape_company_data(request.domain)
+            website_content = scraped.get("description", "")[:2000]
+        except Exception:
+            pass
+    
     num_answers = len(request.previous_answers or [])
+    
+    context_parts = [
+        f"- Company: {request.org_name or 'Unknown'}",
+        f"- Industry: {request.industry or 'Not specified'}",
+        f"- Micro-vertical: {request.micro_vertical or 'Not specified'}",
+        f"- Company size: {request.company_size or 'Not specified'}",
+    ]
+    if website_content:
+        context_parts.append(f"- Website summary: {website_content[:1500]}")
+    if request.uploaded_files_summary:
+        context_parts.append(f"- Uploaded documents: {request.uploaded_files_summary}")
+    if request.social_links:
+        social_str = ", ".join([f"{k}: {v}" for k, v in request.social_links.items() if v])
+        if social_str:
+            context_parts.append(f"- Social presence: {social_str}")
+    company_context = "\n".join(context_parts)
     
     if num_answers == 0:
         prompt = f"""You are YesBoss, an AI business co-founder building a deep understanding of this person to create their personalized operational dashboard.
 
 COMPANY CONTEXT:
-- Company: {request.org_name or "Unknown"}
-- Industry: {request.industry or "Not specified"}
-- Micro-vertical: {request.micro_vertical or "Not specified"}
-- Company size: {request.company_size or "Not specified"}
-- Website: {request.website_content or "Not analyzed"}
-- Social presence: {request.social_links or "None detected"}
+{company_context}
 
 You are meeting this person for the first time. Ask ONE genuine, thoughtful question that helps you understand WHO they are as a leader — not what they do, but how they think, what drives them, what keeps them up at night.
 
@@ -184,23 +205,22 @@ Return ONLY valid JSON:
 {{
     "question": "A genuine, human question about their leadership style, priorities, or challenges",
     "options": ["Realistic option 1", "Realistic option 2", "Realistic option 3"],
-    "time_estimate": 3,
-    "need_more_time": false
+    "time_estimate": <integer 1-5, estimate how many minutes this will take based on company complexity>,
+    "need_more_time": <boolean, true only if company context is thin and you need more questions to understand them>
 }}
 
 Rules:
 - Question must feel like a real conversation, not a form
 - Options should reflect actual leadership archetypes or decision-making styles
-- time_estimate: 2-5 minutes based on how much context we still need
-- need_more_time: false for first question"""
+- time_estimate: Based on company complexity — larger/more complex companies need more time (1-5 min)
+- need_more_time: true if the company context is very limited and you'll need deeper exploration"""
     else:
         answers_text = "\n".join([f"Q: {a.get('question', '')}\nA: {a.get('answer', '')}" for a in request.previous_answers[-5:]])
         
         prompt = f"""You are YesBoss, an AI business co-founder in an ongoing conversation. You've been learning about this person through their answers.
 
 COMPANY CONTEXT:
-- Company: {request.org_name or "Unknown"}
-- Industry: {request.industry or "Not specified"}
+{company_context}
 
 CONVERSATION SO FAR:
 {answers_text}
@@ -214,16 +234,16 @@ Return ONLY valid JSON:
 {{
     "question": "A natural follow-up based on their last answer",
     "options": ["Option that connects to their answer", "Another relevant option", "A different angle option"],
-    "time_estimate": {max(1, 4 - num_answers)},
-    "need_more_time": {num_answers >= 2 and num_answers <= 4}
+    "time_estimate": <integer 1-5, how many minutes this follow-up will likely take>,
+    "need_more_time": <boolean, true only if you genuinely feel you still lack enough understanding after this question>
 }}
 
 Rules:
 - Question MUST connect to their previous answer
 - Options should branch differently based on what they said
-- time_estimate decreases as we learn more (1-3 min)
-- need_more_time: true only if you genuinely feel we need more depth (typically after 2-4 questions)
-- After 5+ questions, need_more_time should be false
+- time_estimate: 1-5 minutes, based on question depth and remaining unknowns
+- need_more_time: true only if you genuinely still lack enough understanding of this person. false once you have a solid picture.
+- Decide dynamically how many more questions are needed — there is no fixed limit
 - Keep it conversational, never robotic"""
     
     try:
@@ -231,7 +251,6 @@ Rules:
             prompt=prompt,
             system_prompt="You are an empathetic business analyst having a real conversation. Generate ONE thoughtful question with 3 realistic options. Return ONLY valid JSON.",
             provider=request.provider,
-            model="qwen2.5:0.5b",
             temperature=0.8,
             max_tokens=400
         )

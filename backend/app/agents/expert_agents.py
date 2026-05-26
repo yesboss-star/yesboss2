@@ -72,7 +72,7 @@ Analyze and provide insights about how the organization works.""",
 
 
 class BaseExpertAgent:
-    def __init__(self, agent_type: str, provider: str = "openai"):
+    def __init__(self, agent_type: str, provider: Optional[str] = None):
         self.agent_type = agent_type
         self.provider = provider
         self.system_prompt = SYSTEM_PROMPTS.get(agent_type, "You are a helpful AI assistant.")
@@ -145,7 +145,7 @@ Provide your analysis with:
 
 
 class FinanceAgent(BaseExpertAgent):
-    def __init__(self, provider: str = "openai"):
+    def __init__(self, provider: Optional[str] = None):
         super().__init__("finance", provider)
     
     async def analyze_financial_health(self, org_id: str) -> dict:
@@ -174,7 +174,7 @@ class FinanceAgent(BaseExpertAgent):
 
 
 class OperationsAgent(BaseExpertAgent):
-    def __init__(self, provider: str = "openai"):
+    def __init__(self, provider: Optional[str] = None):
         super().__init__("operations", provider)
     
     async def analyze_operations(self, org_id: str) -> dict:
@@ -201,7 +201,7 @@ class OperationsAgent(BaseExpertAgent):
 
 
 class WorkflowAgent(BaseExpertAgent):
-    def __init__(self, provider: str = "openai"):
+    def __init__(self, provider: Optional[str] = None):
         super().__init__("workflow", provider)
     
     async def create_workflow(self, workflow_type: str, context: Optional[dict] = None) -> dict:
@@ -257,7 +257,7 @@ class WorkflowAgent(BaseExpertAgent):
 
 
 class ForecastingAgent(BaseExpertAgent):
-    def __init__(self, provider: str = "openai"):
+    def __init__(self, provider: Optional[str] = None):
         super().__init__("forecasting", provider)
     
     async def forecast(self, metric: str, historical_data: Optional[list] = None, context: Optional[dict] = None) -> dict:
@@ -293,7 +293,7 @@ class ForecastingAgent(BaseExpertAgent):
 
 
 class IndustryIntelligenceAgent(BaseExpertAgent):
-    def __init__(self, provider: str = "openai"):
+    def __init__(self, provider: Optional[str] = None):
         super().__init__("industry_intelligence", provider)
     
     async def analyze_industry(self, industry: str) -> dict:
@@ -308,7 +308,7 @@ class IndustryIntelligenceAgent(BaseExpertAgent):
 
 
 class OrgUnderstandingAgent(BaseExpertAgent):
-    def __init__(self, provider: str = "openai"):
+    def __init__(self, provider: Optional[str] = None):
         super().__init__("org_understanding", provider)
     
     async def analyze_organization(self, org_id: str) -> dict:
@@ -332,7 +332,7 @@ class OrgUnderstandingAgent(BaseExpertAgent):
             return await self.analyze("Provide organizational analysis based on available data.", {"error": str(e)})
 
 
-def get_expert_agent(agent_type: str, provider: str = "openai") -> BaseExpertAgent:
+def get_expert_agent(agent_type: str, provider: Optional[str] = None) -> BaseExpertAgent:
     agents = {
         "finance": FinanceAgent,
         "operations": OperationsAgent,

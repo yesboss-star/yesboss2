@@ -10,7 +10,7 @@ async def process_uploaded_file(
     file: UploadFile = File(...),
     org_id: str = Form(...),
     user_id: str = Form(...),
-    provider: str = Form("openai")
+    provider: Optional[str] = Form(None)
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required")
@@ -49,7 +49,7 @@ async def batch_process_files(
     files: list[UploadFile] = File(...),
     org_id: str = Form(...),
     user_id: str = Form(...),
-    provider: str = Form("openai")
+    provider: Optional[str] = Form(None)
 ):
     if len(files) > 10:
         raise HTTPException(status_code=400, detail="Maximum 10 files at once")
@@ -76,7 +76,7 @@ async def search_org_documents(
     org_id: str,
     query: str,
     limit: int = 5,
-    provider: str = "openai"
+    provider: Optional[str] = None
 ):
     if not org_id or not query:
         raise HTTPException(status_code=400, detail="org_id and query are required")

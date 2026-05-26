@@ -11,18 +11,20 @@ client: QdrantClient = None
 
 def get_embedding(text: str) -> list[float]:
     try:
-        from openai import AsyncOpenAI
-        if not settings.OPENAI_API_KEY:
+        api_key = settings.XAI_API_KEY or settings.OPENAI_API_KEY
+        base_url = settings.XAI_BASE_URL if settings.XAI_API_KEY else None
+        if not api_key:
             return generate_fallback_embedding(text)
         
-        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key, base_url=base_url)
         response = client.embeddings.create(
             model="text-embedding-3-small",
             input=text
         )
         return response.data[0].embedding
     except Exception as e:
-        logger.warning(f"OpenAI embedding failed, using fallback: {e}")
+        logger.warning(f"Embedding failed, using fallback: {e}")
         return generate_fallback_embedding(text)
 
 

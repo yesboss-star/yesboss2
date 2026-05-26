@@ -219,7 +219,7 @@ async def run_master_agent(
     user_id: str,
     company_profile: Optional[dict] = None,
     chat_message: Optional[str] = None,
-    provider: str = "openai",
+    provider: Optional[str] = None,
 ) -> dict:
     logger.info(f"Running master agent for user: {user_id}")
     
@@ -243,7 +243,7 @@ async def run_master_agent(
 async def run_onboarding_flow(
     user_id: str,
     company_profile: Optional[dict] = None,
-    provider: str = "openai",
+    provider: Optional[str] = None,
 ) -> dict:
     state = get_initial_state(user_id, company_profile)
     

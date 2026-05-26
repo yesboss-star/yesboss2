@@ -18,20 +18,20 @@ class ExpertQueryRequest(BaseModel):
     agent_type: str
     query: str
     company_context: Optional[dict] = None
-    provider: str = "openai"
+    provider: Optional[str] = None
 
 
 class WorkflowCreateRequest(BaseModel):
     workflow_type: str
     context: Optional[dict] = None
-    provider: str = "openai"
+    provider: Optional[str] = None
 
 
 class ForecastRequest(BaseModel):
     metric: str
     historical_data: Optional[list] = None
     context: Optional[dict] = None
-    provider: str = "openai"
+    provider: Optional[str] = None
 
 
 @router.post("/query")
@@ -90,7 +90,7 @@ async def list_agent_types():
 
 
 @router.get("/finance/health/{org_id}")
-async def analyze_financial_health(org_id: str, provider: str = "openai"):
+async def analyze_financial_health(org_id: str, provider: Optional[str] = None):
     try:
         agent = FinanceAgent(provider=provider)
         result = await agent.analyze_financial_health(org_id)
@@ -100,7 +100,7 @@ async def analyze_financial_health(org_id: str, provider: str = "openai"):
 
 
 @router.get("/operations/analysis/{org_id}")
-async def analyze_operations(org_id: str, provider: str = "openai"):
+async def analyze_operations(org_id: str, provider: Optional[str] = None):
     try:
         agent = OperationsAgent(provider=provider)
         result = await agent.analyze_operations(org_id)
@@ -110,7 +110,7 @@ async def analyze_operations(org_id: str, provider: str = "openai"):
 
 
 @router.get("/organization/analysis/{org_id}")
-async def analyze_organization(org_id: str, provider: str = "openai"):
+async def analyze_organization(org_id: str, provider: Optional[str] = None):
     try:
         agent = OrgUnderstandingAgent(provider=provider)
         result = await agent.analyze_organization(org_id)

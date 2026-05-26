@@ -7,9 +7,18 @@ logger = logging.getLogger("yesboss.ai_client")
 
 
 class AIClient:
-    def __init__(self, provider: str = "gemini"):
-        self.provider = provider
+    def __init__(self, provider: Optional[str] = None):
+        self.provider = provider or settings.DEFAULT_AI_PROVIDER
         self._client = None
+
+    def _get_xai_client(self):
+        if not settings.XAI_API_KEY:
+            raise ValueError("XAI_API_KEY not configured")
+        from openai import AsyncOpenAI
+        return AsyncOpenAI(
+            api_key=settings.XAI_API_KEY,
+            base_url=settings.XAI_BASE_URL,
+        )
 
     def _get_openai_client(self):
         if not settings.OPENAI_API_KEY:
@@ -29,7 +38,9 @@ class AIClient:
         temperature: float = 0.7,
         max_tokens: int = 2000,
     ) -> Dict[str, Any]:
-        if self.provider == "gemini":
+        if self.provider == "xai":
+            return await self._xai_complete(messages, model or settings.XAI_MODEL, temperature, max_tokens)
+        elif self.provider == "gemini":
             return await self._gemini_complete(messages, model, temperature, max_tokens)
         elif self.provider == "openai":
             return await self._openai_complete(messages, model or "gpt-4o", temperature, max_tokens)
@@ -39,6 +50,29 @@ class AIClient:
             return await self._qwen_complete(messages, model or settings.QWEN_MODEL or "qwen2.5:0.5b", temperature, max_tokens)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
+
+    async def _xai_complete(
+        self,
+        messages: List[Dict[str, str]],
+        model: str = "grok-3",
+        temperature: float = 0.7,
+        max_tokens: int = 2000,
+    ) -> Dict[str, Any]:
+        client = self._get_xai_client()
+
+        response = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+
+        return {
+            "content": response.choices[0].message.content,
+            "model": model,
+            "provider": "xai",
+            "usage": response.usage.model_dump() if response.usage else {}
+        }
 
     async def _gemini_complete(
         self,
@@ -216,7 +250,7 @@ class AIClient:
 async def get_ai_response(
     prompt: str,
     system_prompt: str = "You are a helpful AI assistant.",
-    provider: str = "openai",
+    provider: Optional[str] = None,
     model: Optional[str] = None,
     temperature: float = 0.7,
     max_tokens: int = 2000,
@@ -233,7 +267,7 @@ async def get_ai_response(
 
 async def get_chat_response(
     messages: List[Dict[str, str]],
-    provider: str = "openai",
+    provider: Optional[str] = None,
     model: Optional[str] = None,
     temperature: float = 0.7,
     max_tokens: int = 2000,

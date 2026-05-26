@@ -14,6 +14,12 @@ logger = logging.getLogger("yesboss.config")
 
 
 class Settings:
+    XAI_API_KEY: str = os.getenv("XAI_API_KEY", "")
+    XAI_BASE_URL: str = os.getenv("XAI_BASE_URL", "https://api.x.ai/v1")
+    XAI_MODEL: str = os.getenv("XAI_MODEL", "grok-3")
+
+    DEFAULT_AI_PROVIDER: str = os.getenv("DEFAULT_AI_PROVIDER", "xai")
+
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")

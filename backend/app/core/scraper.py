@@ -14,7 +14,6 @@ SOCIAL_DOMAINS = {
     "instagram": ["instagram.com", "instagr.am"],
     "facebook": ["facebook.com", "fb.com", "fb.me"],
     "youtube": ["youtube.com", "youtu.be", "yt.be"],
-    "tiktok": ["tiktok.com"],
 }
 
 SOCIAL_PATTERNS = {
@@ -48,10 +47,6 @@ SOCIAL_PATTERNS = {
         r"youtube\.com/@([a-zA-Z0-9_-]+)",
         r"youtube\.com/channel/([a-zA-Z0-9_-]+)",
         r"youtu\.be/([a-zA-Z0-9_-]+)",
-    ],
-    "tiktok": [
-        r"https?://(?:www\.)?tiktok\.com/@([a-zA-Z0-9_.]+)",
-        r"tiktok\.com/@([a-zA-Z0-9_.]+)",
     ],
 }
 
@@ -92,11 +87,6 @@ def normalize_social_url(url: str, platform: str) -> str:
             return f"https://youtu.be/{m.group(1)}"
         if "youtube.com" in url.lower():
             return url
-    elif platform == "tiktok":
-        m = re.search(r'tiktok\.com/@([a-zA-Z0-9_.]+)', url, re.I)
-        if m:
-            return f"https://www.tiktok.com/@{m.group(1)}"
-    
     return url.split("?")[0].split("#")[0]
 
 
@@ -221,7 +211,6 @@ def try_common_social_urls(company_name: str, domain: str) -> dict:
             "instagram": [f"https://www.instagram.com/{handle}"],
             "facebook": [f"https://www.facebook.com/{handle}"],
             "youtube": [f"https://www.youtube.com/@{handle}"],
-            "tiktok": [f"https://www.tiktok.com/@{handle}"],
         }
         
         for platform, urls in candidates.items():
@@ -523,11 +512,14 @@ async def scrape_company_data(domain: str) -> dict:
             content = searapi_result.get("homepage_content", "") + " " + searapi_result.get("about", "")
             name = searapi_result.get("name") or domain.split(".")[0].replace("-", " ").replace("_", " ").title()
             
+            mv = searapi_result.get("micro_verticals") or searapi_result.get("micro_vertical", "")
+            micro_verticals = mv if isinstance(mv, list) else ([mv] if mv else [])
             return {
                 "name": searapi_result.get("name") or name,
                 "description": content[:500],
                 "industry": searapi_result.get("industry", "Technology"),
-                "micro_vertical": searapi_result.get("micro_vertical", ""),
+                "micro_vertical": micro_verticals[0] if micro_verticals else "",
+                "micro_verticals": micro_verticals,
                 "size": searapi_result.get("size", "1-10"),
                 "social_links": searapi_result.get("social_links", {}),
                 "scraper": "searapi"
@@ -563,11 +555,13 @@ async def scrape_company_data(domain: str) -> dict:
                 industry = ind
                 break
         
+        micro_verticals = result.get("services", [])[:3] if result.get("services") else []
         return {
             "name": result.get("name") or name,
             "description": content[:500],
             "industry": industry,
-            "micro_vertical": result.get("services", [])[:3] if result.get("services") else "",
+            "micro_vertical": micro_verticals[0] if micro_verticals else "",
+            "micro_verticals": micro_verticals,
             "size": "1-10",
             "social_links": result.get("social_links", {}),
             "scraper": "beautifulsoup"
@@ -579,6 +573,7 @@ async def scrape_company_data(domain: str) -> dict:
             "description": "",
             "industry": "Technology",
             "micro_vertical": "",
+            "micro_verticals": [],
             "size": "1-10",
             "social_links": {},
             "scraper": "fallback"

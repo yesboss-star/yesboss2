@@ -73,6 +73,7 @@ interface PersonaQuestion {
   options: string[];
   time_estimate: number;
   ask_more_time: boolean;
+  need_more_time?: boolean;
   question_number: number;
 }
 
@@ -1050,6 +1051,7 @@ function OwnerOnboardingContent() {
     industries: [] as string[],
     size: "1-10",
     micro_vertical: "",
+    micro_verticals: [] as string[],
   });
 
   const analyzeIndustryFromDomain = async (domain: string) => {
@@ -1069,7 +1071,7 @@ function OwnerOnboardingContent() {
         
         if (data) {
           const detectedIndustry = data.industry || "";
-          const detectedMicroVertical = data.micro_vertical || "";
+          const detectedMicroVerticals = data.micro_verticals || (data.micro_vertical ? [data.micro_vertical] : []);
           const detectedIndustries = detectedIndustry ? [detectedIndustry] : [];
           
           setOrgData(prev => ({
@@ -1079,10 +1081,11 @@ function OwnerOnboardingContent() {
             website_url: data.website_url || `https://${domain}`,
             industries: detectedIndustries,
             size: data.size || prev.size || "1-10",
-            micro_vertical: detectedMicroVertical,
+            micro_verticals: detectedMicroVerticals,
+            micro_vertical: detectedMicroVerticals[0] || "",
           }));
           
-          console.log("Setting industry:", detectedIndustry, "micro_vertical:", detectedMicroVertical);
+          console.log("Setting industry:", detectedIndustry, "micro_verticals:", detectedMicroVerticals);
           setDomainAnalyzed(true);
         }
       }
@@ -1151,13 +1154,14 @@ function OwnerOnboardingContent() {
     }
   };
 
-  const handleCompanySelect = (company: {name: string; domain?: string; industry?: string; website_url?: string; micro_vertical?: string; size?: string}) => {
+  const handleCompanySelect = (company: {name: string; domain?: string; industry?: string; website_url?: string; micro_vertical?: string; micro_verticals?: string[]; size?: string}) => {
     let domain = company.domain || "";
     if (domain && !domain.startsWith("http")) {
       domain = `https://${domain}`;
     }
     
     const companyIndustries = company.industry ? [company.industry] : [];
+    const companyMicroVerticals = company.micro_verticals || (company.micro_vertical ? [company.micro_vertical] : []);
     
     setOrgData(prev => ({
       ...prev,
@@ -1166,7 +1170,8 @@ function OwnerOnboardingContent() {
       website_url: company.website_url || domain || prev.website_url,
       industries: companyIndustries.length > 0 ? companyIndustries : prev.industries,
       size: company.size || prev.size || "1-10",
-      micro_vertical: company.micro_vertical || prev.micro_vertical,
+      micro_verticals: companyMicroVerticals.length > 0 ? companyMicroVerticals : prev.micro_verticals,
+      micro_vertical: companyMicroVerticals[0] || prev.micro_vertical,
     }));
     
     setShowCompanyDropdown(false);
@@ -1188,7 +1193,7 @@ function OwnerOnboardingContent() {
 
   const getFileSuggestions = () => {
     const industry = orgData.industries[0] || "Technology & Software";
-    const microVertical = orgData.micro_vertical || "";
+    const microVertical = orgData.micro_verticals[0] || "";
     
     const industrySuggestions = INDUSTRY_FILE_SUGGESTIONS[industry] || INDUSTRY_FILE_SUGGESTIONS["Technology & Software"];
     const microVerticalSuggestions = microVertical ? (MICRO_VERTICAL_FILE_SUGGESTIONS[microVertical] || []) : [];
@@ -1216,12 +1221,25 @@ function OwnerOnboardingContent() {
   };
 
   const addMicroVertical = (mv: string) => {
+    if (!mv || orgData.micro_verticals.some(m => m.toLowerCase() === mv.toLowerCase())) return;
     setOrgData(prev => ({
       ...prev,
-      micro_vertical: mv || prev.micro_vertical,
+      micro_verticals: [...prev.micro_verticals, mv],
+      micro_vertical: prev.micro_verticals.length === 0 ? mv : prev.micro_vertical,
     }));
     setMicroVerticalInput("");
     setShowMicroVerticalSuggestions(false);
+  };
+
+  const removeMicroVertical = (mv: string) => {
+    setOrgData(prev => {
+      const filtered = prev.micro_verticals.filter(m => m !== mv);
+      return {
+        ...prev,
+        micro_verticals: filtered,
+        micro_vertical: filtered.length > 0 ? filtered[0] : "",
+      };
+    });
   };
 
   const getFilteredIndustries = () => {
@@ -1236,7 +1254,7 @@ function OwnerOnboardingContent() {
     if (!microVerticalInput.trim()) return COMMON_MICRO_VERTICALS.slice(0, 8);
     const query = microVerticalInput.toLowerCase();
     return COMMON_MICRO_VERTICALS.filter(mv => 
-      mv.toLowerCase().includes(query) && !mv.includes(orgData.micro_vertical)
+      mv.toLowerCase().includes(query) && !orgData.micro_verticals.some(m => m.toLowerCase() === mv.toLowerCase())
     ).slice(0, 8);
   };
 
@@ -1255,8 +1273,10 @@ function OwnerOnboardingContent() {
         name: orgData.name || domain.split(".")[0],
         domain: domain || "",
         industry: orgData.industries[0] || "Technology & Software",
+        industries: orgData.industries,
         size: orgData.size || "1-10",
-        micro_vertical: orgData.micro_vertical,
+        micro_vertical: orgData.micro_verticals[0] || "",
+        micro_verticals: orgData.micro_verticals,
       });
       setOrgId(org.id);
       setStep("file-upload");
@@ -1273,8 +1293,10 @@ function OwnerOnboardingContent() {
         name: orgData.name,
         domain,
         industry: orgData.industries[0] || "Technology & Software",
+        industries: orgData.industries,
         size: orgData.size || "1-10",
-        micro_vertical: orgData.micro_vertical,
+        micro_vertical: orgData.micro_verticals[0] || "",
+        micro_verticals: orgData.micro_verticals,
       });
       setOrgId(org.id);
       setOrganization({
@@ -1314,7 +1336,6 @@ function OwnerOnboardingContent() {
         { platform: "Instagram", url: socialFromScan.instagram || "", detected: !!socialFromScan.instagram, icon: <Link2 className="w-5 h-5" /> },
         { platform: "Facebook", url: socialFromScan.facebook || "", detected: !!socialFromScan.facebook, icon: <Link2 className="w-5 h-5" /> },
         { platform: "YouTube", url: socialFromScan.youtube || "", detected: !!socialFromScan.youtube, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "TikTok", url: socialFromScan.tiktok || "", detected: !!socialFromScan.tiktok, icon: <Link2 className="w-5 h-5" /> },
       ];
       setSocialLinksList(platforms);
       console.log("Social links set:", platforms.filter(p => p.url));
@@ -1403,23 +1424,21 @@ function OwnerOnboardingContent() {
     try {
       const links = await detectSocialPresence(domain);
       const platforms = [
-        { platform: "LinkedIn", url: links.linkedin || "", detected: !!links.linkedin, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "Twitter / X", url: links.twitter || "", detected: !!links.twitter, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "Instagram", url: links.instagram || "", detected: !!links.instagram, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "Facebook", url: links.facebook || "", detected: !!links.facebook, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "YouTube", url: links.youtube || "", detected: !!links.youtube, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "TikTok", url: links.tiktok || "", detected: !!links.tiktok, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "LinkedIn", url: links.linkedin || "", detected: !!links.linkedin, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "Twitter / X", url: links.twitter || "", detected: !!links.twitter, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "Instagram", url: links.instagram || "", detected: !!links.instagram, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "Facebook", url: links.facebook || "", detected: !!links.facebook, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "YouTube", url: links.youtube || "", detected: !!links.youtube, icon: <Link2 className="w-5 h-5" /> },
       ];
       setSocialLinksList(platforms);
     } catch (error) {
       console.error("Social detection failed:", error);
       setSocialLinksList([
-        { platform: "LinkedIn", url: "", detected: false, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "Twitter / X", url: "", detected: false, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "Instagram", url: "", detected: false, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "Facebook", url: "", detected: false, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "YouTube", url: "", detected: false, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "TikTok", url: "", detected: false, confirmed: false, needsEdit: false, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "LinkedIn", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "Twitter / X", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "Instagram", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "Facebook", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
+        { platform: "YouTube", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
       ]);
     }
   };
@@ -1439,14 +1458,18 @@ function OwnerOnboardingContent() {
   const handlePersonaTimeYes = async () => {
     setPersonaLoading(true);
     try {
+      const socialLinks: Record<string, string> = {};
+      socialLinksList.forEach(s => { if (s.url) socialLinks[s.platform.toLowerCase().replace(/ \/ x$/, "").replace(/ /g, "_")] = s.url; });
       const response = await fetch(`${API_URL}/chatbot/persona/generate-question`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           org_name: orgData.name,
           industry: orgData.industries[0] || "",
-          micro_vertical: orgData.micro_vertical,
+          micro_vertical: orgData.micro_verticals[0] || "",
           company_size: orgData.size,
+          domain: orgData.domain,
+          social_links: socialLinks,
           previous_answers: personaAnswers,
           question_count: personaAnswers.length,
         }),
@@ -1491,21 +1514,20 @@ function OwnerOnboardingContent() {
       return;
     }
 
-    if (updatedAnswers.length >= 5) {
-      setStep("goals");
-      return;
-    }
-
     setPersonaLoading(true);
     try {
+      const socialLinks: Record<string, string> = {};
+      socialLinksList.forEach(s => { if (s.url) socialLinks[s.platform.toLowerCase().replace(/ \/ x$/, "").replace(/ /g, "_")] = s.url; });
       const response = await fetch(`${API_URL}/chatbot/persona/generate-question`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           org_name: orgData.name,
           industry: orgData.industries[0] || "",
-          micro_vertical: orgData.micro_vertical,
+          micro_vertical: orgData.micro_verticals[0] || "",
           company_size: orgData.size,
+          domain: orgData.domain,
+          social_links: socialLinks,
           previous_answers: updatedAnswers,
           question_count: updatedAnswers.length,
         }),
@@ -1513,8 +1535,13 @@ function OwnerOnboardingContent() {
 
       if (response.ok) {
         const data = await response.json();
-        setCurrentQuestion(data);
-        setPersonaCustomAnswer("");
+        if (data.question) {
+          setCurrentQuestion(data);
+          setPersonaCustomAnswer("");
+        } else {
+          setCurrentQuestion(null);
+          setStep("goals");
+        }
       } else {
         setCurrentQuestion(null);
         setStep("goals");
@@ -1531,14 +1558,18 @@ function OwnerOnboardingContent() {
   const handlePersonaMoreTimeYes = async () => {
     setPersonaLoading(true);
     try {
+      const socialLinks: Record<string, string> = {};
+      socialLinksList.forEach(s => { if (s.url) socialLinks[s.platform.toLowerCase().replace(/ \/ x$/, "").replace(/ /g, "_")] = s.url; });
       const response = await fetch(`${API_URL}/chatbot/persona/generate-question`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           org_name: orgData.name,
           industry: orgData.industries[0] || "",
-          micro_vertical: orgData.micro_vertical,
+          micro_vertical: orgData.micro_verticals[0] || "",
           company_size: orgData.size,
+          domain: orgData.domain,
+          social_links: socialLinks,
           previous_answers: personaAnswers,
           question_count: personaAnswers.length,
         }),
@@ -1571,7 +1602,7 @@ function OwnerOnboardingContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           industry: orgData.industries[0] || "",
-          micro_vertical: orgData.micro_vertical || "",
+          micro_vertical: orgData.micro_verticals[0] || "",
           count: 6,
         }),
       });
@@ -1719,7 +1750,7 @@ function OwnerOnboardingContent() {
         body: JSON.stringify({
           message: userMessage,
           organization_id: orgId,
-          context: { industries: orgData.industries, size: orgData.size, micro_vertical: orgData.micro_vertical },
+          context: { industries: orgData.industries, size: orgData.size, micro_vertical: orgData.micro_verticals[0] || "", micro_verticals: orgData.micro_verticals },
         }),
       });
       
@@ -2112,17 +2143,19 @@ function OwnerOnboardingContent() {
 
               <div>
                 <label className="block text-sm font-medium mb-2">
-                  Micro-Vertical {domainAnalyzed && orgData.micro_vertical && <span className="text-emerald-400 text-xs ml-2">(Auto-detected)</span>}
+                  Micro-Verticals {domainAnalyzed && orgData.micro_verticals.length > 0 && <span className="text-emerald-400 text-xs ml-2">(Auto-detected)</span>}
                 </label>
                 <div className="space-y-3">
-                  {orgData.micro_vertical && (
+                  {orgData.micro_verticals.length > 0 && (
                     <div className="flex flex-wrap gap-2">
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500/10 text-purple-500 text-sm">
-                        {orgData.micro_vertical}
-                        <button onClick={() => setOrgData(prev => ({ ...prev, micro_vertical: "" }))} className="hover:bg-purple-500/20 rounded-full p-0.5 cursor-pointer">
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </span>
+                      {orgData.micro_verticals.map((mv, i) => (
+                        <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500/10 text-purple-500 text-sm">
+                          {mv}
+                          <button onClick={() => removeMicroVertical(mv)} className="hover:bg-purple-500/20 rounded-full p-0.5 cursor-pointer">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </span>
+                      ))}
                     </div>
                   )}
                   <div className="relative">
@@ -2173,7 +2206,7 @@ function OwnerOnboardingContent() {
                     )}
                   </div>
                 </div>
-                <p className="text-xs text-text-muted mt-1">Click suggestion or type + click +</p>
+                <p className="text-xs text-text-muted mt-1">Add multiple micro-verticals relevant to your business</p>
               </div>
 
               <div>
@@ -2285,8 +2318,8 @@ function OwnerOnboardingContent() {
                 Upload <span className="gradient-text">{orgData.industries[0] || "your industry"}</span> documents
               </h1>
               <p className="text-text-muted">
-                {orgData.micro_vertical 
-                  ? `Based on your industry (${orgData.industries[0] || "Technology"}) and micro-vertical (${orgData.micro_vertical}), we suggest these document types:`
+                {orgData.micro_verticals.length > 0
+                  ? `Based on your industry (${orgData.industries[0] || "Technology"}) and micro-verticals (${orgData.micro_verticals.join(", ")}), we suggest these document types:`
                   : `Based on your industry, we suggest these document types:`
                 }
               </p>
@@ -2295,7 +2328,7 @@ function OwnerOnboardingContent() {
             <div className="glass rounded-xl p-4 mb-6">
               <h3 className="font-semibold mb-3 text-sm">
                 Suggested for {orgData.industries[0] || "your industry"}
-                {orgData.micro_vertical ? ` + ${orgData.micro_vertical}` : ""}:
+                {orgData.micro_verticals.length > 0 ? ` + ${orgData.micro_verticals.join(", ")}` : ""}:
               </h3>
               <div className="space-y-2">
                 {getFileSuggestions().map((file, i) => (
@@ -2683,12 +2716,17 @@ function OwnerOnboardingContent() {
               <div className="flex items-center gap-2 mb-3">
                 <Lightbulb className="w-5 h-5 text-amber-400" />
                 <h2 className="font-semibold">AI Suggestions</h2>
-                {!goalsLoading && aiGoalSuggestions.length === 0 && (
+                {!goalsLoading && (
                   <button
                     onClick={fetchGoalSuggestions}
-                    className="text-sm text-primary hover:underline ml-2 cursor-pointer"
+                    className="p-1.5 rounded-lg hover:bg-primary/10 text-primary transition-all cursor-pointer ml-auto"
+                    title="Refresh suggestions"
                   >
-                    Load suggestions for {orgData.industries[0] || "your industry"}
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="23 4 23 10 17 10" />
+                      <polyline points="1 20 1 14 7 14" />
+                      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                    </svg>
                   </button>
                 )}
               </div>
