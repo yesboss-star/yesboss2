@@ -264,7 +264,7 @@ export default function SignupPage() {
 
           <h1 className="text-4xl font-bold mb-4 leading-tight">
             Your AI-powered<br />
-            <span className="gradient-text">Business OS</span>
+            <span className="gradient-text">Highly Intelligent Intern</span>
           </h1>
           <p className="text-text-muted text-lg mb-12 max-w-md">
             Join thousands of businesses using AI to make smarter decisions.
@@ -273,7 +273,7 @@ export default function SignupPage() {
           <div className="space-y-6">
             {[
               { icon: Shield, text: "Enterprise-grade security" },
-              { icon: CheckCircle, text: "14-day free trial" },
+              { icon: CheckCircle, text: "CXO's level insights" },
               { icon: User, text: "AI onboarding learns your business" },
             ].map((item, i) => (
               <div key={i} className="flex items-center gap-4">
