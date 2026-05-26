@@ -1,9 +1,10 @@
+import logging
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
 from ..core.database import get_database
-from ..dependencies.auth import get_current_user
+from ..dependencies.auth import get_current_user, get_current_user_optional
 from bson import ObjectId
 
 router = APIRouter()
@@ -16,6 +17,9 @@ class GoalCreate(BaseModel):
     timeline: Optional[str] = None
     department: Optional[str] = None
     assignee_id: Optional[str] = None
+    assignee_name: Optional[str] = None
+    reviewer_id: Optional[str] = None
+    reviewer_name: Optional[str] = None
     organization_id: Optional[str] = None
 
 
@@ -26,7 +30,22 @@ class GoalUpdate(BaseModel):
     timeline: Optional[str] = None
     department: Optional[str] = None
     assignee_id: Optional[str] = None
+    assignee_name: Optional[str] = None
+    reviewer_id: Optional[str] = None
+    reviewer_name: Optional[str] = None
     status: Optional[str] = None
+
+
+class GoalSuggestionsRequest(BaseModel):
+    industry: str
+    micro_vertical: Optional[str] = None
+    count: int = 5
+
+
+class DepartmentAnalysisRequest(BaseModel):
+    title: str
+    description: Optional[str] = None
+    industry: Optional[str] = None
 
 
 class TaskGenerate(BaseModel):
@@ -35,13 +54,13 @@ class TaskGenerate(BaseModel):
 
 
 def get_user_org_id(user) -> Optional[str]:
-    if hasattr(user, 'user_metadata') and user.user_metadata:
+    if user and hasattr(user, 'user_metadata') and user.user_metadata:
         return user.user_metadata.get("organization_id")
     return None
 
 
 @router.post("")
-async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user)):
+async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -50,7 +69,7 @@ async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
     
-    user_id = getattr(current_user, 'id', None) or str(current_user) if current_user else None
+    user_id = getattr(current_user, 'id', None) if current_user else None
     
     goal_doc = {
         "title": goal.title,
@@ -59,6 +78,9 @@ async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user)
         "timeline": goal.timeline,
         "department": goal.department,
         "assignee_id": goal.assignee_id,
+        "assignee_name": goal.assignee_name,
+        "reviewer_id": goal.reviewer_id,
+        "reviewer_name": goal.reviewer_name,
         "organization_id": org_id,
         "created_by": user_id,
         "status": "active",
@@ -154,6 +176,38 @@ async def delete_goal(goal_id: str, current_user = Depends(get_current_user)):
     db.tasks.delete_many({"goal_id": goal_id})
     
     return {"success": True, "message": "Goal deleted"}
+
+
+@router.post("/suggestions")
+async def suggest_goals(request: GoalSuggestionsRequest):
+    try:
+        from ..core.intelligence import generate_goal_suggestions
+        suggestions = await generate_goal_suggestions(
+            industry=request.industry,
+            micro_vertical=request.micro_vertical or "",
+            count=request.count
+        )
+        return {"suggestions": suggestions}
+    except Exception as e:
+        logger = logging.getLogger("yesboss.goals")
+        logger.error(f"Goal suggestions failed: {e}")
+        return {"suggestions": []}
+
+
+@router.post("/analyze-department")
+async def analyze_department(request: DepartmentAnalysisRequest):
+    try:
+        from ..core.intelligence import analyze_goal_department
+        department = await analyze_goal_department(
+            title=request.title,
+            description=request.description or "",
+            industry=request.industry or ""
+        )
+        return {"department": department}
+    except Exception as e:
+        logger = logging.getLogger("yesboss.goals")
+        logger.error(f"Department analysis failed: {e}")
+        return {"department": ""}
 
 
 @router.post("/generate-tasks")

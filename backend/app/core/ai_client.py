@@ -36,14 +36,14 @@ class AIClient:
         elif self.provider == "anthropic":
             return await self._anthropic_complete(messages, model or "claude-sonnet-4-20250514", temperature, max_tokens)
         elif self.provider == "qwen":
-            return await self._qwen_complete(messages, model or "qwen2.5:14b", temperature, max_tokens)
+            return await self._qwen_complete(messages, model or settings.QWEN_MODEL or "qwen2.5:0.5b", temperature, max_tokens)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
 
     async def _gemini_complete(
         self,
         messages: List[Dict[str, str]],
-        model: str = "gemini-2.0-flash",
+        model: str = "gemini-2.5-flash",
         temperature: float = 0.7,
         max_tokens: int = 2000,
     ) -> Dict[str, Any]:
@@ -51,47 +51,52 @@ class AIClient:
             raise ValueError("GEMINI_API_KEY not configured")
 
         try:
-            import google.generativeai as genai
-            
-            genai.configure(api_key=settings.GEMINI_API_KEY)
-            
+            import httpx
+
             system_prompt = ""
-            chat_history = []
+            user_messages = []
             for msg in messages:
                 if msg.get("role") == "system":
                     system_prompt = msg.get("content", "")
                 elif msg.get("role") == "user":
-                    chat_history.append({"role": "user", "parts": [{"text": msg.get("content", "")}]})
+                    user_messages.append(msg.get("content", ""))
                 elif msg.get("role") == "assistant":
-                    chat_history.append({"role": "model", "parts": [{"text": msg.get("content", "")}]})
+                    user_messages.append(f"[Assistant: {msg.get('content', '')}]")
 
-            generation_config = {
-                "temperature": temperature,
-                "max_output_tokens": max_tokens,
-                "top_p": 0.95,
-                "top_k": 40,
+            combined = "\n".join(user_messages)
+            if system_prompt:
+                combined = f"{system_prompt}\n\n{combined}"
+
+            payload = {
+                "contents": [{"parts": [{"text": combined}]}],
+                "generationConfig": {
+                    "temperature": temperature,
+                    "maxOutputTokens": max_tokens,
+                    "topP": 0.95,
+                    "topK": 40,
+                },
             }
 
-            if system_prompt:
-                system_instruction = system_prompt
-            
-            model_obj = genai.GenerativeModel(
-                model_name=model,
-                system_instruction=system_prompt if system_prompt else None
-            )
-            
-            result = model_obj.generate_content(
-                contents=chat_history,
-                generation_config=generation_config
-            )
+            url = f"https://generativelanguage.googleapis.com/v1/models/{model}:generateContent?key={settings.GEMINI_API_KEY}"
 
-            content = result.text if result.text else ""
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, json=payload, timeout=15.0)
+                response.raise_for_status()
+                data = response.json()
 
+            candidates = data.get("candidates", [])
+            content = ""
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                if parts:
+                    content = parts[0].get("text", "")
+
+            usage = data.get("usageMetadata", {})
             return {
                 "content": content,
                 "model": model,
                 "provider": "gemini",
-                "usage": {"total_tokens": getattr(result, 'usage_metadata', {}).get('total_token_count', 0)}
+                "usage": {"total_tokens": usage.get("totalTokenCount", 0)},
             }
         except Exception as e:
             logger.error(f"Gemini API error: {e}")
@@ -211,8 +216,8 @@ class AIClient:
 async def get_ai_response(
     prompt: str,
     system_prompt: str = "You are a helpful AI assistant.",
-    provider: str = "gemini",
-    model: Optional[str] = "gemini-1.5-flash",
+    provider: str = "openai",
+    model: Optional[str] = None,
     temperature: float = 0.7,
     max_tokens: int = 2000,
 ) -> str:
@@ -228,8 +233,8 @@ async def get_ai_response(
 
 async def get_chat_response(
     messages: List[Dict[str, str]],
-    provider: str = "gemini",
-    model: Optional[str] = "gemini-1.5-flash",
+    provider: str = "openai",
+    model: Optional[str] = None,
     temperature: float = 0.7,
     max_tokens: int = 2000,
 ) -> str:

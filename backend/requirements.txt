@@ -31,3 +31,4 @@ python-socketio
 python-socketio[asyncio]
 aiohttp
 firebase-admin
+google-generativeai

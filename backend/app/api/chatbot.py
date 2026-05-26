@@ -156,7 +156,7 @@ class PersonaQuestionGenerateRequest(BaseModel):
     social_links: Optional[dict] = {}
     previous_answers: Optional[list[dict]] = []
     question_count: int = 0
-    provider: str = "gemini"
+    provider: str = "qwen"
 
 
 @router.post("/persona/generate-question")
@@ -231,6 +231,7 @@ Rules:
             prompt=prompt,
             system_prompt="You are an empathetic business analyst having a real conversation. Generate ONE thoughtful question with 3 realistic options. Return ONLY valid JSON.",
             provider=request.provider,
+            model="qwen2.5:0.5b",
             temperature=0.8,
             max_tokens=400
         )

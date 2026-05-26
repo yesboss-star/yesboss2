@@ -12,6 +12,9 @@ export interface Goal {
   timeline?: string;
   department?: string;
   assignee_id?: string;
+  assignee_name?: string;
+  reviewer_id?: string;
+  reviewer_name?: string;
   status: string;
   created_at: string;
   updated_at: string;
@@ -77,7 +80,7 @@ export const useGoalStore = create<GoalState>()(
         }
       },
 
-      createGoal: async (data) => {
+      createGoal: async (data: { title: string; description: string; priority: string; timeline?: string; department?: string; assignee_name?: string; reviewer_name?: string; organization_id: string }) => {
         set({ loading: true, error: null });
         try {
           const response = await fetch(`${API_URL}/goals`, {
