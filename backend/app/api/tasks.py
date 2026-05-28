@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
 from ..core.database import get_database
-from ..dependencies.auth import get_current_user
+from ..dependencies.auth import get_current_user_optional
 from bson import ObjectId
 
 router = APIRouter()
@@ -43,12 +43,12 @@ class TaskComment(BaseModel):
 
 
 @router.post("")
-async def create_task(task: TaskCreate, current_user = Depends(get_current_user)):
+async def create_task(task: TaskCreate, organization_id: Optional[str] = None, current_user = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
-    org_id = get_user_org_id(current_user)
+    org_id = organization_id or get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
     
@@ -84,18 +84,18 @@ async def list_tasks(
     status: Optional[str] = None,
     priority: Optional[str] = None,
     department: Optional[str] = None,
-    org_id: Optional[str] = None,
-    current_user = Depends(get_current_user)
+    organization_id: Optional[str] = None,
+    current_user = Depends(get_current_user_optional)
 ):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
-    organization_id = org_id or get_user_org_id(current_user)
-    if not organization_id:
+    org_id = organization_id or get_user_org_id(current_user)
+    if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
     
-    query = {"organization_id": organization_id}
+    query = {"organization_id": org_id}
     if goal_id:
         query["goal_id"] = goal_id
     if assignee_id:
@@ -116,7 +116,7 @@ async def list_tasks(
 
 
 @router.get("/{task_id}")
-async def get_task(task_id: str, current_user = Depends(get_current_user)):
+async def get_task(task_id: str, current_user = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -136,7 +136,7 @@ async def get_task(task_id: str, current_user = Depends(get_current_user)):
 
 
 @router.put("/{task_id}")
-async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get_current_user)):
+async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -156,7 +156,7 @@ async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get
 
 
 @router.delete("/{task_id}")
-async def delete_task(task_id: str, current_user = Depends(get_current_user)):
+async def delete_task(task_id: str, current_user = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -168,7 +168,7 @@ async def delete_task(task_id: str, current_user = Depends(get_current_user)):
 
 
 @router.post("/{task_id}/comments")
-async def add_comment(task_id: str, comment: TaskComment, current_user = Depends(get_current_user)):
+async def add_comment(task_id: str, comment: TaskComment, current_user = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -195,7 +195,7 @@ async def add_comment(task_id: str, comment: TaskComment, current_user = Depends
 
 
 @router.post("/{task_id}/approve")
-async def approve_task(task_id: str, current_user = Depends(get_current_user)):
+async def approve_task(task_id: str, current_user = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -218,7 +218,7 @@ async def approve_task(task_id: str, current_user = Depends(get_current_user)):
 
 
 @router.post("/{task_id}/complete")
-async def complete_task(task_id: str, current_user = Depends(get_current_user)):
+async def complete_task(task_id: str, current_user = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")

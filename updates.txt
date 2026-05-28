@@ -1,0 +1,393 @@
+YESBOSS — ACTUAL CODEBASE DOCUMENTATION (From Code Analysis)
+=============================================================
+
+SCREEN 1 — LANDING PAGE
+------------------------
+FRONTEND COMPONENTS:
+- Navbar, HeroSection, Features, AIInsights, DashboardPreview
+- Integrations, Testimonials, FAQ, CTASection, Footer
+
+TECH:
+- Next.js 16 (App Router)
+- TailwindCSS v4 (CSS-based, no JS config)
+- Radix UI (NOT ShadCN): Checkbox, Dialog, DropdownMenu, Label, Popover, Select, Slot, Switch, Tabs, Tooltip
+- Zustand (state management)
+- Firebase Auth (client-side)
+- lucide-react (icons)
+- class-variance-authority + clsx + tailwind-merge
+
+NO Framer Motion, NO ShadCN
+
+==================================================
+
+SCREEN 2 — SIGNUP / LOGIN PAGE
+-------------------------------
+SIGNUP FIELDS (Frontend):
+- Full Name, Phone (with country code selector), Email, Password, Confirm Password
+- OTP via Firebase Phone Auth (reCAPTCHA v2 + RecaptchaVerifier)
+- Role: Owner / Employee
+
+LOGIN:
+- Email + Password via Firebase signInWithEmailAndPassword
+- On login: syncs user to MongoDB via POST /api/v1/auth/sync-user
+
+AUTH FLOW:
+- Firebase auth (frontend SDK) + Firebase Admin SDK (backend)
+- Backend stores users in MongoDB (users collection)
+- Role stored in `yesboss_role` localStorage, Firebase custom claims
+- Protected routes via middleware.ts (cookie-based: yesboss_token, yesboss_user)
+
+BACKEND AUTH:
+- POST /api/v1/auth/signup (Firebase Admin create_user + MongoDB sync)
+- POST /api/v1/auth/login (Firebase get_user_by_email + MongoDB lookup)
+- POST /api/v1/auth/send-otp (delegates to Firebase SDK on frontend)
+- POST /api/v1/auth/verify-otp (delegates to Firebase SDK on frontend)
+- POST /api/v1/auth/sync-user (MongoDB upsert)
+- GET /api/v1/auth/me
+- POST /api/v1/auth/logout
+- POST /api/v1/auth/reset-password (Firebase Admin)
+- PUT /api/v1/auth/user/{uid}/role
+
+==================================================
+
+SCREEN 3 — OWNER CHECK LOGIC
+-----------------------------
+SAME AS PDF:
+- Owner → /onboarding/owner
+- Employee → /onboarding/employee
+- middleware.ts checks role + organization_completed for redirect
+
+==================================================
+
+SCREEN 4 — PRE-AI ORGANIZATION INTELLIGENCE ENGINE
+---------------------------------------------------
+CODE IMPLEMENTS:
+- POST /api/v1/intelligence/analyze/email → extracts domain → scrapes
+- POST /api/v1/intelligence/analyze/domain → scrapes + AI enrichment
+- GET /api/v1/intelligence/profile/{domain}
+- POST /api/v1/intelligence/company/search
+
+SCRAPER (core/scraper.py — BeautifulSoup-based, NO Playwright):
+- scrape_company(domain): scrapes homepage, about, services, social links
+- 8 strategies for social link detection (href, meta, footer, page text, DuckDuckGo search, common URL patterns, SearAPI, Firecrawl)
+- Industry detection via keyword matching in scraped content
+- SOCIAL_DOMAINS: linkedin, twitter/x, instagram, facebook, youtube
+- Detective patterns for each platform
+
+AI ANALYSIS (core/intelligence.py):
+- analyze_company_from_email(domain) → scrape → AI enrichment via get_ai_response
+- Uses AI (default: xAI Grok) to extract company_name, industry, micro_verticals
+- Fallback to scraped data if AI fails
+
+NO Kaggle datasets integration found in code.
+NO Playwright usage found.
+
+==================================================
+
+SCREEN 5 — AI TIME REQUEST SCREEN
+-----------------------------------
+FRONTEND:
+- Shows static "2 minutes" (hardcoded aiTimeMinutes = 2)
+- Options: Continue / Later
+- If "Later": creates org with minimal data → goes to file-upload step
+
+CODE OBSERVATION: Time is NOT dynamically decided by Master Agent.
+The master agent's `run_onboarding_flow` always shows same intro.
+
+==================================================
+
+SCREEN 6 — DYNAMIC AI FILE REQUEST SCREEN
+------------------------------------------
+FRONTEND:
+- Industry-specific file suggestions from hardcoded INDUSTRY_FILE_SUGGESTIONS (60+ industries) + MICRO_VERTICAL_FILE_SUGGESTIONS (40+ micro-verticals)
+- File upload: PDF, Excel, Word, Images (max 25MB, max 10 files batch)
+
+BACKEND (core/file_processor.py):
+- ALLOWED_EXTENSIONS: .pdf, .xlsx, .xls, .png, .jpg, .jpeg, .docx, .txt, .csv
+- Text extraction: PyMuPDF (fitz) + PyPDF2 fallback, pandas (Excel), Pillow + pytesseract (images), python-docx (Word)
+- Chunking: 1000 chars, 200 overlap
+- Embeddings: text-embedding-3-small via xAI/OpenAI
+- Storage: MongoDB (documents collection) + Qdrant (documents collection)
+- Search: POST /api/v1/files/search
+
+NO PaddleOCR — uses pytesseract for OCR.
+
+==================================================
+
+SCREEN 7 — SOCIAL PRESENCE DETECTION
+--------------------------------------
+DETECTION SOURCES (core/social_detector.py):
+1. SearAPI (optional, if SEAR_API_KEY set)
+2. Firecrawl (optional, if FIRECRAWL_API_KEY set)
+3. BeautifulSoup (always, href + meta + full page text)
+4. DuckDuckGo search (always)
+5. Common URL patterns (HTTP HEAD check)
+6. AI validation via xAI Grok (always, if API key)
+
+PLATFORMS: LinkedIn, Twitter/X, Instagram, Facebook, YouTube
+User confirms/edits on frontend.
+
+API: POST /api/v1/social/detect, POST /api/v1/social/verify, POST /api/v1/social/detect-by-name
+Frontend calls: POST /api/v1/social/detect with {domain}
+
+==================================================
+
+SCREEN 8 — PERSONA + ORGANIZATIONAL INTELLIGENCE CHAT
+------------------------------------------------------
+FRONTEND (Owner Onboarding):
+- Persona questions generated by AI via POST /api/v1/chatbot/persona/generate-question
+- Question context: org_name, industry, micro_vertical, company_size, domain, social_links, previous_answers
+- 3 options per question + custom text input
+- After each answer → AI generates next follow-up question
+- After certain point: "Do you have more time?" prompt (persona-more-time step)
+- Fallback questions (5 hardcoded) if AI fails
+
+BACKEND (api/chatbot.py):
+- generate_persona_question: builds context from org data, previous answers → AI generates next question
+- Uses get_ai_response with temperature=0.8
+- Returns {question, options, time_estimate, need_more_time, question_number}
+
+Backend OnboardingChatbot (core/chatbot.py):
+- start_conversation: begins with welcome + first question
+- process_message: handles conversation loop
+- 8 fixed question topics: company_description, industry, company_size, goals, challenges, workflows, decision_making, growth
+- Conversation stored in MongoDB (conversations) + Qdrant (conversations)
+
+API: POST /api/v1/chatbot/start, POST /api/v1/chatbot/message, GET /api/v1/chatbot/conversation/{id}, GET /api/v1/chatbot/user/{user_id}
+
+==================================================
+
+SCREEN 9 — CREATE NOW OR LATER SCREEN
+---------------------------------------
+FOUND IN CODE (owner onboarding):
+- After goals step → "create-now-later" step
+- Create Now: saves goals to API, creates workspace
+- Create Later: saves intelligence + redirects to dashboard
+
+==================================================
+
+SCREEN 10 — GOAL CREATION SCREEN
+----------------------------------
+FRONTEND:
+- Goal input + description
+- AI suggestions: POST /api/v1/goals/suggestions (industry-based)
+- Department analysis: POST /api/v1/goals/analyze-department (AI classifies)
+- Goals save: POST /api/v1/goals
+
+BACKEND (api/goals.py):
+- POST /api/v1/goals (create), GET /api/v1/goals (list), GET /api/v1/goals/{id}, PUT /api/v1/goals/{id}, DELETE /api/v1/goals/{id}
+- POST /api/v1/goals/suggestions (AI-generated goal suggestions by industry)
+- POST /api/v1/goals/analyze-department (AI department classification)
+- POST /api/v1/goals/generate-tasks (generates tasks from goal)
+
+GOAL SCHEMA: title, description, priority, timeline, department, assignee_id, assignee_name, reviewer_id, reviewer_name, organization_id, status, created_by
+
+==================================================
+
+SCREEN 11 — TASK EXECUTION SCREEN
+-----------------------------------
+FRONTEND (tasks page):
+- List/Board view toggle
+- Filter by status, goal, search
+- Task stats: total, pending, in_progress, completed
+
+BACKEND (api/tasks.py):
+- POST /api/v1/tasks (create), GET /api/v1/tasks (list), GET /api/v1/tasks/{id}, PUT /api/v1/tasks/{id}, DELETE /api/v1/tasks/{id}
+- POST /api/v1/tasks/{id}/comments (add comment)
+- POST /api/v1/tasks/{id}/approve (approve)
+- POST /api/v1/tasks/{id}/complete (complete)
+
+TASK SCHEMA: title, description, priority, status, goal_id, assignee_id, department, due_date, dependencies[], reviewers[], organization_id
+
+WebSocket: /ws/{organization_id} for real-time task updates
+
+NO Socket.IO — uses raw WebSockets + FastAPI.
+
+==================================================
+
+SCREEN 12 — AI DASHBOARD
+--------------------------
+FRONTEND (ai page):
+- 3 tabs: Overview, Insights, Modules
+- Modules sidebar: All, Founder, Finance, Operations, Productivity, Workflow
+- Module metrics with trend indicators
+- AI Insight Cards by priority (success, warning, info, danger)
+- Action items per insight
+
+BACKEND (api/dashboard.py):
+- Industry-specific dashboard configs: technology, finance, healthcare, retail, manufacturing, default
+- GET /api/v1/dashboard/insights (filters by industry, module, priority)
+- GET /api/v1/dashboard/modules (industry-specific module list)
+- GET /api/v1/dashboard/metrics/{module} (with mock data)
+- GET /api/v1/dashboard/trends/{module} (with mock random data)
+
+5 MODULES per industry: Founder, Finance, Operations, Productivity, Workflow
+
+==================================================
+
+SCREEN 13 — EXECUTIVE AI CHAT
+-------------------------------
+FRONTEND (dashboard/chat):
+- Full chat UI with expert badges, quick questions, expert sidebar
+- 6 experts (Finance, Operations, Strategy, HR, Sales, Product)
+- Messages show expert responses with confidence scores
+- Action items panel per response
+- Copy functionality
+
+BACKEND (api/executive_chat.py):
+- POST /api/v1/executive-chat/chat (query → determine_relevant_experts → generate responses → synthesize)
+- GET /api/v1/executive-chat/experts
+- GET /api/v1/executive-chat/history
+- POST /api/v1/executive-chat/history
+
+6 SAME EXPERT TYPES as PDF: Finance, Operations, Strategy, HR, Sales, Product
+Plus Agent-based: FinanceAgent, OperationsAgent, WorkflowAgent, ForecastingAgent, IndustryIntelligenceAgent, OrgUnderstandingAgent
+
+NO LangGraph/CrewAI in executive chat — uses keyword matching + template responses.
+
+==================================================
+
+SCREEN 14 — CONTINUOUS LEARNING ENGINE (Background)
+----------------------------------------------------
+BACKEND (core/learning.py):
+- ContinuousLearning class with MongoDB storage
+- Collections: workflows, task_outcomes, bottlenecks, learning_patterns
+- record_workflow: stores workflow type, steps, duration, outcome, efficiency
+- record_task_outcome: stores task completion, delays, quality
+- record_bottleneck: stores bottleneck type, impact, frequency
+- record_pattern: stores detected patterns with frequency tracking
+- analyze_workflow_efficiency: computes efficiency score from workflow data
+- Qdrant storage for workflow embeddings
+
+API: POST /api/v1/learning/workflow, POST /api/v1/learning/task-outcome, POST /api/v1/learning/bottleneck, POST /api/v1/learning/pattern
+     GET /api/v1/learning/workflow/analysis/{org_id}, GET /api/v1/learning/bottlenecks/{org_id}, GET /api/v1/learning/patterns/{org_id}
+
+NO LoRA Fine-Tuning, NO PyTorch, NO HuggingFace, NO PEFT, NO Unsloth in code.
+Learning is a MongoDB-based pattern recording system, not ML training.
+
+==================================================
+
+FINAL MVP ARCHITECTURE (From Code)
+-----------------------------------
+Next.js 16 Frontend (App Router)
+↓
+FastAPI Backend (Python, port 8000)
+↓
+Master Agent (LangGraph in agents/master_agent.py)
+↓
+Expert Agents (CrewAI pattern in agents/expert_agents.py)
+↓
+xAI Grok (Default provider) + GPT + Claude + Qwen + Gemini via AIClient
+↓
+MongoDB Atlas (main data: users, orgs, employees, goals, tasks, conversations, documents)
++ Qdrant Cloud (vectors: documents, conversations, workflows)
++ Firebase Auth (authentication)
++ SimpleCache (in-memory, no Redis)
+
+AI PROVIDERS:
+- Default: xAI (Grok-3) via base_url=https://api.x.ai/v1
+- Available: OpenAI, Anthropic, Groq, Qwen (via Ollama localhost:11434), Gemini, xAI
+
+==================================================
+
+EMPLOYEE ONBOARDING FLOW
+=========================
+FRONTEND STEPS: department → org-detect → manager → hierarchy → persona → complete
+
+STEP E1 — Department:
+- AI suggestions via POST /api/v1/intelligence/department-suggestions
+- Industry-based departments or manual input
+
+STEP E2 — Org Detection:
+- Auto-detect by email domain: GET /api/v1/organizations/by-domain/{domain}
+- Manual search: GET /api/v1/organizations?search=...
+- Create new org option
+
+STEP E3 — Manager/Hierarchy:
+- Search managers: GET /api/v1/employees?org_id=...&search=...
+- Role/Title input
+- Subordinates selection (direct reports)
+- Hierarchy visualization
+
+STEP E4 — Persona Chat:
+- AI welcomes based on department
+- Conversational: POST /api/v1/chatbot/persona-questions, POST /api/v1/chatbot/persona-response
+- Preferences saved: POST /api/v1/employees/persona
+
+STEP E5 — Complete:
+- Create Workspace Now → /dashboard
+- Create Later → saves persona, redirects home
+- Stats: Department, Manager, Organization, AI Assistant
+
+==================================================
+
+EMPLOYEE DASHBOARD (Dashboard for Employee Role)
+---------------------------------------------------
+- Stats: Assigned Tasks, In Progress, Pending Review, Team Updates
+- Task list with status, priority, due date, assigned by
+- Pending reviews with Approve/Details buttons
+- Team updates feed
+- AI Productivity Insights (hardcoded rules)
+- Workflow Suggestions (hardcoded)
+- New Goal button (owner only)
+
+==================================================
+
+EMPLOYEE AI ASSISTANT (dashboard/assistant)
+----------------------------------------------
+- Welcome message with 6 quick actions
+- Conversational: "How to prioritize tasks?", "Summarize pending approvals", "What's blocking my workflow?", etc.
+- POST to /api/v1/agent/chat or /api/v1/executive-chat/chat
+- Employee-specific (vs Executive Chat which is owner-focused)
+
+==================================================
+
+MASTER AGENT (agents/master_agent.py)
+---------------------------------------
+- LangGraph StateGraph with 3 nodes: analyze → question → update
+- Keyword-based profile extraction (not AI)
+- 6 missing_info fields: company_name, industry, size, goals, challenges, team_structure
+- Fixed question flow based on missing topics
+- understanding_level increases by 0.1 per answer
+- NO dynamic AI-powered understanding analysis in code
+
+EXPERT AGENTS (agents/expert_agents.py):
+- 6 agents: Finance, Operations, Workflow, Forecasting, IndustryIntelligence, OrgUnderstanding
+- Each: analyze(query) → get_ai_response with system prompt
+- Specific methods: analyze_financial_health, analyze_operations, create_workflow, forecast, analyze_industry, analyze_organization
+
+==================================================
+
+FIREBASE CONFIGURATION
+-----------------------
+Project: yesboss-8b789
+API Key: AIzaSyBjFwWVhr92mNi4VXs1O9UbJ1WGdJmhSiY
+Auth Domain: yesboss-8b789.firebaseapp.com
+RECAPTCHA_SITE_KEY: 6Lep7u8sAAAAAMCEeg8_Ef4an34SWBZy-Ncynxdj
+
+==================================================
+
+MONGODB COLLECTIONS
+---------------------
+users, organizations, employees, goals, tasks, conversations, documents, uploads, files, workflows, task_outcomes, bottlenecks, learning_patterns, task_comments, team_updates, approval_requests, executive_chat_history
+
+QDRANT COLLECTIONS:
+- documents (1536-dim vectors)
+- conversations (1536-dim vectors)
+- workflows (1536-dim vectors)
+
+==================================================
+
+KEY DIFFERENCES FROM PDF
+-------------------------
+- Auth: Firebase (not Supabase Auth). Supabase client exists but unused for auth.
+- UI: Radix UI (not ShadCN)
+- Animations: TailwindCSS classes (not Framer Motion)
+- Real-time: Raw WebSockets (not Socket.IO on frontend, but Socket.IO lib installed)
+- AI Default: xAI Grok-3 (not Qwen 14B). Qwen configured via Ollama.
+- OCR: pytesseract (not PaddleOCR)
+- Scraper: BeautifulSoup + requests (not Playwright)
+- Learning: MongoDB pattern recording (not LoRA/ML training pipeline)
+- No Redis in active use (SimpleCache in-memory instead)
+- No Kaggle dataset integration
+- No Docker configuration found

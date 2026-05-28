@@ -8,10 +8,8 @@ import { useUIStore } from "@/stores/uiStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import {
   LayoutDashboard,
-  Target,
   CheckSquare,
   BarChart3,
-  MessageSquare,
   Users,
   Settings,
   ChevronLeft,
@@ -24,6 +22,8 @@ import {
   User,
   Building2,
   Sparkles,
+  Share2,
+  Zap,
 } from "lucide-react";
 import { Avatar, Badge, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui";
 
@@ -37,14 +37,8 @@ interface NavItem {
 
 const ownerNavItems: NavItem[] = [
   { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
-  { icon: Sparkles, label: "AI Dashboard", href: "/dashboard/ai", badge: "NEW" },
-  { icon: Target, label: "Goals", href: "/dashboard/goals" },
-  { icon: CheckSquare, label: "Tasks", href: "/tasks" },
-  { icon: BarChart3, label: "Analytics", href: "/dashboard/analytics" },
-  { icon: MessageSquare, label: "AI Chat", href: "/dashboard/chat" },
-  { icon: Users, label: "Team", href: "/dashboard/team" },
-  { icon: Building2, label: "Organization", href: "/dashboard/organization" },
-  { icon: Settings, label: "Settings", href: "/dashboard/settings" },
+  { icon: Share2, label: "Orchestration", href: "/dashboard/orchestration" },
+  { icon: Zap, label: "AI Task Cascade", href: "/dashboard/task" },
 ];
 
 const employeeNavItems: NavItem[] = [

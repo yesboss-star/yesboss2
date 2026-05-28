@@ -56,7 +56,7 @@ const isPersonalEmailDomain = (domain: string): boolean => {
   return PERSONAL_EMAIL_DOMAINS.includes(cleanDomain);
 };
 
-type OnboardingStep = "welcome" | "time-request" | "org-details" | "ai-scan" | "file-upload" | "social" | "persona-popup" | "persona-time" | "persona-question" | "persona-more-time" | "goals" | "create-now-later" | "complete";
+type OnboardingStep = "welcome" | "time-request" | "org-details" | "ai-scan" | "file-upload" | "social" | "persona-popup" | "persona-time" | "persona-question" | "persona-more-time" | "goals";
 
 interface OnboardingGoal {
   id: string;
@@ -1730,7 +1730,14 @@ function OwnerOnboardingContent() {
       console.error("Failed to save goals:", error);
     } finally {
       setSavingGoals(false);
-      setStep("create-now-later");
+      const storedUser = localStorage.getItem("yesboss_user");
+      if (storedUser) {
+        const userData = JSON.parse(storedUser);
+        userData.organization_completed = true;
+        localStorage.setItem("yesboss_user", JSON.stringify(userData));
+        document.cookie = `yesboss_user=${JSON.stringify(userData)}; path=/; max-age=86400; SameSite=Lax`;
+      }
+      window.location.href = "/dashboard";
     }
   };
 
@@ -1777,7 +1784,14 @@ function OwnerOnboardingContent() {
   };
 
   const handleContinueChatNo = () => {
-    setStep("create-now-later");
+    const storedUser = localStorage.getItem("yesboss_user");
+    if (storedUser) {
+      const userData = JSON.parse(storedUser);
+      userData.organization_completed = true;
+      localStorage.setItem("yesboss_user", JSON.stringify(userData));
+      document.cookie = `yesboss_user=${JSON.stringify(userData)}; path=/; max-age=86400; SameSite=Lax`;
+    }
+    window.location.href = "/dashboard";
   };
 
   const updateSocialLink = (index: number, url: string) => {
@@ -1803,7 +1817,6 @@ function OwnerOnboardingContent() {
     { id: "persona-question", label: "Persona", icon: Users },
     { id: "persona-more-time", label: "Persona", icon: Users },
     { id: "goals", label: "Goals", icon: Target },
-    { id: "complete", label: "Done", icon: CheckCircle },
   ];
 
   const personaSteps = ["persona-popup", "persona-time", "persona-question", "persona-more-time"];
@@ -2907,104 +2920,7 @@ function OwnerOnboardingContent() {
           </div>
         )}
 
-        {/* STEP 12: CREATE NOW OR LATER */}
-        {step === "create-now-later" && (
-          <div className="max-w-xl mx-auto text-center">
-            <div className="mb-8">
-              <div className="w-20 h-20 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-6">
-                <CheckCircle className="w-10 h-10 text-primary" />
-              </div>
-              <h1 className="text-3xl font-bold mb-2">
-                Create your <span className="gradient-text">workspace</span>
-              </h1>
-              <p className="text-text-muted">
-                Your AI business intelligence is ready. Would you like to create your operational workspace now?
-              </p>
-            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-              <button
-                onClick={() => setStep("complete")}
-                className="p-6 rounded-xl border-2 border-primary bg-primary/10 hover:bg-primary/20 transition-all cursor-pointer text-left"
-              >
-                <div className="flex items-center gap-3 mb-2">
-                  <ArrowRight className="w-5 h-5 text-primary" />
-                  <span className="font-semibold">Create Now</span>
-                </div>
-                <p className="text-sm text-text-muted">
-                  Go directly to your AI-powered dashboard
-                </p>
-              </button>
-
-              <button
-                onClick={() => {
-                  router.push("/");
-                }}
-                className="p-6 rounded-xl border-2 border-border hover:border-border-light transition-all cursor-pointer text-left"
-              >
-                <div className="flex items-center gap-3 mb-2">
-                  <Clock className="w-5 h-5 text-text-muted" />
-                  <span className="font-semibold">Later</span>
-                </div>
-                <p className="text-sm text-text-muted">
-                  Save intelligence for later
-                </p>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* STEP 9: COMPLETE */}
-        {step === "complete" && (
-          <div className="max-w-xl mx-auto text-center">
-            <div className="w-24 h-24 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto mb-8 animate-float">
-              <CheckCircle className="w-12 h-12 text-emerald-400" />
-            </div>
-
-            <h1 className="text-4xl font-bold mb-4">
-              Your AI Business OS is <span className="gradient-text">Ready</span>
-            </h1>
-            <p className="text-text-muted text-lg mb-12">
-              We&apos;ve built an initial intelligence profile for {orgData.name || "your company"}.
-              Your AI agents are now analyzing your data in the background.
-            </p>
-
-            <div className="grid grid-cols-2 gap-4 mb-12">
-              {[
-                { label: "AI Agents Active", value: "6" },
-                { label: "Documents Processed", value: uploadedFiles.length.toString() },
-                { label: "Industry", value: orgData.industries[0] || "Not set" },
-                { label: "Persona Insights", value: personaAnswers.length.toString() },
-              ].map((stat, i) => (
-                <div key={i} className="glass rounded-xl p-6">
-                  <div className="text-3xl font-bold text-primary">{stat.value}</div>
-                  <div className="text-sm text-text-muted mt-1">{stat.label}</div>
-                </div>
-              ))}
-            </div>
-
-            <button
-              onClick={async () => {
-                if (orgId && personaAnswers.length > 0) {
-                  try {
-                    await fetch(`${API_URL}/organizations/${orgId}`, {
-                      method: "PUT",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ persona_answers: personaAnswers }),
-                    });
-                  } catch {
-                    // Silently skip
-                  }
-                }
-                router.push("/dashboard");
-              }}
-              className="w-full py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 flex items-center justify-center gap-2 text-lg"
-            >
-              Go to Dashboard
-              <ArrowRight className="w-5 h-5" />
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );

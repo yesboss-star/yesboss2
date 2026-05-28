@@ -35,6 +35,9 @@ from .api.dashboard import router as dashboard_router
 from .api.executive_chat import router as executive_chat_router
 from .api.learning import router as learning_router
 from .api.websocket import router as websocket_router
+from .api.org_chart import router as org_chart_router
+from .api.reports import router as reports_router
+from .api.market_trends import router as market_trends_router
 from .core import settings
 from .core.database import connect_mongodb, close_mongodb
 from .core.qdrant import connect_qdrant, close_qdrant
@@ -154,4 +157,7 @@ app.include_router(tasks_router, prefix="/api/v1/tasks", tags=["Tasks"])
 app.include_router(dashboard_router, prefix="/api/v1/dashboard", tags=["Dashboard"])
 app.include_router(executive_chat_router, prefix="/api/v1/executive-chat", tags=["Executive Chat"])
 app.include_router(learning_router, prefix="/api/v1/learning", tags=["Continuous Learning"])
+app.include_router(org_chart_router, prefix="/api/v1/org-chart", tags=["Org Chart"])
+app.include_router(reports_router, prefix="/api/v1/reports", tags=["Reports"])
+app.include_router(market_trends_router, prefix="/api/v1/trends", tags=["Market Trends"])
 app.include_router(websocket_router, tags=["WebSocket"])

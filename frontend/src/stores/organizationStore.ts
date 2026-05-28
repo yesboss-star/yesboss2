@@ -23,6 +23,7 @@ interface SocialLinks {
   instagram?: string;
   facebook?: string;
   youtube?: string;
+  [key: string]: string | undefined;
 }
 
 interface OrganizationState {

@@ -11,9 +11,10 @@ interface ModalProps {
   children: React.ReactNode;
   size?: "sm" | "md" | "lg" | "xl" | "full";
   className?: string;
+  title?: string;
 }
 
-const Modal = ({ open, onOpenChange, children, size = "md", className }: ModalProps) => {
+const Modal = ({ open, onOpenChange, children, size = "md", className, title }: ModalProps) => {
   const sizeClasses = {
     sm: "max-w-sm",
     md: "max-w-md",
@@ -37,6 +38,7 @@ const Modal = ({ open, onOpenChange, children, size = "md", className }: ModalPr
             className
           )}
         >
+          <Dialog.Title className="sr-only">{title || "Dialog"}</Dialog.Title>
           {children}
         </Dialog.Content>
       </Dialog.Portal>

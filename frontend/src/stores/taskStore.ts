@@ -112,10 +112,12 @@ export const useTaskStore = create<TaskState>()(
       createTask: async (data) => {
         set({ loading: true, error: null });
         try {
-          const response = await fetch(`${API_URL}/tasks`, {
+          const { organization_id, ...bodyData } = data;
+          const params = organization_id ? `?organization_id=${organization_id}` : "";
+          const response = await fetch(`${API_URL}/tasks${params}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(data),
+            body: JSON.stringify(bodyData),
           });
           if (!response.ok) throw new Error("Failed to create task");
           const result = await response.json();

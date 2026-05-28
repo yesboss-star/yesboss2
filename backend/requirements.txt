@@ -32,3 +32,4 @@ python-socketio[asyncio]
 aiohttp
 firebase-admin
 google-generativeai
+reportlab

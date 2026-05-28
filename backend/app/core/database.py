@@ -56,7 +56,7 @@ def connect_mongodb():
 
 def _ensure_collections(db: Database):
     collections = db.list_collection_names()
-    required = ["users", "organizations", "employees", "goals", "tasks", "workflows", "task_outcomes", "bottlenecks", "learning_patterns", "documents", "conversations", "uploads"]
+    required = ["users", "organizations", "employees", "goals", "tasks", "workflows", "task_outcomes", "bottlenecks", "learning_patterns", "documents", "conversations", "uploads", "org_chart_members", "reports"]
     for col in required:
         if col not in collections:
             db.create_collection(col)

@@ -10,6 +10,7 @@ import { Loader2, Sparkles, TrendingUp, Users, CheckSquare, DollarSign, Plus, Fl
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Badge, Button } from "@/components/ui";
 import GoalModal from "@/components/GoalModal";
+import DashboardView from "@/components/owners/DashboardView";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -93,13 +94,27 @@ export default function DashboardPage() {
           const org = await fetchOrganizationByEmail(email);
           if (!org) {
             if (role === "owner") {
+              const storedUser = localStorage.getItem("yesboss_user");
+              if (storedUser) {
+                const userData = JSON.parse(storedUser);
+                if (userData.organization_completed) {
+                  return;
+                }
+              }
               router.push("/onboarding/owner");
             } else if (role === "employee") {
               router.push("/onboarding/employee");
             }
           }
         } else {
-          if (role === "owner") router.push("/onboarding/owner");
+          if (role === "owner") {
+            const storedUser = localStorage.getItem("yesboss_user");
+            if (storedUser) {
+              const userData = JSON.parse(storedUser);
+              if (userData.organization_completed) return;
+            }
+            router.push("/onboarding/owner");
+          }
           else if (role === "employee") router.push("/onboarding/employee");
         }
       }
@@ -206,6 +221,9 @@ export default function DashboardPage() {
 
   return (
     <DashboardLayout>
+      {role === "owner" ? (
+        <DashboardView />
+      ) : (
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
@@ -213,21 +231,12 @@ export default function DashboardPage() {
               Welcome back, {(user as any)?.user_metadata?.full_name || user?.email?.split("@")[0]}
             </h1>
             <p className="text-text-muted mt-1">
-              {role === "employee" 
-                ? `Here's your agenda for ${organization?.name || "your organization"} today.`
-                : `Here's what's happening with ${organization?.name || "your organization"} today.`
-              }
+              Here's your agenda for {organization?.name || "your organization"} today.
             </p>
           </div>
-          {role === "owner" && (
-            <Button onClick={() => setShowGoalModal(true)} className="flex items-center gap-2 cursor-pointer">
-              <Plus className="w-4 h-4" />
-              New Goal
-            </Button>
-          )}
         </div>
 
-        {role === "owner" && (
+        {role === "employee" && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {[
               { icon: TrendingUp, label: "Revenue", value: "$47.2K", change: "+12.5%", badge: "success" as const },
@@ -387,47 +396,7 @@ export default function DashboardPage() {
           </Card>
         )}
 
-        {role === "owner" && goals.length > 0 && (
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Flag className="w-5 h-5 text-primary" />
-                  <CardTitle>Active Goals</CardTitle>
-                </div>
-                <Button variant="ghost" size="sm" className="cursor-pointer">
-                  View All <ArrowRight className="w-4 h-4 ml-1" />
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {goals.slice(0, 3).map((goal) => (
-                  <div key={goal.id} className="flex items-center gap-4 p-4 rounded-xl bg-surface hover:bg-surface-light transition-colors">
-                    <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                      <Flag className="w-5 h-5 text-primary" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{goal.title}</p>
-                      <div className="flex items-center gap-3 text-xs text-text-muted mt-1">
-                        {goal.department && <span className="capitalize">{goal.department}</span>}
-                        {goal.timeline && (
-                          <span className="flex items-center gap-1">
-                            <Calendar className="w-3 h-3" />
-                            {getTimelineLabel(goal.timeline)}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <span className={`px-2.5 py-1 rounded-full text-xs font-medium border ${getPriorityColor(goal.priority)}`}>
-                      {goal.priority}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
+
 
         <Card>
           <CardHeader>
@@ -484,6 +453,7 @@ export default function DashboardPage() {
           </Card>
         )}
       </div>
+      )}
 
       <GoalModal isOpen={showGoalModal} onClose={() => setShowGoalModal(false)} />
     </DashboardLayout>
