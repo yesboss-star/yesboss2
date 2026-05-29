@@ -115,9 +115,10 @@ export const useGoalStore = create<GoalState>()(
           });
           if (!response.ok) throw new Error("Failed to update goal");
           const result = await response.json();
+          const updatedGoal = { ...result.goal, id: result.goal._id || result.goal.id };
           set((state) => ({
-            goals: state.goals.map((g) => (g.id === goalId ? result.goal : g)),
-            currentGoal: state.currentGoal?.id === goalId ? result.goal : state.currentGoal,
+            goals: state.goals.map((g) => (g.id === goalId ? updatedGoal : g)),
+            currentGoal: state.currentGoal?.id === goalId ? updatedGoal : state.currentGoal,
             loading: false,
           }));
         } catch (error: any) {

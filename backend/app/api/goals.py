@@ -1,10 +1,12 @@
 import logging
+import asyncio
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
 from ..core.database import get_database
 from ..dependencies.auth import get_current_user, get_current_user_optional
+from ..api.websocket import manager as ws_manager
 from bson import ObjectId
 
 router = APIRouter()
@@ -71,12 +73,25 @@ async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user_
     
     user_id = getattr(current_user, 'id', None) if current_user else None
     
+    department = goal.department
+    if not department:
+        try:
+            from ..core.intelligence import analyze_goal_department
+            department = await analyze_goal_department(
+                title=goal.title,
+                description=goal.description or "",
+                industry=""
+            )
+        except Exception as e:
+            logger = logging.getLogger("yesboss.goals")
+            logger.warning(f"AI department analysis failed, leaving unassigned: {e}")
+    
     goal_doc = {
         "title": goal.title,
         "description": goal.description,
         "priority": goal.priority,
         "timeline": goal.timeline,
-        "department": goal.department,
+        "department": department,
         "assignee_id": goal.assignee_id,
         "assignee_name": goal.assignee_name,
         "reviewer_id": goal.reviewer_id,
@@ -90,6 +105,11 @@ async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user_
     
     result = db.goals.insert_one(goal_doc)
     goal_doc["_id"] = str(result.inserted_id)
+    
+    asyncio.create_task(ws_manager.broadcast_to_organization(
+        {"type": "goal_created", "data": goal_doc},
+        org_id
+    ))
     
     return {"goal": goal_doc}
 
@@ -234,7 +254,10 @@ async def generate_tasks_from_goal(request: TaskGenerate, current_user = Depends
         ]
     
     created_tasks = []
-    for task_data in tasks_data:
+    for i, task_data in enumerate(tasks_data):
+        assignee_id = goal.get("assignee_id")
+        reviewer_id = goal.get("reviewer_id")
+        assign_person = assignee_id if i % 2 == 0 else reviewer_id
         task_doc = {
             "title": task_data.get("title", "Untitled Task"),
             "description": task_data.get("description", ""),
@@ -242,12 +265,25 @@ async def generate_tasks_from_goal(request: TaskGenerate, current_user = Depends
             "status": "pending",
             "goal_id": request.goal_id,
             "organization_id": goal.get("organization_id"),
-            "assignee_id": goal.get("assignee_id"),
+            "assignee_id": assign_person or assignee_id,
+            "reviewers": [reviewer_id] if reviewer_id else [],
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow(),
         }
         result = db.tasks.insert_one(task_doc)
         task_doc["_id"] = str(result.inserted_id)
         created_tasks.append(task_doc)
+        
+        org_id = goal.get("organization_id")
+        if org_id:
+            asyncio.create_task(ws_manager.broadcast_to_organization(
+                {"type": "task_created", "data": task_doc},
+                org_id
+            ))
+            if assign_person:
+                asyncio.create_task(ws_manager.send_personal_message(
+                    {"type": "task_assigned", "data": task_doc},
+                    assign_person
+                ))
     
     return {"tasks": created_tasks}

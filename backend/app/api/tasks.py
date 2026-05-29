@@ -1,9 +1,11 @@
+import asyncio
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
 from ..core.database import get_database
 from ..dependencies.auth import get_current_user_optional
+from ..api.websocket import manager as ws_manager
 from bson import ObjectId
 
 router = APIRouter()
@@ -73,6 +75,16 @@ async def create_task(task: TaskCreate, organization_id: Optional[str] = None, c
     
     result = db.tasks.insert_one(task_doc)
     task_doc["_id"] = str(result.inserted_id)
+    
+    asyncio.create_task(ws_manager.broadcast_to_organization(
+        {"type": "task_created", "data": task_doc},
+        org_id
+    ))
+    if task.assignee_id:
+        asyncio.create_task(ws_manager.send_personal_message(
+            {"type": "task_assigned", "data": task_doc},
+            task.assignee_id
+        ))
     
     return {"task": task_doc}
 
@@ -151,6 +163,13 @@ async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get
     
     task_obj = db.tasks.find_one({"_id": ObjectId(task_id)})
     task_obj["_id"] = str(task_obj["_id"])
+    
+    org_id = task_obj.get("organization_id")
+    if org_id:
+        asyncio.create_task(ws_manager.broadcast_to_organization(
+            {"type": "task_updated", "data": task_obj},
+            org_id
+        ))
     
     return {"task": task_obj}
 

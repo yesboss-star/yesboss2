@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useOrgChartStore, OrgMember } from "@/stores/orgChartStore";
 import { useTaskStore } from "@/stores/taskStore";
 import { useGoalStore } from "@/stores/goalStore";
@@ -23,6 +23,8 @@ import {
   FileText,
   X,
   UserCheck,
+  Building2,
+  ChevronDown,
 } from "lucide-react";
 import {
   Card,
@@ -37,40 +39,42 @@ import {
   Modal,
 } from "@/components/ui";
 
+function getRoleColor(role: string) {
+  switch (role.toLowerCase()) {
+    case "ceo":
+    case "founder":
+    case "owner":
+      return "text-purple-400 bg-purple-500/10 border-purple-500/20";
+    case "cto":
+    case "cfo":
+    case "coo":
+    case "cxo":
+      return "text-primary bg-primary/10 border-primary/20";
+    case "vp":
+    case "director":
+    case "head":
+      return "text-amber-400 bg-amber-500/10 border-amber-500/20";
+    case "manager":
+    case "lead":
+      return "text-emerald-400 bg-emerald-500/10 border-emerald-500/20";
+    default:
+      return "text-gray-400 bg-gray-500/10 border-gray-500/20";
+  }
+}
+
 function TreeNode({
   node,
   onAdd,
   onDelete,
+  onSelect,
 }: {
   node: OrgMember;
   onAdd: (parentEmail: string) => void;
   onDelete: (memberId: string) => void;
+  onSelect: (member: OrgMember) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const hasChildren = node.children && node.children.length > 0;
-
-  const getRoleColor = (role: string) => {
-    switch (role.toLowerCase()) {
-      case "ceo":
-      case "founder":
-      case "owner":
-        return "text-purple-400 bg-purple-500/10 border-purple-500/20";
-      case "cto":
-      case "cfo":
-      case "coo":
-      case "cxo":
-        return "text-primary bg-primary/10 border-primary/20";
-      case "vp":
-      case "director":
-      case "head":
-        return "text-amber-400 bg-amber-500/10 border-amber-500/20";
-      case "manager":
-      case "lead":
-        return "text-emerald-400 bg-emerald-500/10 border-emerald-500/20";
-      default:
-        return "text-gray-400 bg-gray-500/10 border-gray-500/20";
-    }
-  };
 
   const isRoot =
     node.role?.toLowerCase() === "ceo" ||
@@ -79,89 +83,86 @@ function TreeNode({
 
   return (
     <div className="flex items-start gap-0">
-      {/* Node Card */}
       <div className="relative group flex-shrink-0">
         <div
-          className={`relative w-44 p-2.5 rounded-lg border transition-all duration-200 ${
+          onClick={() => onSelect(node)}
+          className={`relative w-52 p-3 rounded-xl border transition-all duration-200 cursor-pointer hover:shadow-lg hover:border-primary/30 ${
             isRoot
-              ? "bg-gradient-to-br from-primary/10 to-purple-500/10 border-primary/30"
-              : "bg-surface/80 border-border/50 hover:border-primary/30"
+              ? "bg-gradient-to-br from-primary/10 to-purple-500/10 border-primary/30 shadow-md"
+              : "bg-surface/80 border-border/50 hover:bg-surface"
           }`}
         >
-          {/* Role + Department at top */}
-          <div className="flex items-center gap-1 flex-wrap mb-1.5">
-            <span className={`text-[9px] px-1.5 py-0.5 rounded-full border font-medium ${getRoleColor(node.role)}`}>
+          {/* Role + Department badges */}
+          <div className="flex items-center gap-1.5 flex-wrap mb-2.5">
+            <span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${getRoleColor(node.role)}`}>
               {node.role}
             </span>
             {node.department && (
-              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-surface border border-border/50 text-text-muted">
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-surface border border-border/50 text-text-muted">
                 {node.department}
               </span>
             )}
           </div>
           {/* Avatar + Name + Email */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <div
-              className={`w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ${
+              className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm ${
                 isRoot
                   ? "bg-gradient-to-br from-primary to-purple-500"
                   : "bg-gradient-to-br from-primary/30 to-purple-500/30"
               }`}
             >
-              <span className="text-xs font-bold text-white">{node.full_name?.charAt(0) || "?"}</span>
+              <span className="text-sm font-bold text-white">{node.full_name?.charAt(0) || "?"}</span>
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold truncate">{node.full_name}</p>
-              <p className="text-[9px] text-text-muted truncate">{node.email}</p>
+              <p className="text-sm font-semibold truncate">{node.full_name}</p>
+              <p className="text-[10px] text-text-muted truncate">{node.email}</p>
             </div>
           </div>
-          {/* Hover actions: add / remove */}
+          {/* Hover actions */}
           <div className="absolute -top-1.5 -right-1.5 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
               onClick={(e) => { e.stopPropagation(); onAdd(node.email); }}
-              className="w-4 h-4 rounded-full bg-primary text-white flex items-center justify-center hover:bg-primary/80 transition-all hover:scale-110 cursor-pointer shadow-sm"
+              className="w-5 h-5 rounded-full bg-primary text-white flex items-center justify-center hover:bg-primary/80 transition-all hover:scale-110 cursor-pointer shadow-sm"
               title="Add direct report"
             >
-              <Plus className="w-2.5 h-2.5" />
+              <Plus className="w-3 h-3" />
             </button>
             <button
               onClick={(e) => { e.stopPropagation(); onDelete(node.id); }}
-              className="w-4 h-4 rounded-full bg-rose-500 text-white flex items-center justify-center hover:bg-rose-600 transition-all hover:scale-110 cursor-pointer shadow-sm"
+              className="w-5 h-5 rounded-full bg-rose-500 text-white flex items-center justify-center hover:bg-rose-600 transition-all hover:scale-110 cursor-pointer shadow-sm"
               title="Remove member"
             >
-              <X className="w-2.5 h-2.5" />
+              <X className="w-3 h-3" />
             </button>
           </div>
-          {/* Expand/Collapse toggle (between card and children line) */}
+          {/* Expand/Collapse */}
           {hasChildren && (
             <button
-              onClick={() => setExpanded(!expanded)}
-              className="absolute -right-1.5 top-1/2 -translate-y-1/2 translate-x-full w-4 h-4 rounded-full bg-surface border border-border flex items-center justify-center hover:bg-primary/10 hover:border-primary/30 transition-all z-10 cursor-pointer shadow-sm"
+              onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+              className="absolute -right-2 top-1/2 -translate-y-1/2 translate-x-full w-5 h-5 rounded-full bg-surface border border-border flex items-center justify-center hover:bg-primary/10 hover:border-primary/30 transition-all z-10 cursor-pointer shadow-sm"
             >
               {expanded ? (
-                <Minus className="w-2.5 h-2.5 text-text-muted" />
+                <Minus className="w-3 h-3 text-text-muted" />
               ) : (
-                <Plus className="w-2.5 h-2.5 text-primary" />
+                <Plus className="w-3 h-3 text-primary" />
               )}
             </button>
           )}
         </div>
       </div>
 
-      {/* Children branch to the right */}
+      {/* Children */}
       {hasChildren && expanded && (
-        <div className="flex items-stretch ml-0.5">
-          {/* Horizontal connector from card edge to vertical bar */}
-          <div className="w-3 flex items-center">
-            <div className="h-px bg-border/50 w-full" />
+        <div className="flex items-stretch ml-1">
+          <div className="w-4 flex items-center">
+            <div className="h-0.5 bg-border/60 w-full" />
           </div>
-          {/* Vertical bar + children */}
-          <div className="border-l border-border/50 pl-3 flex flex-col gap-1.5">
+          <div className="border-l-2 border-border/60 pl-4 flex flex-col gap-2">
             {node.children!.map((child, i) => (
               <div key={child.id || i} className="relative">
-                {/* Horizontal connector from vertical bar to child card */}
-                <div className="absolute left-0 top-1/2 -translate-x-full w-3 h-px bg-border/50" />
-                <TreeNode node={child} onAdd={onAdd} onDelete={onDelete} />
+                <div className="absolute left-0 top-1/2 -translate-x-full w-4 h-0.5 bg-border/60" />
+                <TreeNode node={child} onAdd={onAdd} onDelete={onDelete} onSelect={onSelect} />
               </div>
             ))}
           </div>
@@ -191,6 +192,8 @@ export default function OrchestrationView() {
     status: string;
   } | null>(null);
 
+  const [selectedMember, setSelectedMember] = useState<OrgMember | null>(null);
+
   const [uploadResult, setUploadResult] = useState<{
     inserted: number;
     errors: string[];
@@ -211,7 +214,24 @@ export default function OrchestrationView() {
 
   const [assignForm, setAssignForm] = useState({
     assignee_email: "",
+    assignee_name: "",
     message: "",
+  });
+
+  const [assigneeQuery, setAssigneeQuery] = useState("");
+  const [showAssigneeSuggestions, setShowAssigneeSuggestions] = useState(false);
+  const assigneeRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (assigneeRef.current && !assigneeRef.current.contains(e.target as Node)) setShowAssigneeSuggestions(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+
+  const assigneeSelected = members.find((m) => m.email === assignForm.assignee_email);
+  const filteredAssignees = members.filter((m) => {
+    const q = assigneeQuery.toLowerCase();
+    return m.full_name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q);
   });
 
   const [addMethod, setAddMethod] = useState<"upload" | "manual" | "assign" | null>(null);
@@ -349,7 +369,7 @@ export default function OrchestrationView() {
       });
 
       setShowAssignModal(false);
-      setAssignForm({ assignee_email: "", message: "" });
+      setAssignForm({ assignee_email: "", assignee_name: "", message: "" });
     } catch (e) {
       console.error("Failed to assign org chart task:", e);
     }
@@ -508,12 +528,13 @@ export default function OrchestrationView() {
           <CardContent>
             <div className="overflow-x-auto pb-4">
               <div className="flex gap-6 min-w-max">
-                {tree.map((rootNode, i) => (
+                  {tree.map((rootNode, i) => (
                   <TreeNode
                     key={rootNode.id || i}
                     node={rootNode}
                     onAdd={handleAddChild}
                     onDelete={handleDeleteMember}
+                    onSelect={setSelectedMember}
                   />
                 ))}
               </div>
@@ -803,19 +824,39 @@ export default function OrchestrationView() {
             </div>
           )}
 
-          <div>
+          <div ref={assigneeRef} className="relative">
             <label className="text-xs text-text-muted mb-1 block">
-              Assignee Email
+              Assignee
             </label>
-            <Input
-              type="email"
-              value={assignForm.assignee_email}
-              onChange={(e) =>
-                setAssignForm({ ...assignForm, assignee_email: e.target.value })
-              }
-              placeholder="colleague@company.com"
-              icon={<Mail className="w-4 h-4 text-text-muted" />}
-            />
+            <div className="relative">
+              <input
+                type="text"
+                value={showAssigneeSuggestions ? assigneeQuery : (assigneeSelected?.full_name || assignForm.assignee_name || "")}
+                onChange={(e) => { setAssigneeQuery(e.target.value); setShowAssigneeSuggestions(true); }}
+                onFocus={() => { setAssigneeQuery(assigneeSelected?.full_name || assignForm.assignee_name || ""); setShowAssigneeSuggestions(true); }}
+                placeholder="Search name or email..."
+                className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm focus:border-primary focus:outline-none pr-8"
+              />
+              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted pointer-events-none" />
+            </div>
+            {showAssigneeSuggestions && (
+              <div className="absolute z-50 mt-1 left-0 right-0 bg-background border border-border rounded-xl shadow-2xl max-h-48 overflow-y-auto">
+                {filteredAssignees.slice(0, 10).map((m) => (
+                  <button key={m.email} type="button"
+                    onClick={() => { setAssignForm({ ...assignForm, assignee_email: m.email, assignee_name: m.full_name }); setShowAssigneeSuggestions(false); setAssigneeQuery(m.full_name); }}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-surface flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-[9px] font-medium text-primary flex-shrink-0">{m.full_name.charAt(0)}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-medium">{m.full_name}</p>
+                      <p className="text-[10px] text-text-muted truncate">{m.email} &middot; {m.department || m.role}</p>
+                    </div>
+                  </button>
+                ))}
+                {filteredAssignees.length === 0 && assigneeQuery.trim() && (
+                  <div className="p-3 text-xs text-text-muted">No team members found</div>
+                )}
+              </div>
+            )}
           </div>
           <div>
             <label className="text-xs text-text-muted mb-1 block">
@@ -852,6 +893,79 @@ export default function OrchestrationView() {
           </div>
         </div>
       </Modal>
+
+      {selectedMember && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+            onClick={() => setSelectedMember(null)}
+          />
+          <div className="fixed right-0 top-0 h-full w-96 z-50 bg-background border-l border-border shadow-2xl animate-slide-in-from-right overflow-y-auto">
+            <div className="p-6 space-y-5">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-primary/30 to-purple-500/30 flex items-center justify-center shadow-sm">
+                    <span className="text-2xl font-bold text-white">{selectedMember.full_name?.charAt(0) || "?"}</span>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold">{selectedMember.full_name}</h3>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${getRoleColor(selectedMember.role)}`}>
+                      {selectedMember.role}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setSelectedMember(null)}
+                  className="p-1.5 rounded-lg hover:bg-surface text-text-muted hover:text-foreground transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {selectedMember.email && (
+                  <div className="flex items-center gap-3 p-3 rounded-xl bg-surface border border-border/50">
+                    <Mail className="w-4 h-4 text-text-muted flex-shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-[10px] text-text-muted">Email</p>
+                      <a href={`mailto:${selectedMember.email}`} className="text-sm text-primary hover:underline font-medium break-all">
+                        {selectedMember.email}
+                      </a>
+                    </div>
+                  </div>
+                )}
+                {selectedMember.department && (
+                  <div className="flex items-center gap-3 p-3 rounded-xl bg-surface border border-border/50">
+                    <Building2 className="w-4 h-4 text-text-muted flex-shrink-0" />
+                    <div>
+                      <p className="text-[10px] text-text-muted">Department</p>
+                      <p className="text-sm font-medium">{selectedMember.department}</p>
+                    </div>
+                  </div>
+                )}
+                {selectedMember.title && (
+                  <div className="flex items-center gap-3 p-3 rounded-xl bg-surface border border-border/50">
+                    <UserCheck className="w-4 h-4 text-text-muted flex-shrink-0" />
+                    <div>
+                      <p className="text-[10px] text-text-muted">Title</p>
+                      <p className="text-sm font-medium">{selectedMember.title}</p>
+                    </div>
+                  </div>
+                )}
+                {selectedMember.manager_email && (
+                  <div className="flex items-center gap-3 p-3 rounded-xl bg-surface border border-border/50">
+                    <ArrowRight className="w-4 h-4 text-text-muted flex-shrink-0" />
+                    <div>
+                      <p className="text-[10px] text-text-muted">Reports To</p>
+                      <p className="text-sm font-medium">{selectedMember.manager_email}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
