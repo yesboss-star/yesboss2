@@ -31,7 +31,7 @@ interface ChatState {
   setStreaming: (streaming: boolean) => void;
   setError: (error: string | null) => void;
   fetchExperts: () => Promise<void>;
-  sendMessage: (message: string, history?: ChatMessage[]) => Promise<ChatMessage>;
+  sendMessage: (message: string, history?: ChatMessage[], organization_id?: string) => Promise<ChatMessage>;
   clearChat: () => void;
   loadHistory: () => Promise<void>;
 }
@@ -62,7 +62,7 @@ export const useChatStore = create<ChatState>()(
         }
       },
 
-      sendMessage: async (message, history) => {
+      sendMessage: async (message, history, organization_id) => {
         const userMessage: ChatMessage = {
           id: Date.now().toString(),
           role: "user",
@@ -83,6 +83,7 @@ export const useChatStore = create<ChatState>()(
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               message,
+              organization_id,
               history: history?.map(m => ({ role: m.role, content: m.content })),
             }),
           });

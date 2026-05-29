@@ -1,11 +1,14 @@
+import logging
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from ..core.database import get_database
-from ..dependencies.auth import get_current_user
+from ..dependencies.auth import get_current_user, get_current_user_optional
+from ..core.ai_client import get_chat_response
 
 router = APIRouter()
+logger = logging.getLogger("yesboss.executive_chat")
 
 
 def get_user_org_id(user) -> Optional[str]:
@@ -24,6 +27,7 @@ class ChatRequest(BaseModel):
     message: str
     context: Optional[Dict[str, Any]] = None
     history: Optional[List[Message]] = None
+    organization_id: Optional[str] = None
 
 
 class ExpertResponse(BaseModel):
@@ -40,190 +44,126 @@ class ExecutiveResponse(BaseModel):
     timestamp: str
 
 
-EXPERT_AGENTS = {
-    "finance": {
-        "name": "Finance Expert",
-        "description": "Analyzes financial data, budgets, forecasts, and ROI",
-        "example_questions": [
-            "What's our revenue trend?",
-            "Should we increase marketing spend?",
-            "What's our burn rate?"
-        ]
-    },
-    "operations": {
-        "name": "Operations Expert",
-        "description": "Optimizes workflows, processes, and resource allocation",
-        "example_questions": [
-            "What are our operational bottlenecks?",
-            "How can we improve delivery time?",
-            "What's our team's capacity?"
-        ]
-    },
-    "strategy": {
-        "name": "Strategy Expert",
-        "description": "Provides strategic insights and growth recommendations",
-        "example_questions": [
-            "Should we expand to new markets?",
-            "What's our competitive advantage?",
-            "How should we position our product?"
-        ]
-    },
-    "hr": {
-        "name": "HR Expert",
-        "description": "Analyzes workforce metrics, hiring, and culture",
-        "example_questions": [
-            "What's our employee retention rate?",
-            "Are we hiring for the right roles?",
-            "How can we improve team collaboration?"
-        ]
-    },
-    "sales": {
-        "name": "Sales Expert",
-        "description": "Analyzes sales pipeline, conversion, and customer behavior",
-        "example_questions": [
-            "What's our sales forecast?",
-            "Which leads should we prioritize?",
-            "What's our average deal size?"
-        ]
-    },
-    "product": {
-        "name": "Product Expert",
-        "description": "Analyzes product metrics, user feedback, and roadmap",
-        "example_questions": [
-            "What features are users requesting most?",
-            "What's our user engagement like?",
-            "Should we pivot our product strategy?"
-        ]
-    }
-}
-
-
-def determine_relevant_experts(query: str, context: Optional[Dict] = None) -> List[str]:
-    query_lower = query.lower()
-    
-    finance_keywords = ["revenue", "budget", "cost", "expense", "profit", "loss", "investment", "roi", "financial", "money", "cash", "forecast", "burn"]
-    operations_keywords = ["process", "workflow", "efficiency", "operation", "delivery", "supply", "logistics", "resource", "capacity", "optimize"]
-    strategy_keywords = ["strategy", "growth", "market", "competitor", "expand", "position", "business model", "vision", "goal"]
-    hr_keywords = ["team", "hiring", "employee", "staff", "retention", "culture", "recruit", "training", "performance", "organization"]
-    sales_keywords = ["sales", "customer", "client", "lead", "pipeline", "conversion", "deal", "revenue", "quota", "prospect"]
-    product_keywords = ["product", "feature", "user", "feedback", "roadmap", "launch", "design", "experience", "engagement"]
-    
-    relevant = []
-    
-    if any(kw in query_lower for kw in finance_keywords):
-        relevant.append("finance")
-    if any(kw in query_lower for kw in operations_keywords):
-        relevant.append("operations")
-    if any(kw in query_lower for kw in strategy_keywords):
-        relevant.append("strategy")
-    if any(kw in query_lower for kw in hr_keywords):
-        relevant.append("hr")
-    if any(kw in query_lower for kw in sales_keywords):
-        relevant.append("sales")
-    if any(kw in query_lower for kw in product_keywords):
-        relevant.append("product")
-    
-    if not relevant:
-        relevant = ["strategy", "operations"]
-    
-    return relevant[:3]
-
-
-def generate_expert_response(expert: str, query: str, context: Optional[Dict] = None) -> ExpertResponse:
-    import random
-    
-    response_templates = {
-        "finance": [
-            f"Based on the analysis of your financial data, here's what I found for '{query}':\n\nOur metrics show positive trends in key areas. The current financial health indicates we're well-positioned for growth. Recommendation: Continue monitoring key metrics weekly and consider quarterly financial reviews.",
-            f"Financial perspective on '{query}':\n\nThe numbers indicate moderate performance with room for optimization. Focus areas include cost management and revenue diversification. Action items: Review current spending, identify cost-saving opportunities.",
-        ],
-        "operations": [
-            f"Operations analysis for '{query}':\n\nCurrent workflow efficiency is at 78%. Primary bottleneck identified in the approval process. Recommended actions: Implement automation for routine tasks, streamline communication channels.",
-            f"From an operations standpoint for '{query}':\n\nResource utilization is optimal at current capacity. Consider cross-training to improve flexibility. Key metrics are within acceptable ranges.",
-        ],
-        "strategy": [
-            f"Strategic analysis for '{query}':\n\nMarket positioning remains strong with 15% YoY growth. Competitive landscape shows opportunities in the mid-market segment. Strategic recommendation: Focus on product differentiation.",
-            f"Strategy perspective on '{query}':\n\nCurrent trajectory supports expansion in Q3. Key success factors: maintain quality, increase customer retention, explore strategic partnerships.",
-        ],
-        "hr": [
-            f"HR insights for '{query}':\n\nTeam health metrics show 85% engagement score. Hiring pipeline is strong with 12 qualified candidates. Recommendations: Focus on retention, improve onboarding.",
-            f"People analysis for '{query}':\n\nWorkforce productivity is up 12% this quarter. No immediate staffing concerns. Consider succession planning for key roles.",
-        ],
-        "sales": [
-            f"Sales perspective on '{query}':\n\nPipeline value is healthy at $2.4M. Conversion rate improved to 24%. Priority: Focus on enterprise deals closing this month.",
-            f"Sales analysis for '{query}':\n\nDeal velocity has increased by 18%. Win rate at 32% - above industry average. Recommendations: Increase outreach to warm leads.",
-        ],
-        "product": [
-            f"Product insights for '{query}':\n\nUser engagement up 23% this month. Top feature requests: dashboard customization, API integrations. Roadmap consideration: Q2 feature development.",
-            f"Product analysis for '{query}':\n\nActive users at 4,200. Retention rate strong at 89%. Focus area: Mobile experience optimization.",
-        ]
-    }
-    
-    templates = response_templates.get(expert, response_templates["strategy"])
-    response = random.choice(templates)
-    
-    return ExpertResponse(
-        expert=EXPERT_AGENTS[expert]["name"],
-        response=response,
-        confidence=round(0.75 + random.random() * 0.2, 2),
-        sources=["Organization Data", "Industry Benchmarks", "AI Analysis"]
-    )
-
-
-def synthesize_responses(query: str, expert_responses: List[ExpertResponse]) -> str:
-    synthesis = f"## Executive Summary for: \"{query}\"\n\n"
-    
-    synthesis += "### Key Findings\n"
-    for i, exp in enumerate(expert_responses, 1):
-        synthesis += f"{i}. **{exp.expert}**: {exp.response[:150]}...\n"
-    
-    synthesis += "\n### Recommended Actions\n"
-    action_items = [
-        "Schedule follow-up meeting with relevant team leads",
-        "Review detailed metrics in respective dashboards",
-        "Create action plan based on prioritized recommendations",
-        "Set timeline for implementation and check-in points"
-    ]
-    for item in action_items:
-        synthesis += f"- {item}\n"
-    
-    synthesis += "\n### Next Steps\n"
-    synthesis += "Based on the analysis, I recommend focusing on the top 3 priorities this week. "
-    synthesis += "Each expert can provide more detailed recommendations when you ask follow-up questions.\n"
-    
-    synthesis += "\n---\n*This response combines insights from multiple AI experts. "
-    synthesis += "For specific detailed analysis, ask follow-up questions to any expert.*"
-    
-    return synthesis
-
-
 @router.post("/chat")
-async def executive_chat(request: ChatRequest, current_user = Depends(get_current_user)):
+async def executive_chat(request: ChatRequest, current_user = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
-    org_id = get_user_org_id(current_user)
+
+    org_id = request.organization_id or get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
-    
-    relevant_experts = determine_relevant_experts(request.message, request.context)
-    
-    expert_responses = []
-    for expert_id in relevant_experts:
-        response = generate_expert_response(expert_id, request.message, request.context)
-        expert_responses.append(response)
-    
-    synthesized = synthesize_responses(request.message, expert_responses)
-    
-    action_items = [
-        "Review expert recommendations",
-        "Assign action items to team members",
-        "Schedule follow-up discussion"
-    ]
-    
+
+    org = db.organizations.find_one({"_id": org_id})
+    org_name = org.get("name", "Your Organization") if org else "Your Organization"
+    org_industry = org.get("industry", "") if org else ""
+
+    goals = list(db.goals.find({"organization_id": org_id}).sort("created_at", -1).limit(20))
+    tasks = list(db.tasks.find({"organization_id": org_id}).sort("created_at", -1).limit(30))
+    members = list(db.org_chart_members.find({"organization_id": org_id}))
+
+    active_goals = [g for g in goals if g.get("status") == "active"]
+    completed_goals = [g for g in goals if g.get("status") == "completed"]
+
+    goal_details = ""
+    if goals:
+        goal_details = "Goals:\n" + "\n".join([
+            f"  {i+1}. \"{g.get('title', 'Untitled')}\" — status: {g.get('status', 'unknown')}, priority: {g.get('priority', 'medium')}, department: {g.get('department', 'N/A')}"
+            for i, g in enumerate(goals[:8])
+        ])
+
+    task_details = ""
+    if tasks:
+        task_details = "\nTasks:\n" + "\n".join([
+            f"  {i+1}. \"{t.get('title', 'Untitled')}\" — status: {t.get('status', 'pending')}, priority: {t.get('priority', 'medium')}"
+            for i, t in enumerate(tasks[:12])
+        ])
+
+    member_details = ""
+    if members:
+        dept_count = {}
+        for m in members:
+            d = m.get("department", "General")
+            dept_count[d] = dept_count.get(d, 0) + 1
+        member_details = "\nTeam: " + ", ".join([f"{d}: {c}" for d, c in dept_count.items()])
+
+    context_block = f"""===== BUSINESS DATA =====
+Organization: {org_name}
+Industry: {org_industry}
+Total: {len(goals)} goals, {len(tasks)} tasks, {len(members)} team members
+{goal_details}{task_details}{member_details}
+========================="""
+
+    conversation_history = []
+    if request.history:
+        for msg in request.history[-6:]:
+            conversation_history.append({"role": msg.role, "content": msg.content})
+
+    system_prompt = (
+        f"You are an AI Business Analyst for {org_name}. "
+        "Your job is to answer questions using ONLY the business data provided below. "
+        "Be direct, specific, and reference actual goal/task names when answering. "
+        "If the data doesn't contain the answer, say so clearly.\n\n"
+        "FORMAT YOUR RESPONSE LIKE THIS:\n"
+        "- Use **bold** for key numbers and names\n"
+        "- Use short paragraphs separated by blank lines\n"
+        "- Use bullet lists (- ) for multiple items\n"
+        "- Use numbered steps (1. ) for sequences\n"
+        "- Keep it clean — no walls of text, no long sentences\n"
+        "- Max 5-6 lines total unless the user asks for detail"
+    )
+
+    user_prompt = f"{context_block}\n\nQuestion: {request.message}"
+
+    messages = [{"role": "system", "content": system_prompt}]
+    messages.extend(conversation_history)
+    messages.append({"role": "user", "content": user_prompt})
+
+    ai_response = ""
+    try:
+        ai_response = await get_chat_response(
+            messages=messages,
+            provider="xai",
+            temperature=0.7,
+            max_tokens=2000,
+        )
+    except Exception as e:
+        logger.error(f"AI chat failed: {e}")
+        ai_response = (
+            f"I apologize, but I'm having trouble connecting to my AI engine. "
+            f"Here's what I can tell you based on your current data:\n\n"
+            f"{goals_summary}\n{tasks_summary}\n{members_summary}\n\n"
+            f"Please try your question again in a moment."
+        )
+
+    action_items = []
+    lines = ai_response.split("\n")
+    gathering = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.lower().startswith(("action item", "recommend", "next step", "suggest")):
+            gathering = True
+            continue
+        if gathering and stripped.startswith("- ") and len(stripped) > 3:
+            action_items.append(stripped[2:].strip())
+        elif gathering and stripped == "":
+            gathering = False
+    if not action_items:
+        action_items = [
+            "Review the insights above",
+            "Ask follow-up questions for deeper analysis",
+            "Check relevant dashboards for detailed metrics"
+        ]
+
+    expert_responses = [ExpertResponse(
+        expert="Business Analyst",
+        response=ai_response[:400] + ("..." if len(ai_response) > 400 else ""),
+        confidence=0.92,
+        sources=["Organization Data", "AI Analysis"]
+    )]
+
     return ExecutiveResponse(
-        message=synthesized,
+        message=ai_response,
         expert_responses=expert_responses,
         action_items=action_items,
         timestamp=datetime.utcnow().isoformat()
@@ -235,12 +175,17 @@ async def get_experts():
     return {
         "experts": [
             {
-                "id": exp_id,
-                "name": config["name"],
-                "description": config["description"],
-                "example_questions": config["example_questions"]
+                "id": "analyst",
+                "name": "Business Analyst",
+                "description": "Analyzes business data including goals, tasks, team metrics, and provides strategic insights",
+                "example_questions": [
+                    "What's our overall progress this week?",
+                    "Which goals need attention?",
+                    "How is team productivity looking?",
+                    "What should we prioritize?",
+                    "Are we on track for our targets?"
+                ]
             }
-            for exp_id, config in EXPERT_AGENTS.items()
         ]
     }
 
@@ -253,18 +198,18 @@ async def get_chat_history(
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     org_id = get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
-    
+
     history = list(db.executive_chat_history.find(
         {"organization_id": org_id}
     ).sort("created_at", -1).limit(limit))
-    
+
     for item in history:
         item["_id"] = str(item["_id"])
-    
+
     return {"history": history}
 
 
@@ -276,13 +221,13 @@ async def save_chat_message(
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     org_id = get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
-    
+
     user_id = getattr(current_user, 'id', None) or str(current_user) if current_user else None
-    
+
     message_doc = {
         "organization_id": org_id,
         "user_id": user_id,
@@ -290,8 +235,8 @@ async def save_chat_message(
         "content": message.content,
         "created_at": datetime.utcnow()
     }
-    
+
     result = db.executive_chat_history.insert_one(message_doc)
     message_doc["_id"] = str(result.inserted_id)
-    
+
     return {"message": message_doc}

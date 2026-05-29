@@ -18,6 +18,13 @@ export interface Goal {
   status: string;
   created_at: string;
   updated_at: string;
+  progress?: number;
+  task_counts?: {
+    total: number;
+    completed: number;
+    in_progress: number;
+    pending: number;
+  };
 }
 
 export interface Task {

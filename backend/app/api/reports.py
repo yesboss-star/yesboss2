@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from ..core.database import get_database
-from ..dependencies.auth import get_current_user
+from ..dependencies.auth import get_current_user, get_current_user_optional
 from bson import ObjectId
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
@@ -24,6 +24,7 @@ def get_user_org_id(user) -> Optional[str]:
 class ReportRequest(BaseModel):
     period: str = "weekly"
     sections: Optional[List[str]] = None
+    organization_id: Optional[str] = None
 
 def build_report_content(db, org_id: str, request: ReportRequest) -> Dict[str, Any]:
     goals = list(db.goals.find({"organization_id": org_id}).sort("created_at", -1))
@@ -70,23 +71,41 @@ def build_report_content(db, org_id: str, request: ReportRequest) -> Dict[str, A
         "tasks": [{"title": t.get("title"), "status": t.get("status"), "priority": t.get("priority")} for t in tasks[:10]],
     }
 
-def generate_pdf(content: Dict[str, Any]) -> bytes:
+def generate_pdf(content: Dict[str, Any], org_name: str = "YesBoss") -> bytes:
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=72)
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        rightMargin=54, leftMargin=54,
+        topMargin=54, bottomMargin=54
+    )
     styles = getSampleStyleSheet()
 
-    title_style = ParagraphStyle('CustomTitle', parent=styles['Title'], fontSize=24, spaceAfter=20, textColor=colors.HexColor('#0ea5e9'))
-    heading_style = ParagraphStyle('CustomHeading', parent=styles['Heading2'], fontSize=14, spaceAfter=10, textColor=colors.HexColor('#1e293b'))
-    body_style = ParagraphStyle('CustomBody', parent=styles['Normal'], fontSize=10, spaceAfter=6, leading=14)
+    primary = colors.HexColor('#0ea5e9')
+    dark = colors.HexColor('#1e293b')
+    muted = colors.HexColor('#64748b')
+    border = colors.HexColor('#e2e8f0')
+    light_bg = colors.HexColor('#f8fafc')
+
+    title_style = ParagraphStyle('Title2', parent=styles['Title'], fontSize=26, spaceAfter=4, textColor=dark, leading=32)
+    subtitle_style = ParagraphStyle('Sub', parent=styles['Normal'], fontSize=10, spaceAfter=20, textColor=muted, leading=14)
+    section_style = ParagraphStyle('Section', parent=styles['Heading2'], fontSize=15, spaceAfter=8, spaceBefore=18, textColor=primary, leading=20)
+    body_style = ParagraphStyle('Body', parent=styles['Normal'], fontSize=9.5, spaceAfter=6, leading=14, textColor=dark)
+    cell_style = ParagraphStyle('Cell', parent=styles['Normal'], fontSize=8.5, leading=11, textColor=dark)
+    footer_style = ParagraphStyle('Footer', parent=styles['Normal'], fontSize=8, spaceBefore=20, textColor=muted, alignment=1)
 
     story = []
-    story.append(Paragraph("YesBoss Weekly Report", title_style))
-    story.append(Paragraph(f"Generated: {content['generated_at'][:10]}", body_style))
-    story.append(Spacer(1, 12))
+
+    story.append(Paragraph(org_name, title_style))
+    story.append(Paragraph(f"Weekly Performance Report &mdash; {content.get('period', 'weekly').capitalize()}", subtitle_style))
+    story.append(Paragraph(f"Generated: {content['generated_at'][:10]}", subtitle_style))
+    story.append(Spacer(1, 6))
+    story.append(Paragraph("<hr/>", body_style))
+    story.append(Spacer(1, 6))
 
     summary = content["summary"]
-    story.append(Paragraph("Executive Summary", heading_style))
-    summary_data = [
+
+    story.append(Paragraph("Executive Summary", section_style))
+    metrics_table = [
         ["Metric", "Value"],
         ["Active Goals", str(summary["active_goals"])],
         ["Completed Goals", str(summary["completed_goals"])],
@@ -97,53 +116,116 @@ def generate_pdf(content: Dict[str, Any]) -> bytes:
         ["Team Size", str(summary["team_size"])],
         ["Completion Rate", f"{summary['completion_rate']}%"],
     ]
-    t = Table(summary_data, colWidths=[3*inch, 2*inch])
-    t.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0ea5e9')),
+    tbl = Table(metrics_table, colWidths=[3.2*inch, 2.2*inch])
+    tbl.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), primary),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
         ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#e2e8f0')),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]),
+        ('FONTNAME', (0, 1), (0, -1), 'Helvetica'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 12),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 0.5, border),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, light_bg]),
     ]))
-    story.append(t)
-    story.append(Spacer(1, 20))
+    story.append(tbl)
+    story.append(Spacer(1, 6))
 
-    if content["goals"]:
-        story.append(Paragraph("Active Goals", heading_style))
-        goal_data = [["Title", "Status", "Priority", "Department"]]
-        for g in content["goals"]:
-            goal_data.append([g["title"][:50], g["status"], g["priority"], g.get("department", "-")])
-        t = Table(goal_data, colWidths=[2.5*inch, 1*inch, 1*inch, 1*inch])
-        t.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0ea5e9')),
+    if summary["completion_rate"] >= 50:
+        status_text = f"Overall completion rate is <b>{summary['completion_rate']}%</b> — your team is on track."
+    else:
+        status_text = f"Overall completion rate is <b>{summary['completion_rate']}%</b> — review priorities to improve."
+    story.append(Paragraph(status_text, body_style))
+    story.append(Spacer(1, 12))
+
+    goals = content.get("goals", [])
+    if goals:
+        story.append(Paragraph("Goals Overview", section_style))
+        goal_header = [Paragraph("<b>Title</b>", cell_style), Paragraph("<b>Status</b>", cell_style), Paragraph("<b>Priority</b>", cell_style), Paragraph("<b>Department</b>", cell_style)]
+        goal_rows = [goal_header]
+        for g in goals:
+            goal_rows.append([
+                Paragraph(g.get("title", "-")[:55], cell_style),
+                Paragraph(g.get("status", "-"), cell_style),
+                Paragraph(g.get("priority", "-"), cell_style),
+                Paragraph(g.get("department", "-"), cell_style),
+            ])
+        tbl = Table(goal_rows, colWidths=[3*inch, 0.9*inch, 0.8*inch, 1*inch])
+        tbl.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, -1), 8),
-            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#e2e8f0')),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('GRID', (0, 0), (-1, -1), 0.5, border),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, light_bg]),
         ]))
-        story.append(t)
-        story.append(Spacer(1, 20))
+        story.append(tbl)
+        story.append(Spacer(1, 12))
 
-    story.append(Paragraph("Department Breakdown", heading_style))
-    dept_data = [["Department", "Goals", "Tasks"]]
-    for dept, info in content["departments"].items():
-        dept_data.append([dept.capitalize(), str(info["goals"]), str(info["tasks"])])
-    t = Table(dept_data, colWidths=[2*inch, 1.5*inch, 1.5*inch])
-    t.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0ea5e9')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#e2e8f0')),
-    ]))
-    story.append(t)
-    story.append(Spacer(1, 10))
+    tasks = content.get("tasks", [])
+    if tasks:
+        story.append(Paragraph("Recent Tasks", section_style))
+        task_header = [Paragraph("<b>Title</b>", cell_style), Paragraph("<b>Status</b>", cell_style), Paragraph("<b>Priority</b>", cell_style)]
+        task_rows = [task_header]
+        for t in tasks:
+            task_rows.append([
+                Paragraph(t.get("title", "-")[:55], cell_style),
+                Paragraph(t.get("status", "-"), cell_style),
+                Paragraph(t.get("priority", "-"), cell_style),
+            ])
+        tbl = Table(task_rows, colWidths=[3.8*inch, 1*inch, 1*inch])
+        tbl.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('GRID', (0, 0), (-1, -1), 0.5, border),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, light_bg]),
+        ]))
+        story.append(tbl)
+        story.append(Spacer(1, 12))
 
-    story.append(Paragraph("This report was generated automatically by YesBoss AI.", body_style))
+    departments = content.get("departments", {})
+    if departments:
+        story.append(Paragraph("Department Breakdown", section_style))
+        dept_header = [Paragraph("<b>Department</b>", cell_style), Paragraph("<b>Goals</b>", cell_style), Paragraph("<b>Tasks</b>", cell_style)]
+        dept_rows = [dept_header]
+        for dept, info in departments.items():
+            dept_rows.append([
+                Paragraph(dept.capitalize(), cell_style),
+                Paragraph(str(info.get("goals", 0)), cell_style),
+                Paragraph(str(info.get("tasks", 0)), cell_style),
+            ])
+        tbl = Table(dept_rows, colWidths=[2.5*inch, 1.5*inch, 1.5*inch])
+        tbl.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('LEFTPADDING', (0, 0), (-1, -1), 10),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+            ('TOPPADDING', (0, 0), (-1, -1), 7),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
+            ('GRID', (0, 0), (-1, -1), 0.5, border),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, light_bg]),
+        ]))
+        story.append(tbl)
+
+    story.append(Spacer(1, 30))
+    story.append(Paragraph("<hr/>", body_style))
+    story.append(Paragraph("This report was generated automatically by YesBoss AI Business Operating System.", footer_style))
 
     doc.build(story)
     buf.seek(0)
@@ -152,15 +234,24 @@ def generate_pdf(content: Dict[str, Any]) -> bytes:
 @router.post("/generate")
 async def generate_report(
     request: ReportRequest,
-    current_user = Depends(get_current_user)
+    current_user = Depends(get_current_user_optional)
 ):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
-    org_id = get_user_org_id(current_user)
+    org_id = request.organization_id or get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
+
+    goals_count = db.goals.count_documents({"organization_id": org_id})
+    tasks_count = db.tasks.count_documents({"organization_id": org_id})
+
+    if goals_count == 0 and tasks_count == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Insufficient data to generate report. Add goals and tasks first."
+        )
 
     content = build_report_content(db, org_id, request)
 
@@ -203,7 +294,7 @@ async def list_reports(current_user = Depends(get_current_user)):
     return {"reports": reports}
 
 @router.get("/download/{report_id}")
-async def download_report(report_id: str, current_user = Depends(get_current_user)):
+async def download_report(report_id: str, current_user = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -213,8 +304,11 @@ async def download_report(report_id: str, current_user = Depends(get_current_use
         raise HTTPException(status_code=404, detail="Report not found")
 
     content = report.get("content", {})
+    org_id = report.get("organization_id")
+    org = db.organizations.find_one({"_id": org_id}) if org_id else None
+    org_name = org.get("name", "YesBoss") if org else "YesBoss"
 
-    pdf_bytes = generate_pdf(content)
+    pdf_bytes = generate_pdf(content, org_name)
 
     from fastapi.responses import Response
     return Response(

@@ -177,6 +177,23 @@ export default function OrchestrationView() {
     useOrgChartStore();
   const { organization } = useOrganizationStore();
   const { user } = useAuth();
+
+  const getOwnerRank = (): number | null => {
+    if (!organization || !user?.uid) return null;
+    if (organization.owner_id === user.uid) return 1;
+    const idx = (organization.co_owners || []).indexOf(user.uid);
+    if (idx >= 0) return idx + 2;
+    return organization.ownerRank || null;
+  };
+
+  const getOwnerLabel = (rank: number): string => {
+    if (rank === 1) return "Primary Owner";
+    if (rank === 2) return "2nd Owner";
+    if (rank === 3) return "3rd Owner";
+    return `${rank}th Owner`;
+  };
+
+  const ownerRank = getOwnerRank();
   const { createTask, fetchTasks } = useTaskStore();
   const { createGoal } = useGoalStore();
 
@@ -395,6 +412,11 @@ export default function OrchestrationView() {
           </h1>
           <p className="text-text-muted mt-1">
             Build and visualize your organizational structure
+            {ownerRank && (
+              <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20 font-medium">
+                {getOwnerLabel(ownerRank)}
+              </span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">

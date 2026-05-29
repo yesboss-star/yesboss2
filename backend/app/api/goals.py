@@ -139,9 +139,31 @@ async def list_goals(
         query["status"] = status
     
     goals = list(db.goals.find(query).sort("created_at", -1))
+
+    task_pipeline = [
+        {"$match": {"organization_id": org_id, "goal_id": {"$ne": None, "$ne": ""}}},
+        {"$group": {
+            "_id": "$goal_id",
+            "total": {"$sum": 1},
+            "completed": {"$sum": {"$cond": [{"$eq": ["$status", "completed"]}, 1, 0]}},
+            "in_progress": {"$sum": {"$cond": [{"$eq": ["$status", "in_progress"]}, 1, 0]}},
+            "pending": {"$sum": {"$cond": [{"$eq": ["$status", "pending"]}, 1, 0]}},
+        }}
+    ]
+    task_counts = list(db.tasks.aggregate(task_pipeline))
+    task_map = {str(t["_id"]): t for t in task_counts}
     
     for goal in goals:
         goal["_id"] = str(goal["_id"])
+        goal_id = goal["_id"]
+        tc = task_map.get(goal_id, {"total": 0, "completed": 0, "in_progress": 0, "pending": 0})
+        goal["progress"] = round((tc["completed"] / tc["total"] * 100) if tc["total"] > 0 else 0, 1)
+        goal["task_counts"] = {
+            "total": tc["total"],
+            "completed": tc["completed"],
+            "in_progress": tc["in_progress"],
+            "pending": tc["pending"]
+        }
     
     return {"goals": goals}
 

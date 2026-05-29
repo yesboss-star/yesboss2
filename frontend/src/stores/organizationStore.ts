@@ -15,6 +15,9 @@ interface Organization {
   micro_verticals?: string[];
   logo?: string;
   createdAt: string;
+  owner_id?: string;
+  co_owners?: string[];
+  ownerRank?: number;
 }
 
 interface SocialLinks {
@@ -90,14 +93,19 @@ export const useOrganizationStore = create<OrganizationState>()(
           
           const result = await response.json();
           const orgId = result?.organization?._id || result?.organization?.id || result?.id;
+          const orgData = result?.organization || result;
+          const coOwners = orgData.co_owners || [];
           const org = {
             id: orgId,
-            name: result?.organization?.name || data.name,
-            domain: result?.organization?.domain || data.domain,
-            industry: result?.organization?.industry || data.industry,
-            size: result?.organization?.size || data.size,
-            website_url: result?.organization?.website_url || data.website_url,
-            createdAt: result?.organization?.created_at || new Date().toISOString(),
+            name: orgData.name || data.name,
+            domain: orgData.domain || data.domain,
+            industry: orgData.industry || data.industry,
+            size: orgData.size || data.size,
+            website_url: orgData.website_url || data.website_url,
+            createdAt: orgData.created_at || new Date().toISOString(),
+            owner_id: orgData.owner_id,
+            co_owners: coOwners,
+            ownerRank: orgData.owner_id === (JSON.parse(localStorage.getItem("yesboss_user") || "{}").uid) ? 1 : undefined,
           };
           set({ organization: org, loading: false });
           return org;

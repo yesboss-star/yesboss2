@@ -98,12 +98,12 @@ export default function ExecutiveChatPage() {
     if (!input.trim() || loading) return;
     const message = input;
     setInput("");
-    await sendMessage(message, messages);
+    await sendMessage(message, messages, organization?.id);
   };
 
   const handleQuickQuestion = async (question: string) => {
     setInput(question);
-    await sendMessage(question, messages);
+    await sendMessage(question, messages, organization?.id);
   };
 
   const handleCopy = async (content: string, id: string) => {
@@ -292,19 +292,25 @@ export default function ExecutiveChatPage() {
                       }`}>
                         <div className="prose prose-sm max-w-none">
                           {msg.content.split("\n").map((line, i) => {
+                            const renderInline = (text: string) =>
+                              text.split(/(\*\*[^*]+\*\*)/).map((part, j) =>
+                                part.startsWith("**") && part.endsWith("**")
+                                  ? <strong key={j}>{part.slice(2, -2)}</strong>
+                                  : part
+                              );
                             if (line.startsWith("## ")) {
-                              return <h3 key={i} className="text-lg font-bold mt-4 mb-2">{line.replace("## ", "")}</h3>;
+                              return <h3 key={i} className="text-lg font-bold mt-4 mb-2">{renderInline(line.replace("## ", ""))}</h3>;
                             }
                             if (line.startsWith("### ")) {
-                              return <h4 key={i} className="font-semibold mt-3 mb-1">{line.replace("### ", "")}</h4>;
+                              return <h4 key={i} className="font-semibold mt-3 mb-1">{renderInline(line.replace("### ", ""))}</h4>;
                             }
                             if (line.startsWith("- ")) {
-                              return <li key={i} className="ml-4">{line.replace("- ", "")}</li>;
+                              return <li key={i} className="ml-4">{renderInline(line.replace("- ", ""))}</li>;
                             }
                             if (line.startsWith("* ") && !line.includes("**")) {
                               return <li key={i} className="ml-4 text-text-muted">{line.replace("* ", "")}</li>;
                             }
-                            return line ? <p key={i} className="mb-2">{line}</p> : null;
+                            return line ? <p key={i} className="mb-2">{renderInline(line)}</p> : null;
                           })}
                         </div>
                       </div>

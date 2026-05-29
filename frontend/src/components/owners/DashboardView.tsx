@@ -43,9 +43,76 @@ import {
   Badge,
   Button,
   Input,
+  Modal,
+  ModalHeader,
+  ModalTitle,
+  ModalClose,
+  ModalContent,
+  ModalFooter,
 } from "@/components/ui";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+
+function renderMarkdown(text: string): string {
+  const lines = text.split("\n");
+  const result: string[] = [];
+  let inList = false;
+  let listType: "ul" | "ol" | null = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+
+    line = line
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*(.+?)\*/g, "<em>$1</em>")
+      .replace(/`(.+?)`/g, "<code>$1</code>");
+
+    const headerMatch = line.match(/^(#{1,3})\s+(.+)/);
+    if (headerMatch) {
+      if (inList) { result.push(`</${listType}>`); inList = false; listType = null; }
+      const level = headerMatch[1].length;
+      result.push(`<h${level} class="text-sm font-semibold mt-3 mb-1">${headerMatch[2]}</h${level}>`);
+      continue;
+    }
+
+    const bulletMatch = line.match(/^[-*]\s+(.+)/);
+    if (bulletMatch) {
+      if (!inList || listType !== "ul") {
+        if (inList) result.push(`</${listType}>`);
+        result.push("<ul class=\"list-disc pl-4 space-y-0.5 my-1\">");
+        inList = true;
+        listType = "ul";
+      }
+      result.push(`<li>${bulletMatch[1]}</li>`);
+      continue;
+    }
+
+    const numMatch = line.match(/^\d+[.)]\s+(.+)/);
+    if (numMatch) {
+      if (!inList || listType !== "ol") {
+        if (inList) result.push(`</${listType}>`);
+        result.push("<ol class=\"list-decimal pl-4 space-y-0.5 my-1\">");
+        inList = true;
+        listType = "ol";
+      }
+      result.push(`<li>${numMatch[1]}</li>`);
+      continue;
+    }
+
+    if (line.trim() === "") {
+      if (inList) { result.push(`</${listType}>`); inList = false; listType = null; }
+      result.push("<br/>");
+      continue;
+    }
+
+    if (inList) { result.push(`</${listType}>`); inList = false; listType = null; }
+    result.push(`<p class="mb-1">${line}</p>`);
+  }
+
+  if (inList) result.push(`</${listType}>`);
+
+  return result.join("\n");
+}
 
 function EmptyStateTemplate({ title, hint }: { title: string; hint: string }) {
   return (
@@ -121,80 +188,87 @@ function GoalSection() {
       </CardHeader>
       <CardContent>
         <div className="space-y-3">
-          {goals.map((goal) => (
-            <div
-              key={goal.id}
-              className="flex items-center gap-4 p-4 rounded-xl bg-surface hover:bg-surface-light transition-all border border-border/50"
-            >
+          {goals.map((goal) => {
+            const progress = goal.progress ?? (goal.status === "completed" ? 100 : goal.status === "active" ? 60 : 20);
+            const taskCounts = goal.task_counts ?? { total: 0, completed: 0, in_progress: 0, pending: 0 };
+            return (
               <div
-                className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                  goal.status === "completed"
-                    ? "bg-emerald-500/10"
-                    : goal.status === "active"
-                    ? "bg-primary/10"
-                    : "bg-yellow-500/10"
-                }`}
+                key={goal.id}
+                className="flex items-center gap-4 p-4 rounded-xl bg-surface hover:bg-surface-light transition-all border border-border/50"
               >
-                {goal.status === "completed" ? (
-                  <CheckCircle className="w-5 h-5 text-emerald-400" />
-                ) : goal.status === "active" ? (
-                  <Clock className="w-5 h-5 text-primary" />
-                ) : (
-                  <AlertCircle className="w-5 h-5 text-yellow-400" />
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="font-medium truncate">{goal.title}</p>
-                  {goal.status === "active" && (
-                    <span className="flex items-center gap-1 text-[10px] text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
-                      <Bell className="w-3 h-3" />
-                      In progress
-                    </span>
+                <div
+                  className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                    goal.status === "completed"
+                      ? "bg-emerald-500/10"
+                      : goal.status === "active"
+                      ? "bg-primary/10"
+                      : "bg-yellow-500/10"
+                  }`}
+                >
+                  {goal.status === "completed" ? (
+                    <CheckCircle className="w-5 h-5 text-emerald-400" />
+                  ) : goal.status === "active" ? (
+                    <Clock className="w-5 h-5 text-primary" />
+                  ) : (
+                    <AlertCircle className="w-5 h-5 text-yellow-400" />
                   )}
                 </div>
-                <div className="flex items-center gap-3 text-xs text-text-muted mt-1">
-                  {goal.department && (
-                    <span className="capitalize px-2 py-0.5 rounded-full bg-surface border border-border/50">
-                      {goal.department}
-                    </span>
-                  )}
-                  {goal.timeline && (
-                    <span className="flex items-center gap-1">
-                      <Calendar className="w-3 h-3" />
-                      {goal.timeline.replace(/_/g, " ")}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <span
-                className={`px-2.5 py-1 rounded-full text-xs font-medium border ${getPriorityColor(goal.priority)}`}
-              >
-                {goal.priority}
-              </span>
-              <div className="w-20">
-                <div className="flex items-center gap-1">
-                  <div className="flex-1 h-1.5 bg-surface rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full ${
-                        goal.status === "completed"
-                          ? "bg-emerald-400"
-                          : goal.status === "active"
-                          ? "bg-primary"
-                          : "bg-yellow-400"
-                      }`}
-                      style={{
-                        width: goal.status === "completed" ? "100%" : goal.status === "active" ? "60%" : "20%",
-                      }}
-                    />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium truncate">{goal.title}</p>
+                    {goal.status === "active" && (
+                      <span className="flex items-center gap-1 text-[10px] text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
+                        <Bell className="w-3 h-3" />
+                        In progress
+                      </span>
+                    )}
                   </div>
-                  <span className="text-[10px] text-text-muted w-6 text-right">
-                    {goal.status === "completed" ? "100%" : goal.status === "active" ? "60%" : "20%"}
-                  </span>
+                  <div className="flex items-center gap-3 text-xs text-text-muted mt-1">
+                    {goal.department && (
+                      <span className="capitalize px-2 py-0.5 rounded-full bg-surface border border-border/50">
+                        {goal.department}
+                      </span>
+                    )}
+                    {goal.timeline && (
+                      <span className="flex items-center gap-1">
+                        <Calendar className="w-3 h-3" />
+                        {goal.timeline.replace(/_/g, " ")}
+                      </span>
+                    )}
+                    {(taskCounts.total || 0) > 0 && (
+                      <span className="text-text-muted/60">
+                        {taskCounts.completed || 0}/{taskCounts.total} tasks
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <span
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium border ${getPriorityColor(goal.priority)}`}
+                >
+                  {goal.priority}
+                </span>
+                <div className="w-20">
+                  <div className="flex items-center gap-1">
+                    <div className="flex-1 h-1.5 bg-surface rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${
+                          progress >= 100
+                            ? "bg-emerald-400"
+                            : progress >= 50
+                            ? "bg-primary"
+                            : progress > 0
+                            ? "bg-yellow-400"
+                            : "bg-gray-500/30"
+                        }`}
+                        style={{ width: `${Math.min(progress, 100)}%` }}
+                      />
+                    </div>
+                    <span className="text-[10px] text-text-muted w-6 text-right">{progress}%</span>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </CardContent>
     </Card>
@@ -213,6 +287,7 @@ function AISummaryChat() {
   const [loading, setLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const { organization } = useOrganizationStore();
+  const { goals } = useGoalStore();
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -236,6 +311,7 @@ function AISummaryChat() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: userMsg,
+          organization_id: organization?.id,
           context: {
             organization: organization?.name,
             industry: organization?.industry,
@@ -305,13 +381,17 @@ function AISummaryChat() {
                 )}
               </div>
               <div
-                className={`max-w-[80%] p-3 rounded-2xl text-sm ${
+                className={`max-w-[80%] p-3 rounded-2xl text-sm leading-relaxed ${
                   msg.role === "user"
                     ? "bg-gradient-to-br from-primary/20 to-purple-500/20 text-foreground"
                     : "bg-surface border border-border/50 text-text-muted"
                 }`}
               >
-                {msg.content}
+                {msg.role === "assistant" ? (
+                  <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                ) : (
+                  msg.content
+                )}
               </div>
             </div>
           ))}
@@ -348,48 +428,100 @@ function AISummaryChat() {
 function WeeklyReportGenerator() {
   const { currentReport, generating, downloading, generateReport, downloadReport } =
     useReportStore();
+  const { organization } = useOrganizationStore();
+  const [alertOpen, setAlertOpen] = useState(false);
+  const [alertTitle, setAlertTitle] = useState("");
+  const [alertMessage, setAlertMessage] = useState("");
+
+  const showAlert = (title: string, message: string) => {
+    setAlertTitle(title);
+    setAlertMessage(message);
+    setAlertOpen(true);
+  };
+
+  const handleGenerate = async () => {
+    try {
+      await generateReport("weekly", organization?.id);
+    } catch (err: any) {
+      if (err?.message?.includes("Insufficient data") || err?.status === 400) {
+        showAlert("Insufficient Data", "You need at least one goal or task before generating a report. Create a goal first to get started.");
+      } else {
+        showAlert("Generation Failed", err?.message || "Could not generate the report. Please try again.");
+      }
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!currentReport) return;
+    try {
+      await downloadReport(currentReport.id);
+    } catch (err: any) {
+      showAlert("Download Failed", err?.message || "Could not download the report. Please try again.");
+    }
+  };
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <FileText className="w-5 h-5 text-primary" />
-          <CardTitle>Weekly Report Generator</CardTitle>
-        </div>
-        <CardDescription>
-          Generate and download comprehensive business reports
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="flex items-center justify-between p-4 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 border border-primary/10">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-              <FileText className="w-5 h-5 text-primary" />
+    <>
+      <Modal open={alertOpen} onOpenChange={setAlertOpen} size="md">
+        <ModalHeader>
+          <ModalTitle>{alertTitle}</ModalTitle>
+          <ModalClose />
+        </ModalHeader>
+        <ModalContent>
+          <div className="flex flex-col items-center text-center py-4">
+            <div className="w-16 h-16 rounded-2xl bg-amber-500/10 flex items-center justify-center mb-4">
+              <AlertTriangle className="w-8 h-8 text-amber-400" />
             </div>
-            <div>
-              <p className="text-sm font-medium">Weekly Business Report</p>
-              <p className="text-xs text-text-muted">
-                Goals, tasks, department breakdown, and completion rates
-              </p>
-            </div>
+            <p className="text-sm text-text-muted">{alertMessage}</p>
           </div>
-          <div className="flex gap-2">
-            <Button
-              onClick={() => generateReport("weekly")}
-              disabled={generating}
-              className="cursor-pointer"
-              size="sm"
-            >
-              {generating ? (
-                <Loader2 className="w-4 h-4 animate-spin mr-1" />
-              ) : (
-                <Zap className="w-4 h-4 mr-1" />
-              )}
-              {generating ? "Generating..." : "Generate"}
-            </Button>
+        </ModalContent>
+        <ModalFooter>
+          <Button variant="outline" onClick={() => setAlertOpen(false)}>
+            Got it
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <FileText className="w-5 h-5 text-primary" />
+            <CardTitle>Weekly Report Generator</CardTitle>
+          </div>
+          <CardDescription>
+            Generate and download comprehensive business reports
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between p-4 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 border border-primary/10">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                <FileText className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <p className="text-sm font-medium">Weekly Business Report</p>
+                <p className="text-xs text-text-muted">
+                  Goals, tasks, department breakdown, and completion rates
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                onClick={handleGenerate}
+                disabled={generating}
+                className="cursor-pointer"
+                size="sm"
+              >
+                {generating ? (
+                  <Loader2 className="w-4 h-4 animate-spin mr-1" />
+                ) : (
+                  <Zap className="w-4 h-4 mr-1" />
+                )}
+                {generating ? "Generating..." : "Generate"}
+              </Button>
             {currentReport && (
               <Button
-                onClick={() => downloadReport(currentReport.id)}
+                onClick={handleDownload}
                 disabled={downloading}
                 variant="outline"
                 size="sm"
@@ -399,29 +531,30 @@ function WeeklyReportGenerator() {
                 {downloading ? "Downloading..." : "Download PDF"}
               </Button>
             )}
+            </div>
           </div>
-        </div>
-        {currentReport && (
-          <div className="mt-3 grid grid-cols-4 gap-3">
-            {[
-              { label: "Active Goals", value: currentReport.summary.active_goals, icon: Target, color: "text-primary" },
-              { label: "Tasks Done", value: currentReport.summary.completed_tasks, icon: CheckCircle, color: "text-emerald-400" },
-              { label: "Team Size", value: currentReport.summary.team_size, icon: Activity, color: "text-purple-400" },
-              { label: "Completion Rate", value: `${currentReport.summary.completion_rate}%`, icon: TrendingUp, color: "text-amber-400" },
-            ].map((stat, i) => {
-              const Icon = stat.icon;
-              return (
-                <div key={i} className="p-3 rounded-xl bg-surface border border-border/50">
-                  <Icon className={`w-4 h-4 ${stat.color} mb-1`} />
-                  <p className="text-lg font-bold">{stat.value}</p>
-                  <p className="text-[10px] text-text-muted">{stat.label}</p>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+          {currentReport && (
+            <div className="mt-3 grid grid-cols-4 gap-3">
+              {[
+                { label: "Active Goals", value: currentReport.summary.active_goals, icon: Target, color: "text-primary" },
+                { label: "Tasks Done", value: currentReport.summary.completed_tasks, icon: CheckCircle, color: "text-emerald-400" },
+                { label: "Team Size", value: currentReport.summary.team_size, icon: Activity, color: "text-purple-400" },
+                { label: "Completion Rate", value: `${currentReport.summary.completion_rate}%`, icon: TrendingUp, color: "text-amber-400" },
+              ].map((stat, i) => {
+                const Icon = stat.icon;
+                return (
+                  <div key={i} className="p-3 rounded-xl bg-surface border border-border/50">
+                    <Icon className={`w-4 h-4 ${stat.color} mb-1`} />
+                    <p className="text-lg font-bold">{stat.value}</p>
+                    <p className="text-[10px] text-text-muted">{stat.label}</p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </>
   );
 }
 
@@ -634,6 +767,7 @@ export default function DashboardView() {
   const { goals, fetchGoals } = useGoalStore();
   const { adaptation, getAISummary } = useAIDashboardAdaptation();
   const [aiSummary, setAiSummary] = useState("");
+  const [kpiData, setKpiData] = useState<Record<string, { value: any; formatted: string; change: string; trend: string }> | null>(null);
   const orgId = organization?.id;
 
   useEffect(() => {
@@ -645,6 +779,15 @@ export default function DashboardView() {
       getAISummary().then(setAiSummary);
     }
   }, [adaptation.stage, getAISummary]);
+
+  useEffect(() => {
+    if (orgId && adaptation.showExecutiveKPIs) {
+      fetch(`${API_URL}/dashboard/kpi?organization_id=${orgId}`)
+        .then((res) => res.ok ? res.json() : null)
+        .then((data) => setKpiData(data))
+        .catch(() => {});
+    }
+  }, [orgId, adaptation.showExecutiveKPIs]);
 
   const activeGoalCount = goals.filter(g => g.status === "active").length;
 
@@ -722,12 +865,15 @@ export default function DashboardView() {
       {adaptation.showExecutiveKPIs && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {[
-            { icon: TrendingUp, label: "Revenue", value: goals.length > 0 ? "$47.2K" : "---", change: "+12.5%", badge: "success" as const },
-            { icon: Activity, label: "Active Users", value: goals.length > 0 ? "1,847" : "---", change: "+8.2%", badge: "info" as const },
-            { icon: Target, label: "Goals Active", value: activeGoalCount.toString() || "0", change: `${goals.length} total`, badge: "default" as const },
-            { icon: CheckCircle, label: "Completion Rate", value: goals.length > 0 ? "68%" : "---", change: goals.length > 0 ? "On track" : "No data", badge: "secondary" as const },
+            { key: "revenue", icon: TrendingUp, label: "Revenue", badge: "secondary" as const },
+            { key: "active_users", icon: Activity, label: "Active Users", badge: "info" as const },
+            { key: "goals_active", icon: Target, label: "Goals Active", badge: "default" as const },
+            { key: "completion_rate", icon: CheckCircle, label: "Completion Rate", badge: "secondary" as const },
           ].map((stat, i) => {
             const Icon = stat.icon;
+            const kpi = kpiData?.[stat.key];
+            const displayValue = kpi?.formatted ?? "---";
+            const displayChange = kpi?.change ?? "No data";
             return (
               <Card key={i} className="card-hover">
                 <CardHeader>
@@ -735,11 +881,11 @@ export default function DashboardView() {
                     <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary/10 to-purple-500/10 flex items-center justify-center">
                       <Icon className="w-5 h-5 text-primary" />
                     </div>
-                    <Badge variant={stat.badge}>{stat.change}</Badge>
+                    <Badge variant={stat.badge}>{displayChange}</Badge>
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{stat.value}</div>
+                  <div className="text-2xl font-bold">{displayValue}</div>
                   <div className="text-sm text-text-muted">{stat.label}</div>
                 </CardContent>
               </Card>

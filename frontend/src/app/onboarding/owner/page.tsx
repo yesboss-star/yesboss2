@@ -1047,7 +1047,7 @@ function OwnerOnboardingContent() {
 
   const [existingOrg, setExistingOrg] = useState<any>(null);
   const [showDuplicatePrompt, setShowDuplicatePrompt] = useState(false);
-  const [showDuplicateNoHint, setShowDuplicateNoHint] = useState(false);
+
   const [duplicateChecking, setDuplicateChecking] = useState(false);
 
   const [orgData, setOrgData] = useState({
@@ -1289,6 +1289,10 @@ function OwnerOnboardingContent() {
       if (!res.ok) throw new Error("Failed to add owner");
       const data = await res.json();
       const org = data.organization;
+
+      const coOwners = org.co_owners || [];
+      const ownerRank = org.owner_id === uid ? 1 : coOwners.indexOf(uid) + 2;
+
       setOrganization({
         id: org._id,
         name: org.name,
@@ -1297,24 +1301,42 @@ function OwnerOnboardingContent() {
         size: org.size || "",
         website_url: org.website_url || "",
         createdAt: org.created_at || new Date().toISOString(),
+        owner_id: org.owner_id,
+        co_owners: coOwners,
+        ownerRank,
       });
       setOrgId(org._id);
       setShowDuplicatePrompt(false);
       setExistingOrg(null);
-      if (domainAnalyzed) {
-        setStep("ai-scan");
-      } else {
-        setStep("file-upload");
+
+      // Store owner rank in user data for dashboard display
+      if (storedUser) {
+        const updatedUser = { ...JSON.parse(storedUser), owner_rank: ownerRank, organization_completed: true };
+        localStorage.setItem("yesboss_user", JSON.stringify(updatedUser));
+        document.cookie = `yesboss_user=${JSON.stringify(updatedUser)}; path=/; max-age=86400; SameSite=Lax`;
       }
+
+      setStep("persona-popup");
     } catch (err) {
       console.error("Failed to join existing org:", err);
       alert("Failed to join organization. Please try again.");
     }
   };
 
-  const handleDuplicateNo = () => {
+  const handleDuplicateNo = async () => {
     setShowDuplicatePrompt(false);
-    setShowDuplicateNoHint(true);
+    setExistingOrg(null);
+    localStorage.removeItem("yesboss_token");
+    localStorage.removeItem("yesboss_user");
+    localStorage.removeItem("yesboss_role");
+    document.cookie = "yesboss_token=; path=/; max-age=0; SameSite=Lax";
+    document.cookie = "yesboss_user=; path=/; max-age=0; SameSite=Lax";
+    try {
+      const { signOut: firebaseSignOut } = await import("firebase/auth");
+      const { auth } = await import("@/lib/firebase");
+      await firebaseSignOut(auth);
+    } catch {}
+    router.push("/signup");
   };
 
   const handleWelcomeContinue = async () => {
@@ -1373,14 +1395,18 @@ function OwnerOnboardingContent() {
         micro_verticals: orgData.micro_verticals,
       });
       setOrgId(org.id);
+      const storedUser = localStorage.getItem("yesboss_user");
+      const userData = storedUser ? JSON.parse(storedUser) : {};
       setOrganization({
         ...org,
         createdAt: org.createdAt,
+        owner_id: org.owner_id || userData?.uid,
+        ownerRank: 1,
       });
       if (domainAnalyzed) {
         setStep("ai-scan");
       } else {
-        router.push("/dashboard");
+        setStep("file-upload");
       }
     } catch (error) {
       console.error("Failed to create organization:", error);
@@ -2997,8 +3023,8 @@ function OwnerOnboardingContent() {
 
       </div>
 
-      {showDuplicatePrompt && !showDuplicateNoHint && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      {showDuplicatePrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="max-w-md w-full mx-4 glass rounded-2xl p-8 text-center">
             <div className="w-16 h-16 rounded-2xl bg-amber-500/10 flex items-center justify-center mx-auto mb-4">
               <Building2 className="w-8 h-8 text-amber-400" />
@@ -3012,10 +3038,10 @@ function OwnerOnboardingContent() {
             </p>
             <div className="flex gap-3">
               <button
-                onClick={() => { setShowDuplicateNoHint(true); }}
+                onClick={handleDuplicateNo}
                 className="flex-1 py-3 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer"
               >
-                No, use different domain
+                OK, signup with different email
               </button>
               <button
                 onClick={handleDuplicateYes}
@@ -3024,26 +3050,6 @@ function OwnerOnboardingContent() {
                 Yes, continue
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {showDuplicateNoHint && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="max-w-md w-full mx-4 glass rounded-2xl p-8 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-rose-500/10 flex items-center justify-center mx-auto mb-4">
-              <AlertCircle className="w-8 h-8 text-rose-400" />
-            </div>
-            <h2 className="text-xl font-bold mb-2">Domain Already Taken</h2>
-            <p className="text-text-muted text-sm mb-6">
-              This domain is already registered. To create a new organization, please sign out and sign up with a different email address that uses a unique company domain.
-            </p>
-            <button
-              onClick={signOut}
-              className="w-full py-3 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-semibold transition-all cursor-pointer"
-            >
-              Sign out and try again
-            </button>
           </div>
         </div>
       )}

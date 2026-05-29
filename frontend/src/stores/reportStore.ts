@@ -30,7 +30,7 @@ interface ReportState {
   error: string | null;
   setCurrentReport: (report: Report | null) => void;
   setReportHistory: (reports: Report[]) => void;
-  generateReport: (period?: string) => Promise<Report>;
+  generateReport: (period?: string, organization_id?: string) => Promise<Report>;
   fetchReportHistory: () => Promise<void>;
   downloadReport: (reportId: string) => Promise<void>;
 }
@@ -47,15 +47,20 @@ export const useReportStore = create<ReportState>()(
     setCurrentReport: (report) => set({ currentReport: report }),
     setReportHistory: (reports) => set({ reportHistory: reports }),
 
-    generateReport: async (period = "weekly") => {
+    generateReport: async (period = "weekly", organization_id) => {
       set({ generating: true, error: null });
       try {
         const response = await fetch(`${API_URL}/reports/generate`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ period }),
+          body: JSON.stringify({ period, organization_id }),
         });
-        if (!response.ok) throw new Error("Failed to generate report");
+        if (!response.ok) {
+          const errBody = await response.json().catch(() => ({}));
+          const err = new Error(errBody.detail || "Failed to generate report");
+          (err as any).status = response.status;
+          throw err;
+        }
         const result = await response.json();
         const report = {
           ...result.report,
