@@ -10,7 +10,6 @@ import { signInWithEmailAndPassword } from "firebase/auth";
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -48,17 +47,23 @@ export default function LoginPage() {
       const storedUser = localStorage.getItem("yesboss_user");
       let userData = storedUser ? JSON.parse(storedUser) : { uid: userCredential.user.uid, email: formData.email, role: "owner" };
       userData = { ...userData, uid: userData.uid || userCredential.user.uid, email: userData.email || formData.email };
-      
-      await fetch(`${API_URL}/auth/sync-user`, {
+
+      const syncRes = await fetch(`${API_URL}/auth/sync-user`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ uid: userData.uid, email: userData.email, full_name: userData.full_name || "", role: userData.role || "owner", phone_verified: true }),
       });
-      
-      document.cookie = `yesboss_token=true; path=/; max-age=86400`;
-      document.cookie = `yesboss_user=${JSON.stringify(userData)}; path=/; max-age=86400`;
+      const syncData = await syncRes.json();
+      if (syncData?.user?.role) userData.role = syncData.user.role;
 
-      router.push("/dashboard");
+      localStorage.setItem("yesboss_user", JSON.stringify(userData));
+      localStorage.setItem("yesboss_role", userData.role);
+
+      const userCookie = encodeURIComponent(JSON.stringify(userData));
+      document.cookie = `yesboss_token=true; path=/; max-age=86400; SameSite=Lax`;
+      document.cookie = `yesboss_user=${userCookie}; path=/; max-age=86400; SameSite=Lax`;
+
+      window.location.href = "/dashboard";
     } catch (err: any) {
       if (err.code === "auth/invalid-email") {
         setError("Invalid email address");

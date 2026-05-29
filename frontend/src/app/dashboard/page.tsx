@@ -87,40 +87,19 @@ export default function DashboardPage() {
   }, [setBreadcrumbs]);
 
   useEffect(() => {
-    const initOrg = async () => {
-      if (!loading && user && !organization) {
-        const email = user.email;
-        if (email) {
-          const org = await fetchOrganizationByEmail(email);
-          if (!org) {
-            if (role === "owner") {
-              const storedUser = localStorage.getItem("yesboss_user");
-              if (storedUser) {
-                const userData = JSON.parse(storedUser);
-                if (userData.organization_completed) {
-                  return;
-                }
-              }
-              router.push("/onboarding/owner");
-            } else if (role === "employee") {
-              router.push("/onboarding/employee");
-            }
-          }
-        } else {
-          if (role === "owner") {
-            const storedUser = localStorage.getItem("yesboss_user");
-            if (storedUser) {
-              const userData = JSON.parse(storedUser);
-              if (userData.organization_completed) return;
-            }
-            router.push("/onboarding/owner");
-          }
-          else if (role === "employee") router.push("/onboarding/employee");
+    if (loading || !user || organization) return;
+    const existingPersist = localStorage.getItem("yesboss-organization");
+    if (existingPersist) {
+      try {
+        const parsed = JSON.parse(existingPersist);
+        if (parsed?.state?.organization) {
+          setOrganization(parsed.state.organization);
+          return;
         }
-      }
-    };
-    initOrg();
-  }, [user, role, loading, organization, fetchOrganizationByEmail, router]);
+      } catch {}
+    }
+    fetchOrganizationByEmail(user.email!);
+  }, [user, loading, organization, setOrganization, fetchOrganizationByEmail]);
 
   useEffect(() => {
     if (organization?.id) {

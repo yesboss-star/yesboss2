@@ -32,15 +32,6 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
-  if (pathname === "/dashboard" && role && !orgCompleted) {
-    if (role === "owner") {
-      return NextResponse.redirect(new URL("/onboarding/owner", request.url));
-    }
-    if (role === "employee") {
-      return NextResponse.redirect(new URL("/onboarding/employee", request.url));
-    }
-  }
-
   return NextResponse.next();
 }
 

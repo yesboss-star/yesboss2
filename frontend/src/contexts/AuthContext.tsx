@@ -60,8 +60,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem("yesboss_token");
     localStorage.removeItem("yesboss_user");
     localStorage.removeItem("yesboss_role");
-    setUser(null);
-    setRole(null);
+    document.cookie = "yesboss_token=; path=/; max-age=0; SameSite=Lax";
+    document.cookie = "yesboss_user=; path=/; max-age=0; SameSite=Lax";
+    window.location.href = "/login";
   };
 
   return (

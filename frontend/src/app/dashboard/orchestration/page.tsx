@@ -10,7 +10,7 @@ import OrchestrationView from "@/components/owners/OrchestrationView";
 export default function OrchestrationPage() {
   const { user, role, loading } = useAuth();
   const router = useRouter();
-  const { organization, fetchOrganizationByEmail } = useOrganizationStore();
+  const { organization } = useOrganizationStore();
 
   useEffect(() => {
     if (!loading && !user) {
@@ -19,24 +19,19 @@ export default function OrchestrationPage() {
   }, [user, loading, router]);
 
   useEffect(() => {
-    const initOrg = async () => {
-      if (!loading && user && !organization) {
-        const email = user.email;
-        if (email) {
-          const org = await fetchOrganizationByEmail(email);
-          if (!org && role === "owner") {
-            const storedUser = localStorage.getItem("yesboss_user");
-            if (storedUser) {
-              const userData = JSON.parse(storedUser);
-              if (userData.organization_completed) return;
-            }
-            router.push("/onboarding/owner");
-          }
+    if (loading || !user || organization) return;
+    const existingPersist = localStorage.getItem("yesboss-organization");
+    if (existingPersist) {
+      try {
+        const parsed = JSON.parse(existingPersist);
+        if (parsed?.state?.organization) {
+          useOrganizationStore.getState().setOrganization(parsed.state.organization);
+          return;
         }
-      }
-    };
-    initOrg();
-  }, [user, role, loading, organization, fetchOrganizationByEmail, router]);
+      } catch {}
+    }
+    useOrganizationStore.getState().fetchOrganizationByEmail(user.email!);
+  }, [user, loading, organization]);
 
   if (loading || !user) {
     return null;
