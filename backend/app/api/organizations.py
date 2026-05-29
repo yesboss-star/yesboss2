@@ -18,6 +18,7 @@ class OrganizationCreate(BaseModel):
     micro_verticals: Optional[list] = None
     size: Optional[str] = None
     owner_id: Optional[str] = None
+    co_owners: Optional[list] = []
     social_links: Optional[dict] = None
     persona_answers: Optional[list] = None
 
@@ -49,6 +50,7 @@ async def create_organization(request: OrganizationCreate, current_user: Optiona
         "micro_verticals": request.micro_verticals or ([request.micro_vertical] if request.micro_vertical else []),
         "size": request.size,
         "owner_id": request.owner_id,
+        "co_owners": request.co_owners or [],
         "social_links": request.social_links or {},
         "persona_answers": request.persona_answers or [],
         "created_at": datetime.utcnow(),
@@ -130,6 +132,32 @@ async def get_organization_by_domain(domain: str):
     if not org:
         return {"organization": None, "domain": domain}
     
+    org["_id"] = str(org["_id"])
+    return {"organization": org}
+
+class AddOwnerRequest(BaseModel):
+    uid: str
+
+@router.post("/{org_id}/add-owner")
+async def add_owner(org_id: str, request: AddOwnerRequest):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+    
+    from bson import ObjectId
+    org = db.organizations.find_one({"_id": ObjectId(org_id)})
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    
+    existing_co_owners = org.get("co_owners", []) or []
+    if request.uid not in existing_co_owners and request.uid != org.get("owner_id"):
+        existing_co_owners.append(request.uid)
+        db.organizations.update_one(
+            {"_id": ObjectId(org_id)},
+            {"$set": {"co_owners": existing_co_owners, "updated_at": datetime.utcnow()}}
+        )
+    
+    org = db.organizations.find_one({"_id": ObjectId(org_id)})
     org["_id"] = str(org["_id"])
     return {"organization": org}
 

@@ -12,6 +12,7 @@ from ..core.firebase_admin import (
     get_user_by_email,
     get_user,
     update_user,
+    delete_user,
     generate_email_verification_link,
     generate_password_reset_link,
     set_custom_user_claims,
@@ -441,5 +442,41 @@ async def update_user_role(uid: str, role: str):
         logger.error("Update role failed: %s", str(e))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@router.delete("/user/by-email/{email}", response_model=AuthResponse)
+async def delete_firebase_user(email: str):
+    email = email.strip().lower()
+    try:
+        user = get_user_by_email(email)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found in Firebase",
+            )
+
+        uid = user.uid
+        delete_user(uid)
+
+        db = get_database()
+        if db:
+            db.users.delete_one({"uid": uid})
+            db.organizations.delete_many({"owner_id": uid})
+
+        logger.info("User deleted from Firebase and MongoDB: %s (%s)", email, uid)
+
+        return AuthResponse(
+            success=True,
+            message=f"User {email} deleted successfully",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Delete user failed: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
         )

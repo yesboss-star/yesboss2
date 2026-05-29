@@ -27,6 +27,7 @@ import {
   UserPlus,
   Trash2,
   Lightbulb,
+  AlertCircle,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -1044,6 +1045,11 @@ function OwnerOnboardingContent() {
   const [showIndustrySuggestions, setShowIndustrySuggestions] = useState(false);
   const [showMicroVerticalSuggestions, setShowMicroVerticalSuggestions] = useState(false);
 
+  const [existingOrg, setExistingOrg] = useState<any>(null);
+  const [showDuplicatePrompt, setShowDuplicatePrompt] = useState(false);
+  const [showDuplicateNoHint, setShowDuplicateNoHint] = useState(false);
+  const [duplicateChecking, setDuplicateChecking] = useState(false);
+
   const [orgData, setOrgData] = useState({
     name: "",
     domain: "",
@@ -1103,6 +1109,17 @@ function OwnerOnboardingContent() {
         setOrgData(prev => ({ ...prev, domain: extractedDomain }));
         if (!isPersonalEmailDomain(extractedDomain)) {
           analyzeIndustryFromDomain(extractedDomain);
+          setDuplicateChecking(true);
+          fetch(`${API_URL}/organizations/by-domain/${encodeURIComponent(extractedDomain)}`)
+            .then(r => r.json())
+            .then(data => {
+              if (data?.organization?._id) {
+                setExistingOrg(data.organization);
+                setShowDuplicatePrompt(true);
+              }
+            })
+            .catch(() => {})
+            .finally(() => setDuplicateChecking(false));
         }
       }
     }
@@ -1258,7 +1275,64 @@ function OwnerOnboardingContent() {
     ).slice(0, 8);
   };
 
+  const handleDuplicateYes = async () => {
+    if (!existingOrg?._id) return;
+    try {
+      const storedUser = localStorage.getItem("yesboss_user");
+      const userData = storedUser ? JSON.parse(storedUser) : {};
+      const uid = userData?.uid || user?.uid;
+      const res = await fetch(`${API_URL}/organizations/${existingOrg._id}/add-owner`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid }),
+      });
+      if (!res.ok) throw new Error("Failed to add owner");
+      const data = await res.json();
+      const org = data.organization;
+      setOrganization({
+        id: org._id,
+        name: org.name,
+        domain: org.domain || "",
+        industry: org.industry || "",
+        size: org.size || "",
+        website_url: org.website_url || "",
+        createdAt: org.created_at || new Date().toISOString(),
+      });
+      setOrgId(org._id);
+      setShowDuplicatePrompt(false);
+      setExistingOrg(null);
+      if (domainAnalyzed) {
+        setStep("ai-scan");
+      } else {
+        setStep("file-upload");
+      }
+    } catch (err) {
+      console.error("Failed to join existing org:", err);
+      alert("Failed to join organization. Please try again.");
+    }
+  };
+
+  const handleDuplicateNo = () => {
+    setShowDuplicatePrompt(false);
+    setShowDuplicateNoHint(true);
+  };
+
   const handleWelcomeContinue = async () => {
+    const domain = processDomain(orgData.domain);
+    if (domain) {
+      setDuplicateChecking(true);
+      try {
+        const res = await fetch(`${API_URL}/organizations/by-domain/${encodeURIComponent(domain)}`);
+        const data = await res.json();
+        if (data?.organization?._id) {
+          setExistingOrg(data.organization);
+          setShowDuplicatePrompt(true);
+          setDuplicateChecking(false);
+          return;
+        }
+      } catch {}
+      setDuplicateChecking(false);
+    }
     setStep("time-request");
   };
 
@@ -2922,6 +2996,57 @@ function OwnerOnboardingContent() {
 
 
       </div>
+
+      {showDuplicatePrompt && !showDuplicateNoHint && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="max-w-md w-full mx-4 glass rounded-2xl p-8 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-amber-500/10 flex items-center justify-center mx-auto mb-4">
+              <Building2 className="w-8 h-8 text-amber-400" />
+            </div>
+            <h2 className="text-xl font-bold mb-2">Domain Already Registered</h2>
+            <p className="text-text-muted text-sm mb-1">
+              The domain <span className="font-semibold text-foreground">{orgData.domain}</span> is already registered.
+            </p>
+            <p className="text-text-muted text-sm mb-6">
+              Do you want to continue as an owner of this organization?
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setShowDuplicateNoHint(true); }}
+                className="flex-1 py-3 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer"
+              >
+                No, use different domain
+              </button>
+              <button
+                onClick={handleDuplicateYes}
+                className="flex-1 py-3 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25"
+              >
+                Yes, continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDuplicateNoHint && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="max-w-md w-full mx-4 glass rounded-2xl p-8 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-rose-500/10 flex items-center justify-center mx-auto mb-4">
+              <AlertCircle className="w-8 h-8 text-rose-400" />
+            </div>
+            <h2 className="text-xl font-bold mb-2">Domain Already Taken</h2>
+            <p className="text-text-muted text-sm mb-6">
+              This domain is already registered. To create a new organization, please sign out and sign up with a different email address that uses a unique company domain.
+            </p>
+            <button
+              onClick={signOut}
+              className="w-full py-3 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-semibold transition-all cursor-pointer"
+            >
+              Sign out and try again
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
