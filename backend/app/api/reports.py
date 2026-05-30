@@ -293,8 +293,121 @@ async def list_reports(current_user = Depends(get_current_user)):
             r["summary"] = r["content"].get("summary", {})
     return {"reports": reports}
 
+def generate_docx(content: Dict[str, Any], org_name: str = "YesBoss") -> bytes:
+    from docx import Document
+    from docx.shared import Inches, Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+
+    doc = Document()
+
+    style = doc.styles['Normal']
+    font = style.font
+    font.name = 'Calibri'
+    font.size = Pt(10)
+
+    title = doc.add_heading(org_name, level=0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    period_str = content.get('period', 'weekly').capitalize()
+    doc.add_paragraph(f"Weekly Performance Report — {period_str}").alignment = WD_ALIGN_PARAGRAPH.CENTER
+    doc.add_paragraph(f"Generated: {content['generated_at'][:10]}").alignment = WD_ALIGN_PARAGRAPH.CENTER
+    doc.add_paragraph("")
+
+    doc.add_heading("Executive Summary", level=1)
+    summary = content["summary"]
+
+    table = doc.add_table(rows=1, cols=2)
+    table.style = 'Light Shading Accent 1'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    hdr = table.rows[0].cells
+    hdr[0].text = 'Metric'
+    hdr[1].text = 'Value'
+
+    metrics_rows = [
+        ("Active Goals", str(summary["active_goals"])),
+        ("Completed Goals", str(summary["completed_goals"])),
+        ("Total Tasks", str(summary["total_tasks"])),
+        ("Completed Tasks", str(summary["completed_tasks"])),
+        ("Pending Tasks", str(summary["pending_tasks"])),
+        ("In Progress", str(summary["in_progress_tasks"])),
+        ("Team Size", str(summary["team_size"])),
+        ("Completion Rate", f"{summary['completion_rate']}%"),
+    ]
+    for metric, value in metrics_rows:
+        row = table.add_row().cells
+        row[0].text = metric
+        row[1].text = value
+
+    doc.add_paragraph("")
+    if summary['completion_rate'] >= 50:
+        status_text = f"Overall completion rate is {summary['completion_rate']}% — your team is on track."
+    else:
+        status_text = f"Overall completion rate is {summary['completion_rate']}% — review priorities to improve."
+    doc.add_paragraph(status_text)
+
+    goals = content.get("goals", [])
+    if goals:
+        doc.add_heading("Goals Overview", level=1)
+        table = doc.add_table(rows=1, cols=4)
+        table.style = 'Light Shading Accent 1'
+        hdr = table.rows[0].cells
+        hdr[0].text = 'Title'
+        hdr[1].text = 'Status'
+        hdr[2].text = 'Priority'
+        hdr[3].text = 'Department'
+        for g in goals:
+            row = table.add_row().cells
+            row[0].text = g.get("title", "-")[:55]
+            row[1].text = g.get("status", "-")
+            row[2].text = g.get("priority", "-")
+            row[3].text = g.get("department", "-")
+
+    tasks = content.get("tasks", [])
+    if tasks:
+        doc.add_heading("Recent Tasks", level=1)
+        table = doc.add_table(rows=1, cols=3)
+        table.style = 'Light Shading Accent 1'
+        hdr = table.rows[0].cells
+        hdr[0].text = 'Title'
+        hdr[1].text = 'Status'
+        hdr[2].text = 'Priority'
+        for t in tasks:
+            row = table.add_row().cells
+            row[0].text = t.get("title", "-")[:55]
+            row[1].text = t.get("status", "-")
+            row[2].text = t.get("priority", "-")
+
+    departments = content.get("departments", {})
+    if departments:
+        doc.add_heading("Department Breakdown", level=1)
+        table = doc.add_table(rows=1, cols=3)
+        table.style = 'Light Shading Accent 1'
+        hdr = table.rows[0].cells
+        hdr[0].text = 'Department'
+        hdr[1].text = 'Goals'
+        hdr[2].text = 'Tasks'
+        for dept, info in departments.items():
+            row = table.add_row().cells
+            row[0].text = dept.capitalize()
+            row[1].text = str(info.get("goals", 0))
+            row[2].text = str(info.get("tasks", 0))
+
+    doc.add_paragraph("")
+    doc.add_paragraph("This report was generated automatically by YesBoss AI Business Operating System.")
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+
 @router.get("/download/{report_id}")
-async def download_report(report_id: str, current_user = Depends(get_current_user_optional)):
+async def download_report(
+    report_id: str,
+    format: str = Query("pdf", regex="^(pdf|docx)$"),
+    current_user = Depends(get_current_user_optional)
+):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -308,9 +421,20 @@ async def download_report(report_id: str, current_user = Depends(get_current_use
     org = db.organizations.find_one({"_id": org_id}) if org_id else None
     org_name = org.get("name", "YesBoss") if org else "YesBoss"
 
-    pdf_bytes = generate_pdf(content, org_name)
-
     from fastapi.responses import Response
+
+    if format == "docx":
+        docx_bytes = generate_docx(content, org_name)
+        return Response(
+            content=docx_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={
+                "Content-Disposition": f"attachment; filename=yesboss_report_{report_id}.docx",
+                "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            }
+        )
+
+    pdf_bytes = generate_pdf(content, org_name)
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",

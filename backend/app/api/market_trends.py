@@ -66,7 +66,7 @@ async def get_market_news(
 - title: compelling headline
 - description: 1-2 sentence summary
 - source: real publication name (e.g., Bloomberg, TechCrunch, Reuters, Forbes)
-- url: "#"
+- url: A REAL, VERIFIABLE news URL from a well-known publication that matches the article content (e.g., https://techcrunch.com/2026/05/28/article-slug or https://www.reuters.com/business/article-slug). The URL must look authentic and point to a real, existing publication domain.
 - published_at: ISO date string within the last 7 days
 - category: array of category strings
 - image_url: ""
@@ -77,7 +77,7 @@ Return a JSON array. Example:
     "title": "AI Startups Raise Record Funding",
     "description": "Venture capital investment in AI reaches new highs...",
     "source": "TechCrunch",
-    "url": "#",
+    "url": "https://techcrunch.com/2026/05/28/ai-startups-record-funding",
     "published_at": "2026-05-28T10:00:00Z",
     "category": ["technology"],
     "image_url": ""
@@ -98,11 +98,13 @@ Return a JSON array. Example:
 
         if articles:
             now = datetime.utcnow()
+            import urllib.parse
             for article in articles:
                 if not article.get("published_at"):
                     article["published_at"] = (now - timedelta(hours=len(articles))).isoformat()
                 article.setdefault("source", "Market Analysis")
-                article.setdefault("url", "#")
+                title_q = urllib.parse.quote(article.get("title", industry_name))
+                article["url"] = f"https://news.google.com/search?q={title_q}"
                 article.setdefault("category", [industry_name])
                 article.setdefault("image_url", "")
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { useGoalStore } from "@/stores/goalStore";
@@ -8,50 +8,30 @@ import { useMarketTrendsStore } from "@/stores/marketTrendsStore";
 import { useReportStore } from "@/stores/reportStore";
 import { useAIDashboardAdaptation, type OrgStage } from "@/hooks/useAIDashboardAdaptation";
 import {
-  Sparkles,
-  Flag,
-  Calendar,
-  Clock,
-  CheckCircle,
-  AlertCircle,
-  TrendingUp,
-  TrendingDown,
-  DollarSign,
-  Shield,
-  MessageSquare,
-  FileText,
-  Download,
-  Send,
-  Loader2,
-  Newspaper,
-  ExternalLink,
-  BarChart3,
-  Target,
-  Zap,
-  Activity,
-  Bell,
-  ChevronRight,
-  AlertTriangle,
-  Info,
+  Sparkles, Flag, Calendar, Clock, CheckCircle, AlertCircle,
+  TrendingUp, TrendingDown, DollarSign, Shield, MessageSquare,
+  FileText, Download, Send, Loader2, Newspaper, ExternalLink,
+  BarChart3, Target, Zap, Activity, Bell, ChevronRight,
+  AlertTriangle, Info, Users, User, FileSpreadsheet, Paperclip,
+  PieChart as PieChartIcon, Link2
 } from "lucide-react";
 import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-  Badge,
-  Button,
-  Input,
-  Modal,
-  ModalHeader,
-  ModalTitle,
-  ModalClose,
-  ModalContent,
-  ModalFooter,
+  Card, CardHeader, CardTitle, CardDescription, CardContent,
+  Badge, Button, Input, Modal, ModalHeader, ModalTitle,
+  ModalClose, ModalContent, ModalFooter,
 } from "@/components/ui";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart as RePieChart, Pie, Cell, LineChart as ReLineChart, Line,
+  AreaChart, Area, Legend
+} from "recharts";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+
+const ICON_MAP: Record<string, any> = {
+  Target, CheckCircle, Users, Activity, FileText, TrendingUp,
+  TrendingDown, DollarSign, Shield, BarChart3, Clock, Flag,
+};
 
 function renderMarkdown(text: string): string {
   const lines = text.split("\n");
@@ -61,7 +41,6 @@ function renderMarkdown(text: string): string {
 
   for (let i = 0; i < lines.length; i++) {
     let line = lines[i];
-
     line = line
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
       .replace(/\*(.+?)\*/g, "<em>$1</em>")
@@ -79,7 +58,7 @@ function renderMarkdown(text: string): string {
     if (bulletMatch) {
       if (!inList || listType !== "ul") {
         if (inList) result.push(`</${listType}>`);
-        result.push("<ul class=\"list-disc pl-4 space-y-0.5 my-1\">");
+        result.push('<ul class="list-disc pl-4 space-y-0.5 my-1">');
         inList = true;
         listType = "ul";
       }
@@ -91,7 +70,7 @@ function renderMarkdown(text: string): string {
     if (numMatch) {
       if (!inList || listType !== "ol") {
         if (inList) result.push(`</${listType}>`);
-        result.push("<ol class=\"list-decimal pl-4 space-y-0.5 my-1\">");
+        result.push('<ol class="list-decimal pl-4 space-y-0.5 my-1">');
         inList = true;
         listType = "ol";
       }
@@ -110,7 +89,6 @@ function renderMarkdown(text: string): string {
   }
 
   if (inList) result.push(`</${listType}>`);
-
   return result.join("\n");
 }
 
@@ -126,10 +104,181 @@ function EmptyStateTemplate({ title, hint }: { title: string; hint: string }) {
   );
 }
 
+function ExpandedGoalPipeline({ goal, onClose }: { goal: any; onClose: () => void }) {
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`${API_URL}/goals/${goal.id}`)
+      .then((r) => r.json())
+      .then((data) => {
+        setTasks(data.tasks || []);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, [goal.id]);
+
+  const statusCounts = {
+    completed: tasks.filter((t) => t.status === "completed").length,
+    in_progress: tasks.filter((t) => t.status === "in_progress").length,
+    pending: tasks.filter((t) => t.status === "pending").length,
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "completed": return "text-emerald-400 bg-emerald-500/10 border-emerald-500/20";
+      case "in_progress": return "text-primary bg-primary/10 border-primary/20";
+      default: return "text-yellow-400 bg-yellow-500/10 border-yellow-500/20";
+    }
+  };
+
+  return (
+      <Modal open={true} onOpenChange={(open) => { if (!open) onClose(); }} size="xl">
+      <ModalHeader>
+        <ModalTitle>
+          <div className="flex items-center gap-2">
+            <Flag className="w-5 h-5 text-primary" />
+            <span>{goal.title}</span>
+          </div>
+        </ModalTitle>
+        <ModalClose />
+      </ModalHeader>
+      <ModalContent>
+        <div className="space-y-4">
+          <div className="flex items-center gap-4 flex-wrap">
+            {goal.department && (
+              <span className="text-xs px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 capitalize">
+                {goal.department}
+              </span>
+            )}
+            {goal.priority && (
+              <span className={`text-xs px-2.5 py-1 rounded-full border ${
+                goal.priority === "urgent" ? "text-rose-400 bg-rose-500/10 border-rose-500/20" :
+                goal.priority === "high" ? "text-orange-400 bg-orange-500/10 border-orange-500/20" :
+                "text-yellow-400 bg-yellow-500/10 border-yellow-500/20"
+              }`}>
+                {goal.priority}
+              </span>
+            )}
+            {goal.timeline && (
+              <span className="text-xs flex items-center gap-1 text-text-muted">
+                <Calendar className="w-3 h-3" /> {goal.timeline.replace(/_/g, " ")}
+              </span>
+            )}
+            <Badge variant={goal.status === "completed" ? "success" : goal.status === "active" ? "info" : "warning"}>
+              {goal.status}
+            </Badge>
+          </div>
+
+          {goal.description && (
+            <p className="text-sm text-text-muted bg-surface p-3 rounded-xl border border-border/50">
+              {goal.description}
+            </p>
+          )}
+
+          {goal.assignee_name && (
+            <div className="flex items-center gap-2 text-sm text-text-muted">
+              <User className="w-4 h-4" />
+              <span><strong>Assignee:</strong> {goal.assignee_name}</span>
+              {goal.reviewer_name && <span className="ml-2"><strong>Reviewer:</strong> {goal.reviewer_name}</span>}
+            </div>
+          )}
+
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { label: "Completed", value: statusCounts.completed, color: "text-emerald-400" },
+              { label: "In Progress", value: statusCounts.in_progress, color: "text-primary" },
+              { label: "Pending", value: statusCounts.pending, color: "text-yellow-400" },
+            ].map((s, i) => (
+              <div key={i} className="p-3 rounded-xl bg-surface border border-border/50 text-center">
+                <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
+                <p className="text-[10px] text-text-muted">{s.label}</p>
+              </div>
+            ))}
+          </div>
+
+          {goal.task_counts && (
+            <div>
+              <div className="flex justify-between text-xs text-text-muted mb-1.5">
+                <span>Overall Progress</span>
+                <span className={goal.progress >= 100 ? "text-emerald-400" : goal.progress >= 50 ? "text-primary" : "text-yellow-400"}>
+                  {goal.progress}%
+                </span>
+              </div>
+              <div className="h-2 bg-surface rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    goal.progress >= 100 ? "bg-emerald-400" : goal.progress >= 50 ? "bg-primary" : "bg-yellow-400"
+                  }`}
+                  style={{ width: `${Math.min(goal.progress, 100)}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          <div>
+            <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+              <Activity className="w-4 h-4 text-primary" />
+              Task Pipeline ({tasks.length})
+            </h4>
+            {loading ? (
+              <div className="flex items-center justify-center py-4">
+                <Loader2 className="w-5 h-5 animate-spin text-primary" />
+              </div>
+            ) : tasks.length === 0 ? (
+              <p className="text-xs text-text-muted text-center py-4">No tasks created for this goal yet.</p>
+            ) : (
+              <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar">
+                {tasks.map((task: any) => (
+                  <div key={task._id || task.id} className="flex items-center gap-3 p-3 rounded-xl bg-surface border border-border/50">
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                      task.status === "completed" ? "bg-emerald-500/10" :
+                      task.status === "in_progress" ? "bg-primary/10" : "bg-yellow-500/10"
+                    }`}>
+                      {task.status === "completed" ? (
+                        <CheckCircle className="w-4 h-4 text-emerald-400" />
+                      ) : task.status === "in_progress" ? (
+                        <Clock className="w-4 h-4 text-primary" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 text-yellow-400" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{task.title}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${getStatusColor(task.status)}`}>
+                          {task.status.replace("_", " ")}
+                        </span>
+                        {task.priority && (
+                          <span className="text-[10px] text-text-muted capitalize">{task.priority}</span>
+                        )}
+                        {task.assignee_id && (
+                          <span className="text-[10px] text-text-muted flex items-center gap-1">
+                            <User className="w-3 h-3" /> {task.assignee_id}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </ModalContent>
+      <ModalFooter>
+        <Button variant="outline" onClick={onClose}>Close</Button>
+      </ModalFooter>
+    </Modal>
+  );
+}
+
 function GoalSection() {
   const { organization } = useOrganizationStore();
   const { goals, fetchGoals } = useGoalStore();
   const orgId = organization?.id;
+  const [expandedGoal, setExpandedGoal] = useState<any>(null);
 
   useEffect(() => {
     if (orgId) fetchGoals(orgId);
@@ -158,14 +307,14 @@ function GoalSection() {
         <CardHeader>
           <div className="flex items-center gap-2">
             <Flag className="w-5 h-5 text-primary" />
-            <CardTitle>Goals</CardTitle>
+            <CardTitle>Goals Pipeline</CardTitle>
           </div>
           <CardDescription>Track your business goals and pipeline</CardDescription>
         </CardHeader>
         <CardContent>
           <EmptyStateTemplate
             title="No goals yet"
-            hint="Create goals from the dashboard to start tracking your business objectives. You can add title, description, priority, timeline, and assign to departments."
+            hint="Create goals from the dashboard to start tracking your business objectives."
           />
         </CardContent>
       </Card>
@@ -173,132 +322,188 @@ function GoalSection() {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Flag className="w-5 h-5 text-primary" />
-            <CardTitle>Goals Pipeline</CardTitle>
+    <>
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Flag className="w-5 h-5 text-primary" />
+              <CardTitle>Goals Pipeline</CardTitle>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="text-xs">
+                {goals.filter((g) => g.status === "active").length} active
+              </Badge>
+              <Badge variant="outline" className="text-xs">
+                {goals.length} total
+              </Badge>
+            </div>
           </div>
-          <Badge variant="outline" className="text-xs">
-            {goals.filter((g) => g.status === "active").length} active
-          </Badge>
-        </div>
-        <CardDescription>Real-time status of your business goals</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-3">
-          {goals.map((goal) => {
-            const progress = goal.progress ?? (goal.status === "completed" ? 100 : goal.status === "active" ? 60 : 20);
-            const taskCounts = goal.task_counts ?? { total: 0, completed: 0, in_progress: 0, pending: 0 };
-            return (
-              <div
-                key={goal.id}
-                className="flex items-center gap-4 p-4 rounded-xl bg-surface hover:bg-surface-light transition-all border border-border/50"
-              >
-                <div
-                  className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                    goal.status === "completed"
-                      ? "bg-emerald-500/10"
-                      : goal.status === "active"
-                      ? "bg-primary/10"
-                      : "bg-yellow-500/10"
-                  }`}
+          <CardDescription>Click any goal to see the full task pipeline</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3">
+            {goals.map((goal) => {
+              const progress = goal.progress ?? (goal.status === "completed" ? 100 : goal.status === "active" ? 60 : 20);
+              const taskCounts = goal.task_counts ?? { total: 0, completed: 0, in_progress: 0, pending: 0 };
+              return (
+                <button
+                  key={goal.id}
+                  onClick={() => setExpandedGoal(goal)}
+                  className="w-full text-left flex items-center gap-4 p-4 rounded-xl bg-surface hover:bg-surface-light transition-all border border-border/50 hover:border-primary/30 hover:shadow-md cursor-pointer group"
                 >
-                  {goal.status === "completed" ? (
-                    <CheckCircle className="w-5 h-5 text-emerald-400" />
-                  ) : goal.status === "active" ? (
-                    <Clock className="w-5 h-5 text-primary" />
-                  ) : (
-                    <AlertCircle className="w-5 h-5 text-yellow-400" />
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="font-medium truncate">{goal.title}</p>
-                    {goal.status === "active" && (
-                      <span className="flex items-center gap-1 text-[10px] text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
-                        <Bell className="w-3 h-3" />
-                        In progress
-                      </span>
+                  <div
+                    className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                      goal.status === "completed"
+                        ? "bg-emerald-500/10"
+                        : goal.status === "active"
+                        ? "bg-primary/10"
+                        : "bg-yellow-500/10"
+                    }`}
+                  >
+                    {goal.status === "completed" ? (
+                      <CheckCircle className="w-5 h-5 text-emerald-400" />
+                    ) : goal.status === "active" ? (
+                      <Clock className="w-5 h-5 text-primary" />
+                    ) : (
+                      <AlertCircle className="w-5 h-5 text-yellow-400" />
                     )}
                   </div>
-                  <div className="flex items-center gap-3 text-xs text-text-muted mt-1">
-                    {goal.department && (
-                      <span className="capitalize px-2 py-0.5 rounded-full bg-surface border border-border/50">
-                        {goal.department}
-                      </span>
-                    )}
-                    {goal.timeline && (
-                      <span className="flex items-center gap-1">
-                        <Calendar className="w-3 h-3" />
-                        {goal.timeline.replace(/_/g, " ")}
-                      </span>
-                    )}
-                    {(taskCounts.total || 0) > 0 && (
-                      <span className="text-text-muted/60">
-                        {taskCounts.completed || 0}/{taskCounts.total} tasks
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <span
-                  className={`px-2.5 py-1 rounded-full text-xs font-medium border ${getPriorityColor(goal.priority)}`}
-                >
-                  {goal.priority}
-                </span>
-                <div className="w-20">
-                  <div className="flex items-center gap-1">
-                    <div className="flex-1 h-1.5 bg-surface rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full ${
-                          progress >= 100
-                            ? "bg-emerald-400"
-                            : progress >= 50
-                            ? "bg-primary"
-                            : progress > 0
-                            ? "bg-yellow-400"
-                            : "bg-gray-500/30"
-                        }`}
-                        style={{ width: `${Math.min(progress, 100)}%` }}
-                      />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium truncate group-hover:text-primary transition-colors">{goal.title}</p>
+                      {goal.status === "active" && (
+                        <span className="flex items-center gap-1 text-[10px] text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
+                          <Bell className="w-3 h-3" />
+                          In progress
+                        </span>
+                      )}
                     </div>
-                    <span className="text-[10px] text-text-muted w-6 text-right">{progress}%</span>
+                    <div className="flex items-center gap-3 text-xs text-text-muted mt-1">
+                      {goal.department && (
+                        <span className="capitalize px-2 py-0.5 rounded-full bg-surface border border-border/50">
+                          {goal.department}
+                        </span>
+                      )}
+                      {goal.assignee_name && (
+                        <span className="flex items-center gap-1">
+                          <User className="w-3 h-3" />
+                          {goal.assignee_name}
+                        </span>
+                      )}
+                      {(taskCounts.total || 0) > 0 && (
+                        <span className="text-text-muted/60">
+                          {taskCounts.completed || 0}/{taskCounts.total} tasks
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </CardContent>
-    </Card>
+                  <span
+                    className={`px-2.5 py-1 rounded-full text-xs font-medium border ${getPriorityColor(goal.priority)}`}
+                  >
+                    {goal.priority}
+                  </span>
+                  <div className="w-24">
+                    <div className="flex items-center gap-1">
+                      <div className="flex-1 h-1.5 bg-surface rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${
+                            progress >= 100
+                              ? "bg-emerald-400"
+                              : progress >= 50
+                              ? "bg-primary"
+                              : progress > 0
+                              ? "bg-yellow-400"
+                              : "bg-gray-500/30"
+                          }`}
+                          style={{ width: `${Math.min(progress, 100)}%` }}
+                        />
+                      </div>
+                      <span className="text-[10px] text-text-muted w-6 text-right">{progress}%</span>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-text-muted group-hover:text-primary transition-colors flex-shrink-0" />
+                </button>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
+      {expandedGoal && (
+        <ExpandedGoalPipeline
+          goal={expandedGoal}
+          onClose={() => setExpandedGoal(null)}
+        />
+      )}
+    </>
   );
 }
 
 function AISummaryChat() {
-  const [messages, setMessages] = useState<{ role: string; content: string }[]>([
-    {
-      role: "assistant",
-      content:
-        "Hello! I'm your AI Business Analyst powered by Grok. I can analyze your business data, answer questions about goals, tasks, and provide strategic insights. What would you like to know?",
-    },
-  ]);
+  const [messages, setMessages] = useState<{ role: string; content: string }[]>(() => {
+    try {
+      const saved = localStorage.getItem("yesboss-aisummary-chat");
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [];
+  });
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [showUrlInput, setShowUrlInput] = useState(false);
+  const [urlValue, setUrlValue] = useState("");
+  const [urlLoading, setUrlLoading] = useState(false);
+  const [loadedFromApi, setLoadedFromApi] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { organization } = useOrganizationStore();
-  const { goals } = useGoalStore();
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  useEffect(() => {
+    if (!organization?.id || loadedFromApi) return;
+    fetch(`${API_URL}/executive-chat/history?organization_id=${organization.id}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (data?.history?.length) {
+          const reversed = [...data.history].reverse().map((m: any) => ({
+            role: m.role,
+            content: m.content,
+          }));
+          setMessages(reversed);
+        }
+        setLoadedFromApi(true);
+      })
+      .catch(() => setLoadedFromApi(true));
+  }, [organization?.id, loadedFromApi]);
+
+  const saveMessages = useCallback((msgs: { role: string; content: string }[]) => {
+    try {
+      localStorage.setItem("yesboss-aisummary-chat", JSON.stringify(msgs));
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (messages.length > 0) saveMessages(messages);
+  }, [messages, saveMessages]);
+
   const sendMessage = async () => {
     if (!input.trim() || loading) return;
     const userMsg = input.trim();
     setInput("");
-    setMessages((prev) => [...prev, { role: "user", content: userMsg }]);
+    const updated = [...messages, { role: "user" as const, content: userMsg }];
+    setMessages(updated);
+    saveMessages(updated);
     setLoading(true);
+
+    fetch(`${API_URL}/executive-chat/history?organization_id=${organization?.id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: "user", content: userMsg }),
+    }).catch(() => {});
 
     try {
       const history = messages.map((m) => ({
@@ -315,6 +520,7 @@ function AISummaryChat() {
           context: {
             organization: organization?.name,
             industry: organization?.industry,
+            micro_vertical: organization?.micro_vertical,
           },
           history,
         }),
@@ -323,49 +529,138 @@ function AISummaryChat() {
       if (!response.ok) throw new Error("Chat failed");
 
       const data = await response.json();
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: data.message || "I've analyzed your query. Here are my insights...",
-        },
-      ]);
+      const reply = data.message || "I've analyzed your query. Here are my insights...";
+      const final = [...updated, { role: "assistant" as const, content: reply }];
+      setMessages(final);
+      saveMessages(final);
+
+      fetch(`${API_URL}/executive-chat/history?organization_id=${organization?.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "assistant", content: reply }),
+      }).catch(() => {});
     } catch {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content:
-            "I'm having trouble connecting to my analysis engine. Please try again or check your connection.",
-        },
-      ]);
+      const errMsgs = [
+        ...updated,
+        { role: "assistant" as const, content: "I'm having trouble connecting to my analysis engine. Please try again or check your connection." },
+      ];
+      setMessages(errMsgs);
+      saveMessages(errMsgs);
     } finally {
       setLoading(false);
     }
   };
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !organization?.id) return;
+
+    setUploading(true);
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("organization_id", organization.id);
+
+    try {
+      const response = await fetch(`${API_URL}/executive-chat/upload-and-analyze`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        let errDetail = "Upload failed";
+        try { const errBody = await response.json(); errDetail = errBody.detail || errDetail; } catch {}
+        throw new Error(errDetail);
+      }
+
+      const data = await response.json();
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "user",
+          content: `📎 Uploaded: **${file.name}**`,
+        },
+        {
+          role: "assistant",
+          content: data.message
+            ? `✅ ${data.message}\n\n**Preview:** ${data.text_preview?.substring(0, 300)}...`
+            : `✅ File **${file.name}** uploaded and analyzed! Ask me anything about it.`,
+        },
+      ]);
+    } catch (err: any) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `❌ Failed to upload and analyze **${file.name}**: ${err.message || "Unknown error"}`,
+        },
+      ]);
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleUrlUpload = async () => {
+    const url = urlValue.trim();
+    if (!url || !organization?.id || urlLoading) return;
+    setUrlLoading(true);
+    setShowUrlInput(false);
+    setUrlValue("");
+
+    const formData = new FormData();
+    formData.append("url", url);
+    formData.append("organization_id", organization.id);
+
+    setMessages((prev) => [...prev, { role: "user", content: `📎 Import from URL: ${url}` }]);
+
+    try {
+      const response = await fetch(`${API_URL}/executive-chat/upload-url`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!response.ok) {
+        let errDetail = "Upload failed";
+        try { const errBody = await response.json(); errDetail = errBody.detail || errDetail; } catch {}
+        throw new Error(errDetail);
+      }
+      const data = await response.json();
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `✅ ${data.message}\n\n**Preview:** ${data.text_preview?.substring(0, 300)}...`,
+        },
+      ]);
+    } catch (err: any) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: `❌ Failed to import from URL: ${err.message || "Unknown error"}` },
+      ]);
+    } finally {
+      setUrlLoading(false);
+    }
+  };
+
   return (
-    <Card>
-      <CardHeader>
+    <Card className="flex flex-col h-full">
+      <CardHeader className="flex-shrink-0">
         <div className="flex items-center gap-2">
           <MessageSquare className="w-5 h-5 text-primary" />
-          <CardTitle>AI Business Analysis</CardTitle>
-          <Badge variant="default" className="text-[10px] ml-2">
-            Powered by Grok
-          </Badge>
+          <CardTitle>AI Business Analytics</CardTitle>
+          <Badge variant="default" className="text-[10px] ml-2">Real-time</Badge>
         </div>
         <CardDescription>
-          Ask questions about your business data, goals, and get AI-powered insights
+          Ask about your business or upload files/URLs for analysis
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        <div className="h-64 overflow-y-auto space-y-3 mb-4 pr-2 custom-scrollbar">
+      <CardContent className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 overflow-y-auto space-y-3 mb-4 pr-2 custom-scrollbar" style={{ maxHeight: "320px" }}>
           {messages.map((msg, i) => (
             <div
               key={i}
               className={`flex items-start gap-3 ${
                 msg.role === "user" ? "flex-row-reverse" : ""
-              }`}
+              } animate-in fade-in slide-in-from-bottom-1 duration-200`}
             >
               <div
                 className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${
@@ -401,13 +696,69 @@ function AISummaryChat() {
               Analyzing your business data...
             </div>
           )}
+          {uploading && (
+            <div className="flex items-center gap-2 text-text-muted text-sm">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Uploading and analyzing file...
+            </div>
+          )}
+          {urlLoading && (
+            <div className="flex items-center gap-2 text-text-muted text-sm">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Fetching and analyzing URL...
+            </div>
+          )}
           <div ref={chatEndRef} />
         </div>
-        <div className="flex gap-2">
+        {showUrlInput && (
+          <div className="flex gap-2 mb-2 flex-shrink-0">
+            <Input
+              value={urlValue}
+              onChange={(e) => setUrlValue(e.target.value)}
+              placeholder="Paste a file URL (PDF, DOCX, etc)..."
+              onKeyDown={(e) => e.key === "Enter" && handleUrlUpload()}
+              icon={<Link2 className="w-4 h-4 text-text-muted" />}
+            />
+            <Button onClick={handleUrlUpload} disabled={urlLoading || !urlValue.trim()} size="icon" className="cursor-pointer flex-shrink-0">
+              <Send className="w-4 h-4" />
+            </Button>
+            <Button onClick={() => { setShowUrlInput(false); setUrlValue(""); }} variant="outline" size="icon" className="cursor-pointer flex-shrink-0">
+              X
+            </Button>
+          </div>
+        )}
+        <div className="flex gap-2 flex-shrink-0">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.docx,.txt,.csv,.xlsx,.xls,.png,.jpg,.jpeg"
+            className="hidden"
+            onChange={handleFileUpload}
+          />
+          <Button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            variant="outline"
+            size="icon"
+            className="cursor-pointer flex-shrink-0"
+            title="Upload a file for analysis"
+          >
+            <Paperclip className="w-4 h-4" />
+          </Button>
+          <Button
+            onClick={() => setShowUrlInput(!showUrlInput)}
+            disabled={urlLoading}
+            variant="outline"
+            size="icon"
+            className="cursor-pointer flex-shrink-0"
+            title="Import from URL"
+          >
+            <Link2 className="w-4 h-4" />
+          </Button>
           <Input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask about your business..."
+            placeholder="Ask about your business or uploaded files..."
             onKeyDown={(e) => e.key === "Enter" && sendMessage()}
             icon={<MessageSquare className="w-4 h-4 text-text-muted" />}
           />
@@ -415,7 +766,7 @@ function AISummaryChat() {
             onClick={sendMessage}
             disabled={loading || !input.trim()}
             size="icon"
-            className="cursor-pointer"
+            className="cursor-pointer flex-shrink-0"
           >
             <Send className="w-4 h-4" />
           </Button>
@@ -451,10 +802,10 @@ function WeeklyReportGenerator() {
     }
   };
 
-  const handleDownload = async () => {
+  const handleDownload = async (format: string = "pdf") => {
     if (!currentReport) return;
     try {
-      await downloadReport(currentReport.id);
+      await downloadReport(currentReport.id, format);
     } catch (err: any) {
       showAlert("Download Failed", err?.message || "Could not download the report. Please try again.");
     }
@@ -489,7 +840,7 @@ function WeeklyReportGenerator() {
             <CardTitle>Weekly Report Generator</CardTitle>
           </div>
           <CardDescription>
-            Generate and download comprehensive business reports
+            Generate and download comprehensive business reports (PDF &amp; Word)
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -505,51 +856,61 @@ function WeeklyReportGenerator() {
                 </p>
               </div>
             </div>
-            <div className="flex gap-2">
-              <Button
-                onClick={handleGenerate}
-                disabled={generating}
-                className="cursor-pointer"
-                size="sm"
-              >
-                {generating ? (
-                  <Loader2 className="w-4 h-4 animate-spin mr-1" />
-                ) : (
-                  <Zap className="w-4 h-4 mr-1" />
-                )}
-                {generating ? "Generating..." : "Generate"}
-              </Button>
-            {currentReport && (
-              <Button
-                onClick={handleDownload}
-                disabled={downloading}
-                variant="outline"
-                size="sm"
-                className="cursor-pointer"
-              >
-                <Download className="w-4 h-4 mr-1" />
-                {downloading ? "Downloading..." : "Download PDF"}
-              </Button>
-            )}
-            </div>
+            <Button
+              onClick={handleGenerate}
+              disabled={generating}
+              className="cursor-pointer"
+              size="sm"
+            >
+              {generating ? (
+                <Loader2 className="w-4 h-4 animate-spin mr-1" />
+              ) : (
+                <Zap className="w-4 h-4 mr-1" />
+              )}
+              {generating ? "Generating..." : "Generate"}
+            </Button>
           </div>
           {currentReport && (
-            <div className="mt-3 grid grid-cols-4 gap-3">
-              {[
-                { label: "Active Goals", value: currentReport.summary.active_goals, icon: Target, color: "text-primary" },
-                { label: "Tasks Done", value: currentReport.summary.completed_tasks, icon: CheckCircle, color: "text-emerald-400" },
-                { label: "Team Size", value: currentReport.summary.team_size, icon: Activity, color: "text-purple-400" },
-                { label: "Completion Rate", value: `${currentReport.summary.completion_rate}%`, icon: TrendingUp, color: "text-amber-400" },
-              ].map((stat, i) => {
-                const Icon = stat.icon;
-                return (
-                  <div key={i} className="p-3 rounded-xl bg-surface border border-border/50">
-                    <Icon className={`w-4 h-4 ${stat.color} mb-1`} />
-                    <p className="text-lg font-bold">{stat.value}</p>
-                    <p className="text-[10px] text-text-muted">{stat.label}</p>
-                  </div>
-                );
-              })}
+            <div className="mt-3 space-y-3">
+              <div className="grid grid-cols-4 gap-3">
+                {[
+                  { label: "Active Goals", value: currentReport.summary.active_goals, icon: Target, color: "text-primary" },
+                  { label: "Tasks Done", value: currentReport.summary.completed_tasks, icon: CheckCircle, color: "text-emerald-400" },
+                  { label: "Team Size", value: currentReport.summary.team_size, icon: Activity, color: "text-purple-400" },
+                  { label: "Completion Rate", value: `${currentReport.summary.completion_rate}%`, icon: TrendingUp, color: "text-amber-400" },
+                ].map((stat, i) => {
+                  const Icon = stat.icon;
+                  return (
+                    <div key={i} className="p-3 rounded-xl bg-surface border border-border/50">
+                      <Icon className={`w-4 h-4 ${stat.color} mb-1`} />
+                      <p className="text-lg font-bold">{stat.value}</p>
+                      <p className="text-[10px] text-text-muted">{stat.label}</p>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => handleDownload("pdf")}
+                  disabled={downloading}
+                  variant="outline"
+                  size="sm"
+                  className="cursor-pointer flex-1"
+                >
+                  <Download className="w-4 h-4 mr-1" />
+                  {downloading ? "Downloading..." : "Download PDF"}
+                </Button>
+                <Button
+                  onClick={() => handleDownload("docx")}
+                  disabled={downloading}
+                  variant="outline"
+                  size="sm"
+                  className="cursor-pointer flex-1"
+                >
+                  <FileSpreadsheet className="w-4 h-4 mr-1" />
+                  {downloading ? "Downloading..." : "Download Word"}
+                </Button>
+              </div>
             </div>
           )}
         </CardContent>
@@ -587,7 +948,7 @@ function MarketTrendsSection() {
           </Badge>
         </div>
         <CardDescription>
-          Recent news and trends in your industry
+          Click any article to read the full story on the source website
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -642,66 +1003,225 @@ function MarketTrendsSection() {
   );
 }
 
+function DataCharts({ goals, tasks }: { goals: any[]; tasks?: any[] }) {
+  const [chartTasks, setChartTasks] = useState<any[]>([]);
+  const { organization } = useOrganizationStore();
+
+  useEffect(() => {
+    if (!organization?.id) return;
+    fetch(`${API_URL}/tasks?organization_id=${organization.id}`)
+      .then((r) => r.json())
+      .then((data) => setChartTasks(data.tasks || []))
+      .catch(() => {});
+  }, [organization?.id]);
+
+  const allTasks = tasks || chartTasks;
+
+  const taskStatusData = [
+    { name: "Completed", value: allTasks.filter((t: any) => t.status === "completed").length, color: "#10b981" },
+    { name: "In Progress", value: allTasks.filter((t: any) => t.status === "in_progress").length, color: "#0ea5e9" },
+    { name: "Pending", value: allTasks.filter((t: any) => t.status === "pending").length, color: "#eab308" },
+  ].filter((d) => d.value > 0);
+
+  const goalProgressData = goals.slice(0, 8).map((g) => ({
+    name: g.title?.length > 15 ? g.title.substring(0, 15) + "..." : g.title || "Goal",
+    progress: g.progress ?? 0,
+  }));
+
+  const COLORS = ["#0ea5e9", "#10b981", "#eab308", "#f97316", "#8b5cf6", "#ec4899"];
+
+  if (allTasks.length === 0 && goals.length === 0) return null;
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {taskStatusData.length > 0 && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <PieChartIcon className="w-5 h-5 text-primary" />
+              <CardTitle>Task Distribution</CardTitle>
+            </div>
+            <CardDescription>Real-time breakdown of all task statuses</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <RePieChart>
+                  <Pie
+                    data={taskStatusData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={100}
+                    paddingAngle={5}
+                    dataKey="value"
+                    label={({ name, value }) => `${name}: ${value}`}
+                  >
+                    {taskStatusData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                  <Legend />
+                </RePieChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {goalProgressData.length > 0 && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <BarChart3 className="w-5 h-5 text-primary" />
+              <CardTitle>Goal Progress</CardTitle>
+            </div>
+            <CardDescription>Completion percentage per goal</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={goalProgressData} layout="vertical" margin={{ top: 5, right: 30, left: 80, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                  <XAxis type="number" domain={[0, 100]} tick={{ fill: "#64748b", fontSize: 11 }} />
+                  <YAxis dataKey="name" type="category" tick={{ fill: "#64748b", fontSize: 10 }} width={90} />
+                  <Tooltip
+                    contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: "8px" }}
+                    formatter={(value: any) => [`${value}%`, "Progress"]}
+                  />
+                  <Bar dataKey="progress" radius={[0, 6, 6, 0]}>
+                    {goalProgressData.map((_, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {taskStatusData.length > 0 && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-primary" />
+              <CardTitle>Task Completion</CardTitle>
+            </div>
+            <CardDescription>Completed vs total tasks</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart
+                  data={[
+                    { name: "Pending", value: taskStatusData.find((d) => d.name === "Pending")?.value || 0 },
+                    { name: "In Progress", value: taskStatusData.find((d) => d.name === "In Progress")?.value || 0 },
+                    { name: "Completed", value: taskStatusData.find((d) => d.name === "Completed")?.value || 0 },
+                  ]}
+                  margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                  <XAxis dataKey="name" tick={{ fill: "#64748b", fontSize: 11 }} />
+                  <YAxis tick={{ fill: "#64748b", fontSize: 11 }} />
+                  <Tooltip
+                    contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: "8px" }}
+                  />
+                  <Area type="monotone" dataKey="value" stroke="#0ea5e9" fill="url(#colorGradient)" strokeWidth={2} />
+                  <defs>
+                    <linearGradient id="colorGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0.05} />
+                    </linearGradient>
+                  </defs>
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 function RevenueRiskRadar() {
-  const risks = [
-    {
-      title: "Cash Flow Risk",
-      level: "medium",
-      value: 45,
-      description: "Receivables aging beyond 45 days",
-      impact: "Medium impact on operations",
-      icon: DollarSign,
-    },
-    {
-      title: "Market Volatility",
-      level: "low",
-      value: 25,
-      description: "Industry fluctuation within normal range",
-      impact: "Low immediate concern",
-      icon: TrendingUp,
-    },
-    {
-      title: "Goal Completion Risk",
-      level: "high",
-      value: 72,
-      description: "3 active goals behind schedule",
-      impact: "High - may affect Q2 targets",
-      icon: Target,
-    },
-    {
-      title: "Team Capacity",
-      level: "medium",
-      value: 55,
-      description: "Team utilization at 85% capacity",
-      impact: "Medium - consider hiring",
-      icon: Activity,
-    },
-    {
-      title: "Revenue Concentration",
-      level: "high",
-      value: 68,
-      description: "Top 2 clients represent 60% of revenue",
-      impact: "High diversification needed",
-      icon: TrendingDown,
-    },
-    {
-      title: "Compliance Risk",
-      level: "low",
-      value: 15,
-      description: "All regulatory requirements met",
-      impact: "Low - no action needed",
-      icon: Shield,
-    },
-  ];
+  const [risks, setRisks] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { organization } = useOrganizationStore();
+
+  useEffect(() => {
+    if (!organization?.id) return;
+    let cancelled = false;
+    const fetchRisk = () => {
+      fetch(`${API_URL}/dashboard/kpi?organization_id=${organization.id}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (cancelled) return;
+          const computed = [];
+          if (data.goals_active) {
+            const val = data.goals_active.value;
+            computed.push({
+              title: "Goal Completion Risk",
+              level: val > 5 ? "high" : val > 2 ? "medium" : "low",
+              value: Math.min(val * 15, 95),
+              description: `${val} active goals in progress`,
+              impact: val > 5 ? "High - review priorities" : val > 2 ? "Medium - monitor progress" : "Low - on track",
+              icon: Target,
+            });
+          }
+          if (data.completion_rate) {
+            const rate = data.completion_rate.value;
+            computed.push({
+              title: "Task Completion Rate",
+              level: rate < 30 ? "high" : rate < 60 ? "medium" : "low",
+              value: 100 - rate,
+              description: `${rate}% tasks completed`,
+              impact: rate >= 60 ? "Good momentum" : rate >= 30 ? "Needs attention" : "Critical - intervene",
+              icon: CheckCircle,
+            });
+          }
+          if (data.team_size) {
+            computed.push({
+              title: "Team Capacity",
+              level: "medium",
+              value: Math.min(data.team_size.value * 10, 80),
+              description: `${data.team_size.value} team members`,
+              impact: "Monitor team workload distribution",
+              icon: Activity,
+            });
+          }
+          if (data.tasks_pipeline) {
+            const pend = data.tasks_pipeline.change?.match(/(\d+) pending/);
+            const pendingCount = pend ? parseInt(pend[1]) : 0;
+            computed.push({
+              title: "Task Backlog",
+              level: pendingCount > 10 ? "high" : pendingCount > 5 ? "medium" : "low",
+              value: Math.min(pendingCount * 8, 90),
+              description: `${pendingCount} pending tasks in queue`,
+              impact: pendingCount > 10 ? "High - assign resources" : pendingCount > 5 ? "Medium - review priorities" : "Low - manageable",
+              icon: Clock,
+            });
+          }
+          setRisks(computed.length > 0 ? computed : [
+            { title: "No Risk Data", level: "low", value: 0, description: "Add goals and tasks to see risk analysis", impact: "Start creating goals", icon: Shield },
+          ]);
+          setLoading(false);
+        })
+        .catch(() => {
+          if (!cancelled) { setRisks([]); setLoading(false); }
+        });
+    };
+    fetchRisk();
+    const interval = setInterval(fetchRisk, 30000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [organization?.id]);
 
   const getRiskColor = (level: string) => {
     switch (level) {
-      case "high":
-        return { bg: "bg-rose-500/10", text: "text-rose-400", border: "border-rose-500/20", bar: "bg-rose-400" };
-      case "medium":
-        return { bg: "bg-amber-500/10", text: "text-amber-400", border: "border-amber-500/20", bar: "bg-amber-400" };
-      default:
-        return { bg: "bg-emerald-500/10", text: "text-emerald-400", border: "border-emerald-500/20", bar: "bg-emerald-400" };
+      case "high": return { bg: "bg-rose-500/10", text: "text-rose-400", border: "border-rose-500/20", bar: "bg-rose-400" };
+      case "medium": return { bg: "bg-amber-500/10", text: "text-amber-400", border: "border-amber-500/20", bar: "bg-amber-400" };
+      default: return { bg: "bg-emerald-500/10", text: "text-emerald-400", border: "border-emerald-500/20", bar: "bg-emerald-400" };
     }
   };
 
@@ -710,52 +1230,48 @@ function RevenueRiskRadar() {
       <CardHeader>
         <div className="flex items-center gap-2">
           <Shield className="w-5 h-5 text-primary" />
-          <CardTitle>Revenue Risk Radar</CardTitle>
-          <Badge variant="warning" className="text-[10px] ml-2">
-            Real-time
-          </Badge>
+          <CardTitle>Business Risk Radar</CardTitle>
+          <Badge variant="warning" className="text-[10px] ml-2">Real-time</Badge>
         </div>
-        <CardDescription>
-          Monitor key risk areas affecting your business
-        </CardDescription>
+        <CardDescription>AI-analyzed risks based on your actual business data</CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {risks.map((risk, i) => {
-            const colors = getRiskColor(risk.level);
-            const Icon = risk.icon;
-            return (
-              <div
-                key={i}
-                className={`p-4 rounded-xl ${colors.bg} ${colors.border} border transition-all hover:shadow-lg`}
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <Icon className={`w-4 h-4 ${colors.text}`} />
-                    <span className="text-sm font-medium">{risk.title}</span>
+        {loading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-5 h-5 animate-spin text-primary" />
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {risks.slice(0, 6).map((risk, i) => {
+              const colors = getRiskColor(risk.level);
+              const Icon = risk.icon;
+              return (
+                <div key={i} className={`p-4 rounded-xl ${colors.bg} ${colors.border} border transition-all hover:shadow-lg`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <Icon className={`w-4 h-4 ${colors.text}`} />
+                      <span className="text-sm font-medium">{risk.title}</span>
+                    </div>
+                    <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${colors.bg} ${colors.text} ${colors.border} border`}>
+                      {risk.level}
+                    </span>
                   </div>
-                  <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${colors.bg} ${colors.text} ${colors.border} border`}>
-                    {risk.level}
-                  </span>
+                  <div className="mb-2">
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-text-muted">Risk Score</span>
+                      <span className={colors.text}>{risk.value}%</span>
+                    </div>
+                    <div className="h-2 bg-black/20 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${colors.bar} transition-all duration-500`} style={{ width: `${risk.value}%` }} />
+                    </div>
+                  </div>
+                  <p className="text-xs text-text-muted mt-2">{risk.description}</p>
+                  <p className={`text-[10px] ${colors.text} mt-1`}>{risk.impact}</p>
                 </div>
-                <div className="mb-2">
-                  <div className="flex justify-between text-xs mb-1">
-                    <span className="text-text-muted">Risk Score</span>
-                    <span className={colors.text}>{risk.value}%</span>
-                  </div>
-                  <div className="h-2 bg-black/20 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full ${colors.bar} transition-all duration-500`}
-                      style={{ width: `${risk.value}%` }}
-                    />
-                  </div>
-                </div>
-                <p className="text-xs text-text-muted mt-2">{risk.description}</p>
-                <p className={`text-[10px] ${colors.text} mt-1`}>{risk.impact}</p>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -767,7 +1283,8 @@ export default function DashboardView() {
   const { goals, fetchGoals } = useGoalStore();
   const { adaptation, getAISummary } = useAIDashboardAdaptation();
   const [aiSummary, setAiSummary] = useState("");
-  const [kpiData, setKpiData] = useState<Record<string, { value: any; formatted: string; change: string; trend: string }> | null>(null);
+  const [kpiData, setKpiData] = useState<Record<string, any> | null>(null);
+  const [kpiLoading, setKpiLoading] = useState(false);
   const orgId = organization?.id;
 
   useEffect(() => {
@@ -781,12 +1298,20 @@ export default function DashboardView() {
   }, [adaptation.stage, getAISummary]);
 
   useEffect(() => {
-    if (orgId && adaptation.showExecutiveKPIs) {
+    if (!orgId || !adaptation.showExecutiveKPIs) return;
+    let cancelled = false;
+    const fetchKpi = () => {
+      setKpiLoading(true);
       fetch(`${API_URL}/dashboard/kpi?organization_id=${orgId}`)
         .then((res) => res.ok ? res.json() : null)
-        .then((data) => setKpiData(data))
-        .catch(() => {});
-    }
+        .then((data) => {
+          if (!cancelled) { setKpiData(data); setKpiLoading(false); }
+        })
+        .catch(() => { if (!cancelled) setKpiLoading(false); });
+    };
+    fetchKpi();
+    const interval = setInterval(fetchKpi, 30000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, [orgId, adaptation.showExecutiveKPIs]);
 
   const activeGoalCount = goals.filter(g => g.status === "active").length;
@@ -800,8 +1325,16 @@ export default function DashboardView() {
     }
   };
 
+  const getTrendIcon = (trend: string) => {
+    switch (trend) {
+      case "up": return <TrendingUp className="w-3 h-3 text-emerald-400" />;
+      case "down": return <TrendingDown className="w-3 h-3 text-rose-400" />;
+      default: return null;
+    }
+  };
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-foreground to-primary bg-clip-text text-transparent">
@@ -809,7 +1342,7 @@ export default function DashboardView() {
           </h1>
           <p className="text-text-muted mt-1">
             {organization?.name
-              ? `${organization.name} — ${organization.industry || "Business"}`
+              ? `${organization.name} — ${organization.industry || "Business"}${organization.micro_vertical ? ` — ${organization.micro_vertical}` : ""}`
               : "Your business command center"}
           </p>
         </div>
@@ -825,7 +1358,7 @@ export default function DashboardView() {
       </div>
 
       {aiSummary && (
-        <Card className="border-primary/20 bg-gradient-to-br from-primary/5 to-purple-500/5">
+        <Card className="border-primary/20 bg-gradient-to-br from-primary/5 to-purple-500/5 animate-in fade-in slide-in-from-top-1 duration-300">
           <CardContent className="p-4">
             <div className="flex items-start gap-3">
               <Sparkles className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
@@ -864,37 +1397,63 @@ export default function DashboardView() {
 
       {adaptation.showExecutiveKPIs && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[
-            { key: "revenue", icon: TrendingUp, label: "Revenue", badge: "secondary" as const },
-            { key: "active_users", icon: Activity, label: "Active Users", badge: "info" as const },
-            { key: "goals_active", icon: Target, label: "Goals Active", badge: "default" as const },
-            { key: "completion_rate", icon: CheckCircle, label: "Completion Rate", badge: "secondary" as const },
-          ].map((stat, i) => {
-            const Icon = stat.icon;
-            const kpi = kpiData?.[stat.key];
-            const displayValue = kpi?.formatted ?? "---";
-            const displayChange = kpi?.change ?? "No data";
-            return (
-              <Card key={i} className="card-hover">
+          {kpiLoading ? (
+            Array.from({ length: 4 }).map((_, i) => (
+              <Card key={i} className="animate-pulse">
                 <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary/10 to-purple-500/10 flex items-center justify-center">
-                      <Icon className="w-5 h-5 text-primary" />
-                    </div>
-                    <Badge variant={stat.badge}>{displayChange}</Badge>
-                  </div>
+                  <div className="w-10 h-10 rounded-xl bg-surface" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{displayValue}</div>
-                  <div className="text-sm text-text-muted">{stat.label}</div>
+                  <div className="h-8 w-20 bg-surface rounded mb-2" />
+                  <div className="h-4 w-16 bg-surface rounded" />
                 </CardContent>
               </Card>
-            );
-          })}
+            ))
+          ) : kpiData ? (
+            Object.entries(kpiData).slice(0, 8).map(([key, kpi]: [string, any], i) => {
+              const IconComponent = ICON_MAP[kpi.icon] || BarChart3;
+              return (
+                <Card key={key} className="card-hover animate-in fade-in slide-in-from-bottom-1 duration-300" style={{ animationDelay: `${i * 50}ms` }}>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary/10 to-purple-500/10 flex items-center justify-center">
+                        <IconComponent className="w-5 h-5 text-primary" />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {getTrendIcon(kpi.trend)}
+                        <Badge variant="secondary" className="text-[10px]">{kpi.change || "---"}</Badge>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{kpi.formatted ?? "---"}</div>
+                    <div className="text-sm text-text-muted">{kpi.label || key.replace(/_/g, " ")}</div>
+                    {kpi.description && (
+                      <p className="text-[10px] text-text-muted/60 mt-1">{kpi.description}</p>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })
+          ) : (
+            Array.from({ length: 4 }).map((_, i) => (
+              <Card key={i}>
+                <CardHeader>
+                  <div className="w-10 h-10 rounded-xl bg-surface" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">--</div>
+                  <div className="text-sm text-text-muted">No data yet</div>
+                </CardContent>
+              </Card>
+            ))
+          )}
         </div>
       )}
 
       <GoalSection />
+
+      {adaptation.showExecutiveKPIs && <DataCharts goals={goals} />}
 
       {adaptation.showGrokInsights && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

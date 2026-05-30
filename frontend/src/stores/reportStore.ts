@@ -32,7 +32,7 @@ interface ReportState {
   setReportHistory: (reports: Report[]) => void;
   generateReport: (period?: string, organization_id?: string) => Promise<Report>;
   fetchReportHistory: () => Promise<void>;
-  downloadReport: (reportId: string) => Promise<void>;
+  downloadReport: (reportId: string, format?: string) => Promise<void>;
 }
 
 export const useReportStore = create<ReportState>()(
@@ -94,16 +94,16 @@ export const useReportStore = create<ReportState>()(
       }
     },
 
-    downloadReport: async (reportId) => {
+    downloadReport: async (reportId, format = "pdf") => {
       set({ downloading: true, error: null });
       try {
-        const response = await fetch(`${API_URL}/reports/download/${reportId}`);
+        const response = await fetch(`${API_URL}/reports/download/${reportId}?format=${format}`);
         if (!response.ok) throw new Error("Failed to download report");
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `yesboss_report_${reportId}.pdf`;
+        a.download = `yesboss_report_${reportId}.${format === "docx" ? "docx" : "pdf"}`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);

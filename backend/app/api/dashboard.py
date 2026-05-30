@@ -1,11 +1,14 @@
+import logging
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from ..core.database import get_database
-from ..dependencies.auth import get_current_user
+from ..dependencies.auth import get_current_user, get_current_user_optional
+from bson import ObjectId
 
 router = APIRouter()
+logger = logging.getLogger("yesboss.dashboard")
 
 
 def get_user_org_id(user) -> Optional[str]:
@@ -270,7 +273,7 @@ async def get_dashboard_insights(
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
     
-    organization = db.organizations.find_one({"_id": org_id if org_id else None})
+    organization = db.organizations.find_one({"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id})
     org_industry = industry or (organization.get("industry") if organization else None)
     
     insights = get_industry_insights(org_industry or "default")
@@ -294,7 +297,7 @@ async def get_dashboard_modules(
     
     org_id = get_user_org_id(current_user)
     if org_id:
-        organization = db.organizations.find_one({"_id": org_id})
+        organization = db.organizations.find_one({"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id})
         org_industry = industry or (organization.get("industry") if organization else None)
     else:
         org_industry = industry
@@ -317,7 +320,7 @@ async def get_dashboard_modules(
 @router.get("/kpi")
 async def get_dashboard_kpi(
     organization_id: Optional[str] = Query(None),
-    current_user = Depends(get_current_user)
+    current_user = Depends(get_current_user_optional)
 ):
     db = get_database()
     if db is None:
@@ -327,6 +330,10 @@ async def get_dashboard_kpi(
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
 
+    org = db.organizations.find_one({"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id})
+    org_industry = org.get("industry", "") if org else ""
+    org_micro_vertical = org.get("micro_vertical", "") if org else ""
+
     total_goals = db.goals.count_documents({"organization_id": org_id})
     active_goals = db.goals.count_documents({"organization_id": org_id, "status": "active"})
     completed_goals = db.goals.count_documents({"organization_id": org_id, "status": "completed"})
@@ -334,37 +341,135 @@ async def get_dashboard_kpi(
     total_tasks = db.tasks.count_documents({"organization_id": org_id})
     completed_tasks = db.tasks.count_documents({"organization_id": org_id, "status": "completed"})
     in_progress_tasks = db.tasks.count_documents({"organization_id": org_id, "status": "in_progress"})
+    pending_tasks = db.tasks.count_documents({"organization_id": org_id, "status": "pending"})
 
     total_members = db.org_chart_members.count_documents({"organization_id": org_id})
 
     completion_rate = round((completed_tasks / total_tasks * 100) if total_tasks > 0 else 0, 1)
 
-    return {
-        "goals_active": {
-            "value": active_goals,
-            "formatted": str(active_goals),
-            "change": f"{total_goals} total",
-            "trend": "up" if active_goals > 0 else "neutral"
-        },
-        "completion_rate": {
-            "value": completion_rate,
-            "formatted": f"{completion_rate}%",
-            "change": "On track" if completion_rate >= 50 else "Needs attention",
-            "trend": "up" if completion_rate >= 50 else "down"
-        },
-        "active_users": {
-            "value": total_members,
-            "formatted": str(total_members),
-            "change": "Team members",
-            "trend": "neutral"
-        },
-        "revenue": {
-            "value": 0,
-            "formatted": "---",
-            "change": "No revenue data",
-            "trend": "neutral"
-        }
+    total_files = db.files.count_documents({"organization_id": org_id})
+
+    departments = db.org_chart_members.distinct("department", {"organization_id": org_id})
+    dept_count = len(departments)
+
+    kpi_response = {}
+
+    kpi_response["goals_active"] = {
+        "value": active_goals,
+        "formatted": str(active_goals),
+        "change": f"{total_goals} total",
+        "trend": "up" if active_goals > 0 else "neutral",
+        "label": "Active Goals",
+        "description": f"{completed_goals} completed, {total_goals - active_goals - completed_goals} pending",
+        "icon": "Target"
     }
+
+    kpi_response["completion_rate"] = {
+        "value": completion_rate,
+        "formatted": f"{completion_rate}%",
+        "change": "On track" if completion_rate >= 50 else "Needs attention",
+        "trend": "up" if completion_rate >= 50 else "down",
+        "label": "Task Completion Rate",
+        "description": f"{completed_tasks} of {total_tasks} tasks done",
+        "icon": "CheckCircle"
+    }
+
+    kpi_response["team_size"] = {
+        "value": total_members,
+        "formatted": str(total_members),
+        "change": f"{dept_count} departments",
+        "trend": "neutral",
+        "label": "Team Size",
+        "description": f"Across {dept_count} departments",
+        "icon": "Users"
+    }
+
+    kpi_response["tasks_pipeline"] = {
+        "value": in_progress_tasks,
+        "formatted": str(in_progress_tasks),
+        "change": f"{pending_tasks} pending, {completed_tasks} done",
+        "trend": "up" if in_progress_tasks > pending_tasks else "neutral",
+        "label": "Tasks In Progress",
+        "description": f"{completed_tasks} completed total",
+        "icon": "Activity"
+    }
+
+    if total_files > 0:
+        kpi_response["documents"] = {
+            "value": total_files,
+            "formatted": str(total_files),
+            "change": "Uploaded",
+            "trend": "neutral",
+            "label": "Documents Analyzed",
+            "description": "Available for AI analysis",
+            "icon": "FileText"
+        }
+
+    goal_completion_pct = round((completed_goals / total_goals * 100) if total_goals > 0 else 0, 1)
+    kpi_response["goal_completion_rate"] = {
+        "value": goal_completion_pct,
+        "formatted": f"{goal_completion_pct}%",
+        "change": f"{active_goals} active, {completed_goals} done",
+        "trend": "up" if goal_completion_pct >= 30 else "neutral",
+        "label": "Goal Completion Rate",
+        "description": f"Of {total_goals} total goals",
+        "icon": "Flag"
+    }
+
+    in_progress_pct = round((in_progress_tasks / total_tasks * 100) if total_tasks > 0 else 0, 1)
+    kpi_response["task_velocity"] = {
+        "value": in_progress_tasks,
+        "formatted": str(in_progress_tasks),
+        "change": f"{in_progress_pct}% of tasks in progress",
+        "trend": "up" if in_progress_pct > 30 else "neutral",
+        "label": "Tasks In Motion",
+        "description": f"{pending_tasks} pending, {completed_tasks} completed",
+        "icon": "Zap"
+    }
+
+    member_to_goal_ratio = round(total_members / total_goals, 1) if total_goals > 0 else 0
+    kpi_response["team_efficiency"] = {
+        "value": member_to_goal_ratio,
+        "formatted": str(member_to_goal_ratio),
+        "change": f"{total_members} members : {total_goals} goals",
+        "trend": "up" if member_to_goal_ratio >= 1 else "down",
+        "label": "Members per Goal",
+        "description": f"Across {dept_count} departments",
+        "icon": "Users"
+    }
+
+    try:
+        from ..core.ai_client import get_ai_response
+        ai_prompt = (
+            f"Given a business in the {org_industry} industry"
+            + (f" ({org_micro_vertical})" if org_micro_vertical else "")
+            + f" with {total_goals} goals ({active_goals} active, {completed_goals} completed), {total_tasks} tasks ({in_progress_tasks} in progress, {completed_tasks} completed), "
+            f"{total_members} team members in {dept_count} departments, "
+            f"and a {completion_rate}% task completion rate, suggest 1-2 additional KPIs that would be "
+            f"most relevant for this business. Return ONLY a JSON array of objects with keys: 'key' (snake_case), "
+            f"'label' (display name), 'formatted' (string value), 'change' (trend description), "
+            f"'trend' ('up'/'down'/'neutral'), 'description', 'icon' (lucide icon name). "
+            f"Keep it concise - only suggest KPIs that make sense for {org_industry}."
+        )
+        ai_kpis = await get_ai_response(
+            prompt=ai_prompt,
+            system_prompt="You are a business analytics expert. Return ONLY valid JSON.",
+            provider="xai",
+            temperature=0.3,
+            max_tokens=500,
+        )
+        import json, re
+        json_match = re.search(r'\[.*\]', ai_kpis, re.DOTALL)
+        if json_match:
+            parsed = json.loads(json_match.group())
+            if isinstance(parsed, list):
+                for item in parsed:
+                    if isinstance(item, dict) and "key" in item:
+                        kpi_response[item["key"]] = item
+    except Exception as e:
+        logger.warning(f"AI KPI suggestion failed: {e}")
+
+    return kpi_response
 
 
 @router.get("/metrics/{module}")

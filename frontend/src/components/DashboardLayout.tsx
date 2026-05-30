@@ -24,6 +24,7 @@ import {
   Sparkles,
   Share2,
   Zap,
+  FolderOpen,
 } from "lucide-react";
 import { Avatar, Badge, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui";
 
@@ -39,6 +40,7 @@ const ownerNavItems: NavItem[] = [
   { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
   { icon: Share2, label: "Orchestration", href: "/dashboard/orchestration" },
   { icon: Zap, label: "AI Task Cascade", href: "/dashboard/task" },
+  { icon: FolderOpen, label: "Uploaded Data", href: "/dashboard/data" },
 ];
 
 const employeeNavItems: NavItem[] = [
