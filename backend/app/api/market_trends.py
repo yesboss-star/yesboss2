@@ -53,9 +53,11 @@ async def get_market_news(
     vertical = org_micro_vertical or ""
     query_description = f"{industry_name}" + (f" ({vertical})" if vertical else "")
 
+    from ..core.prompt_engine import PERSONA_INSTRUCTIONS
+    market_persona = PERSONA_INSTRUCTIONS.get("market_analyst", "You are a market research analyst.")
     system_prompt = (
-        "You are a market research analyst. Generate realistic, recent market news and trends "
-        f"for the {industry_name} industry. "
+        f"{market_persona} "
+        f"Focus on the {industry_name} industry. "
         "Return ONLY a valid JSON array of article objects. No markdown, no explanation."
     )
 

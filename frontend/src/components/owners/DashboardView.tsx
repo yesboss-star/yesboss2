@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, Fragment } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { useGoalStore } from "@/stores/goalStore";
@@ -25,6 +25,7 @@ import {
   PieChart as RePieChart, Pie, Cell, LineChart as ReLineChart, Line,
   AreaChart, Area, Legend
 } from "recharts";
+import GoalDetailChat from "@/components/owners/GoalDetailChat";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -104,9 +105,14 @@ function EmptyStateTemplate({ title, hint }: { title: string; hint: string }) {
   );
 }
 
-function ExpandedGoalPipeline({ goal, onClose }: { goal: any; onClose: () => void }) {
+function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; onClose: () => void; orgId?: string }) {
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [goalData, setGoalData] = useState(goal);
+
+  useEffect(() => {
+    setGoalData(goal);
+  }, [goal]);
 
   useEffect(() => {
     setLoading(true);
@@ -118,6 +124,10 @@ function ExpandedGoalPipeline({ goal, onClose }: { goal: any; onClose: () => voi
       })
       .catch(() => setLoading(false));
   }, [goal.id]);
+
+  const handleGoalUpdate = (updates: any) => {
+    setGoalData((prev: any) => ({ ...prev, ...updates }));
+  };
 
   const statusCounts = {
     completed: tasks.filter((t) => t.status === "completed").length,
@@ -177,11 +187,11 @@ function ExpandedGoalPipeline({ goal, onClose }: { goal: any; onClose: () => voi
             </p>
           )}
 
-          {goal.assignee_name && (
+          {(goalData.assignee_name || goalData.reviewer_name) && (
             <div className="flex items-center gap-2 text-sm text-text-muted">
               <User className="w-4 h-4" />
-              <span><strong>Assignee:</strong> {goal.assignee_name}</span>
-              {goal.reviewer_name && <span className="ml-2"><strong>Reviewer:</strong> {goal.reviewer_name}</span>}
+              {goalData.assignee_name && <span><strong>Assignee:</strong> {goalData.assignee_name}</span>}
+              {goalData.reviewer_name && <span className="ml-2"><strong>Reviewer:</strong> {goalData.reviewer_name}</span>}
             </div>
           )}
 
@@ -265,6 +275,24 @@ function ExpandedGoalPipeline({ goal, onClose }: { goal: any; onClose: () => voi
               </div>
             )}
           </div>
+
+          <GoalDetailChat
+            goalId={goal.id || goal._id}
+            goalTitle={goal.title}
+            initialBreakdown={goalData.breakdown_history || goal.breakdown_history || []}
+            existingFields={{
+              success_criteria: goalData.success_criteria || goal.success_criteria,
+              kpis: goalData.kpis || goal.kpis,
+              timeline_detail: goalData.timeline_detail || goal.timeline_detail,
+              dependencies: goalData.dependencies || goal.dependencies,
+            }}
+            assigneeName={goalData.assignee_name}
+            assigneeId={goalData.assignee_id}
+            reviewerName={goalData.reviewer_name}
+            reviewerId={goalData.reviewer_id}
+            organizationId={propOrgId || goal.organization_id}
+            onGoalUpdate={handleGoalUpdate}
+          />
         </div>
       </ModalContent>
       <ModalFooter>
@@ -279,10 +307,38 @@ function GoalSection() {
   const { goals, fetchGoals } = useGoalStore();
   const orgId = organization?.id;
   const [expandedGoal, setExpandedGoal] = useState<any>(null);
+  const [showTasksFor, setShowTasksFor] = useState<Set<string>>(new Set());
+  const [goalTasks, setGoalTasks] = useState<Record<string, any[]>>({});
+  const [loadingTasks, setLoadingTasks] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (orgId) fetchGoals(orgId);
   }, [orgId, fetchGoals]);
+
+  const toggleGoalTasks = async (goalId: string) => {
+    if (showTasksFor.has(goalId)) {
+      setShowTasksFor((prev) => {
+        const next = new Set(prev);
+        next.delete(goalId);
+        return next;
+      });
+      return;
+    }
+    if (!goalTasks[goalId]) {
+      setLoadingTasks((prev) => new Set(prev).add(goalId));
+      try {
+        const res = await fetch(`${API_URL}/goals/${goalId}`);
+        const data = await res.json();
+        setGoalTasks((prev) => ({ ...prev, [goalId]: data.tasks || [] }));
+      } catch {}
+      setLoadingTasks((prev) => {
+        const next = new Set(prev);
+        next.delete(goalId);
+        return next;
+      });
+    }
+    setShowTasksFor((prev) => new Set(prev).add(goalId));
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -346,9 +402,9 @@ function GoalSection() {
             {goals.map((goal) => {
               const progress = goal.progress ?? (goal.status === "completed" ? 100 : goal.status === "active" ? 60 : 20);
               const taskCounts = goal.task_counts ?? { total: 0, completed: 0, in_progress: 0, pending: 0 };
-              return (
+              const goalId = goal.id;
+              return (<Fragment key={goalId}>
                 <button
-                  key={goal.id}
                   onClick={() => setExpandedGoal(goal)}
                   className="w-full text-left flex items-center gap-4 p-4 rounded-xl bg-surface hover:bg-surface-light transition-all border border-border/50 hover:border-primary/30 hover:shadow-md cursor-pointer group"
                 >
@@ -391,9 +447,26 @@ function GoalSection() {
                           {goal.assignee_name}
                         </span>
                       )}
-                      {(taskCounts.total || 0) > 0 && (
-                        <span className="text-text-muted/60">
+                      {(taskCounts.total || 0) > 0 ? (
+                        <span
+                          onClick={(e) => { e.stopPropagation(); toggleGoalTasks(goal.id); }}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); toggleGoalTasks(goal.id); } }}
+                          tabIndex={0}
+                          role="button"
+                          className="text-text-muted/60 hover:text-primary cursor-pointer"
+                        >
                           {taskCounts.completed || 0}/{taskCounts.total} tasks
+                          {showTasksFor.has(goal.id) ? " ▲" : " ▼"}
+                        </span>
+                      ) : (
+                        <span
+                          onClick={(e) => { e.stopPropagation(); toggleGoalTasks(goal.id); }}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); toggleGoalTasks(goal.id); } }}
+                          tabIndex={0}
+                          role="button"
+                          className="text-text-muted/40 hover:text-primary cursor-pointer text-[10px]"
+                        >
+                          No tasks ▼
                         </span>
                       )}
                     </div>
@@ -424,7 +497,41 @@ function GoalSection() {
                   </div>
                   <ChevronRight className="w-4 h-4 text-text-muted group-hover:text-primary transition-colors flex-shrink-0" />
                 </button>
-              );
+                {showTasksFor.has(goal.id) && (
+                  <div className="mt-2 pl-14 pr-16 space-y-1.5">
+                    {loadingTasks.has(goal.id) ? (
+                      <div className="flex items-center gap-2 text-[10px] text-text-muted py-2">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        Loading tasks...
+                      </div>
+                    ) : (goalTasks[goal.id] || []).length === 0 ? (
+                      <p className="text-[10px] text-text-muted/60 py-1">No tasks yet</p>
+                    ) : (
+                      (goalTasks[goal.id] || []).map((task: any) => (
+                        <div key={task._id || task.id} className="flex items-center gap-2 py-1">
+                          {task.status === "completed" ? (
+                            <CheckCircle className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+                          ) : task.status === "in_progress" ? (
+                            <Clock className="w-3 h-3 text-primary flex-shrink-0" />
+                          ) : (
+                            <AlertCircle className="w-3 h-3 text-yellow-400 flex-shrink-0" />
+                          )}
+                          <span className="text-xs truncate">{task.title}</span>
+                          <span className={`text-[9px] px-1 py-0.5 rounded-full border ml-auto flex-shrink-0 ${
+                            task.priority === "high" || task.priority === "urgent"
+                              ? "text-rose-400 bg-rose-500/10 border-rose-500/20"
+                              : task.priority === "medium"
+                              ? "text-yellow-400 bg-yellow-500/10 border-yellow-500/20"
+                              : "text-gray-400 bg-gray-500/10 border-gray-500/20"
+                          }`}>
+                            {task.priority}
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </Fragment>);
             })}
           </div>
         </CardContent>
@@ -434,6 +541,7 @@ function GoalSection() {
         <ExpandedGoalPipeline
           goal={expandedGoal}
           onClose={() => setExpandedGoal(null)}
+          orgId={orgId}
         />
       )}
     </>

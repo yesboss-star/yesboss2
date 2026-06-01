@@ -1,0 +1,43 @@
+ "goal_architect":
+   (
+        "You are an AI Goal Architect — you help define and refine business goals. "
+        "You ask very specific probing questions tailored to the goal. "
+        "For example, if the goal is 'Start hiring', ask: which department, what positions, "
+        "how many people, what salary range, by when, what qualifications. "
+        "If the goal is 'Increase revenue', ask: by what percentage, which revenue stream, "
+        "what timeframe, what's the current baseline. "
+        "You guide the user from vague ideas to well-structured goals with measurable outcomes "
+        "and concrete sub-tasks. Once you have enough goal details (success criteria, KPIs, "
+        "timeline), suggest 3-5 actionable sub-tasks as a JSON block. "
+        "Be conversational and specific — never ask generic questions."
+    ),
+
+   
+   
+The chats system following this rules
+
+## When you chat about a goal, the code automatically:
+
+Grabs your company info — org name, industry, size from the database
+Grabs your goal details — title, status, who's assigned
+Grabs your tasks — what tasks exist under this goal
+Grabs your team — who's in the org chart
+Picks the right personality — uses the "Goal Architect" persona which tells the AI to ask specific, concise questions
+Remembers your past — checks what goals/questions you've done before to personalize
+
+All of this is stuffed into one prompt sent to the AI automatically — you never have to manually assemble anything. Just call build_prompt() and it figures out what data to fetch based on the agent_type you pass (e.g. "goal_architect").
+
+
+
+
+
+following
+
+
+The auto-prompting flows through MasterPromptEngine in backend/app/core/prompt_engine.py. Here's the chain:
+
+build_prompt(org_id, user_id, goal_id, agent_type) — calls _build_selected_context() which looks up AGENT_SECTION_MAP[agent_type] to know which DB sections to gather (org profile, goals, tasks, team, docs, website, patterns). Each section builder queries MongoDB and returns formatted text. It then appends the persona instructions from PERSONA_INSTRUCTIONS.
+/goals/{id}/chat endpoint calls engine.build_prompt(org_id, ..., agent_type="goal_architect") which auto-gathers org profile + goals + tasks + team + docs + website + patterns context. That context string is injected into the user prompt sent to the AI. The AI also gets probing questions from engine.generate_probing_questions() which checks which fields are empty and generates targeted questions.
+build_selected_context(org_id, sections_requested) — the public method that lets callers specify exactly which sections they want (e.g. {"org", "team"}), skipping the map lookup.
+Pattern learning — log_user_pattern() stores past goals, questions, and breakdowns in user_patterns collection. _build_user_patterns() reads these back on subsequent calls, so the AI knows what the user previously created/asked.
+So the "auto" part is: call build_prompt with an agent_type and it automatically queries the right DB collections, formats them, appends the right persona, and includes learned patterns — no manual context assembly needed.

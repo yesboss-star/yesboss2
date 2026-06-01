@@ -36,8 +36,12 @@ class OnboardingChatbot:
             for key, value in company_profile.items():
                 if value:
                     profile_info += f"- {key}: {value}\n"
-        
-        prompt = f"""You are YesBoss AI, an intelligent business analysis assistant helping a business owner through onboarding.
+
+        # Use MasterPromptEngine persona
+        from .prompt_engine import PERSONA_INSTRUCTIONS
+        persona = PERSONA_INSTRUCTIONS.get("onboarding_assistant", "")
+
+        prompt = f"""{persona}
 
 Your job is to ask questions to understand their business deeply. Be conversational, friendly, and helpful.
 

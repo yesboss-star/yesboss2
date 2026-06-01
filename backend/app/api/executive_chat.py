@@ -67,101 +67,6 @@ async def scrape_website_text(url: str) -> str:
     return ""
 
 
-def build_full_context(db, org_id: str, website_content: str = "") -> str:
-    oid = ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id
-    org = db.organizations.find_one({"_id": oid})
-    if not org:
-        return "No organization data found."
-
-    org_name = org.get("name", "Your Organization")
-    org_industry = org.get("industry", "")
-    org_micro_vertical = org.get("micro_vertical", "")
-    org_size = org.get("size", "")
-    org_website = org.get("website_url", "")
-    org_domain = org.get("domain", "")
-
-    goals = list(db.goals.find({"organization_id": org_id}).sort("created_at", -1).limit(20))
-    tasks = list(db.tasks.find({"organization_id": org_id}).sort("created_at", -1).limit(30))
-    members = list(db.org_chart_members.find({"organization_id": org_id}))
-    files = list(db.files.find({"organization_id": org_id}).sort("created_at", -1).limit(10))
-    documents = list(db.documents.find({"org_id": org_id}).sort("created_at", -1).limit(5))
-
-    active_goals = [g for g in goals if g.get("status") == "active"]
-    completed_goals = [g for g in goals if g.get("status") == "completed"]
-
-    goal_details = ""
-    if goals:
-        goal_details = "Goals:\n" + "\n".join([
-            f"  {i+1}. \"{g.get('title', 'Untitled')}\" — status: {g.get('status', 'unknown')}, priority: {g.get('priority', 'medium')}, department: {g.get('department', 'N/A')}, assignee: {g.get('assignee_name', 'unassigned')}"
-            for i, g in enumerate(goals[:8])
-        ])
-
-    task_details = ""
-    if tasks:
-        task_details = "\nTasks:\n" + "\n".join([
-            f"  {i+1}. \"{t.get('title', 'Untitled')}\" — status: {t.get('status', 'pending')}, priority: {t.get('priority', 'medium')}, assignee: {t.get('assignee_id', 'unassigned')}"
-            for i, t in enumerate(tasks[:12])
-        ])
-
-    member_details = ""
-    if members:
-        dept_count = {}
-        member_names = []
-        for m in members:
-            d = m.get("department", "General")
-            dept_count[d] = dept_count.get(d, 0) + 1
-            member_names.append(m.get("full_name", m.get("email", "Unknown")))
-        member_details = "\nTeam members by department: " + ", ".join([f"{d}: {c}" for d, c in dept_count.items()])
-        member_details += "\nTeam member names: " + ", ".join(member_names)
-
-    file_details = ""
-    if files:
-        file_details = "\nUploaded files (from upload API):\n" + "\n".join([
-            f"  {i+1}. {f.get('filename', 'unknown')} (type: {f.get('file_type', 'unknown')})"
-            for i, f in enumerate(files)
-        ])
-    else:
-        file_details = "\nNo files uploaded yet."
-
-    doc_details = ""
-    if documents:
-        doc_details = "\nProcessed documents (with extracted text):\n" + "\n".join([
-            f"  {i+1}. {d.get('filename', 'unknown')} — {d.get('text_length', 0)} chars, {d.get('chunk_count', 0)} chunks. Preview: {d.get('text', '')[:300]}"
-            for i, d in enumerate(documents)
-        ])
-    else:
-        doc_details = "\nNo documents have been uploaded for AI analysis yet."
-
-    total_tasks = len(tasks)
-    completed_tasks = len([t for t in tasks if t.get("status") == "completed"])
-    completion_rate = round((completed_tasks / total_tasks * 100) if total_tasks > 0 else 0, 1)
-
-    website_block = ""
-    if website_content:
-        website_block = f"\nWebsite Content (from {org_website}):\n{website_content[:2000]}\n"
-
-    context_block = f"""===== BUSINESS DATA =====
-Organization: {org_name}
-Industry: {org_industry}
-Micro Vertical: {org_micro_vertical or "Not specified"}
-Size: {org_size or "Not specified"}
-Domain: {org_domain}
-Website: {org_website or "Not specified"}
-
-Summary: {len(goals)} goals ({len(active_goals)} active, {len(completed_goals)} completed), {len(tasks)} tasks ({completed_tasks} completed, {completion_rate}% completion rate), {len(members)} team members
-
-{goal_details}
-{task_details}
-{member_details}
-{file_details}
-{doc_details}
-{website_block}
-========================
-
-"""
-    return context_block
-
-
 @router.post("/chat")
 async def executive_chat(request: ChatRequest, current_user = Depends(get_current_user_optional)):
     db = get_database()
@@ -172,13 +77,15 @@ async def executive_chat(request: ChatRequest, current_user = Depends(get_curren
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
 
-    context_block = build_full_context(db, org_id)
+    user_id = getattr(current_user, 'id', None) if current_user else None
 
-    org = db.organizations.find_one({"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id})
-    if org and org.get("website_url"):
-        website_text = await scrape_website_text(org["website_url"])
-        if website_text:
-            context_block += f"\nWebsite Content (from {org['website_url']}):\n{website_text[:2000]}\n"
+    from ..core.prompt_engine import MasterPromptEngine
+    engine = MasterPromptEngine(db)
+    context_block = await engine.build_prompt(
+        org_id=org_id,
+        user_id=user_id,
+        agent_type="business_analyst",
+    )
 
     conversation_history = []
     if request.history:

@@ -163,7 +163,9 @@ class PersonaQuestionGenerateRequest(BaseModel):
 @router.post("/persona/generate-question")
 async def generate_persona_question(request: PersonaQuestionGenerateRequest):
     from ..core.ai_client import get_ai_response
-    
+    from ..core.database import get_database
+    from ..core.prompt_engine import MasterPromptEngine
+
     website_content = request.website_content or ""
     if not website_content and request.domain:
         try:
@@ -172,9 +174,9 @@ async def generate_persona_question(request: PersonaQuestionGenerateRequest):
             website_content = scraped.get("description", "")[:2000]
         except Exception:
             pass
-    
+
     num_answers = len(request.previous_answers or [])
-    
+
     context_parts = [
         f"- Company: {request.org_name or 'Unknown'}",
         f"- Industry: {request.industry or 'Not specified'}",
@@ -190,12 +192,17 @@ async def generate_persona_question(request: PersonaQuestionGenerateRequest):
         if social_str:
             context_parts.append(f"- Social presence: {social_str}")
     company_context = "\n".join(context_parts)
-    
-    if num_answers == 0:
-        prompt = f"""You are YesBoss, an AI business co-founder building a deep understanding of this person to create their personalized operational dashboard.
 
-COMPANY CONTEXT:
-{company_context}
+    # Build unified context through MasterPromptEngine
+    db = get_database()
+    engine = MasterPromptEngine(db) if db is not None else None
+    engine_context = f"===== COMPANY CONTEXT =====\n{company_context}\n===========================\n"
+    if engine:
+        persona = engine._get_persona_instructions("persona_builder")
+        engine_context += f"\n===== PERSONA =====\n{persona}\n====================\n"
+
+    if num_answers == 0:
+        prompt = f"""{engine_context}
 
 You are meeting this person for the first time. Ask ONE genuine, thoughtful question that helps you understand WHO they are as a leader — not what they do, but how they think, what drives them, what keeps them up at night.
 
@@ -217,10 +224,7 @@ Rules:
     else:
         answers_text = "\n".join([f"Q: {a.get('question', '')}\nA: {a.get('answer', '')}" for a in request.previous_answers[-5:]])
         
-        prompt = f"""You are YesBoss, an AI business co-founder in an ongoing conversation. You've been learning about this person through their answers.
-
-COMPANY CONTEXT:
-{company_context}
+        prompt = f"""{engine_context}
 
 CONVERSATION SO FAR:
 {answers_text}

@@ -388,6 +388,7 @@ async def _source_ai_validation(domain: str, company_name: str, all_candidates: 
     validated = {}
     try:
         from .ai_client import get_ai_response
+        from .prompt_engine import PERSONA_INSTRUCTIONS
 
         candidates_json = {}
         for platform, url in sorted(all_candidates.items()):
@@ -423,9 +424,10 @@ Example:
 
 Return ONLY valid JSON. No markdown. No explanation. NO extra URLs."""
 
+        social_persona = PERSONA_INSTRUCTIONS.get("social_verifier", "You are a strict social media verifier. NEVER guess or invent URLs. Return ONLY valid JSON.")
         response = await get_ai_response(
             prompt=prompt,
-            system_prompt="You are a strict social media verifier. NEVER guess or invent URLs. Only validate URLs that were explicitly found. Return ONLY valid JSON.",
+            system_prompt=social_persona,
             temperature=0.1,
             max_tokens=400
         )

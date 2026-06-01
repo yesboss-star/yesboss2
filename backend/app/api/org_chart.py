@@ -242,8 +242,40 @@ async def get_org_tree(organization_id: Optional[str] = None, current_user = Dep
         "total": len(members)
     }
 
+@router.get("/members/search")
+async def search_org_members(
+    q: str = "",
+    organization_id: Optional[str] = None,
+    current_user = Depends(get_current_user_optional)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    org_id = organization_id or get_user_org_id(current_user)
+    if not org_id:
+        raise HTTPException(status_code=400, detail="Organization ID required")
+
+    if not q:
+        return {"members": []}
+
+    import re
+    regex = re.compile(re.escape(q), re.IGNORECASE)
+    members = list(
+        db.org_chart_members.find({
+            "organization_id": org_id,
+            "$or": [
+                {"full_name": {"$regex": regex}},
+                {"email": {"$regex": regex}},
+            ]
+        }).sort("full_name", 1).limit(20)
+    )
+    for m in members:
+        m["_id"] = str(m["_id"])
+    return {"members": members}
+
 @router.get("/members")
-async def list_org_members(organization_id: Optional[str] = None, current_user = Depends(get_current_user_optional)):
+async def list_org_members(organization_id: Optional[str] = None, current_user = Depends(get_current_user_optional)): 
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")

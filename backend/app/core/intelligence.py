@@ -22,11 +22,12 @@ async def analyze_company_from_domain(domain: str) -> dict:
     except Exception as e:
         logger.warning("Scrape failed for %s: %s", domain, e)
 
-    company_name = domain.split(".")[0].title()
-    industry = "Technology"
+    company_name = ""
+    industry = ""
     micro_verticals = []
     description = ""
     website_url = f"https://{domain}"
+    confidence = 0.0
 
     homepage_text = (scraped.get("description") or "") if scraped else ""
     if not homepage_text and scraped:
@@ -57,9 +58,12 @@ Rules:
 - micro_verticals: Array of 1-5 specific sub-niches based on industry (e.g. for Automotive: ['Auto Parts Manufacturing', 'EV Charging Infrastructure', 'Fleet Management'])
 - Use the exact industry names from the standard list provided."""
 
+        from .prompt_engine import PERSONA_INSTRUCTIONS
+        company_analyst_persona = PERSONA_INSTRUCTIONS.get("company_analyst", "You are an industry analyst. Return ONLY valid JSON. No markdown.")
+
         response = await get_ai_response(
             prompt=ai_prompt,
-            system_prompt="You are an industry analyst. Return ONLY valid JSON. No markdown.",
+            system_prompt=company_analyst_persona,
             temperature=0.1,
             max_tokens=500
         )
@@ -78,22 +82,52 @@ Rules:
             ai_name = parsed.get("company_name", "")
             if ai_name and ai_name.lower() != domain.replace("www.", "").split(".")[0].lower():
                 company_name = ai_name
-            industry = parsed.get("industry", industry) or industry
-            micro_verticals = parsed.get("micro_verticals", [])
+                confidence += 0.3
+            ai_industry = parsed.get("industry", "")
+            if ai_industry and ai_industry != "Technology":
+                industry = ai_industry
+                confidence += 0.4
+            elif ai_industry:
+                industry = ai_industry
+                confidence += 0.1
+            ai_micro_verticals = parsed.get("micro_verticals", [])
+            if not isinstance(ai_micro_verticals, list):
+                ai_micro_verticals = [ai_micro_verticals] if ai_micro_verticals else []
+            if ai_micro_verticals:
+                micro_verticals = ai_micro_verticals
+                confidence += 0.2
+            ai_url = parsed.get("website_url", website_url)
+            if ai_url:
+                website_url = ai_url
+                confidence += 0.1
+            company_name = parsed.get("company_name") or company_name
+            industry = parsed.get("industry") or industry
+            micro_verticals = parsed.get("micro_verticals", micro_verticals)
             if not isinstance(micro_verticals, list):
                 micro_verticals = [micro_verticals] if micro_verticals else []
             website_url = parsed.get("website_url", website_url) or website_url
 
-        logger.info("Detected - Name: %s, Industry: %s, Verticals: %s", company_name, industry, micro_verticals)
+        if scraped and scraped.get("description"):
+            description = scraped["description"]
+            confidence += 0.05
+
+        confidence = min(1.0, confidence)
+        logger.info("Detected - Name: %s, Industry: %s, Verticals: %s, Confidence: %.2f", company_name, industry, micro_verticals, confidence)
     except Exception as e:
         logger.error("AI domain analysis failed: %s", e)
         if scraped and scraped.get("name"):
             company_name = scraped["name"]
-        if scraped and scraped.get("industry"):
+            confidence = 0.3
+        if scraped and scraped.get("industry") and scraped.get("industry") != "Technology":
             industry = scraped["industry"]
+            confidence = max(confidence, 0.4)
+        elif scraped and scraped.get("industry"):
+            industry = scraped["industry"]
+            confidence = max(confidence, 0.2)
         if scraped and scraped.get("micro_vertical"):
             mv = scraped["micro_vertical"]
             micro_verticals = [mv] if isinstance(mv, str) else (mv if isinstance(mv, list) else [])
+            confidence = max(confidence, 0.5)
 
     return {
         "company_name": company_name,
@@ -102,6 +136,8 @@ Rules:
         "micro_vertical": micro_verticals[0] if micro_verticals else "",
         "website_url": website_url,
         "description": description or (scraped.get("description") if scraped else ""),
+        "confidence": round(confidence, 2),
+        "auto_filled": confidence >= 0.5,
     }
 
 
@@ -174,9 +210,11 @@ Examples:
 
 Return ONLY the department name, nothing else."""
 
+    from .prompt_engine import PERSONA_INSTRUCTIONS
+    dept_persona = PERSONA_INSTRUCTIONS.get("department_classifier", "You classify goals into departments. Reply with ONE department word only.")
     response = await get_ai_response(
         prompt=prompt,
-        system_prompt="You classify goals into departments. Reply with ONE department word only: Engineering, Marketing, Sales, Operations, Finance, Human Resources, Product, Design, Customer Support, R&D, Supply Chain, or Legal. Do not add any explanation.",
+        system_prompt=dept_persona,
         temperature=0.2,
         max_tokens=30
     )
@@ -192,9 +230,11 @@ async def generate_goal_suggestions(industry: str, micro_vertical: str, count: i
 
     prompt = f"List {count} goals for {industry} {micro_vertical or ''}. Return JSON array: [{{title,description,department,priority}}]"
 
+    from .prompt_engine import PERSONA_INSTRUCTIONS
+    suggester_persona = PERSONA_INSTRUCTIONS.get("goal_suggester", "You are a business consultant. Return ONLY valid JSON array. No markdown.")
     response = await get_ai_response(
         prompt=prompt,
-        system_prompt="You are a business consultant. Return ONLY valid JSON array. No markdown.",
+        system_prompt=suggester_persona,
         temperature=0.3,
         max_tokens=800
     )
@@ -249,6 +289,221 @@ async def generate_goal_suggestions(industry: str, micro_vertical: str, count: i
         return []
 
 
+async def suggest_industries(query: str, limit: int = 8) -> list:
+    """Suggest industries based on user-typed query using Grok AI."""
+    logger.info("Suggesting industries for query: %s", query)
+    from .ai_client import get_ai_response
+    import json
+    import re
+
+    if not query or len(query.strip()) < 1:
+        return _get_default_industries(limit)
+
+    try:
+        prompt = f"""The user is typing: "{query}" while selecting their industry in a business onboarding form.
+
+Suggest up to {limit} matching industry names. Be flexible with partial matches, abbreviations, and synonyms.
+
+Examples of valid industries (non-exhaustive):
+- Technology & Software
+- IT Services & Consulting
+- Artificial Intelligence & Machine Learning
+- SaaS / Cloud Computing
+- Cybersecurity
+- E-commerce & Online Retail
+- Fintech & Payment Solutions
+- Banking & Financial Services
+- Healthcare & Life Sciences
+- Healthcare Technology (HealthTech)
+- Pharmaceuticals & Biotech
+- Education & EdTech
+- Online Learning & E-Learning
+- Manufacturing & Industrial
+- Automotive & Electric Vehicles
+- Real Estate & Property
+- Construction & Infrastructure
+- Media & Entertainment
+- Advertising & Marketing
+- Digital Marketing & SEO
+- Logistics & Supply Chain
+- Travel & Tourism
+- Hospitality & Hotels
+- Restaurants & Food Services
+- Legal Services & Law
+- Accounting & Taxation
+- HR & Recruitment
+- Non-profit & NGO
+- Energy & Utilities
+- Agriculture & AgTech
+- Telecommunications
+- Food & Beverage
+- Fashion & Apparel
+- Sports & Fitness
+- Gaming & Esports
+
+If the user types something like "tech", suggest "Technology & Software" and "SaaS / Cloud Computing" and "IT Services & Consulting".
+If the user types "ai", suggest "Artificial Intelligence & Machine Learning" and "SaaS / Cloud Computing".
+If the user types "shop", suggest "E-commerce & Online Retail" and "Retail & Consumer Goods".
+If the user types "school", suggest "Education & EdTech" and "Higher Education".
+
+Return ONLY a JSON array of strings, e.g. ["Technology & Software", "SaaS / Cloud Computing"].
+No markdown, no explanation."""
+
+        response = await get_ai_response(
+            prompt=prompt,
+            system_prompt="You are a business taxonomy assistant. Return ONLY a JSON array of industry name strings. No markdown.",
+            temperature=0.2,
+            max_tokens=300
+        )
+
+        json_str = response.strip()
+        json_str = re.sub(r'^```(?:json)?\s*', '', json_str)
+        json_str = re.sub(r'\s*```$', '', json_str)
+        if '[' in json_str and ']' in json_str:
+            start = json_str.find('[')
+            end = json_str.rfind(']') + 1
+            json_str = json_str[start:end]
+
+        try:
+            result = json.loads(json_str)
+            if isinstance(result, list):
+                cleaned = [str(s).strip() for s in result if s and str(s).strip()]
+                return cleaned[:limit]
+        except json.JSONDecodeError:
+            matches = re.findall(r'"([^"]+)"', response)
+            return [m.strip() for m in matches if m.strip()][:limit]
+
+        return _get_default_industries(limit, query)
+    except Exception as e:
+        logger.error("Industry suggestion failed: %s", e)
+        return _get_default_industries(limit, query)
+
+
+async def suggest_micro_verticals(query: str, industry: str = "", limit: int = 8) -> list:
+    """Suggest micro-verticals based on user-typed query and (optional) industry using Grok AI."""
+    logger.info("Suggesting micro-verticals for query=%s industry=%s", query, industry)
+    from .ai_client import get_ai_response
+    import json
+    import re
+
+    if not query or len(query.strip()) < 1:
+        return _get_default_micro_verticals(limit, industry)
+
+    try:
+        industry_context = f" within the {industry} industry" if industry else ""
+        prompt = f"""The user is typing: "{query}" while selecting micro-verticals (specific niches) for their business{industry_context}.
+
+Suggest up to {limit} matching micro-vertical names. Be flexible with partial matches, abbreviations, and synonyms.
+
+Examples of micro-verticals (non-exhaustive):
+- Custom Software Development, Mobile App Development, Web Development
+- Cloud Services & Migration, DevOps & Infrastructure, API Development & Integration
+- E-commerce Platforms, Payment Processing, Marketplace & Platforms
+- Fintech Solutions, Blockchain & Crypto, Insurtech
+- Telehealth & Remote Care, Electronic Health Records (EHR)
+- Online Education Platforms, Corporate Training, Skill Development
+- Supply Chain Management, Warehouse Management, Last Mile Delivery
+- Electric Vehicles & Charging, Smart Buildings & Homes, IoT
+- Digital Marketing, SEO, Content Management Systems
+- Customer Relationship Management (CRM), Enterprise Resource Planning (ERP)
+- Video Streaming & OTT, Online Gaming, Social Media & Networking
+- Clean Energy Solutions, Agriculture Technology, Food Technology
+- B2B Services, B2C Services, Subscription Services, Consulting & Advisory
+- Machine Learning & AI Solutions, Data Analytics & Business Intelligence
+
+If the user types "app", suggest "Mobile App Development", "Custom Software Development", "Web Development".
+If the user types "blockchain", suggest "Blockchain & Crypto", "Fintech Solutions".
+If the user types "training", suggest "Corporate Training", "Skill Development", "Online Education Platforms".
+
+Return ONLY a JSON array of strings, e.g. ["Mobile App Development", "Custom Software Development"].
+No markdown, no explanation."""
+
+        response = await get_ai_response(
+            prompt=prompt,
+            system_prompt="You are a business taxonomy assistant. Return ONLY a JSON array of micro-vertical name strings. No markdown.",
+            temperature=0.2,
+            max_tokens=300
+        )
+
+        json_str = response.strip()
+        json_str = re.sub(r'^```(?:json)?\s*', '', json_str)
+        json_str = re.sub(r'\s*```$', '', json_str)
+        if '[' in json_str and ']' in json_str:
+            start = json_str.find('[')
+            end = json_str.rfind(']') + 1
+            json_str = json_str[start:end]
+
+        try:
+            result = json.loads(json_str)
+            if isinstance(result, list):
+                cleaned = [str(s).strip() for s in result if s and str(s).strip()]
+                return cleaned[:limit]
+        except json.JSONDecodeError:
+            matches = re.findall(r'"([^"]+)"', response)
+            return [m.strip() for m in matches if m.strip()][:limit]
+
+        return _get_default_micro_verticals(limit, industry, query)
+    except Exception as e:
+        logger.error("Micro-vertical suggestion failed: %s", e)
+        return _get_default_micro_verticals(limit, industry, query)
+
+
+def _get_default_industries(limit: int = 8, query: str = "") -> list:
+    """Fallback list of common industries filtered by query."""
+    all_industries = [
+        "Technology & Software", "IT Services & Consulting", "SaaS / Cloud Computing",
+        "Artificial Intelligence & Machine Learning", "Cybersecurity",
+        "E-commerce & Online Retail", "Fintech & Payment Solutions",
+        "Banking & Financial Services", "Healthcare & Life Sciences",
+        "Healthcare Technology (HealthTech)", "Pharmaceuticals & Biotech",
+        "Education & EdTech", "Manufacturing & Industrial",
+        "Automotive & Electric Vehicles", "Real Estate & Property",
+        "Media & Entertainment", "Advertising & Marketing",
+        "Digital Marketing & SEO", "Logistics & Supply Chain",
+        "Travel & Tourism", "Hospitality & Hotels", "Restaurants & Food Services",
+        "Legal Services & Law", "Accounting & Taxation", "HR & Recruitment",
+        "Non-profit & NGO", "Energy & Utilities", "Agriculture & AgTech",
+        "Telecommunications", "Food & Beverage", "Fashion & Apparel",
+        "Sports & Fitness", "Gaming & Esports", "Renewable Energy & Sustainability",
+    ]
+    if not query:
+        return all_industries[:limit]
+    q = query.lower()
+    matched = [i for i in all_industries if q in i.lower()]
+    if not matched:
+        return all_industries[:limit]
+    return matched[:limit]
+
+
+def _get_default_micro_verticals(limit: int = 8, industry: str = "", query: str = "") -> list:
+    """Fallback list of common micro-verticals filtered by industry/query."""
+    all_verticals = [
+        "Custom Software Development", "Mobile App Development", "Web Development",
+        "Cloud Services & Migration", "DevOps & Infrastructure",
+        "API Development & Integration", "E-commerce Platforms", "Payment Processing",
+        "Fintech Solutions", "Blockchain & Crypto", "Insurtech",
+        "Telehealth & Remote Care", "Electronic Health Records (EHR)",
+        "Online Education Platforms", "Corporate Training", "Skill Development",
+        "Supply Chain Management", "Warehouse Management", "Last Mile Delivery",
+        "Electric Vehicles & Charging", "Smart Buildings & Homes", "IoT",
+        "Digital Marketing", "Content Management Systems",
+        "Customer Relationship Management (CRM)", "Enterprise Resource Planning (ERP)",
+        "Video Streaming & OTT", "Online Gaming", "Social Media & Networking",
+        "Clean Energy Solutions", "Agriculture Technology", "Food Technology",
+        "B2B Services", "B2C Services", "Subscription Services", "Consulting & Advisory",
+        "Machine Learning & AI Solutions", "Data Analytics & Business Intelligence",
+        "Marketplace & Platforms", "Managed Services", "Project Management Tools",
+        "Human Resources (HR) Software", "Internet of Things (IoT)", "Robotics & Automation",
+    ]
+    search = (query or industry or "").lower()
+    if not search:
+        return all_verticals[:limit]
+    matched = [v for v in all_verticals if search in v.lower()]
+    if not matched:
+        return all_verticals[:limit]
+    return matched[:limit]
+
+
 async def search_company_info(company_name: str) -> dict:
     logger.info("Searching for company: %s", company_name)
     
@@ -282,9 +537,11 @@ If you cannot find verified information:
     "found": false
 }}"""
 
+        from .prompt_engine import PERSONA_INSTRUCTIONS
+        researcher_persona = PERSONA_INSTRUCTIONS.get("company_researcher", "You are a precise company researcher. Return ONLY valid, parseable JSON.")
         response = await get_ai_response(
             prompt=ai_prompt,
-            system_prompt="You are a precise company researcher. Return ONLY valid, parseable JSON. Be extremely conservative - only return found:true if you are 100% confident about the company. Do NOT make up companies.",
+            system_prompt=researcher_persona,
             temperature=0.1,
             max_tokens=600
         )

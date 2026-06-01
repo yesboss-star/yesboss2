@@ -440,6 +440,8 @@ async def get_dashboard_kpi(
 
     try:
         from ..core.ai_client import get_ai_response
+        from ..core.prompt_engine import PERSONA_INSTRUCTIONS
+        kpi_persona = PERSONA_INSTRUCTIONS.get("kpi_analyst", "You are a business analytics expert. Return ONLY valid JSON.")
         ai_prompt = (
             f"Given a business in the {org_industry} industry"
             + (f" ({org_micro_vertical})" if org_micro_vertical else "")
@@ -453,7 +455,7 @@ async def get_dashboard_kpi(
         )
         ai_kpis = await get_ai_response(
             prompt=ai_prompt,
-            system_prompt="You are a business analytics expert. Return ONLY valid JSON.",
+            system_prompt=kpi_persona,
             provider="xai",
             temperature=0.3,
             max_tokens=500,

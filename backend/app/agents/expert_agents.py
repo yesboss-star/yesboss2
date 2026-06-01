@@ -7,80 +7,35 @@ logger = logging.getLogger("yesboss.agents.expert")
 
 from ..core.ai_client import get_ai_response, get_chat_response
 from ..core.database import get_database
-
-SYSTEM_PROMPTS = {
-    "finance": """You are a Finance Expert AI Agent. You specialize in:
-- Financial analysis and planning
-- Cash flow management
-- Cost optimization
-- Budgeting and forecasting
-- ROI analysis
-- Investment decisions
-
-Provide clear, actionable financial insights with specific recommendations.""",
-    
-    "operations": """You are an Operations Expert AI Agent. You specialize in:
-- Process optimization
-- Supply chain management
-- Resource allocation
-- Workflow efficiency
-- Quality control
-- Vendor management
-
-Provide practical operational improvements with measurable outcomes.""",
-    
-    "workflow": """You are a Workflow Design Expert AI Agent. You specialize in:
-- Business process design
-- Automation opportunities
-- Team coordination
-- Task dependencies
-- Approval workflows
-- Reporting structures
-
-Design efficient workflows that reduce bottlenecks and improve productivity.""",
-    
-    "forecasting": """You are a Business Forecasting Expert AI Agent. You specialize in:
-- Trend analysis
-- Demand forecasting
-- Growth predictions
-- Risk assessment
-- Market analysis
-- Seasonal patterns
-
-Provide data-driven forecasts with confidence levels and key assumptions.""",
-    
-    "industry_intelligence": """You are an Industry Intelligence Expert AI Agent. You specialize in:
-- Market analysis
-- Competitor research
-- Industry trends
-- Best practices
-- Benchmarking
-- Regulatory changes
-
-Provide comprehensive industry insights to inform strategic decisions.""",
-    
-    "org_understanding": """You are an Organization Analysis Expert AI Agent. You specialize in:
-- Organizational structure
-- Team dynamics
-- Leadership patterns
-- Communication flows
-- Department interactions
-- Cultural analysis
-
-Analyze and provide insights about how the organization works.""",
-}
+from ..core.prompt_engine import MasterPromptEngine
 
 
 class BaseExpertAgent:
-    def __init__(self, agent_type: str, provider: Optional[str] = None):
+    def __init__(self, agent_type: str, provider: Optional[str] = None, db=None):
         self.agent_type = agent_type
         self.provider = provider
-        self.system_prompt = SYSTEM_PROMPTS.get(agent_type, "You are a helpful AI assistant.")
+        self.db = db or get_database()
+        # Get persona from MasterPromptEngine
+        engine = MasterPromptEngine(self.db)
+        persona_key = f"expert_{agent_type}" if not agent_type.startswith("expert_") else agent_type
+        self.system_prompt = engine._get_persona_instructions(persona_key)
     
-    async def analyze(self, query: str, context: Optional[dict] = None) -> dict:
+    async def analyze(self, query: str, context: Optional[dict] = None, org_id: Optional[str] = None) -> dict:
+        engine = MasterPromptEngine(self.db)
         context_str = ""
+
+        if org_id:
+            # Build unified context from engine
+            agent_key = f"expert_{self.agent_type}" if not self.agent_type.startswith("expert_") else self.agent_type
+            engine_ctx = await engine.build_selected_context(
+                org_id=org_id,
+                sections_requested={"org", "goals", "tasks", "team", "docs", "patterns"},
+            )
+            if engine_ctx:
+                context_str = f"\n\nBusiness Context:\n{engine_ctx}"
+
         if context:
-            context_str = f"\n\nContext: {json.dumps(context, indent=2)}"
+            context_str += f"\n\nAdditional Context: {json.dumps(context, indent=2)}"
         
         full_prompt = f"""{query}{context_str}
 
@@ -145,58 +100,38 @@ Provide your analysis with:
 
 
 class FinanceAgent(BaseExpertAgent):
-    def __init__(self, provider: Optional[str] = None):
-        super().__init__("finance", provider)
+    def __init__(self, provider: Optional[str] = None, db=None):
+        super().__init__("finance", provider, db)
     
     async def analyze_financial_health(self, org_id: str) -> dict:
-        db = get_database()
-        
         try:
-            tasks = list(db.tasks.find({"organization_id": org_id}))
-            goals = list(db.goals.find({"organization_id": org_id}))
-            
-            context = {
-                "task_count": len(tasks),
-                "goal_count": len(goals),
-                "has_goals": len(goals) > 0,
-            }
-            
             query = "Analyze the financial health indicators based on the available organizational data."
-            return await self.analyze(query, context)
+            return await self.analyze(query, org_id=org_id)
         except Exception as e:
-            return await self.analyze("Provide general financial health analysis for a business.", {"error": str(e)})
+            return await self.analyze("Provide general financial health analysis for a business.", org_id=org_id)
     
     async def suggest_cost_optimization(self, org_id: str) -> dict:
         return await self.analyze(
             "What are the top 5 cost optimization opportunities for this organization?",
-            {"organization_id": org_id, "focus": "cost_optimization"}
+            org_id=org_id
         )
 
 
 class OperationsAgent(BaseExpertAgent):
-    def __init__(self, provider: Optional[str] = None):
-        super().__init__("operations", provider)
+    def __init__(self, provider: Optional[str] = None, db=None):
+        super().__init__("operations", provider, db)
     
     async def analyze_operations(self, org_id: str) -> dict:
-        db = get_database()
-        
         try:
-            tasks = list(db.tasks.find({"organization_id": org_id}).limit(20))
-            
-            context = {
-                "task_count": len(tasks),
-                "task_sample": [{"title": t.get("title"), "status": t.get("status")} for t in tasks[:5]]
-            }
-            
             query = "Analyze operational efficiency and identify improvement areas."
-            return await self.analyze(query, context)
+            return await self.analyze(query, org_id=org_id)
         except Exception as e:
-            return await self.analyze("Provide operations optimization recommendations.", {"error": str(e)})
+            return await self.analyze("Provide operations optimization recommendations.", org_id=org_id)
     
     async def identify_bottlenecks(self, org_id: str) -> dict:
         return await self.analyze(
             "Identify the top operational bottlenecks and suggest ways to resolve them.",
-            {"organization_id": org_id, "focus": "bottlenecks"}
+            org_id=org_id
         )
 
 
@@ -308,28 +243,15 @@ class IndustryIntelligenceAgent(BaseExpertAgent):
 
 
 class OrgUnderstandingAgent(BaseExpertAgent):
-    def __init__(self, provider: Optional[str] = None):
-        super().__init__("org_understanding", provider)
+    def __init__(self, provider: Optional[str] = None, db=None):
+        super().__init__("org_understanding", provider, db)
     
     async def analyze_organization(self, org_id: str) -> dict:
-        db = get_database()
-        
         try:
-            org = db.organizations.find_one({"_id": org_id})
-            employees = list(db.employees.find({"organization_id": org_id}))
-            tasks = list(db.tasks.find({"organization_id": org_id}).limit(20))
-            
-            context = {
-                "organization": org,
-                "employee_count": len(employees),
-                "task_count": len(tasks),
-                "has_organization": org is not None
-            }
-            
             query = "Analyze the organization's structure, culture, and operational patterns."
-            return await self.analyze(query, context)
+            return await self.analyze(query, org_id=org_id)
         except Exception as e:
-            return await self.analyze("Provide organizational analysis based on available data.", {"error": str(e)})
+            return await self.analyze("Provide organizational analysis based on available data.", org_id=org_id)
 
 
 def get_expert_agent(agent_type: str, provider: Optional[str] = None) -> BaseExpertAgent:

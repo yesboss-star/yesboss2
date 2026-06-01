@@ -5,7 +5,9 @@ from ..core.intelligence import (
     analyze_company_from_email,
     analyze_company_from_domain,
     enrich_profile_with_ai,
-    build_pre_org_profile
+    build_pre_org_profile,
+    suggest_industries,
+    suggest_micro_verticals,
 )
 
 router = APIRouter()
@@ -21,6 +23,13 @@ class AnalyzeFromDomainRequest(BaseModel):
     domain: str
     enrich_with_ai: bool = False
     ai_provider: Optional[str] = None
+
+
+class SuggestRequest(BaseModel):
+    query: str = ""
+    industry: Optional[str] = None
+    type: str = "industries"
+    limit: int = 8
 
 
 @router.post("/analyze/email")
@@ -79,6 +88,27 @@ class DepartmentSuggestionsRequest(BaseModel):
     email: str | None = None
     role: str | None = None
     industry: str | None = None
+
+
+@router.post("/suggest")
+async def suggest_taxonomy(request: SuggestRequest):
+    """Suggest industry or micro-vertical names powered by Grok AI."""
+    if request.type not in ("industries", "micro_verticals"):
+        raise HTTPException(status_code=400, detail="type must be 'industries' or 'micro_verticals'")
+
+    try:
+        limit = max(1, min(request.limit or 8, 20))
+        if request.type == "industries":
+            suggestions = await suggest_industries(request.query or "", limit=limit)
+        else:
+            suggestions = await suggest_micro_verticals(
+                request.query or "",
+                industry=request.industry or "",
+                limit=limit,
+            )
+        return {"type": request.type, "query": request.query, "suggestions": suggestions}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 DEPARTMENTS_BY_INDUSTRY = {

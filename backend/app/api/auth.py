@@ -141,7 +141,7 @@ async def signup(request: SignupRequest):
         set_custom_user_claims(user.uid, {"role": request.role})
 
         db = get_database()
-        if db:
+        if db is not None:
             db.users.insert_one({
                 "uid": user.uid,
                 "email": request.email,
@@ -198,7 +198,7 @@ async def login(request: LoginRequest):
 
         db = get_database()
         db_user = None
-        if db:
+        if db is not None:
             db_user = db.users.find_one({"uid": user.uid})
 
         logger.info("User logged in: %s", request.email)
@@ -284,7 +284,7 @@ async def get_me(uid: str = None):
 
         db = get_database()
         db_user = None
-        if db:
+        if db is not None:
             db_user = db.users.find_one({"uid": uid})
 
         return AuthResponse(
@@ -428,7 +428,7 @@ async def update_user_role(uid: str, role: str):
         set_custom_user_claims(uid, {"role": role})
 
         db = get_database()
-        if db:
+        if db is not None:
             db.users.update_one({"uid": uid}, {"$set": {"role": role}})
 
         logger.info("User %s role updated to: %s", uid, role)
@@ -461,7 +461,7 @@ async def delete_firebase_user(email: str):
         delete_user(uid)
 
         db = get_database()
-        if db:
+        if db is not None:
             db.users.delete_one({"uid": uid})
             db.organizations.delete_many({"owner_id": uid})
 

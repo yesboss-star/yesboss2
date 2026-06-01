@@ -19,12 +19,27 @@ export interface Goal {
   created_at: string;
   updated_at: string;
   progress?: number;
+  success_criteria?: string;
+  kpis?: string;
+  timeline_detail?: string;
+  dependencies?: string;
+  breakdown_history?: Array<{
+    role: string;
+    content: string;
+    timestamp: string;
+  }>;
   task_counts?: {
     total: number;
     completed: number;
     in_progress: number;
     pending: number;
   };
+}
+
+export interface TaskSuggestion {
+  title: string;
+  description?: string;
+  priority: string;
 }
 
 export interface Task {
@@ -54,6 +69,9 @@ interface GoalState {
   deleteGoal: (goalId: string) => Promise<void>;
   generateTasks: (goalId: string, count?: number) => Promise<Task[]>;
   fetchGoalWithTasks: (goalId: string) => Promise<{ goal: Goal; tasks: Task[] }>;
+  updateGoalBreakdown: (goalId: string, data: Partial<Goal>) => Promise<Goal>;
+  goalChat: (goalId: string, message: string) => Promise<{ response: string; probing_questions: string[]; structured_update: Record<string, string>; task_suggestions: TaskSuggestion[]; goal: Goal }>;
+  createTasksFromSuggestions: (goalId: string, tasks: TaskSuggestion[]) => Promise<Task[]>;
 }
 
 export const useGoalStore = create<GoalState>()(
@@ -192,6 +210,81 @@ export const useGoalStore = create<GoalState>()(
             loading: false,
           });
           return { goal, tasks };
+        } catch (error: any) {
+          set({ error: error.message, loading: false });
+          throw error;
+        }
+      },
+
+      updateGoalBreakdown: async (goalId, data) => {
+        set({ loading: true, error: null });
+        try {
+          const response = await fetch(`${API_URL}/goals/${goalId}/breakdown`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+          });
+          if (!response.ok) throw new Error("Failed to update goal breakdown");
+          const result = await response.json();
+          const updatedGoal = { ...result.goal, id: result.goal._id || result.goal.id };
+          set((state) => ({
+            goals: state.goals.map((g) => (g.id === goalId ? updatedGoal : g)),
+            currentGoal: state.currentGoal?.id === goalId ? updatedGoal : state.currentGoal,
+            loading: false,
+          }));
+          return updatedGoal;
+        } catch (error: any) {
+          set({ error: error.message, loading: false });
+          throw error;
+        }
+      },
+
+      goalChat: async (goalId, message) => {
+        set({ loading: true, error: null });
+        try {
+          const response = await fetch(`${API_URL}/goals/${goalId}/chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message, goal_id: goalId }),
+          });
+          if (!response.ok) throw new Error("Failed to send goal chat message");
+          const result = await response.json();
+          if (result.goal) {
+            const updatedGoal = { ...result.goal, id: result.goal._id || result.goal.id };
+            set((state) => ({
+              goals: state.goals.map((g) => (g.id === goalId ? updatedGoal : g)),
+              currentGoal: state.currentGoal?.id === goalId ? updatedGoal : state.currentGoal,
+              loading: false,
+            }));
+          } else {
+            set({ loading: false });
+          }
+          return result;
+        } catch (error: any) {
+          set({ error: error.message, loading: false });
+          throw error;
+        }
+      },
+
+      createTasksFromSuggestions: async (goalId, tasks) => {
+        set({ loading: true, error: null });
+        try {
+          const response = await fetch(`${API_URL}/goals/create-tasks-from-suggestions`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ goal_id: goalId, tasks }),
+          });
+          if (!response.ok) throw new Error("Failed to create tasks from suggestions");
+          const result = await response.json();
+          const newTasks = (result.tasks || []).map((t: any) => ({
+            ...t,
+            id: t._id || t.id,
+          }));
+          set((state) => ({
+            tasks: [...newTasks, ...state.tasks],
+            loading: false,
+          }));
+          return newTasks;
         } catch (error: any) {
           set({ error: error.message, loading: false });
           throw error;

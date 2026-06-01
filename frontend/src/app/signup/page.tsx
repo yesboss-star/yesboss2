@@ -67,10 +67,12 @@ export default function SignupPage() {
   }, [resendTimer]);
 
   useEffect(() => {
-    const loadRecaptcha = () => {
-      if (typeof window === "undefined") return;
+    if (currentStep !== 2 || otpVerified) return;
+    if (typeof window === "undefined") return;
+    if (recaptchaVerifierRef.current) return;
+
+    const loadScript = () => {
       if (document.getElementById("google-recaptcha-js")) return;
-      
       const script = document.createElement("script");
       script.id = "google-recaptcha-js";
       script.src = `https://www.google.com/recaptcha/api.js?render=${RECAPTCHA_SITE_KEY}`;
@@ -79,20 +81,25 @@ export default function SignupPage() {
       document.head.appendChild(script);
     };
 
-    loadRecaptcha();
-  }, []);
-
-  useEffect(() => {
     const initRecaptcha = async () => {
-      if (typeof window === "undefined") return;
-      if (recaptchaVerifierRef.current) return;
-      
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
+      loadScript();
       try {
+        if (typeof (window as unknown as { grecaptcha?: unknown }).grecaptcha === "undefined") {
+          await new Promise<void>((resolve) => {
+            const check = () => {
+              if (typeof (window as unknown as { grecaptcha?: unknown }).grecaptcha !== "undefined") {
+                resolve();
+              } else {
+                setTimeout(check, 100);
+              }
+            };
+            check();
+            setTimeout(() => resolve(), 3000);
+          });
+        }
         recaptchaVerifierRef.current = new RecaptchaVerifier(auth, "recaptcha-container", {
           siteKey: RECAPTCHA_SITE_KEY,
-          size: "normal",
+          size: "invisible",
           callback: () => {},
         });
       } catch (err) {
@@ -101,7 +108,14 @@ export default function SignupPage() {
     };
 
     initRecaptcha();
-  }, []);
+
+    return () => {
+      try {
+        recaptchaVerifierRef.current?.clear?.();
+      } catch {}
+      recaptchaVerifierRef.current = null;
+    };
+  }, [currentStep, otpVerified]);
 
   const updateField = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -248,8 +262,6 @@ export default function SignupPage() {
 
   return (
     <div className="min-h-screen flex">
-      <div id="recaptcha-container" className="g-recaptcha"></div>
-      
       <div className="hidden lg:flex lg:w-1/2 relative bg-surface overflow-hidden">
         <div className="hero-glow top-1/4 left-1/4 animate-pulse-glow" />
         <div className="hero-glow bottom-1/4 right-1/4 animate-pulse-glow" style={{ animationDelay: "1.5s" }} />
@@ -352,6 +364,7 @@ export default function SignupPage() {
 
             {currentStep === 2 && (
               <div>
+                <div id="recaptcha-container" style={{ position: "absolute", left: "-9999px", top: "auto", width: 1, height: 1, overflow: "hidden" }} />
                 <label className="block text-sm font-medium mb-2">Phone Number</label>
                 <div className="flex gap-2">
                   <select
