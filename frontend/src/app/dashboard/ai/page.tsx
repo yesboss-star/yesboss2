@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUIStore } from "@/stores/uiStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
+import { useDocumentStore, DocumentContext } from "@/stores/documentStore";
 import { useDashboardStore, DashboardInsight } from "@/stores/dashboardStore";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardHeader, CardTitle, CardContent, Badge, Button } from "@/components/ui";
@@ -27,7 +28,12 @@ import {
   BarChart3,
   PieChart,
   LineChart,
-  RefreshCw
+  RefreshCw,
+  FileText,
+  Brain,
+  ChevronDown,
+  ChevronUp,
+  Briefcase,
 } from "lucide-react";
 
 const MODULE_ICONS: Record<string, any> = {
@@ -68,7 +74,10 @@ export default function AIDashboardPage() {
     fetchModuleMetrics,
     setCurrentModule
   } = useDashboardStore();
+  const { context: docContext, fetchContext: fetchDocContext, contextLoading: docContextLoading } =
+    useDocumentStore();
   const [activeTab, setActiveTab] = useState<"overview" | "insights" | "modules">("overview");
+  const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
 
   useEffect(() => {
     setBreadcrumbs([
@@ -96,6 +105,24 @@ export default function AIDashboardPage() {
     fetchModuleMetrics(currentModule);
     fetchInsights(organization?.industry, currentModule);
   }, [currentModule, organization?.industry]);
+
+  useEffect(() => {
+    const orgId = organization?.id;
+    if (orgId) {
+      fetchDocContext(orgId);
+    }
+    // Poll every 8s for a short while if any docs are still being analyzed.
+  }, [organization?.id]);
+
+  useEffect(() => {
+    if (!docContext || docContext.pending_documents === 0) return;
+    const orgId = organization?.id;
+    if (!orgId) return;
+    const handle = setInterval(() => {
+      fetchDocContext(orgId);
+    }, 8000);
+    return () => clearInterval(handle);
+  }, [docContext?.pending_documents, organization?.id]);
 
   const getInsightIcon = (type: string) => {
     switch (type) {
@@ -212,6 +239,177 @@ export default function AIDashboardPage() {
           <div className="lg:col-span-4 space-y-6">
             {activeTab === "overview" && (
               <>
+                {docContext && docContext.total_documents > 0 && (
+                  <Card className="border-primary/20">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <FileText className="w-5 h-5 text-primary" />
+                        Your documents
+                        <Badge variant="secondary" className="ml-2">
+                          {docContext.analyzed_documents}/{docContext.total_documents} analyzed
+                        </Badge>
+                        {docContextLoading && (
+                          <Loader2 className="w-4 h-4 text-text-muted animate-spin ml-auto" />
+                        )}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {docContext.metrics.length > 0 && (
+                        <div>
+                          <div className="text-xs uppercase tracking-wider text-text-muted mb-2 flex items-center gap-1">
+                            <BarChart3 className="w-3 h-3" /> Key metrics from your files
+                          </div>
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                            {docContext.metrics.slice(0, 6).map((m, i) => (
+                              <div
+                                key={i}
+                                className="rounded-lg bg-surface/60 border border-border p-3"
+                              >
+                                <div className="text-[10px] uppercase tracking-wider text-text-muted">
+                                  {m.name}
+                                </div>
+                                <div className="text-lg font-bold text-foreground mt-0.5">
+                                  {m.value}
+                                </div>
+                                {m.context && (
+                                  <div className="text-[11px] text-text-muted mt-0.5 line-clamp-2">
+                                    {m.context}
+                                  </div>
+                                )}
+                                <div className="text-[10px] text-text-muted/70 mt-1 truncate">
+                                  from {m.source_file}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div>
+                        <div className="text-xs uppercase tracking-wider text-text-muted mb-2 flex items-center gap-1">
+                          <Brain className="w-3 h-3" /> Analyzed documents
+                        </div>
+                        <div className="space-y-2">
+                          {docContext.documents.slice(0, 6).map((d) => {
+                            const isOpen = expandedDoc === d.file_id;
+                            return (
+                              <div
+                                key={d.file_id}
+                                className="rounded-lg border border-border bg-surface/40 overflow-hidden"
+                              >
+                                <button
+                                  onClick={() =>
+                                    setExpandedDoc(isOpen ? null : d.file_id)
+                                  }
+                                  className="w-full p-3 flex items-center gap-3 hover:bg-surface-light transition-colors text-left cursor-pointer"
+                                >
+                                  <div className="w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0">
+                                    {d.insights_status === "completed" ? (
+                                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                                    ) : d.insights_status === "pending" ? (
+                                      <Loader2 className="w-4 h-4 text-primary animate-spin" />
+                                    ) : (
+                                      <AlertTriangle className="w-4 h-4 text-amber-400" />
+                                    )}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="text-sm font-medium truncate">
+                                      {d.filename}
+                                    </div>
+                                    {d.summary && (
+                                      <div className="text-xs text-text-muted line-clamp-1">
+                                        {d.summary}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <Badge variant="secondary" className="text-[10px] capitalize">
+                                    {d.document_category.replace(/_/g, " ")}
+                                  </Badge>
+                                  {isOpen ? (
+                                    <ChevronUp className="w-4 h-4 text-text-muted" />
+                                  ) : (
+                                    <ChevronDown className="w-4 h-4 text-text-muted" />
+                                  )}
+                                </button>
+                                {isOpen && d.insights_status === "completed" && (
+                                  <div className="p-3 border-t border-border bg-surface/20 space-y-3">
+                                    {d.summary && (
+                                      <div>
+                                        <div className="text-[10px] uppercase tracking-wider text-text-muted">
+                                          Summary
+                                        </div>
+                                        <p className="text-xs text-foreground mt-1">
+                                          {d.summary}
+                                        </p>
+                                      </div>
+                                    )}
+                                    {d.key_metrics.length > 0 && (
+                                      <div>
+                                        <div className="text-[10px] uppercase tracking-wider text-text-muted">
+                                          Key metrics
+                                        </div>
+                                        <ul className="text-xs space-y-1 mt-1">
+                                          {d.key_metrics.slice(0, 6).map((m, i) => (
+                                            <li key={i}>
+                                              <span className="text-text-muted">{m.name}:</span>{" "}
+                                              <span className="font-medium">{m.value}</span>
+                                              {m.context && (
+                                                <span className="text-text-muted/70">
+                                                  {" "}
+                                                  — {m.context}
+                                                </span>
+                                              )}
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    )}
+                                    {d.decisions.length > 0 && (
+                                      <div>
+                                        <div className="text-[10px] uppercase tracking-wider text-text-muted">
+                                          Decisions
+                                        </div>
+                                        <ul className="text-xs space-y-1 mt-1">
+                                          {d.decisions.map((x, i) => (
+                                            <li key={i} className="text-foreground">
+                                              • {x}
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    )}
+                                    {d.action_items.length > 0 && (
+                                      <div>
+                                        <div className="text-[10px] uppercase tracking-wider text-text-muted">
+                                          Action items
+                                        </div>
+                                        <ul className="text-xs space-y-1 mt-1">
+                                          {d.action_items.map((x, i) => (
+                                            <li key={i} className="text-foreground">
+                                              • {x}
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                                {isOpen && d.insights_status === "pending" && (
+                                  <div className="p-3 border-t border-border bg-surface/20 text-xs text-text-muted flex items-center gap-2">
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                    AI is analyzing this document in the background. Refresh in a
+                                    moment.
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
                 {Object.keys(moduleMetrics).length > 0 && (
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                     {Object.entries(moduleMetrics).map(([key, metric]) => (

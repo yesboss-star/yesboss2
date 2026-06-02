@@ -4,6 +4,7 @@ import { Suspense, useState, useRef, useEffect, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganizationStore } from "@/stores/organizationStore";
+import { useDocumentStore } from "@/stores/documentStore";
 import {
   ArrowRight,
   Building2,
@@ -26,6 +27,11 @@ import {
   Trash2,
   Lightbulb,
   Search,
+  TrendingUp,
+  AlertTriangle,
+  Briefcase,
+  Brain,
+  ChevronRight,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -58,6 +64,83 @@ const PERSONAL_EMAIL_DOMAINS = [
 const isPersonalEmailDomain = (domain: string): boolean => {
   const cleanDomain = domain.toLowerCase().trim();
   return PERSONAL_EMAIL_DOMAINS.includes(cleanDomain);
+};
+
+const deriveCompanyNameFromDomain = (domain: string): string => {
+  if (!domain) return "";
+  let cleaned = domain.trim().toLowerCase();
+  cleaned = cleaned.replace("https://", "").replace("http://", "").replace("www.", "");
+  cleaned = cleaned.split("/")[0].split("?")[0].split("#")[0];
+  if (!cleaned || !cleaned.includes(".")) return "";
+  const parts = cleaned.split(".");
+  const TLDs = new Set([
+    "com", "co", "io", "ai", "net", "org", "app", "dev", "tech", "in", "us", "uk",
+    "de", "fr", "jp", "cn", "au", "ca", "eu", "ru", "br", "it", "es", "nl", "se",
+  ]);
+  if (parts.length > 1 && TLDs.has(parts[parts.length - 1])) parts.pop();
+  if (!parts.length) return "";
+  const first = parts[0];
+  if (!first) return "";
+  const words: string[] = [];
+  let current = "";
+  for (const ch of first) {
+    if (ch === "-" || ch === "_") {
+      if (current) words.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  if (current) words.push(current);
+  if (!words.length) return "";
+
+  const SUFFIXES = [
+    "systems", "system", "solutions", "solution", "technologies", "technology",
+    "tech", "labs", "lab", "group", "global", "industries", "industry",
+    "services", "service", "consulting", "consultants", "software", "apps",
+    "digital", "media", "studios", "studio", "works", "workshop", "co",
+    "inc", "llc", "ltd", "corp", "company",
+  ];
+  const PREFIXES = [
+    "smart", "next", "open", "meta", "neo", "cloud", "data", "deep",
+    "auto", "bio", "eco", "fin", "edge", "quantum",
+  ];
+
+  const finalWords: string[] = [];
+  for (const w of words) {
+    if (w.length >= 8) {
+      let splitDone = false;
+      for (const hint of SUFFIXES) {
+        if (w.endsWith(hint) && w.length - hint.length >= 3) {
+          finalWords.push(w.slice(0, w.length - hint.length));
+          finalWords.push(hint);
+          splitDone = true;
+          break;
+        }
+      }
+      if (!splitDone) {
+        for (const hint of PREFIXES) {
+          if (
+            w.startsWith(hint) &&
+            w.length - hint.length >= 3 &&
+            !["the", "my", "our", "pro", "co", "inc", "llc", "ltd", "corp"].includes(hint)
+          ) {
+            finalWords.push(hint);
+            finalWords.push(w.slice(hint.length));
+            splitDone = true;
+            break;
+          }
+        }
+      }
+      if (!splitDone) finalWords.push(w);
+    } else {
+      finalWords.push(w);
+    }
+  }
+  return finalWords
+    .map((w) => (w[0] ? w[0].toUpperCase() + w.slice(1) : ""))
+    .filter(Boolean)
+    .join(" ");
 };
 
 type OnboardingStep =
@@ -112,6 +195,12 @@ export default function OwnerOnboarding() {
 function OwnerOnboardingContent() {
   const { user, signOut } = useAuth();
   const { setOrganization, createOrganization, detectSocialPresence } = useOrganizationStore();
+  const {
+    suggestions: docSuggestions,
+    businessContext,
+    suggestionsLoading,
+    fetchSuggestions: fetchDocSuggestions,
+  } = useDocumentStore();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -119,7 +208,13 @@ function OwnerOnboardingContent() {
   const [step, setStep] = useState<OnboardingStep>("org-details");
   const [orgId, setOrgId] = useState<string>("");
   const [uploadedFiles, setUploadedFiles] = useState<
-    { name: string; processed: boolean; type: string }[]
+    {
+      name: string;
+      processed: boolean;
+      type: string;
+      aiStatus?: "analyzing" | "completed" | "failed";
+      summary?: string;
+    }[]
   >([]);
   const [socialLinksList, setSocialLinksList] = useState<SocialLink[]>([]);
 
@@ -152,6 +247,8 @@ function OwnerOnboardingContent() {
     }[]
   >([]);
   const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
+  const [companyNameSuggestions, setCompanyNameSuggestions] = useState<string[]>([]);
+  const [showCompanyNameSuggestions, setShowCompanyNameSuggestions] = useState(false);
   const [industryInput, setIndustryInput] = useState("");
   const [microVerticalInput, setMicroVerticalInput] = useState("");
   const [industrySuggestions, setIndustrySuggestions] = useState<string[]>([]);
@@ -167,18 +264,28 @@ function OwnerOnboardingContent() {
   const [duplicateChecking, setDuplicateChecking] = useState(false);
 
   const initialEmailDomain = (userEmail.split("@")[1] || "").trim();
+  const isPersonal = isPersonalEmailDomain(initialEmailDomain);
+  const initialDerivedName = !isPersonal ? deriveCompanyNameFromDomain(initialEmailDomain) : "";
   const [orgData, setOrgData] = useState({
-    name: "",
+    name: initialDerivedName,
     domain: initialEmailDomain,
-    website_url: initialEmailDomain ? `https://${initialEmailDomain}` : "",
+    website_url: "",
     industries: [] as string[],
-    size: "1-10",
+    size: "1",
     micro_vertical: "",
     micro_verticals: [] as string[],
   });
 
   const industrySuggestSeq = useRef(0);
   const microVerticalSuggestSeq = useRef(0);
+
+  const lastAnalysisRef = useRef<{
+    domain?: string;
+    company_name?: string;
+    social_links?: Record<string, string>;
+    industry_suggestions?: string[];
+    micro_vertical_suggestions?: string[];
+  } | null>(null);
 
   const processDomain = (domain: string) => {
     let processed = domain.trim().toLowerCase();
@@ -208,32 +315,22 @@ function OwnerOnboardingContent() {
         const data = responseData.profile || responseData;
         if (!data) return;
 
-        const confidence = typeof data.confidence === "number" ? data.confidence : 0;
-        const detectedIndustry = data.industry || "";
-        const detectedMicroVerticals =
-          data.micro_verticals || (data.micro_vertical ? [data.micro_vertical] : []);
-        const detectedIndustries = detectedIndustry ? [detectedIndustry] : [];
+        const detectedName = (data.company_name || "").trim();
 
-        if (confidence >= 0.5) {
-          setOrgData((prev) => ({
-            ...prev,
-            domain: cleanDomain,
-            website_url: data.website_url || prev.website_url || `https://${cleanDomain}`,
-            industries:
-              detectedIndustries.length > 0 ? detectedIndustries : prev.industries,
-            micro_verticals:
-              detectedMicroVerticals.length > 0 ? detectedMicroVerticals : prev.micro_verticals,
-            micro_vertical: detectedMicroVerticals[0] || prev.micro_vertical,
-          }));
-          setAutoFilledFromScan(true);
-        } else {
-          setOrgData((prev) => ({
-            ...prev,
-            domain: cleanDomain,
-            website_url: prev.website_url || `https://${cleanDomain}`,
-          }));
-          setAutoFilledFromScan(false);
-        }
+        lastAnalysisRef.current = {
+          domain: cleanDomain,
+          company_name: detectedName,
+          social_links: data.social_links,
+          industry_suggestions: data.industry_suggestions,
+          micro_vertical_suggestions: data.micro_vertical_suggestions,
+        };
+
+        setOrgData((prev) => {
+          const next = { ...prev, domain: cleanDomain };
+          if (detectedName) next.name = detectedName;
+          return next;
+        });
+        setAutoFilledFromScan(true);
       } catch (error) {
         console.error("Failed to analyze industry:", error);
       } finally {
@@ -272,6 +369,47 @@ function OwnerOnboardingContent() {
     /* eslint-enable react-hooks/set-state-in-effect */
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userEmail]);
+
+  useEffect(() => {
+    // Debounced re-analyze when the user types/pastes a website URL.
+    // Only fires for a clean domain (has at least one dot) and only when
+    // it differs from the email-derived domain we already analyzed.
+    /* eslint-disable react-hooks/set-state-in-effect */
+    const url = (orgData.website_url || "").trim();
+    if (!url) return;
+    const cleanDomain = processDomain(url);
+    if (!cleanDomain || !cleanDomain.includes(".")) return;
+
+    const emailDomain = (userEmail.split("@")[1] || "").trim().toLowerCase();
+    if (cleanDomain === emailDomain) return;
+
+    const handle = setTimeout(() => {
+      analyzeIndustryFromDomain(cleanDomain);
+    }, 1200);
+
+    return () => clearTimeout(handle);
+    /* eslint-enable react-hooks/set-state-in-effect */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgData.website_url]);
+
+  useEffect(() => {
+    // When the user enters the file-upload step, ask the AI for
+    // growth-driven document recommendations based on the org's context.
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (step !== "file-upload") return;
+    const companyName = orgData.name || lastAnalysisRef.current?.company_name || "";
+    if (!companyName) return;
+    fetchDocSuggestions({
+      domain: orgData.domain || "",
+      company_name: companyName,
+      industry: orgData.industries[0] || "",
+      micro_vertical: orgData.micro_verticals[0] || "",
+      size: orgData.size || "",
+      existing_documents: uploadedFiles.map((f) => ({ filename: f.name })),
+    });
+    /* eslint-enable react-hooks/set-state-in-effect */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
 
   const searchCompanySuggestions = async (query: string) => {
     if (query.length < 2) {
@@ -313,6 +451,36 @@ function OwnerOnboardingContent() {
     }
   };
 
+  const companyNameSuggestSeq = useRef(0);
+
+  const fetchCompanyNameSuggestions = useCallback(
+    async (query: string) => {
+      const seq = ++companyNameSuggestSeq.current;
+      try {
+        const res = await fetch(`${API_URL}/intelligence/company-name-suggest`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query,
+            industry: orgData.industries[0] || "",
+            limit: 50,
+          }),
+        });
+        if (!res.ok) {
+          if (seq === companyNameSuggestSeq.current) setCompanyNameSuggestions([]);
+          return;
+        }
+        const data = await res.json();
+        if (seq !== companyNameSuggestSeq.current) return;
+        const names = Array.isArray(data.suggestions) ? data.suggestions : [];
+        setCompanyNameSuggestions(names);
+      } catch {
+        if (seq === companyNameSuggestSeq.current) setCompanyNameSuggestions([]);
+      }
+    },
+    [orgData.industries]
+  );
+
   const handleCompanySelect = (company: {
     name: string;
     domain?: string;
@@ -344,8 +512,21 @@ function OwnerOnboardingContent() {
 
     setShowCompanyDropdown(false);
     setCompanySuggestions([]);
+    setShowCompanyNameSuggestions(false);
+    setCompanyNameSuggestions([]);
     setIndustryInput("");
     setMicroVerticalInput("");
+  };
+
+  const handleCompanyNameSuggestionSelect = (name: string, isCustom: boolean) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setOrgData((prev) => ({ ...prev, name: trimmed }));
+    setShowCompanyNameSuggestions(false);
+    setCompanyNameSuggestions([]);
+    if (isCustom) {
+      saveCustomTaxonomy("company_names", trimmed, orgData.industries[0]);
+    }
   };
 
   const fetchIndustrySuggestions = useCallback(async (query: string) => {
@@ -355,7 +536,7 @@ function OwnerOnboardingContent() {
       const res = await fetch(`${API_URL}/intelligence/suggest`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query, type: "industries", limit: 8 }),
+        body: JSON.stringify({ query, type: "industries", limit: 100 }),
       });
       if (!res.ok) {
         setIndustrySuggestions([]);
@@ -379,7 +560,7 @@ function OwnerOnboardingContent() {
         const res = await fetch(`${API_URL}/intelligence/suggest`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query, type: "micro_verticals", industry, limit: 8 }),
+          body: JSON.stringify({ query, type: "micro_verticals", industry, limit: 100 }),
         });
         if (!res.ok) {
           setMicroVerticalSuggestions([]);
@@ -423,7 +604,24 @@ function OwnerOnboardingContent() {
     return unique.slice(0, 8);
   };
 
-  const addIndustry = (industry: string) => {
+  const saveCustomTaxonomy = async (
+    type: "industries" | "micro_verticals" | "company_names",
+    value: string,
+    industry?: string
+  ) => {
+    if (!value || !value.trim()) return;
+    try {
+      await fetch(`${API_URL}/intelligence/taxonomy/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type, value: value.trim(), industry }),
+      });
+    } catch (err) {
+      console.error("Failed to save custom taxonomy:", err);
+    }
+  };
+
+  const addIndustry = (industry: string, persistCustom = true) => {
     const trimmed = industry.trim();
     if (!trimmed || orgData.industries.includes(trimmed)) {
       setIndustryInput("");
@@ -433,6 +631,7 @@ function OwnerOnboardingContent() {
     setOrgData((prev) => ({ ...prev, industries: [...prev.industries, trimmed] }));
     setIndustryInput("");
     setShowIndustrySuggestions(false);
+    if (persistCustom) saveCustomTaxonomy("industries", trimmed);
   };
 
   const removeIndustry = (industry: string) => {
@@ -442,7 +641,7 @@ function OwnerOnboardingContent() {
     }));
   };
 
-  const addMicroVertical = (mv: string) => {
+  const addMicroVertical = (mv: string, persistCustom = true) => {
     const trimmed = mv.trim();
     if (!trimmed || orgData.micro_verticals.some((m) => m.toLowerCase() === trimmed.toLowerCase())) {
       setMicroVerticalInput("");
@@ -456,6 +655,7 @@ function OwnerOnboardingContent() {
     }));
     setMicroVerticalInput("");
     setShowMicroVerticalSuggestions(false);
+    if (persistCustom) saveCustomTaxonomy("micro_verticals", trimmed, orgData.industries[0]);
   };
 
   const removeMicroVertical = (mv: string) => {
@@ -536,56 +736,60 @@ function OwnerOnboardingContent() {
     router.push("/signup");
   };
 
-  const fetchSocialLinks = useCallback(async (domain: string) => {
-    if (!domain) return;
-    setSocialLoading(true);
-    try {
-      const links = await detectSocialPresence(domain);
-      setSocialLinksList([
-        {
-          platform: "LinkedIn",
-          url: links.linkedin || "",
-          detected: !!links.linkedin,
-          icon: <Link2 className="w-5 h-5" />,
-        },
-        {
-          platform: "Twitter / X",
-          url: links.twitter || "",
-          detected: !!links.twitter,
-          icon: <Link2 className="w-5 h-5" />,
-        },
-        {
-          platform: "Instagram",
-          url: links.instagram || "",
-          detected: !!links.instagram,
-          icon: <Link2 className="w-5 h-5" />,
-        },
-        {
-          platform: "Facebook",
-          url: links.facebook || "",
-          detected: !!links.facebook,
-          icon: <Link2 className="w-5 h-5" />,
-        },
-        {
-          platform: "YouTube",
-          url: links.youtube || "",
-          detected: !!links.youtube,
-          icon: <Link2 className="w-5 h-5" />,
-        },
-      ]);
-    } catch (error) {
-      console.error("Social detection failed:", error);
-      setSocialLinksList([
-        { platform: "LinkedIn", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "Twitter / X", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "Instagram", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "Facebook", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
-        { platform: "YouTube", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
-      ]);
-    } finally {
-      setSocialLoading(false);
-    }
-  }, [detectSocialPresence]);
+  const fetchSocialLinks = useCallback(
+    async (domain: string) => {
+      if (!domain) return;
+      setSocialLoading(true);
+      const baseList = (platform: string, url?: string) => ({
+        platform,
+        url: url || "",
+        detected: !!url,
+        icon: <Link2 className="w-5 h-5" />,
+      });
+
+      const pre = lastAnalysisRef.current?.social_links || {};
+      const preLinkedin = pre.linkedin;
+      const preTwitter = pre.twitter || pre.x;
+      const preInstagram = pre.instagram;
+      const preFacebook = pre.facebook;
+      const preYoutube = pre.youtube;
+      const haveAnyPre =
+        preLinkedin || preTwitter || preInstagram || preFacebook || preYoutube;
+
+      try {
+        const links = await detectSocialPresence(domain);
+        setSocialLinksList([
+          baseList("LinkedIn", links.linkedin || preLinkedin),
+          baseList("Twitter / X", links.twitter || preTwitter),
+          baseList("Instagram", links.instagram || preInstagram),
+          baseList("Facebook", links.facebook || preFacebook),
+          baseList("YouTube", links.youtube || preYoutube),
+        ]);
+      } catch (error) {
+        console.error("Social detection failed:", error);
+        if (haveAnyPre) {
+          setSocialLinksList([
+            baseList("LinkedIn", preLinkedin),
+            baseList("Twitter / X", preTwitter),
+            baseList("Instagram", preInstagram),
+            baseList("Facebook", preFacebook),
+            baseList("YouTube", preYoutube),
+          ]);
+        } else {
+          setSocialLinksList([
+            { platform: "LinkedIn", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
+            { platform: "Twitter / X", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
+            { platform: "Instagram", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
+            { platform: "Facebook", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
+            { platform: "YouTube", url: "", detected: false, icon: <Link2 className="w-5 h-5" /> },
+          ]);
+        }
+      } finally {
+        setSocialLoading(false);
+      }
+    },
+    [detectSocialPresence]
+  );
 
   const handleOrgDetailsSubmit = async () => {
     if (!orgData.name.trim()) {
@@ -600,7 +804,7 @@ function OwnerOnboardingContent() {
         domain,
         industry: orgData.industries[0] || "Technology & Software",
         industries: orgData.industries,
-        size: orgData.size || "1-10",
+        size: orgData.size || "1",
         micro_vertical: orgData.micro_verticals[0] || "",
         micro_verticals: orgData.micro_verticals,
         website_url: orgData.website_url,
@@ -630,9 +834,19 @@ function OwnerOnboardingContent() {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    const newFiles: { name: string; processed: boolean; type: string }[] = [];
+    const newFiles: {
+      name: string;
+      processed: boolean;
+      type: string;
+      aiStatus: "analyzing" | "completed" | "failed";
+    }[] = [];
     for (let i = 0; i < files.length; i++) {
-      newFiles.push({ name: files[i].name, processed: false, type: files[i].type });
+      newFiles.push({
+        name: files[i].name,
+        processed: false,
+        type: files[i].type,
+        aiStatus: "analyzing",
+      });
     }
 
     setUploadedFiles((prev) => [...prev, ...newFiles]);
@@ -643,6 +857,10 @@ function OwnerOnboardingContent() {
       formData.append("file", file);
       formData.append("org_id", orgId || "temp");
       formData.append("user_id", user?.uid || "temp");
+      if (orgData.name) formData.append("company_name", orgData.name);
+      if (orgData.industries[0]) formData.append("industry", orgData.industries[0]);
+      if (orgData.micro_verticals[0])
+        formData.append("micro_vertical", orgData.micro_verticals[0]);
 
       try {
         const response = await fetch(`${API_URL}/files/process`, {
@@ -650,7 +868,11 @@ function OwnerOnboardingContent() {
           body: formData,
         });
         setUploadedFiles((prev) =>
-          prev.map((f) => (f.name === file.name ? { ...f, processed: true } : f))
+          prev.map((f) =>
+            f.name === file.name
+              ? { ...f, processed: true, aiStatus: response.ok ? "analyzing" : "failed" }
+              : f
+          )
         );
         if (!response.ok) {
           console.error("File upload failed:", response.status);
@@ -658,7 +880,7 @@ function OwnerOnboardingContent() {
       } catch (error) {
         console.error("File upload error:", error);
         setUploadedFiles((prev) =>
-          prev.map((f) => (f.name === file.name ? { ...f, processed: true } : f))
+          prev.map((f) => (f.name === file.name ? { ...f, processed: true, aiStatus: "failed" } : f))
         );
       }
     }
@@ -1116,25 +1338,39 @@ function OwnerOnboardingContent() {
                       setOrgData((prev) => ({ ...prev, name: value }));
                       if (value.length >= 2) {
                         searchCompanySuggestions(value);
+                        fetchCompanyNameSuggestions(value);
+                        setShowCompanyNameSuggestions(true);
                       } else {
                         setCompanySuggestions([]);
                         setShowCompanyDropdown(false);
+                        setCompanyNameSuggestions([]);
+                        setShowCompanyNameSuggestions(false);
                       }
                     }}
                     onFocus={() => {
-                      if (orgData.name.length >= 2 && companySuggestions.length > 0) {
-                        setShowCompanyDropdown(true);
+                      if (orgData.name.length >= 2) {
+                        if (companySuggestions.length > 0) setShowCompanyDropdown(true);
+                        if (companyNameSuggestions.length === 0) {
+                          fetchCompanyNameSuggestions(orgData.name);
+                        }
+                        setShowCompanyNameSuggestions(true);
                       }
                     }}
+                    onBlur={() =>
+                      setTimeout(() => setShowCompanyNameSuggestions(false), 200)
+                    }
                     placeholder="Start typing company name..."
                     className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
                   />
                   {showCompanyDropdown && companySuggestions.length > 0 && (
-                    <div className="absolute top-full left-0 right-0 mt-2 bg-surface border border-border rounded-xl shadow-lg z-50 max-h-60 overflow-y-auto">
+                    <div className="absolute top-full left-0 right-0 mt-2 bg-surface border border-border rounded-xl shadow-lg z-40 max-h-60 overflow-y-auto">
                       {companySuggestions.map((company, i) => (
                         <button
                           key={i}
-                          onClick={() => handleCompanySelect(company)}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            handleCompanySelect(company);
+                          }}
                           className="w-full px-4 py-3 text-left hover:bg-surface-light transition-colors border-b border-border last:border-b-0"
                         >
                           <div className="font-medium text-sm">{company.name}</div>
@@ -1146,6 +1382,39 @@ function OwnerOnboardingContent() {
                           </div>
                         </button>
                       ))}
+                    </div>
+                  )}
+                  {showCompanyNameSuggestions && companyNameSuggestions.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 mt-2 bg-surface border border-border rounded-xl shadow-lg z-30 max-h-60 overflow-y-auto">
+                      <div className="px-4 py-2 text-[10px] uppercase tracking-wider text-text-muted border-b border-border">
+                        Suggested company names
+                      </div>
+                      {companyNameSuggestions.map((name, i) => (
+                        <button
+                          key={i}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            handleCompanyNameSuggestionSelect(name, false);
+                          }}
+                          className="w-full px-4 py-3 text-left hover:bg-surface-light transition-colors border-b border-border last:border-b-0 text-sm"
+                        >
+                          {name}
+                        </button>
+                      ))}
+                      {orgData.name.trim() &&
+                        !companyNameSuggestions.some(
+                          (s) => s.toLowerCase() === orgData.name.trim().toLowerCase()
+                        ) && (
+                          <button
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              handleCompanyNameSuggestionSelect(orgData.name, true);
+                            }}
+                            className="w-full px-4 py-3 text-left hover:bg-surface-light transition-colors text-sm italic text-primary border-t border-border bg-surface-light/50"
+                          >
+                            Other — use &quot;{orgData.name.trim()}&quot; (custom)
+                          </button>
+                        )}
                     </div>
                   )}
                 </div>
@@ -1162,14 +1431,14 @@ function OwnerOnboardingContent() {
                   <Globe className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
                   <input
                     type="text"
-                    value={orgData.website_url || `https://${orgData.domain}`}
+                    value={orgData.website_url}
                     onChange={(e) => setOrgData({ ...orgData, website_url: e.target.value })}
-                    placeholder="https://www.yourcompany.com"
+                    placeholder="https://www.yourcompany.com (optional)"
                     className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
                   />
                 </div>
                 <p className="text-xs text-text-muted mt-1">
-                  Official company website URL
+                  Optional. We&apos;ll auto-detect your industry and documents if you add it.
                 </p>
               </div>
 
@@ -1239,29 +1508,44 @@ function OwnerOnboardingContent() {
                         <span className="text-lg">+</span>
                       </button>
                     </div>
-                    {showIndustrySuggestions && industrySuggestions.length > 0 && (
-                      <div className="absolute top-full left-0 right-0 mt-2 bg-surface border border-border rounded-xl shadow-lg z-50 max-h-60 overflow-y-auto">
-                        {industrySuggestions
-                          .filter(
-                            (ind) =>
-                              !orgData.industries.some(
-                                (existing) => existing.toLowerCase() === ind.toLowerCase()
-                              )
-                          )
-                          .map((ind, i) => (
-                            <button
-                              key={i}
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                                addIndustry(ind);
-                              }}
-                              className="w-full px-4 py-3 text-left hover:bg-surface-light transition-colors border-b border-border last:border-b-0 text-sm cursor-pointer"
-                            >
-                              {ind}
-                            </button>
-                          ))}
-                      </div>
-                    )}
+                    {showIndustrySuggestions &&
+                      (industrySuggestions.length > 0 || industryInput.trim().length > 0) && (
+                        <div className="absolute top-full left-0 right-0 mt-2 bg-surface border border-border rounded-xl shadow-lg z-50 max-h-60 overflow-y-auto">
+                          {industrySuggestions
+                            .filter(
+                              (ind) =>
+                                !orgData.industries.some(
+                                  (existing) => existing.toLowerCase() === ind.toLowerCase()
+                                )
+                            )
+                            .map((ind, i) => (
+                              <button
+                                key={i}
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  addIndustry(ind);
+                                }}
+                                className="w-full px-4 py-3 text-left hover:bg-surface-light transition-colors border-b border-border text-sm cursor-pointer"
+                              >
+                                {ind}
+                              </button>
+                            ))}
+                          {industryInput.trim() &&
+                            !industrySuggestions.some(
+                              (s) => s.toLowerCase() === industryInput.trim().toLowerCase()
+                            ) && (
+                              <button
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  addIndustry(industryInput.trim());
+                                }}
+                                className="w-full px-4 py-3 text-left hover:bg-surface-light transition-colors text-sm cursor-pointer border-t border-border bg-surface-light/50 italic text-primary"
+                              >
+                                Other — use &quot;{industryInput.trim()}&quot; (custom)
+                              </button>
+                            )}
+                        </div>
+                      )}
                   </div>
                 </div>
               </div>
@@ -1340,29 +1624,44 @@ function OwnerOnboardingContent() {
                         <span className="text-lg">+</span>
                       </button>
                     </div>
-                    {showMicroVerticalSuggestions && microVerticalSuggestions.length > 0 && (
-                      <div className="absolute top-full left-0 right-0 mt-2 bg-surface border border-border rounded-xl shadow-lg z-50 max-h-60 overflow-y-auto">
-                        {microVerticalSuggestions
-                          .filter(
-                            (mv) =>
-                              !orgData.micro_verticals.some(
-                                (existing) => existing.toLowerCase() === mv.toLowerCase()
-                              )
-                          )
-                          .map((mv, i) => (
-                            <button
-                              key={i}
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                                addMicroVertical(mv);
-                              }}
-                              className="w-full px-4 py-3 text-left hover:bg-surface-light transition-colors border-b border-border last:border-b-0 text-sm cursor-pointer"
-                            >
-                              {mv}
-                            </button>
-                          ))}
-                      </div>
-                    )}
+                    {showMicroVerticalSuggestions &&
+                      (microVerticalSuggestions.length > 0 || microVerticalInput.trim().length > 0) && (
+                        <div className="absolute top-full left-0 right-0 mt-2 bg-surface border border-border rounded-xl shadow-lg z-50 max-h-60 overflow-y-auto">
+                          {microVerticalSuggestions
+                            .filter(
+                              (mv) =>
+                                !orgData.micro_verticals.some(
+                                  (existing) => existing.toLowerCase() === mv.toLowerCase()
+                                )
+                            )
+                            .map((mv, i) => (
+                              <button
+                                key={i}
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  addMicroVertical(mv);
+                                }}
+                                className="w-full px-4 py-3 text-left hover:bg-surface-light transition-colors border-b border-border text-sm cursor-pointer"
+                              >
+                                {mv}
+                              </button>
+                            ))}
+                          {microVerticalInput.trim() &&
+                            !microVerticalSuggestions.some(
+                              (s) => s.toLowerCase() === microVerticalInput.trim().toLowerCase()
+                            ) && (
+                              <button
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  addMicroVertical(microVerticalInput.trim());
+                                }}
+                                className="w-full px-4 py-3 text-left hover:bg-surface-light transition-colors text-sm cursor-pointer border-t border-border bg-surface-light/50 italic text-purple-500"
+                              >
+                                Other — use &quot;{microVerticalInput.trim()}&quot; (custom)
+                              </button>
+                            )}
+                        </div>
+                      )}
                   </div>
                 </div>
                 <p className="text-xs text-text-muted mt-1">
@@ -1402,37 +1701,119 @@ function OwnerOnboardingContent() {
 
         {/* STEP 2: FILE UPLOAD */}
         {step === "file-upload" && (
-          <div className="max-w-xl mx-auto">
-            <div className="text-center mb-8">
+          <div className="max-w-2xl mx-auto">
+            <div className="text-center mb-6">
               <h1 className="text-3xl font-bold mb-2">
-                Upload documents
+                Help your AI understand your business
               </h1>
               <p className="text-text-muted">
-                {orgData.industries[0] && orgData.micro_verticals[0]
-                  ? `Based on your industry (${orgData.industries[0]}) and micro-verticals (${orgData.micro_verticals.join(", ")}), these documents will help us understand your business better:`
-                  : orgData.industries[0]
-                  ? `Based on your industry (${orgData.industries[0]}), these documents will help us understand your business better:`
-                  : "We couldn't detect your industry from the website, so here are general documents that help us understand your business:"}
+                {orgData.industries[0]
+                  ? `Based on your industry (${orgData.industries[0]}${
+                      orgData.micro_verticals[0] ? `, ${orgData.micro_verticals[0]}` : ""
+                    }), these are the documents that will unlock the most growth insight.`
+                  : "Upload a few key business documents so your AI can give you sharp, specific answers about your company."}
               </p>
             </div>
 
-            <div className="glass rounded-xl p-4 mb-6">
-              <h3 className="font-semibold mb-3 text-sm">
-                {orgData.industries[0]
-                  ? `Suggested for ${orgData.industries[0]}${
-                      orgData.micro_verticals[0] ? ` + ${orgData.micro_verticals[0]}` : ""
-                    }`
-                  : "Suggested for your business"}
-                :
-              </h3>
+            {businessContext && (
+              <div className="glass rounded-2xl p-5 mb-5 border border-primary/20">
+                <div className="flex items-center gap-2 mb-3">
+                  <Brain className="w-5 h-5 text-primary" />
+                  <h2 className="font-semibold text-sm uppercase tracking-wider text-text-muted">
+                    What we learned about {orgData.name || "your business"}
+                  </h2>
+                </div>
+                <div className="grid sm:grid-cols-2 gap-3 mb-3">
+                  <div className="rounded-lg bg-surface/60 px-3 py-2">
+                    <div className="text-[10px] uppercase tracking-wider text-text-muted">Stage</div>
+                    <div className="text-sm font-medium capitalize">
+                      {businessContext.stage.replace(/_/g, " ")}
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-surface/60 px-3 py-2">
+                    <div className="text-[10px] uppercase tracking-wider text-text-muted">
+                      Business model
+                    </div>
+                    <div className="text-sm font-medium">{businessContext.business_model}</div>
+                  </div>
+                </div>
+                <div className="rounded-lg bg-surface/60 px-3 py-2 mb-3">
+                  <div className="text-[10px] uppercase tracking-wider text-text-muted flex items-center gap-1">
+                    <TrendingUp className="w-3 h-3" /> Primary growth lever
+                  </div>
+                  <div className="text-sm font-medium">{businessContext.primary_growth_lever}</div>
+                </div>
+                {businessContext.key_risks.length > 0 && (
+                  <div className="rounded-lg bg-amber-500/5 border border-amber-500/20 px-3 py-2">
+                    <div className="text-[10px] uppercase tracking-wider text-amber-400 flex items-center gap-1 mb-1">
+                      <AlertTriangle className="w-3 h-3" /> Key risks
+                    </div>
+                    <ul className="text-xs space-y-1">
+                      {businessContext.key_risks.map((r, i) => (
+                        <li key={i} className="text-text-muted">
+                          • {r}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="glass rounded-2xl p-5 mb-5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-sm flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-primary" />
+                  Documents that drive growth
+                </h3>
+                {suggestionsLoading && (
+                  <Loader2 className="w-4 h-4 text-text-muted animate-spin" />
+                )}
+              </div>
+              <p className="text-xs text-text-muted mb-3">
+                Each suggestion is tailored to your stage, model, and industry. Uploading these
+                will let the AI dashboard answer questions like &quot;what is our biggest growth
+                blocker?&quot; or &quot;where should we invest next?&quot;
+              </p>
               <div className="space-y-2">
-                {getFileSuggestions().map((file, i) => (
+                {docSuggestions.length === 0 && !suggestionsLoading && (
+                  <div className="text-sm text-text-muted italic">
+                    Add a website URL or industry to unlock tailored suggestions.
+                  </div>
+                )}
+                {docSuggestions.map((s, i) => (
                   <div
                     key={i}
-                    className="flex items-center gap-2 text-sm text-text-muted"
+                    className="rounded-xl border border-border bg-surface/40 p-3 hover:border-primary/40 transition-colors"
                   >
-                    <FileText className="w-4 h-4 text-primary" />
-                    {file}
+                    <div className="flex items-start gap-2">
+                      <FileText className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-medium">{s.title}</span>
+                          <span
+                            className={`text-[10px] px-1.5 py-0.5 rounded-full uppercase tracking-wider ${
+                              s.priority === "high"
+                                ? "bg-emerald-500/15 text-emerald-400"
+                                : s.priority === "medium"
+                                ? "bg-cyan-500/15 text-cyan-400"
+                                : "bg-text-muted/15 text-text-muted"
+                            }`}
+                          >
+                            {s.priority}
+                          </span>
+                          <span className="text-[10px] text-text-muted capitalize">
+                            {s.category.replace(/_/g, " ")}
+                          </span>
+                        </div>
+                        <p className="text-xs text-text-muted mt-1">{s.why_it_helps}</p>
+                        {s.example_contents && (
+                          <p className="text-[11px] text-text-muted/70 mt-1 italic">
+                            e.g. {s.example_contents}
+                          </p>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1440,19 +1821,21 @@ function OwnerOnboardingContent() {
 
             <div
               onClick={() => fileInputRef.current?.click()}
-              className="glass rounded-2xl border-2 border-dashed border-border p-12 text-center mb-6 cursor-pointer hover:border-primary transition-colors"
+              className="glass rounded-2xl border-2 border-dashed border-border p-10 text-center mb-5 cursor-pointer hover:border-primary transition-colors"
             >
               <input
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png"
+                accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png,.txt,.csv"
                 onChange={handleFileUpload}
                 className="hidden"
               />
               <Upload className="w-12 h-12 text-text-muted mx-auto mb-4" />
               <p className="font-medium mb-1">Drop files here or click to upload</p>
-              <p className="text-sm text-text-muted">PDF, Excel, Word, Images (max 25MB each)</p>
+              <p className="text-sm text-text-muted">
+                PDF, Excel, Word, Images, CSV, TXT (max 25MB each)
+              </p>
             </div>
 
             <div className="space-y-3 mb-8">
@@ -1462,16 +1845,22 @@ function OwnerOnboardingContent() {
                   className="glass rounded-xl p-4 flex items-center gap-4"
                 >
                   <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                    {file.processed ? (
+                    {file.processed && file.aiStatus === "completed" ? (
                       <CheckCircle className="w-5 h-5 text-emerald-400" />
+                    ) : file.processed && file.aiStatus === "failed" ? (
+                      <AlertTriangle className="w-5 h-5 text-amber-400" />
                     ) : (
                       <Loader2 className="w-5 h-5 text-primary animate-spin" />
                     )}
                   </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">{file.name}</p>
-                    <p className="text-xs text-text-muted">
-                      {file.processed ? "Processed successfully" : "Processing..."}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{file.name}</p>
+                    <p className="text-xs text-text-muted flex items-center gap-1">
+                      {!file.processed
+                        ? "Uploading..."
+                        : file.aiStatus === "failed"
+                        ? "Upload complete — AI analysis will retry later"
+                        : "Uploaded — AI is analyzing for your dashboard"}
                     </p>
                   </div>
                   <button onClick={() => removeFile(i)} className="cursor-pointer">

@@ -8,7 +8,9 @@ from ..core.intelligence import (
     build_pre_org_profile,
     suggest_industries,
     suggest_micro_verticals,
+    suggest_growth_documents,
 )
+from ..core.taxonomy_store import save_custom as save_custom_taxonomy, get_custom_matches
 
 router = APIRouter()
 
@@ -92,12 +94,16 @@ class DepartmentSuggestionsRequest(BaseModel):
 
 @router.post("/suggest")
 async def suggest_taxonomy(request: SuggestRequest):
-    """Suggest industry or micro-vertical names powered by Grok AI."""
+    """Suggest industry or micro-vertical names powered by Grok AI.
+
+    Results are merged with community-contributed custom values so the catalog
+    grows over time as users type their own industries/verticals.
+    """
     if request.type not in ("industries", "micro_verticals"):
         raise HTTPException(status_code=400, detail="type must be 'industries' or 'micro_verticals'")
 
     try:
-        limit = max(1, min(request.limit or 8, 20))
+        limit = max(1, min(request.limit or 50, 100))
         if request.type == "industries":
             suggestions = await suggest_industries(request.query or "", limit=limit)
         else:
@@ -106,7 +112,88 @@ async def suggest_taxonomy(request: SuggestRequest):
                 industry=request.industry or "",
                 limit=limit,
             )
-        return {"type": request.type, "query": request.query, "suggestions": suggestions}
+        customs = get_custom_matches(request.type, request.query or "", limit=limit)
+        merged: list[str] = []
+        seen: set[str] = set()
+        for s in list(customs) + list(suggestions):
+            if not s:
+                continue
+            key = s.strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            merged.append(s)
+            if len(merged) >= limit:
+                break
+        return {"type": request.type, "query": request.query, "suggestions": merged}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class SaveCustomTaxonomyRequest(BaseModel):
+    type: str
+    value: str
+    industry: Optional[str] = None
+
+
+@router.post("/taxonomy/save")
+async def save_custom(request: SaveCustomTaxonomyRequest):
+    """Persist a user-typed custom industry / micro-vertical / company name.
+
+    Used when the user types something that's not in the AI suggestions —
+    we store it as 'Other' so the catalog expands over time.
+    """
+    if request.type not in ("industries", "micro_verticals", "company_names"):
+        raise HTTPException(
+            status_code=400,
+            detail="type must be 'industries', 'micro_verticals', or 'company_names'",
+        )
+    if not request.value or len(request.value.strip()) < 1:
+        raise HTTPException(status_code=400, detail="value is required")
+    context = {}
+    if request.industry:
+        context["industry"] = request.industry
+    result = save_custom_taxonomy(request.type, request.value, context=context or None)
+    if not result.get("saved"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Could not save"))
+    return result
+
+
+class SuggestCompanyNamesRequest(BaseModel):
+    query: str = ""
+    industry: Optional[str] = None
+    limit: int = 20
+
+
+@router.post("/company-name-suggest")
+async def suggest_company_names(request: SuggestCompanyNamesRequest):
+    """Suggest company names powered by Grok AI (Google-like suggestions).
+
+    Returns AI-generated company name ideas plus community-contributed ones.
+    """
+    from ..core.intelligence import suggest_company_names as _suggest_company_names
+
+    try:
+        limit = max(1, min(request.limit or 20, 50))
+        ai_suggestions = await _suggest_company_names(
+            request.query or "",
+            industry=request.industry or "",
+            limit=limit,
+        )
+        customs = get_custom_matches("company_names", request.query or "", limit=limit)
+        merged: list[str] = []
+        seen: set[str] = set()
+        for s in list(customs) + list(ai_suggestions):
+            if not s:
+                continue
+            key = s.strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            merged.append(s)
+            if len(merged) >= limit:
+                break
+        return {"query": request.query, "suggestions": merged}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -128,11 +215,11 @@ async def get_department_suggestions(request: DepartmentSuggestionsRequest):
     domain = ""
     if request.email and "@" in request.email:
         domain = request.email.split("@")[1]
-    
+
     industry = request.industry or "default"
     industry_key = next((k for k in DEPARTMENTS_BY_INDUSTRY.keys() if k in industry.lower()), "default")
     suggestions = DEPARTMENTS_BY_INDUSTRY.get(industry_key, DEPARTMENTS_BY_INDUSTRY["default"])
-    
+
     if request.role:
         role_lower = request.role.lower()
         priority_depts = []
@@ -146,8 +233,33 @@ async def get_department_suggestions(request: DepartmentSuggestionsRequest):
             priority_depts = ["Finance", "Accounting"]
         elif any(w in role_lower for w in ["oper", "process", "project"]):
             priority_depts = ["Operations", "Project Management"]
-        
+
         if priority_depts:
             suggestions = priority_depts + [s for s in suggestions if s not in priority_depts]
-    
+
     return {"suggestions": suggestions[:8]}
+
+
+class DocumentSuggestionsRequest(BaseModel):
+    domain: Optional[str] = None
+    company_name: Optional[str] = None
+    industry: Optional[str] = None
+    micro_vertical: Optional[str] = None
+    size: Optional[str] = None
+    existing_documents: Optional[list] = None
+    count: int = 10
+
+
+@router.post("/document-suggestions")
+async def get_growth_document_suggestions(request: DocumentSuggestionsRequest):
+    """Suggest growth-driving documents for this specific business.
+    Returns a business context summary + categorized recommendations."""
+    return await suggest_growth_documents(
+        domain=request.domain or "",
+        company_name=request.company_name or "",
+        industry=request.industry or "",
+        micro_vertical=request.micro_vertical or "",
+        size=request.size or "",
+        existing_documents=request.existing_documents or [],
+        count=request.count,
+    )

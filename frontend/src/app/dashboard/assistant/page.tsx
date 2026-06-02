@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUIStore } from "@/stores/uiStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
+import { useDocumentStore } from "@/stores/documentStore";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, Button } from "@/components/ui";
-import { Loader2, Sparkles, Send, CheckSquare, AlertCircle, Clock, Users, MessageSquare, Briefcase } from "lucide-react";
+import { Loader2, Sparkles, Send, CheckSquare, AlertCircle, Clock, Users, MessageSquare, Briefcase, FileText } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -19,7 +20,7 @@ interface Message {
   isLoading?: boolean;
 }
 
-const WELCOME_MESSAGE = "Hi! I'm your AI work assistant. I can help you prioritize tasks, summarize approvals, identify blockers, and more. Try one of the quick actions below or type your question.";
+const WELCOME_MESSAGE = "Hi! I'm your AI work assistant. I can help you prioritize tasks, summarize approvals, identify blockers, and — once you've uploaded business documents — answer questions about your company (e.g. \"What was our Q3 revenue?\" or \"What decisions did we make last quarter?\"). Try one of the quick actions below or type your question.";
 
 const QUICK_ACTIONS = [
   { id: "prioritize", label: "How to prioritize today's tasks?", icon: CheckSquare },
@@ -28,6 +29,7 @@ const QUICK_ACTIONS = [
   { id: "updates", label: "Recent team updates", icon: Users },
   { id: "deadlines", label: "What's due this week?", icon: Briefcase },
   { id: "help", label: "How can you help me?", icon: MessageSquare },
+  { id: "ask_docs", label: "What does my uploaded data say?", icon: FileText },
 ];
 
 const generateId = () => `msg_${Math.random().toString(36).substring(7)}`;
@@ -37,12 +39,24 @@ export default function EmployeeAIAssistant() {
   const router = useRouter();
   const { setBreadcrumbs } = useUIStore();
   const { organization } = useOrganizationStore();
-  
+  const {
+    context: docContext,
+    fetchContext: fetchDocContext,
+    askQuestion: askDocQuestion,
+  } = useDocumentStore();
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const initialized = useRef(false);
+
+  useEffect(() => {
+    const orgId = organization?.id;
+    if (orgId) {
+      fetchDocContext(orgId);
+    }
+  }, [organization?.id, fetchDocContext]);
 
   useEffect(() => {
     setBreadcrumbs([
@@ -81,7 +95,7 @@ export default function EmployeeAIAssistant() {
 
   const sendMessage = async (text: string) => {
     if (!text.trim() || isLoading) return;
-    
+
     const userMessage: Message = {
       id: generateId(),
       role: "user",
@@ -102,6 +116,61 @@ export default function EmployeeAIAssistant() {
     };
     setMessages((prev) => [...prev, loadingMessage]);
 
+    const lower = text.toLowerCase();
+    const docHints = [
+      "uploaded",
+      "my data",
+      "my doc",
+      "our doc",
+      "our data",
+      "the report",
+      "the deck",
+      "revenue",
+      "mrr",
+      "arr",
+      "churn",
+      "cac",
+      "ltv",
+      "q1",
+      "q2",
+      "q3",
+      "q4",
+      "financial",
+      "customers do",
+      "decisions we",
+      "action items",
+      "what does my",
+    ];
+    const isDocQuestion =
+      docHints.some((h) => lower.includes(h)) ||
+      lower.startsWith("what does") ||
+      lower.startsWith("what is our") ||
+      lower.startsWith("how much") ||
+      lower.startsWith("when did") ||
+      lower.startsWith("who is our");
+
+    const hasDocs = (docContext?.analyzed_documents ?? 0) > 0;
+
+    if (isDocQuestion && hasDocs && organization?.id) {
+      const answer = await askDocQuestion(organization.id, text);
+      if (answer) {
+        let content = answer.answer || "I couldn't find a clear answer in your documents.";
+        if (answer.sources && answer.sources.length > 0) {
+          const src = answer.sources[0];
+          content += `\n\n_Source: ${src.filename}_`;
+        }
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === aiMessageId
+              ? { ...msg, content, isLoading: false }
+              : msg
+          )
+        );
+        setIsLoading(false);
+        return;
+      }
+    }
+
     try {
       const res = await fetch(`${API_URL}/chatbot/employee-assistant`, {
         method: "POST",
@@ -112,10 +181,11 @@ export default function EmployeeAIAssistant() {
             user_email: user?.email,
             organization_id: organization?.id,
             organization_name: organization?.name,
+            document_summary: hasDocs ? docContext?.summary : "",
           },
         }),
       });
-      
+
       if (res.ok) {
         const data = await res.json();
         setMessages((prev) =>

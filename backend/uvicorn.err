@@ -1,0 +1,493 @@
+2026-06-02 10:50:41 | INFO     | yesboss.config | Optional env var not set: OPENAI_API_KEY
+2026-06-02 10:50:41 | INFO     | yesboss.config | Optional env var not set: ANTHROPIC_API_KEY
+2026-06-02 10:50:41 | INFO     | yesboss.config | Optional env var not set: GROQ_API_KEY
+2026-06-02 10:50:49 | INFO     | yesboss.firebase | Firebase initialized with credentials file: firebase-credentials.json
+C:\VSLLP\krisha\2\yesboss2\backend\app\api\reports.py:408: FastAPIDeprecationWarning: `regex` has been deprecated, please use `pattern` instead
+  format: str = Query("pdf", regex="^(pdf|docx)$"),
+INFO:     Started server process [15660]
+INFO:     Waiting for application startup.
+2026-06-02 10:50:52 | INFO     | yesboss.api | Starting YesBoss API...
+2026-06-02 10:50:54 | INFO     | yesboss.database | Database indexes created
+2026-06-02 10:50:54 | INFO     | yesboss.database | MongoDB connected to yesboss_db
+2026-06-02 10:50:56 | INFO     | httpx | HTTP Request: GET https://28297010-9d48-4f41-8cb9-450b141c6579.eu-west-2-0.aws.cloud.qdrant.io:6333/collections "HTTP/1.1 200 OK"
+2026-06-02 10:50:56 | INFO     | yesboss.qdrant | Qdrant connected at https://28297010-9d48-4f41-8cb9-450b141c6579.eu-west-2-0.aws.cloud.qdrant.io
+2026-06-02 10:50:56 | INFO     | httpx | HTTP Request: GET https://28297010-9d48-4f41-8cb9-450b141c6579.eu-west-2-0.aws.cloud.qdrant.io:6333 "HTTP/1.1 200 OK"
+2026-06-02 10:50:56 | INFO     | yesboss.supabase | Supabase connected at https://oiwbdstrjpchgugavbss.supabase.co
+2026-06-02 10:50:57 | INFO     | httpx | HTTP Request: GET https://28297010-9d48-4f41-8cb9-450b141c6579.eu-west-2-0.aws.cloud.qdrant.io:6333/collections "HTTP/1.1 200 OK"
+2026-06-02 10:50:57 | INFO     | yesboss.qdrant | Collection 'documents' already exists
+2026-06-02 10:50:57 | INFO     | httpx | HTTP Request: GET https://28297010-9d48-4f41-8cb9-450b141c6579.eu-west-2-0.aws.cloud.qdrant.io:6333/collections "HTTP/1.1 200 OK"
+2026-06-02 10:50:57 | INFO     | yesboss.qdrant | Collection 'conversations' already exists
+2026-06-02 10:50:57 | INFO     | httpx | HTTP Request: GET https://28297010-9d48-4f41-8cb9-450b141c6579.eu-west-2-0.aws.cloud.qdrant.io:6333/collections "HTTP/1.1 200 OK"
+2026-06-02 10:50:57 | INFO     | yesboss.qdrant | Collection 'workflows' already exists
+2026-06-02 10:50:57 | INFO     | yesboss.api | All services initialized
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+2026-06-02 10:53:01 | INFO     | yesboss.database | Database indexes created
+2026-06-02 10:53:01 | INFO     | yesboss.database | MongoDB connected to yesboss_db
+2026-06-02 10:53:02 | INFO     | httpx | HTTP Request: GET https://28297010-9d48-4f41-8cb9-450b141c6579.eu-west-2-0.aws.cloud.qdrant.io:6333/collections "HTTP/1.1 200 OK"
+2026-06-02 10:53:02 | INFO     | yesboss.qdrant | Qdrant connected at https://28297010-9d48-4f41-8cb9-450b141c6579.eu-west-2-0.aws.cloud.qdrant.io
+2026-06-02 10:53:02 | INFO     | httpx | HTTP Request: GET https://28297010-9d48-4f41-8cb9-450b141c6579.eu-west-2-0.aws.cloud.qdrant.io:6333 "HTTP/1.1 200 OK"
+2026-06-02 10:53:03 | INFO     | yesboss.supabase | Supabase connected at https://oiwbdstrjpchgugavbss.supabase.co
+2026-06-02 10:53:19 | INFO     | yesboss.file_processor | Searching documents for org: 6a1e651a424b3d6464af4963, query: What was our Q3 revenue and how does it compare to last year?
+2026-06-02 10:53:27 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/embeddings "HTTP/1.1 404 Not Found"
+2026-06-02 10:53:27 | ERROR    | yesboss.file_processor | Embedding failed with xai: Error code: 404 - {'code': 'Some requested entity was not found', 'error': 'The model text-embedding-3-small does not exist or your team b263063f-f5d9-4382-bb11-e173cdae0b94 does not have access to it. If you believe this is a mistake, please contact support and quote your team ID and the model name.'}
+2026-06-02 10:53:32 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 10:55:41 | INFO     | yesboss.intelligence | Analyzing domain: cloudsphere.io
+2026-06-02 10:56:03 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 10:56:03 | INFO     | yesboss.intelligence | Detected - Name: Cloudsphere, Industry: , Verticals: [], Confidence: 0.45
+2026-06-02 10:56:12 | INFO     | yesboss.intelligence | Analyzing domain: cloudsphere.io
+2026-06-02 10:56:33 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 10:56:33 | INFO     | yesboss.intelligence | Detected - Name: Cloudsphere, Industry: , Verticals: [], Confidence: 0.45
+2026-06-02 10:58:04 | INFO     | yesboss.intelligence | Analyzing domain: cloudsphere.io
+2026-06-02 10:58:29 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 10:58:29 | INFO     | yesboss.intelligence | Detected - Name: Cloudsphere, Industry: , Verticals: [], Confidence: 0.45
+2026-06-02 11:09:57 | INFO     | yesboss.file_processor | Searching documents for org: 6a1e651a424b3d6464af4963, query: What are our Q4 action items?
+2026-06-02 11:09:58 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/embeddings "HTTP/1.1 404 Not Found"
+2026-06-02 11:09:58 | ERROR    | yesboss.file_processor | Embedding failed with xai: Error code: 404 - {'code': 'Some requested entity was not found', 'error': 'The model text-embedding-3-small does not exist or your team b263063f-f5d9-4382-bb11-e173cdae0b94 does not have access to it. If you believe this is a mistake, please contact support and quote your team ID and the model name.'}
+2026-06-02 11:10:02 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:11:08 | INFO     | yesboss.file_processor | Processing file: marketing_oct.txt for org: 6a1e651a424b3d6464af4963
+2026-06-02 11:11:08 | INFO     | yesboss.file_processor | Extracting text from marketing_oct.txt (type: text)
+2026-06-02 11:11:10 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/embeddings "HTTP/1.1 404 Not Found"
+2026-06-02 11:11:10 | ERROR    | yesboss.file_processor | Embedding failed with xai: Error code: 404 - {'code': 'Some requested entity was not found', 'error': 'The model text-embedding-3-small does not exist or your team b263063f-f5d9-4382-bb11-e173cdae0b94 does not have access to it. If you believe this is a mistake, please contact support and quote your team ID and the model name.'}
+2026-06-02 11:11:10 | INFO     | httpx | HTTP Request: PUT https://28297010-9d48-4f41-8cb9-450b141c6579.eu-west-2-0.aws.cloud.qdrant.io:6333/collections/documents/points?wait=true "HTTP/1.1 200 OK"
+2026-06-02 11:11:18 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:11:18 | INFO     | yesboss.file_processor | Deep analysis complete for marketing_oct.txt (b8bccd40-6f38-466c-b629-6b17f31c3e3e)
+2026-06-02 11:12:04 | INFO     | yesboss.file_processor | Searching documents for org: 6a1e651a424b3d6464af4963, query: Which marketing channel is the best and why?
+2026-06-02 11:12:05 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/embeddings "HTTP/1.1 404 Not Found"
+2026-06-02 11:12:05 | ERROR    | yesboss.file_processor | Embedding failed with xai: Error code: 404 - {'code': 'Some requested entity was not found', 'error': 'The model text-embedding-3-small does not exist or your team b263063f-f5d9-4382-bb11-e173cdae0b94 does not have access to it. If you believe this is a mistake, please contact support and quote your team ID and the model name.'}
+2026-06-02 11:12:11 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:13:36 | INFO     | yesboss.intelligence | Analyzing domain: cloudsphere.io
+2026-06-02 11:13:55 | INFO     | yesboss.intelligence | Analyzing domain: cloudsphere.com
+2026-06-02 11:14:18 | INFO     | yesboss.intelligence | Suggesting industries for query: 
+2026-06-02 11:14:19 | INFO     | openai._base_client | Retrying request to /chat/completions in 0.449627 seconds
+2026-06-02 11:14:19 | INFO     | yesboss.intelligence | Suggesting industries for query: 
+2026-06-02 11:14:20 | INFO     | yesboss.intelligence | Suggesting industries for query: c
+2026-06-02 11:14:21 | INFO     | yesboss.intelligence | Suggesting industries for query: cl
+2026-06-02 11:14:26 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:14:26 | INFO     | yesboss.intelligence | Detected - Name: Cloudsphere, Industry: , Verticals: [], Confidence: 0.45
+2026-06-02 11:14:26 | INFO     | yesboss.intelligence | Suggesting industries for query: clo
+2026-06-02 11:14:28 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:14:28 | INFO     | yesboss.intelligence | Detected - Name: Cloudsphere, Industry: , Verticals: [], Confidence: 0.45
+2026-06-02 11:14:28 | INFO     | yesboss.intelligence | Suggesting industries for query: clou
+2026-06-02 11:14:29 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:14:29 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:14:29 | INFO     | yesboss.intelligence | Suggesting industries for query: cloud
+2026-06-02 11:14:30 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:14:32 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:14:35 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:14:36 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:14:36 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:14:41 | INFO     | yesboss.intelligence | Suggesting industries for query: s
+2026-06-02 11:14:42 | INFO     | yesboss.intelligence | Suggesting industries for query: sa
+2026-06-02 11:14:43 | INFO     | yesboss.intelligence | Suggesting industries for query: saa
+2026-06-02 11:14:44 | INFO     | yesboss.intelligence | Suggesting industries for query: saas
+2026-06-02 11:14:49 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:14:50 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:14:50 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:14:53 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:15:01 | INFO     | yesboss.intelligence | Suggesting micro-verticals for query= industry=Cloud Computing Services
+2026-06-02 11:15:02 | INFO     | yesboss.intelligence | Suggesting micro-verticals for query=c industry=Cloud Computing Services
+2026-06-02 11:15:03 | INFO     | yesboss.intelligence | Suggesting micro-verticals for query=cl industry=Cloud Computing Services
+2026-06-02 11:15:04 | INFO     | yesboss.intelligence | Suggesting micro-verticals for query=clo industry=Cloud Computing Services
+2026-06-02 11:15:05 | INFO     | yesboss.intelligence | Suggesting micro-verticals for query=clou industry=Cloud Computing Services
+2026-06-02 11:15:06 | INFO     | yesboss.intelligence | Suggesting micro-verticals for query=cloud industry=Cloud Computing Services
+2026-06-02 11:15:11 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:15:11 | INFO     | yesboss.intelligence | Suggesting micro-verticals for query=cloud  industry=Cloud Computing Services
+2026-06-02 11:15:12 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:15:12 | INFO     | yesboss.intelligence | Suggesting micro-verticals for query=cloud g industry=Cloud Computing Services
+2026-06-02 11:15:13 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:15:13 | INFO     | yesboss.intelligence | Suggesting micro-verticals for query=cloud go industry=Cloud Computing Services
+2026-06-02 11:15:14 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:15:14 | INFO     | yesboss.intelligence | Suggesting micro-verticals for query=cloud gov industry=Cloud Computing Services
+2026-06-02 11:15:15 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:15:18 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:15:19 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:15:20 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:15:21 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:15:23 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:15:29 | INFO     | yesboss.intelligence | Suggesting micro-verticals for query=cloud gove industry=Cloud Computing Services
+2026-06-02 11:15:30 | INFO     | yesboss.intelligence | Suggesting micro-verticals for query=cloud gover industry=Cloud Computing Services
+2026-06-02 11:15:35 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:15:39 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:15:46 | ERROR    | yesboss.api | Unhandled error: 'Settings' object has no attribute 'SEAR_API_KEY'
+  + Exception Group Traceback (most recent call last):
+  |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_utils.py", line 81, in collapse_excgroups
+  |     yield
+  |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 192, in __call__
+  |     async with anyio.create_task_group() as task_group:
+  |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\anyio\_backends\_asyncio.py", line 799, in __aexit__
+  |     raise BaseExceptionGroup(
+  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    |     await self.app(scope, receive, _send)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 191, in __call__
+    |     with recv_stream, send_stream, collapse_excgroups():
+    |   File "C:\Program Files\Python311\Lib\contextlib.py", line 158, in __exit__
+    |     self.gen.throw(typ, value, traceback)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_utils.py", line 87, in collapse_excgroups
+    |     raise exc
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 193, in __call__
+    |     response = await self.dispatch_func(request, call_next)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\VSLLP\krisha\2\yesboss2\backend\app\main.py", line 101, in request_timing_middleware
+    |     response = await call_next(request)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 168, in call_next
+    |     raise app_exc from app_exc.__cause__ or app_exc.__context__
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 144, in coro
+    |     await self.app(scope, receive_or_disconnect, send_no_error)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\cors.py", line 96, in __call__
+    |     await self.simple_response(scope, receive, send, request_headers=headers)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\cors.py", line 154, in simple_response
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 191, in __call__
+    |     with recv_stream, send_stream, collapse_excgroups():
+    |   File "C:\Program Files\Python311\Lib\contextlib.py", line 158, in __exit__
+    |     self.gen.throw(typ, value, traceback)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_utils.py", line 87, in collapse_excgroups
+    |     raise exc
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 193, in __call__
+    |     response = await self.dispatch_func(request, call_next)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\VSLLP\krisha\2\yesboss2\backend\app\main.py", line 13, in dispatch
+    |     response = await call_next(request)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 168, in call_next
+    |     raise app_exc from app_exc.__cause__ or app_exc.__context__
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 144, in coro
+    |     await self.app(scope, receive_or_disconnect, send_no_error)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    |     await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\routing.py", line 660, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\routing.py", line 680, in app
+    |     await route.handle(scope, receive, send)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\routing.py", line 276, in handle
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\fastapi\routing.py", line 134, in app
+    |     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\fastapi\routing.py", line 120, in app
+    |     response = await f(request)
+    |                ^^^^^^^^^^^^^^^^
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\fastapi\routing.py", line 674, in app
+    |     raw_response = await run_endpoint_function(
+    |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\fastapi\routing.py", line 328, in run_endpoint_function
+    |     return await dependant.call(**values)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\VSLLP\krisha\2\yesboss2\backend\app\api\social.py", line 36, in detect_social_links
+    |     social_data = await detect_social_presence(domain)
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\VSLLP\krisha\2\yesboss2\backend\app\core\social_detector.py", line 495, in detect_social_presence
+    |     if settings.SEAR_API_KEY:
+    |        ^^^^^^^^^^^^^^^^^^^^^
+    | AttributeError: 'Settings' object has no attribute 'SEAR_API_KEY'
+    +------------------------------------
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 191, in __call__
+    with recv_stream, send_stream, collapse_excgroups():
+  File "C:\Program Files\Python311\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_utils.py", line 87, in collapse_excgroups
+    raise exc
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 193, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\VSLLP\krisha\2\yesboss2\backend\app\main.py", line 101, in request_timing_middleware
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 168, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 144, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\cors.py", line 96, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\cors.py", line 154, in simple_response
+    await self.app(scope, receive, send)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 191, in __call__
+    with recv_stream, send_stream, collapse_excgroups():
+  File "C:\Program Files\Python311\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_utils.py", line 87, in collapse_excgroups
+    raise exc
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 193, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\VSLLP\krisha\2\yesboss2\backend\app\main.py", line 13, in dispatch
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 168, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 144, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\routing.py", line 660, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\routing.py", line 680, in app
+    await route.handle(scope, receive, send)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\routing.py", line 276, in handle
+    await self.app(scope, receive, send)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\fastapi\routing.py", line 134, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\fastapi\routing.py", line 120, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\fastapi\routing.py", line 674, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\fastapi\routing.py", line 328, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\VSLLP\krisha\2\yesboss2\backend\app\api\social.py", line 36, in detect_social_links
+    social_data = await detect_social_presence(domain)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\VSLLP\krisha\2\yesboss2\backend\app\core\social_detector.py", line 495, in detect_social_presence
+    if settings.SEAR_API_KEY:
+       ^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Settings' object has no attribute 'SEAR_API_KEY'
+ERROR:    Exception in ASGI application
+  + Exception Group Traceback (most recent call last):
+  |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_utils.py", line 81, in collapse_excgroups
+  |     yield
+  |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 192, in __call__
+  |     async with anyio.create_task_group() as task_group:
+  |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\anyio\_backends\_asyncio.py", line 799, in __aexit__
+  |     raise BaseExceptionGroup(
+  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\uvicorn\protocols\http\httptools_impl.py", line 421, in run_asgi
+    |     result = await app(  # type: ignore[func-returns-value]
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\uvicorn\middleware\proxy_headers.py", line 56, in __call__
+    |     return await self.app(scope, receive, send)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\fastapi\applications.py", line 1159, in __call__
+    |     await super().__call__(scope, receive, send)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\applications.py", line 90, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\errors.py", line 186, in __call__
+    |     raise exc
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    |     await self.app(scope, receive, _send)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 191, in __call__
+    |     with recv_stream, send_stream, collapse_excgroups():
+    |   File "C:\Program Files\Python311\Lib\contextlib.py", line 158, in __exit__
+    |     self.gen.throw(typ, value, traceback)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_utils.py", line 87, in collapse_excgroups
+    |     raise exc
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 193, in __call__
+    |     response = await self.dispatch_func(request, call_next)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\VSLLP\krisha\2\yesboss2\backend\app\main.py", line 101, in request_timing_middleware
+    |     response = await call_next(request)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 168, in call_next
+    |     raise app_exc from app_exc.__cause__ or app_exc.__context__
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 144, in coro
+    |     await self.app(scope, receive_or_disconnect, send_no_error)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\cors.py", line 96, in __call__
+    |     await self.simple_response(scope, receive, send, request_headers=headers)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\cors.py", line 154, in simple_response
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 191, in __call__
+    |     with recv_stream, send_stream, collapse_excgroups():
+    |   File "C:\Program Files\Python311\Lib\contextlib.py", line 158, in __exit__
+    |     self.gen.throw(typ, value, traceback)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_utils.py", line 87, in collapse_excgroups
+    |     raise exc
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 193, in __call__
+    |     response = await self.dispatch_func(request, call_next)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\VSLLP\krisha\2\yesboss2\backend\app\main.py", line 13, in dispatch
+    |     response = await call_next(request)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 168, in call_next
+    |     raise app_exc from app_exc.__cause__ or app_exc.__context__
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 144, in coro
+    |     await self.app(scope, receive_or_disconnect, send_no_error)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    |     await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\routing.py", line 660, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\routing.py", line 680, in app
+    |     await route.handle(scope, receive, send)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\routing.py", line 276, in handle
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\fastapi\routing.py", line 134, in app
+    |     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\fastapi\routing.py", line 120, in app
+    |     response = await f(request)
+    |                ^^^^^^^^^^^^^^^^
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\fastapi\routing.py", line 674, in app
+    |     raw_response = await run_endpoint_function(
+    |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\fastapi\routing.py", line 328, in run_endpoint_function
+    |     return await dependant.call(**values)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\VSLLP\krisha\2\yesboss2\backend\app\api\social.py", line 36, in detect_social_links
+    |     social_data = await detect_social_presence(domain)
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\VSLLP\krisha\2\yesboss2\backend\app\core\social_detector.py", line 495, in detect_social_presence
+    |     if settings.SEAR_API_KEY:
+    |        ^^^^^^^^^^^^^^^^^^^^^
+    | AttributeError: 'Settings' object has no attribute 'SEAR_API_KEY'
+    +------------------------------------
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\uvicorn\protocols\http\httptools_impl.py", line 421, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\uvicorn\middleware\proxy_headers.py", line 56, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\fastapi\applications.py", line 1159, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\applications.py", line 90, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\errors.py", line 186, in __call__
+    raise exc
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 191, in __call__
+    with recv_stream, send_stream, collapse_excgroups():
+  File "C:\Program Files\Python311\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_utils.py", line 87, in collapse_excgroups
+    raise exc
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 193, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\VSLLP\krisha\2\yesboss2\backend\app\main.py", line 101, in request_timing_middleware
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 168, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 144, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\cors.py", line 96, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\cors.py", line 154, in simple_response
+    await self.app(scope, receive, send)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 191, in __call__
+    with recv_stream, send_stream, collapse_excgroups():
+  File "C:\Program Files\Python311\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_utils.py", line 87, in collapse_excgroups
+    raise exc
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 193, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\VSLLP\krisha\2\yesboss2\backend\app\main.py", line 13, in dispatch
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 168, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\base.py", line 144, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\routing.py", line 660, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\routing.py", line 680, in app
+    await route.handle(scope, receive, send)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\routing.py", line 276, in handle
+    await self.app(scope, receive, send)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\fastapi\routing.py", line 134, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\fastapi\routing.py", line 120, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\fastapi\routing.py", line 674, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\krish\AppData\Roaming\Python\Python311\site-packages\fastapi\routing.py", line 328, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\VSLLP\krisha\2\yesboss2\backend\app\api\social.py", line 36, in detect_social_links
+    social_data = await detect_social_presence(domain)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\VSLLP\krisha\2\yesboss2\backend\app\core\social_detector.py", line 495, in detect_social_presence
+    if settings.SEAR_API_KEY:
+       ^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Settings' object has no attribute 'SEAR_API_KEY'
+2026-06-02 11:15:59 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:22:47 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:23:35 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:23:38 | INFO     | yesboss.intelligence | Generating goal suggestions for industry=Cloud Computing Services micro_vertical=Cloud Governance
+2026-06-02 11:23:45 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:23:45 | INFO     | yesboss.intelligence | Generated 6 goal suggestions
+2026-06-02 11:24:04 | INFO     | yesboss.intelligence | Analyzing department for goal: increase revenue by 67% this month
+2026-06-02 11:24:07 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:24:56 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:25:08 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:25:29 | INFO     | httpx | HTTP Request: GET https://cloudsphere.com/ "HTTP/1.1 403 Forbidden"
+2026-06-02 11:25:38 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:61485 - "WebSocket /ws/6a1e6e09450ca773dd254c4e?user_id=hello%40cloudsphere.io" [accepted]
+2026-06-02 11:27:08 | INFO     | yesboss.websocket | WebSocket connected. Org: 6a1e6e09450ca773dd254c4e, User: hello@cloudsphere.io
+INFO:     connection open
+2026-06-02 11:27:29 | INFO     | yesboss.intelligence | Analyzing department for goal: complete 
+2026-06-02 11:27:34 | INFO     | yesboss.intelligence | Analyzing department for goal: complete drip campaign 
+2026-06-02 11:27:38 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:27:38 | INFO     | yesboss.intelligence | Analyzing department for goal: complete drip campaign eodx
+2026-06-02 11:27:40 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:27:42 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:27:43 | INFO     | yesboss.intelligence | Analyzing department for goal: complete drip campaign eod
+2026-06-02 11:27:48 | INFO     | httpx | HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 11:28:16 | INFO     | yesboss.websocket | WebSocket disconnected. Org: 6a1e6e09450ca773dd254c4e
+INFO:     connection closed
+INFO:     127.0.0.1:57578 - "WebSocket /ws/6a1e6e09450ca773dd254c4e?user_id=hello%40cloudsphere.io" [accepted]
+2026-06-02 11:28:22 | INFO     | yesboss.websocket | WebSocket connected. Org: 6a1e6e09450ca773dd254c4e, User: hello@cloudsphere.io
+INFO:     connection open
+2026-06-02 11:28:27 | INFO     | yesboss.websocket | WebSocket disconnected. Org: 6a1e6e09450ca773dd254c4e
+INFO:     connection closed
