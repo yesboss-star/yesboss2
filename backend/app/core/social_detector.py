@@ -131,7 +131,10 @@ def _score_url(url: str, domain: str, company_name: str) -> int:
     return score
 
 
-def _url_exists(url: str) -> bool:
+def _url_exists(url: str, company_name: str = "", domain: str = "") -> bool:
+    """Strict existence check: only confirm a URL if the resolved page actually
+    appears to belong to the company. Pure 200 OK is not enough — many platforms
+    return 200 with a generic landing page even for non-existent profiles."""
     try:
         import requests
         resp = requests.get(url, timeout=8, allow_redirects=True, headers={
@@ -139,15 +142,37 @@ def _url_exists(url: str) -> bool:
         })
         if resp.status_code in [404, 410]:
             return False
-        body_lower = resp.text.lower()[:2000]
+
+        body_lower = resp.text.lower()[:5000]
+        final_url = (resp.url or url).lower()
+
         not_found_indicators = [
             "page not found", "this page doesn't exist", "this page isn't available",
             "sorry, this page isn't available", "link is broken", "no results found",
             "this profile doesn't exist", "page doesn't exist", "can't find this page",
-            "the page you requested was not found", "404", "not found",
+            "the page you requested was not found", "this account is suspended",
+            "account suspended", "this account has been suspended", "user not found",
+            "this user is deactivated", "hmm... this page didn't load", "page not available",
         ]
         if any(indicator in body_lower for indicator in not_found_indicators):
             return False
+
+        # If we have a company hint, require the page to actually look like it belongs
+        # to the company. Otherwise we'd accept any 200 page.
+        hints: list[str] = []
+        if company_name:
+            cleaned = re.sub(r"[^a-z0-9]", "", company_name.lower())
+            if cleaned:
+                hints.append(cleaned)
+        if domain:
+            base = domain.split(".")[0].lower()
+            base_clean = re.sub(r"[^a-z0-9]", "", base)
+            if base_clean and len(base_clean) >= 2:
+                hints.append(base_clean)
+
+        if hints and not any(h in body_lower or h in final_url for h in hints):
+            return False
+
         return True
     except Exception:
         return False
@@ -353,32 +378,12 @@ async def _source_duckduckgo(company_name: str, domain: str) -> dict:
 # ============================================================
 # SOURCE 5: Common URL patterns
 # ============================================================
+# NOTE: This source was previously responsible for hallucinated links — it would
+# guess handles from the company/domain name and accept any 200 response as a
+# match. It is intentionally disabled; we only return URLs that were explicitly
+# observed on the company's website or returned by a real search index.
 def _source_common_patterns(company_name: str, domain: str) -> dict:
-    detected = {}
-    if not company_name:
-        return detected
-    clean_name = re.sub(r'[^a-zA-Z0-9\s]', '', company_name).lower().strip()
-    clean_name = clean_name.replace(" ", "").replace("-", "").replace("&", "and").replace(".", "")[:30]
-    domain_name = domain.split(".")[0].lower().replace("-", "").replace("_", "")[:30]
-    handles = list(dict.fromkeys([h for h in [clean_name, domain_name] if h and len(h) >= 2]))
-
-    for handle in handles:
-        candidates = {
-            "linkedin": [f"https://www.linkedin.com/company/{handle}"],
-            "twitter": [f"https://x.com/{handle}"],
-            "instagram": [f"https://www.instagram.com/{handle}"],
-            "facebook": [f"https://www.facebook.com/{handle}"],
-            "youtube": [f"https://www.youtube.com/@{handle}"],
-        }
-        for platform, urls in candidates.items():
-            if platform in detected:
-                continue
-            for url in urls:
-                if _url_exists(url):
-                    detected[platform] = normalize_url(url, platform)
-                    break
-    logger.info(f"Common patterns found {len(detected)} social links")
-    return detected
+    return {}
 
 
 # ============================================================
@@ -454,9 +459,10 @@ Return ONLY valid JSON. No markdown. No explanation. NO extra URLs."""
 # ============================================================
 # MAIN: Detect social presence using all sources
 # ============================================================
-async def detect_social_presence(domain: str) -> dict:
+async def detect_social_presence(domain: str, company_name: str = "") -> dict:
     base_url = f"https://{domain}" if not domain.startswith(("http://", "https://")) else domain
-    company_name = domain.split(".")[0].replace("-", " ").replace("_", " ").title()
+    if not company_name:
+        company_name = domain.split(".")[0].replace("-", " ").replace("_", " ").title()
     page_content = ""
 
     # Get page content for AI validation
@@ -551,13 +557,13 @@ async def detect_social_presence(domain: str) -> dict:
             has_ai = "ai" in data.get("sources", [])
             sources = data.get("sources", [])
 
-            # Auto-verified: found by 2+ sources OR confirmed by AI
+            # Verified: found by 2+ sources OR confirmed by AI OR strict single-source
+            # content check that matches the company hint
             if has_ai or data["count"] >= 2:
                 url = candidate_url
                 verified = True
             elif data["count"] == 1:
-                # Single source: validate with HTTP check
-                if _url_exists(candidate_url):
+                if _url_exists(candidate_url, company_name, domain):
                     url = candidate_url
                     verified = True
 

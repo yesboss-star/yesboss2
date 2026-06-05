@@ -14,9 +14,69 @@
     },
     {
       "value": "SaaS / Cloud Computing",
-      "uses": 1,
+      "uses": 3,
       "created_at": 1780379087,
-      "last_used": 1780379087
+      "last_used": 1780466350
+    },
+    {
+      "value": "Information Services",
+      "uses": 1,
+      "created_at": 1780389792,
+      "last_used": 1780389792
+    },
+    {
+      "value": "Software Development",
+      "uses": 1,
+      "created_at": 1780399219,
+      "last_used": 1780399219
+    },
+    {
+      "value": "Enterprise Software Solutions",
+      "uses": 1,
+      "created_at": 1780399252,
+      "last_used": 1780399252
+    },
+    {
+      "value": "Video Streaming Services",
+      "uses": 1,
+      "created_at": 1780546445,
+      "last_used": 1780546445
+    },
+    {
+      "value": "Sticker Printing & Manufacturing",
+      "uses": 1,
+      "created_at": 1780551383,
+      "last_used": 1780551383
+    },
+    {
+      "value": "manufac",
+      "uses": 1,
+      "created_at": 1780552611,
+      "last_used": 1780552611
+    },
+    {
+      "value": "Manufacturing & Industrial",
+      "uses": 1,
+      "created_at": 1780552626,
+      "last_used": 1780552626
+    },
+    {
+      "value": "Laptop Manufacturing",
+      "uses": 2,
+      "created_at": 1780552642,
+      "last_used": 1780553643
+    },
+    {
+      "value": "IT Services & Consulting",
+      "uses": 1,
+      "created_at": 1780634625,
+      "last_used": 1780634625
+    },
+    {
+      "value": "Computer and Related Activities",
+      "uses": 1,
+      "created_at": 1780634708,
+      "last_used": 1780634708
     }
   ],
   "micro_verticals": [
@@ -33,6 +93,153 @@
       "created_at": 1780379139,
       "last_used": 1780379139,
       "industry": "Cloud Computing Services"
+    },
+    {
+      "value": "Last-Mile Delivery Optimization",
+      "uses": 1,
+      "created_at": 1780385659,
+      "last_used": 1780385659,
+      "industry": "SaaS / Cloud Computing"
+    },
+    {
+      "value": "Smart City Infrastructure Management",
+      "uses": 1,
+      "created_at": 1780389835,
+      "last_used": 1780389835,
+      "industry": "Information Services"
+    },
+    {
+      "value": "Cybersecurity Services",
+      "uses": 1,
+      "created_at": 1780389870,
+      "last_used": 1780389870,
+      "industry": "Information Services"
+    },
+    {
+      "value": "Zoho Partner Services",
+      "uses": 2,
+      "created_at": 1780399284,
+      "last_used": 1780466408,
+      "industry": "Enterprise Software Solutions"
+    },
+    {
+      "value": "Zoho Implementation Consulting",
+      "uses": 1,
+      "created_at": 1780399288,
+      "last_used": 1780399288,
+      "industry": "Enterprise Software Solutions"
+    },
+    {
+      "value": "Zoho CRM Solutions",
+      "uses": 1,
+      "created_at": 1780399290,
+      "last_used": 1780399290,
+      "industry": "Enterprise Software Solutions"
+    },
+    {
+      "value": "Zoho ERP Integration",
+      "uses": 1,
+      "created_at": 1780399294,
+      "last_used": 1780399294,
+      "industry": "Enterprise Software Solutions"
+    },
+    {
+      "value": "Zoho One Deployment",
+      "uses": 1,
+      "created_at": 1780399297,
+      "last_used": 1780399297,
+      "industry": "Enterprise Software Solutions"
+    },
+    {
+      "value": "Zoho Books Accounting",
+      "uses": 1,
+      "created_at": 1780399299,
+      "last_used": 1780399299,
+      "industry": "Enterprise Software Solutions"
+    },
+    {
+      "value": "Zoho Inventory Management",
+      "uses": 1,
+      "created_at": 1780399301,
+      "last_used": 1780399301,
+      "industry": "Enterprise Software Solutions"
+    },
+    {
+      "value": "Zoho Marketing Automation",
+      "uses": 1,
+      "created_at": 1780399302,
+      "last_used": 1780399302,
+      "industry": "Enterprise Software Solutions"
+    },
+    {
+      "value": "Zoho Project Management Consulting",
+      "uses": 1,
+      "created_at": 1780399309,
+      "last_used": 1780399309,
+      "industry": "Enterprise Software Solutions"
+    },
+    {
+      "value": "Laptop Parts Manufacturing",
+      "uses": 1,
+      "created_at": 1780552656,
+      "last_used": 1780552656,
+      "industry": "Manufacturing & Industrial"
+    },
+    {
+      "value": "Laptop Component Production",
+      "uses": 1,
+      "created_at": 1780552661,
+      "last_used": 1780552661,
+      "industry": "Manufacturing & Industrial"
+    },
+    {
+      "value": "Enterprise Software Implementation",
+      "uses": 1,
+      "created_at": 1780635953,
+      "last_used": 1780635953,
+      "industry": "IT Services & Consulting"
+    },
+    {
+      "value": "Customer Relationship Management Consulting",
+      "uses": 1,
+      "created_at": 1780635970,
+      "last_used": 1780635970,
+      "industry": "IT Services & Consulting"
+    },
+    {
+      "value": "Human Resource Management Systems",
+      "uses": 1,
+      "created_at": 1780635996,
+      "last_used": 1780635996,
+      "industry": "IT Services & Consulting"
+    },
+    {
+      "value": "Business Intelligence Analytics",
+      "uses": 1,
+      "created_at": 1780636080,
+      "last_used": 1780636080,
+      "industry": "IT Services & Consulting"
+    },
+    {
+      "value": "Low-Code Development Platforms",
+      "uses": 1,
+      "created_at": 1780636151,
+      "last_used": 1780636151,
+      "industry": "IT Services & Consulting"
+    },
+    {
+      "value": "Enterprise AI Solutions",
+      "uses": 1,
+      "created_at": 1780636156,
+      "last_used": 1780636156,
+      "industry": "IT Services & Consulting"
+    },
+    {
+      "value": "Enterprise IT Consulting",
+      "uses": 1,
+      "created_at": 1780636245,
+      "last_used": 1780636245,
+      "industry": "IT Services & Consulting"
     }
   ],
   "company_names": []

@@ -18,6 +18,7 @@ interface Organization {
   owner_id?: string;
   co_owners?: string[];
   ownerRank?: number;
+  social_links?: Record<string, string>;
 }
 
 interface SocialLinks {
@@ -44,7 +45,7 @@ interface OrganizationState {
   setSocialLinks: (links: SocialLinks) => void;
   createOrganization: (data: { name: string; domain: string; industry: string; industries?: string[]; size: string; micro_vertical?: string; micro_verticals?: string[]; website_url?: string }) => Promise<Organization>;
   updateSocialLinks: (orgId: string, links: SocialLinks) => Promise<void>;
-  detectSocialPresence: (domain: string) => Promise<SocialLinks>;
+  detectSocialPresence: (domain: string, company_name?: string) => Promise<SocialLinks>;
   fetchOrganizationByEmail: (email: string) => Promise<Organization | null>;
 }
 
@@ -130,17 +131,17 @@ export const useOrganizationStore = create<OrganizationState>()(
         }
       },
 
-      detectSocialPresence: async (domain) => {
+      detectSocialPresence: async (domain, company_name = "") => {
         set({ loading: true, error: null });
         try {
           const response = await fetch(`${API_URL}/social/detect`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ domain }),
+            body: JSON.stringify({ domain, company_name }),
           });
           if (!response.ok) throw new Error("Failed to detect social presence");
           const result = await response.json();
-          
+
           const links: SocialLinks = {};
           if (Array.isArray(result.social_links)) {
             result.social_links.forEach((item: any) => {
@@ -151,7 +152,7 @@ export const useOrganizationStore = create<OrganizationState>()(
           } else if (result.social_links) {
             Object.assign(links, result.social_links);
           }
-          
+
           set({ socialLinks: links, loading: false });
           return links;
         } catch (error: any) {

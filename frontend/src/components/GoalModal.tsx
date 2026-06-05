@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useGoalStore } from "@/stores/goalStore";
 import { useOrgChartStore } from "@/stores/orgChartStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
-import { X, Loader2, Sparkles, Calendar, Users, Flag, CheckCircle2, Search, ChevronDown } from "lucide-react";
+import { X, Loader2, Sparkles, Calendar, Users, Flag, CheckCircle2, ChevronDown } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 const DEPARTMENTS = ["Engineering", "Marketing", "Sales", "Operations", "Finance", "Human Resources", "Product", "Design", "Customer Support", "R&D", "Supply Chain", "Legal"];
@@ -102,7 +102,7 @@ interface GoalModalProps {
 }
 
 export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
-  const { createGoal, generateTasks, loading } = useGoalStore();
+  const { createGoal, loading } = useGoalStore();
   const { organization } = useOrganizationStore();
   const { members, fetchOrgMembers } = useOrgChartStore();
   const [formData, setFormData] = useState({
@@ -115,7 +115,6 @@ export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
     assignee_name: "",
     reviewer_id: "",
     reviewer_name: "",
-    generateTasks: true,
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -177,7 +176,7 @@ export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
     setError("");
 
     try {
-      const goal = await createGoal({
+      await createGoal({
         title: formData.title,
         description: formData.description,
         priority: formData.priority,
@@ -190,14 +189,10 @@ export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
         organization_id: organization.id,
       });
 
-      if (formData.generateTasks && goal.id) {
-        await generateTasks(goal.id, 5);
-      }
-
       setFormData({
         title: "", description: "", priority: "medium", timeline: "",
         department: "", assignee_id: "", assignee_name: "",
-        reviewer_id: "", reviewer_name: "", generateTasks: true,
+        reviewer_id: "", reviewer_name: "",
       });
       setDetectedDept(null);
       onClose();
@@ -306,15 +301,6 @@ export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
             filterDept={formData.department || null}
             onChange={(id, name) => setFormData({ ...formData, reviewer_id: id, reviewer_name: name })}
           />
-
-          <div className="flex items-center gap-3 p-4 rounded-xl bg-primary/5 border border-primary/10">
-            <input type="checkbox" id="generateTasks" checked={formData.generateTasks} onChange={(e) => setFormData({ ...formData, generateTasks: e.target.checked })} className="w-4 h-4 rounded border-border text-primary focus:ring-primary" />
-            <label htmlFor="generateTasks" className="flex-1 cursor-pointer">
-              <span className="text-sm font-medium">AI Generate Tasks</span>
-              <p className="text-xs text-text-muted">Let AI create 5 initial tasks for this goal</p>
-            </label>
-            <Sparkles className="w-5 h-5 text-primary" />
-          </div>
 
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose} className="flex-1 py-3 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer">Cancel</button>

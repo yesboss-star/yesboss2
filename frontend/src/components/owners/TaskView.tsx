@@ -54,7 +54,7 @@ function PersonSuggest({ value, nameVal, members, filterDept, onChange, placehol
       {open && (
         <div className="absolute z-50 mt-1 left-0 right-0 bg-background border border-border rounded-xl shadow-2xl max-h-48 overflow-y-auto">
           {filtered.slice(0, 10).map((m) => (
-            <button key={m.email} type="button"
+            <button key={m.email + '-' + m.full_name} type="button"
               onClick={() => { onChange(m.email, m.full_name); setOpen(false); setQuery(m.full_name); }}
               className="w-full text-left px-3 py-2 text-sm hover:bg-surface flex items-center gap-2">
               <span className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-[9px] font-medium text-primary flex-shrink-0">{m.full_name.charAt(0)}</span>

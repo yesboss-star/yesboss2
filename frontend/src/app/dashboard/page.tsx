@@ -201,7 +201,7 @@ export default function DashboardPage() {
   return (
     <DashboardLayout>
       {role === "owner" ? (
-        <DashboardView />
+        <DashboardView onCreateGoal={() => setShowGoalModal(true)} />
       ) : (
       <div className="space-y-6">
         <div className="flex items-center justify-between">

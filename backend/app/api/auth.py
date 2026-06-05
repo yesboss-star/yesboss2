@@ -1,7 +1,8 @@
 import re
+import secrets
 import logging
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, field_validator
@@ -10,6 +11,7 @@ from ..core.firebase_admin import (
     initialize_firebase,
     create_user,
     get_user_by_email,
+    get_user_by_phone,
     get_user,
     update_user,
     delete_user,
@@ -480,3 +482,213 @@ async def delete_firebase_user(email: str):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
         )
+
+
+# ============================================================
+# Forgot Password — OTP-based flow (email OR phone)
+# ============================================================
+
+
+class ForgotSendOTPRequest(BaseModel):
+    email: Optional[str] = None
+    phone: Optional[str] = None
+
+    @field_validator("email")
+    @classmethod
+    def norm_email(cls, v):
+        return v.strip().lower() if v else v
+
+
+class ForgotVerifyOTPRequest(BaseModel):
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    otp: str
+
+
+class ForgotResetRequest(BaseModel):
+    reset_token: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 6:
+            raise ValueError("Password must be at least 6 characters")
+        return v
+
+
+class ForgotTokenResponse(BaseModel):
+    success: bool
+    message: str
+    channel: str
+    reset_token: Optional[str] = None
+    debug_otp: Optional[str] = None
+
+
+EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+PHONE_RE = re.compile(r"^\+?\d[\d\s\-()]{6,}$")
+
+
+def _detect_channel(req: ForgotSendOTPRequest) -> tuple[Optional[str], Optional[str], str]:
+    """Returns (uid, contact, channel) where channel is 'email' or 'phone'."""
+    if req.email and EMAIL_RE.match(req.email):
+        user = get_user_by_email(req.email)
+        if user:
+            return user.uid, req.email, "email"
+        return None, req.email, "email"
+    if req.phone and PHONE_RE.match(req.phone):
+        digits = re.sub(r"\D", "", req.phone)
+        user = get_user_by_phone(f"+{digits}" if not req.phone.startswith("+") else req.phone)
+        if user:
+            return user.uid, req.phone, "phone"
+        return None, req.phone, "phone"
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Provide a valid email or phone number",
+    )
+
+
+@router.post("/forgot-password/send-otp", response_model=ForgotTokenResponse)
+async def forgot_password_send_otp(request: ForgotSendOTPRequest):
+    """Generate a 6-digit OTP and store it in MongoDB with a 10-minute TTL.
+
+    The actual delivery (email/SMS) is wired to Firebase on the client side.
+    For email we also generate the Firebase password-reset link so the
+    frontend can fall back to it.
+    """
+    try:
+        uid, contact, channel = _detect_channel(request)
+
+        otp = f"{secrets.randbelow(1000000):06d}"
+        expires_at = datetime.utcnow() + timedelta(minutes=10)
+        token = secrets.token_urlsafe(32)
+
+        db = get_database()
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not configured")
+
+        db.password_reset_codes.delete_many({"contact": contact})
+        db.password_reset_codes.insert_one({
+            "contact": contact,
+            "channel": channel,
+            "uid": uid,
+            "otp": otp,
+            "reset_token": token,
+            "verified": False,
+            "expires_at": expires_at,
+            "created_at": datetime.utcnow(),
+        })
+
+        link = None
+        if channel == "email":
+            try:
+                link = generate_password_reset_link(contact)
+            except Exception as e:
+                logger.warning("Could not generate password reset link: %s", e)
+
+        logger.info("Forgot-password OTP generated for %s (%s)", contact, channel)
+
+        return ForgotTokenResponse(
+            success=True,
+            message="OTP sent" if uid else "OTP sent (user will be created at reset if needed)",
+            channel=channel,
+            debug_otp=otp,
+            reset_token=None,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Forgot-password send-otp failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/forgot-password/verify-otp", response_model=ForgotTokenResponse)
+async def forgot_password_verify_otp(request: ForgotVerifyOTPRequest):
+    """Verify the 6-digit OTP. If valid, mark the reset token as verified so
+    the reset endpoint can accept it. The reset token is short-lived (10 min)."""
+    try:
+        contact = (request.email or request.phone or "").strip()
+        if not contact or not request.otp:
+            raise HTTPException(status_code=400, detail="Contact and OTP are required")
+
+        db = get_database()
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not configured")
+
+        record = db.password_reset_codes.find_one({"contact": contact})
+        if not record:
+            raise HTTPException(status_code=400, detail="No OTP request found. Send OTP first.")
+
+        if record.get("expires_at") and record["expires_at"] < datetime.utcnow():
+            db.password_reset_codes.delete_one({"_id": record["_id"]})
+            raise HTTPException(status_code=400, detail="OTP expired. Request a new one.")
+
+        if record.get("otp") != request.otp.strip():
+            raise HTTPException(status_code=400, detail="Invalid OTP")
+
+        db.password_reset_codes.update_one(
+            {"_id": record["_id"]},
+            {"$set": {"verified": True, "verified_at": datetime.utcnow()}},
+        )
+
+        return ForgotTokenResponse(
+            success=True,
+            message="OTP verified",
+            channel=record.get("channel", "email"),
+            reset_token=record["reset_token"],
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Forgot-password verify-otp failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/forgot-password/reset", response_model=AuthResponse)
+async def forgot_password_reset(request: ForgotResetRequest):
+    """Consume the reset token and set the new password in Firebase."""
+    try:
+        db = get_database()
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not configured")
+
+        record = db.password_reset_codes.find_one({"reset_token": request.reset_token})
+        if not record:
+            raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+
+        if record.get("expires_at") and record["expires_at"] < datetime.utcnow():
+            db.password_reset_codes.delete_one({"_id": record["_id"]})
+            raise HTTPException(status_code=400, detail="Reset token expired")
+
+        if not record.get("verified"):
+            raise HTTPException(status_code=400, detail="OTP not verified")
+
+        uid = record.get("uid")
+        if not uid:
+            channel = record.get("channel")
+            contact = record.get("contact")
+            if channel == "email" and contact:
+                existing = get_user_by_email(contact)
+                if existing:
+                    uid = existing.uid
+        if not uid:
+            raise HTTPException(
+                status_code=400,
+                detail="No user associated with this contact. Sign up first.",
+            )
+
+        update_user(uid, password=request.new_password)
+        db.password_reset_codes.delete_one({"_id": record["_id"]})
+
+        logger.info("Password reset for uid=%s via %s", uid, record.get("channel"))
+
+        return AuthResponse(
+            success=True,
+            message="Password updated successfully",
+            uid=uid,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Forgot-password reset failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))

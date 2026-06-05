@@ -25,8 +25,10 @@ import {
   Share2,
   Zap,
   FolderOpen,
+
 } from "lucide-react";
 import { Avatar, Badge, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui";
+import { ThemeToggleInline } from "@/components/ThemeToggleInline";
 
 interface NavItem {
   icon: React.ElementType;
@@ -220,6 +222,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
 
             <div className="flex items-center gap-3">
+              <ThemeToggleInline />
               <button className="relative p-2 rounded-lg hover:bg-surface text-text-muted hover:text-foreground transition-colors cursor-pointer">
                 <Bell className="w-5 h-5" />
                 {unreadCount > 0 && (
@@ -243,11 +246,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem>
-                    <User className="w-4 h-4" /> Profile
+                  <DropdownMenuItem asChild>
+                    <Link href="/dashboard/profile">
+                      <User className="w-4 h-4" /> Profile
+                    </Link>
                   </DropdownMenuItem>
-                  <DropdownMenuItem>
-                    <Settings className="w-4 h-4" /> Settings
+                  <DropdownMenuItem asChild>
+                    <Link href="/dashboard/settings">
+                      <Settings className="w-4 h-4" /> Settings
+                    </Link>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={signOut} className="text-rose-400">

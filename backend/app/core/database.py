@@ -9,6 +9,23 @@ client: MongoClient = None
 db: Database = None
 
 
+def _patch_dns_resolver():
+    """Configure dnspython to use Google DNS instead of the system resolver.
+    Many home routers (JioFiber etc.) don't handle SRV records needed by mongodb+srv://."""
+    try:
+        import dns.resolver
+        new_resolver = dns.resolver.Resolver()
+        new_resolver.nameservers = ["8.8.8.8", "8.8.4.4"]
+        new_resolver.timeout = 5.0
+        new_resolver.lifetime = 5.0
+        dns.resolver.default_resolver = new_resolver
+        logger.info("DNS resolver set to 8.8.8.8 / 8.8.4.4 for SRV lookups")
+    except ImportError:
+        logger.warning("dnspython not available — SRV resolution may fail on some networks")
+    except Exception as e:
+        logger.warning("Could not override DNS resolver: %s", e)
+
+
 def connect_mongodb():
     global client, db
     if not settings.MONGODB_URI:
@@ -16,32 +33,23 @@ def connect_mongodb():
         return None
 
     try:
-        from pymongo import MongoClient
-        import urllib.parse
+        # Patch the DNS resolver before any SRV lookups (many home routers
+        # don't handle SRV records that mongodb+srv:// requires)
+        _patch_dns_resolver()
         
         mongo_uri = settings.MONGODB_URI
         
-        parsed = urllib.parse.urlparse(mongo_uri)
-        if parsed.scheme == "mongodb+srv":
-            client = MongoClient(
-                mongo_uri,
-                serverSelectionTimeoutMS=15000,
-                connectTimeoutMS=15000,
-                tls=True,
-                tlsAllowInvalidCertificates=True,
-            )
-        else:
-            client = MongoClient(
-                mongo_uri,
-                serverSelectionTimeoutMS=15000,
-                connectTimeoutMS=15000,
-                tls=True,
-                tlsAllowInvalidCertificates=True,
-            )
+        client = MongoClient(
+            mongo_uri,
+            serverSelectionTimeoutMS=15000,
+            connectTimeoutMS=15000,
+            tls=True,
+            tlsAllowInvalidCertificates=True,
+        )
         
         client.admin.command("ping")
         
-        if "yb1.kf8ash8.mongodb.net" in mongo_uri:
+        if "kf8ash8.mongodb.net" in mongo_uri:
             db = client["yesboss_db"]
         else:
             db = client.get_default_database()

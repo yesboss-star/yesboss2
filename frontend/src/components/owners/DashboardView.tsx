@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback, Fragment } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { useGoalStore } from "@/stores/goalStore";
+import { useTaskStore } from "@/stores/taskStore";
+import { useOrgChartStore } from "@/stores/orgChartStore";
 import { useMarketTrendsStore } from "@/stores/marketTrendsStore";
 import { useReportStore } from "@/stores/reportStore";
 import { useAIDashboardAdaptation, type OrgStage } from "@/hooks/useAIDashboardAdaptation";
@@ -11,9 +14,10 @@ import {
   Sparkles, Flag, Calendar, Clock, CheckCircle, AlertCircle,
   TrendingUp, TrendingDown, DollarSign, Shield, MessageSquare,
   FileText, Download, Send, Loader2, Newspaper, ExternalLink,
-  BarChart3, Target, Zap, Activity, Bell, ChevronRight,
+  BarChart3, Target, Zap, Activity, ChevronRight,
   AlertTriangle, Info, Users, User, FileSpreadsheet, Paperclip,
-  PieChart as PieChartIcon, Link2
+  PieChart as PieChartIcon, Link2, X, Building2, Network,
+  Briefcase, Search, ChevronDown
 } from "lucide-react";
 import {
   Card, CardHeader, CardTitle, CardDescription, CardContent,
@@ -26,13 +30,9 @@ import {
   AreaChart, Area, Legend
 } from "recharts";
 import GoalDetailChat from "@/components/owners/GoalDetailChat";
+import KPISuggestionsCard from "@/components/owners/KPISuggestionsCard";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
-
-const ICON_MAP: Record<string, any> = {
-  Target, CheckCircle, Users, Activity, FileText, TrendingUp,
-  TrendingDown, DollarSign, Shield, BarChart3, Clock, Flag,
-};
 
 function renderMarkdown(text: string): string {
   const lines = text.split("\n");
@@ -109,30 +109,54 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [goalData, setGoalData] = useState(goal);
+  const { updateTask } = useTaskStore();
+  const { members, fetchOrgMembers } = useOrgChartStore();
 
   useEffect(() => {
     setGoalData(goal);
   }, [goal]);
 
   useEffect(() => {
+    if (propOrgId) fetchOrgMembers(propOrgId);
+  }, [propOrgId, fetchOrgMembers]);
+
+  const loadTasks = useCallback(() => {
     setLoading(true);
     fetch(`${API_URL}/goals/${goal.id}`)
       .then((r) => r.json())
       .then((data) => {
         setTasks(data.tasks || []);
+        if (data.goal) {
+          setGoalData((prev: any) => ({ ...prev, ...data.goal, id: data.goal._id || data.goal.id || prev.id }));
+        }
         setLoading(false);
       })
       .catch(() => setLoading(false));
   }, [goal.id]);
 
+  useEffect(() => {
+    loadTasks();
+  }, [loadTasks]);
+
   const handleGoalUpdate = (updates: any) => {
     setGoalData((prev: any) => ({ ...prev, ...updates }));
   };
 
-  const statusCounts = {
+  const taskCounts = goalData.task_counts ?? {
+    total: tasks.length,
     completed: tasks.filter((t) => t.status === "completed").length,
     in_progress: tasks.filter((t) => t.status === "in_progress").length,
     pending: tasks.filter((t) => t.status === "pending").length,
+  };
+
+  const computedProgress = taskCounts.total > 0
+    ? Math.round((taskCounts.completed / taskCounts.total) * 100)
+    : goalData.progress ?? 0;
+
+  const statusCounts = {
+    completed: taskCounts.completed,
+    in_progress: taskCounts.in_progress,
+    pending: taskCounts.pending,
   };
 
   const getStatusColor = (status: string) => {
@@ -140,6 +164,30 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
       case "completed": return "text-emerald-400 bg-emerald-500/10 border-emerald-500/20";
       case "in_progress": return "text-primary bg-primary/10 border-primary/20";
       default: return "text-yellow-400 bg-yellow-500/10 border-yellow-500/20";
+    }
+  };
+
+  const handleTaskAssigneeChange = async (task: any, member: { id: string; full_name: string; email: string } | null) => {
+    const taskId = task._id || task.id;
+    if (!taskId) return;
+    const nextAssigneeId = member?.id ?? null;
+    const nextAssigneeName = member?.full_name ?? "";
+    setTasks((prev) => prev.map((t) => (t._id === taskId || t.id === taskId ? { ...t, assignee_id: nextAssigneeId, assignee_name: nextAssigneeName } : t)));
+    try {
+      await updateTask(taskId, { assignee_id: nextAssigneeId || undefined } as any);
+    } catch {
+      loadTasks();
+    }
+  };
+
+  const handleTaskStatusChange = async (task: any, status: string) => {
+    const taskId = task._id || task.id;
+    if (!taskId) return;
+    setTasks((prev) => prev.map((t) => (t._id === taskId || t.id === taskId ? { ...t, status } : t)));
+    try {
+      await updateTask(taskId, { status } as any);
+    } catch {
+      loadTasks();
     }
   };
 
@@ -158,8 +206,8 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
         <div className="space-y-4">
           <div className="flex items-center gap-4 flex-wrap">
             {goal.department && (
-              <span className="text-xs px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 capitalize">
-                {goal.department}
+              <span className="text-xs px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 capitalize flex items-center gap-1">
+                <Briefcase className="w-3 h-3" /> {goal.department}
               </span>
             )}
             {goal.priority && (
@@ -195,6 +243,33 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
             </div>
           )}
 
+          <div className="p-4 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 border border-primary/20">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <Target className="w-4 h-4 text-primary" />
+                <span className="text-sm font-semibold">Overall Goal Progress</span>
+              </div>
+              <span className={`text-lg font-bold ${
+                computedProgress >= 100 ? "text-emerald-400" :
+                computedProgress >= 50 ? "text-primary" : "text-yellow-400"
+              }`}>
+                {computedProgress}%
+              </span>
+            </div>
+            <div className="h-2.5 bg-surface rounded-full overflow-hidden border border-border/50">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${
+                  computedProgress >= 100 ? "bg-emerald-400" :
+                  computedProgress >= 50 ? "bg-primary" : "bg-yellow-400"
+                }`}
+                style={{ width: `${Math.min(computedProgress, 100)}%` }}
+              />
+            </div>
+            <p className="text-[10px] text-text-muted mt-1.5">
+              {taskCounts.completed} of {taskCounts.total} tasks completed
+            </p>
+          </div>
+
           <div className="grid grid-cols-3 gap-3">
             {[
               { label: "Completed", value: statusCounts.completed, color: "text-emerald-400" },
@@ -208,25 +283,6 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
             ))}
           </div>
 
-          {goal.task_counts && (
-            <div>
-              <div className="flex justify-between text-xs text-text-muted mb-1.5">
-                <span>Overall Progress</span>
-                <span className={goal.progress >= 100 ? "text-emerald-400" : goal.progress >= 50 ? "text-primary" : "text-yellow-400"}>
-                  {goal.progress}%
-                </span>
-              </div>
-              <div className="h-2 bg-surface rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all duration-500 ${
-                    goal.progress >= 100 ? "bg-emerald-400" : goal.progress >= 50 ? "bg-primary" : "bg-yellow-400"
-                  }`}
-                  style={{ width: `${Math.min(goal.progress, 100)}%` }}
-                />
-              </div>
-            </div>
-          )}
-
           <div>
             <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
               <Activity className="w-4 h-4 text-primary" />
@@ -239,38 +295,17 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
             ) : tasks.length === 0 ? (
               <p className="text-xs text-text-muted text-center py-4">No tasks created for this goal yet.</p>
             ) : (
-              <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar">
+              <div className="space-y-2 max-h-72 overflow-y-auto custom-scrollbar pr-1">
                 {tasks.map((task: any) => (
-                  <div key={task._id || task.id} className="flex items-center gap-3 p-3 rounded-xl bg-surface border border-border/50">
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                      task.status === "completed" ? "bg-emerald-500/10" :
-                      task.status === "in_progress" ? "bg-primary/10" : "bg-yellow-500/10"
-                    }`}>
-                      {task.status === "completed" ? (
-                        <CheckCircle className="w-4 h-4 text-emerald-400" />
-                      ) : task.status === "in_progress" ? (
-                        <Clock className="w-4 h-4 text-primary" />
-                      ) : (
-                        <AlertCircle className="w-4 h-4 text-yellow-400" />
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{task.title}</p>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${getStatusColor(task.status)}`}>
-                          {task.status.replace("_", " ")}
-                        </span>
-                        {task.priority && (
-                          <span className="text-[10px] text-text-muted capitalize">{task.priority}</span>
-                        )}
-                        {task.assignee_id && (
-                          <span className="text-[10px] text-text-muted flex items-center gap-1">
-                            <User className="w-3 h-3" /> {task.assignee_id}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                  <TaskRow
+                    key={task._id || task.id}
+                    task={task}
+                    members={members}
+                    department={goalData.department}
+                    onAssigneeChange={(member) => handleTaskAssigneeChange(task, member)}
+                    onStatusChange={(status) => handleTaskStatusChange(task, status)}
+                    getStatusColor={getStatusColor}
+                  />
                 ))}
               </div>
             )}
@@ -302,52 +337,282 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
   );
 }
 
-function GoalSection() {
-  const { organization } = useOrganizationStore();
-  const { goals, fetchGoals } = useGoalStore();
-  const orgId = organization?.id;
-  const [expandedGoal, setExpandedGoal] = useState<any>(null);
-  const [showTasksFor, setShowTasksFor] = useState<Set<string>>(new Set());
-  const [goalTasks, setGoalTasks] = useState<Record<string, any[]>>({});
-  const [loadingTasks, setLoadingTasks] = useState<Set<string>>(new Set());
+function TaskRow({
+  task,
+  members,
+  department,
+  onAssigneeChange,
+  onStatusChange,
+  getStatusColor,
+}: {
+  task: any;
+  members: { id: string; email: string; full_name: string; department: string; role: string }[];
+  department?: string;
+  onAssigneeChange: (member: { id: string; email: string; full_name: string } | null) => void;
+  onStatusChange: (status: string) => void;
+  getStatusColor: (status: string) => string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (orgId) fetchGoals(orgId);
-  }, [orgId, fetchGoals]);
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
-  const toggleGoalTasks = async (goalId: string) => {
-    if (showTasksFor.has(goalId)) {
-      setShowTasksFor((prev) => {
-        const next = new Set(prev);
-        next.delete(goalId);
-        return next;
-      });
-      return;
-    }
-    if (!goalTasks[goalId]) {
-      setLoadingTasks((prev) => new Set(prev).add(goalId));
-      try {
-        const res = await fetch(`${API_URL}/goals/${goalId}`);
-        const data = await res.json();
-        setGoalTasks((prev) => ({ ...prev, [goalId]: data.tasks || [] }));
-      } catch {}
-      setLoadingTasks((prev) => {
-        const next = new Set(prev);
-        next.delete(goalId);
-        return next;
-      });
-    }
-    setShowTasksFor((prev) => new Set(prev).add(goalId));
-  };
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return members
+      .filter((m) => !department || !m.department || m.department.toLowerCase() === department.toLowerCase() || true)
+      .filter((m) => !q || m.full_name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [members, query, department]);
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "completed": return "text-emerald-400 bg-emerald-500/10";
-      case "active": return "text-primary bg-primary/10";
-      default: return "text-yellow-400 bg-yellow-500/10";
-    }
-  };
+  const selected = task.assignee_name || (task.assignee_id && members.find((m) => m.id === task.assignee_id)?.full_name);
 
+  const statusOptions = [
+    { value: "pending", label: "Pending" },
+    { value: "in_progress", label: "In Progress" },
+    { value: "completed", label: "Completed" },
+  ];
+
+  return (
+    <div className="flex items-center gap-3 p-3 rounded-xl bg-surface border border-border/50">
+      <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+        task.status === "completed" ? "bg-emerald-500/10" :
+        task.status === "in_progress" ? "bg-primary/10" : "bg-yellow-500/10"
+      }`}>
+        {task.status === "completed" ? (
+          <CheckCircle className="w-4 h-4 text-emerald-400" />
+        ) : task.status === "in_progress" ? (
+          <Clock className="w-4 h-4 text-primary" />
+        ) : (
+          <AlertCircle className="w-4 h-4 text-yellow-400" />
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium truncate">{task.title}</p>
+        <div className="flex flex-wrap items-center gap-2 mt-1">
+          <div className="relative">
+            <select
+              value={task.status || "pending"}
+              onChange={(e) => onStatusChange(e.target.value)}
+              className={`text-[10px] appearance-none pl-2 pr-6 py-0.5 rounded-full border bg-transparent cursor-pointer focus:outline-none ${getStatusColor(task.status)}`}
+            >
+              {statusOptions.map((s) => (
+                <option key={s.value} value={s.value} className="bg-surface text-foreground">
+                  {s.label}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="w-3 h-3 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none opacity-70" />
+          </div>
+          {task.priority && (
+            <span className="text-[10px] text-text-muted capitalize">{task.priority}</span>
+          )}
+        </div>
+      </div>
+      <div ref={ref} className="relative flex-shrink-0 w-44">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="w-full flex items-center justify-between gap-1 text-[10px] px-2 py-1 rounded-lg bg-background border border-border text-text-muted hover:border-primary/40 hover:text-foreground transition-colors"
+        >
+          <span className="flex items-center gap-1 truncate">
+            <User className="w-3 h-3 flex-shrink-0" />
+            {selected ? <span className="truncate">{selected}</span> : <span className="text-text-muted/60">Assign…</span>}
+          </span>
+          <ChevronDown className="w-3 h-3 flex-shrink-0" />
+        </button>
+        {open && (
+          <div className="absolute right-0 top-full mt-1 z-30 w-56 bg-background border border-border rounded-xl shadow-2xl overflow-hidden">
+            <div className="p-2 border-b border-border/50">
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search team members..."
+                icon={<Search className="w-3 h-3" />}
+                className="h-7 text-xs"
+                autoFocus
+              />
+            </div>
+            <div className="max-h-44 overflow-y-auto">
+              {task.assignee_id && (
+                <button
+                  type="button"
+                  onClick={() => { onAssigneeChange(null); setOpen(false); setQuery(""); }}
+                  className="w-full text-left px-3 py-1.5 text-[11px] text-rose-400 hover:bg-rose-500/10 flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" /> Unassign
+                </button>
+              )}
+              {filtered.length === 0 ? (
+                <p className="p-3 text-[11px] text-text-muted text-center">No team members found</p>
+              ) : (
+                filtered.map((m) => (
+                  <button
+                    key={m.id || m.email}
+                    type="button"
+                    onClick={() => { onAssigneeChange({ id: m.id, email: m.email, full_name: m.full_name }); setOpen(false); setQuery(""); }}
+                    className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-primary/10 flex items-center gap-2"
+                  >
+                    <span className="w-5 h-5 rounded-full bg-primary/15 text-primary text-[9px] font-medium flex items-center justify-center flex-shrink-0">
+                      {m.full_name.charAt(0)}
+                    </span>
+                    <span className="flex-1 min-w-0 truncate">{m.full_name}</span>
+                    <span className="text-text-muted/60 truncate">{m.department || m.role}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const DEPARTMENT_PALETTE: { name: string; bg: string; text: string; border: string; icon: any }[] = [
+  { name: "Sales", bg: "from-emerald-500/15 to-teal-500/10", text: "text-emerald-400", border: "border-emerald-500/30", icon: TrendingUp },
+  { name: "Finance", bg: "from-amber-500/15 to-orange-500/10", text: "text-amber-400", border: "border-amber-500/30", icon: DollarSign },
+  { name: "Marketing", bg: "from-pink-500/15 to-rose-500/10", text: "text-pink-400", border: "border-pink-500/30", icon: Sparkles },
+  { name: "Engineering", bg: "from-primary/15 to-cyan-500/10", text: "text-primary", border: "border-primary/30", icon: Zap },
+  { name: "Operations", bg: "from-violet-500/15 to-purple-500/10", text: "text-violet-400", border: "border-violet-500/30", icon: Activity },
+  { name: "Human Resources", bg: "from-fuchsia-500/15 to-pink-500/10", text: "text-fuchsia-400", border: "border-fuchsia-500/30", icon: Users },
+  { name: "Product", bg: "from-blue-500/15 to-indigo-500/10", text: "text-blue-400", border: "border-blue-500/30", icon: Target },
+  { name: "Design", bg: "from-rose-500/15 to-pink-500/10", text: "text-rose-400", border: "border-rose-500/30", icon: Sparkles },
+  { name: "Customer Support", bg: "from-teal-500/15 to-cyan-500/10", text: "text-teal-400", border: "border-teal-500/30", icon: MessageSquare },
+  { name: "R&D", bg: "from-indigo-500/15 to-blue-500/10", text: "text-indigo-400", border: "border-indigo-500/30", icon: FileText },
+  { name: "Supply Chain", bg: "from-lime-500/15 to-emerald-500/10", text: "text-lime-400", border: "border-lime-500/30", icon: Network },
+  { name: "Legal", bg: "from-slate-500/15 to-gray-500/10", text: "text-slate-400", border: "border-slate-500/30", icon: Shield },
+];
+
+function getDepartmentStyle(name: string) {
+  return DEPARTMENT_PALETTE.find((d) => d.name.toLowerCase() === (name || "").toLowerCase())
+    || { name: name || "Other", bg: "from-gray-500/10 to-slate-500/5", text: "text-text-muted", border: "border-border/50", icon: Briefcase };
+}
+
+function InlinePersonPicker({
+  value,
+  members,
+  type,
+  onChange,
+  saving,
+}: {
+  value: { id?: string; name?: string };
+  members: { id: string; email: string; full_name: string; department: string; role: string }[];
+  type: "defaulter" | "reviewer";
+  onChange: (member: { id: string; full_name: string; email: string } | null) => void;
+  saving?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return members
+      .filter((m) => !q || m.full_name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [members, query]);
+
+  const label = type === "defaulter" ? "Defaulter" : "Reviewer";
+  const selected = value.name || "";
+
+  return (
+    <div ref={ref} className="relative flex-1 min-w-0">
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        className={`w-full flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-lg border transition-colors ${
+          selected
+            ? "bg-primary/10 text-primary border-primary/30"
+            : "bg-background text-text-muted border-border hover:border-primary/30"
+        }`}
+      >
+        <User className="w-3 h-3 flex-shrink-0" />
+        <span className="truncate flex-1 text-left">
+          {selected || `${label}…`}
+        </span>
+        {saving ? <Loader2 className="w-3 h-3 animate-spin flex-shrink-0" /> : <ChevronDown className="w-3 h-3 flex-shrink-0 opacity-60" />}
+      </button>
+      {open && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="absolute z-30 mt-1 left-0 w-56 bg-background border border-border rounded-xl shadow-2xl overflow-hidden"
+        >
+          <div className="p-2 border-b border-border/50">
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={`Search ${label.toLowerCase()}...`}
+              icon={<Search className="w-3 h-3" />}
+              className="h-7 text-xs"
+              autoFocus
+            />
+          </div>
+          <div className="max-h-44 overflow-y-auto">
+            {value.id && (
+              <button
+                type="button"
+                onClick={() => { onChange(null); setOpen(false); setQuery(""); }}
+                className="w-full text-left px-3 py-1.5 text-[11px] text-rose-400 hover:bg-rose-500/10 flex items-center gap-1"
+              >
+                <X className="w-3 h-3" /> Unassign {label.toLowerCase()}
+              </button>
+            )}
+            {filtered.length === 0 ? (
+              <p className="p-3 text-[11px] text-text-muted text-center">No team members found</p>
+            ) : (
+              filtered.map((m) => (
+                <button
+                  key={m.id || m.email}
+                  type="button"
+                  onClick={() => { onChange({ id: m.id, full_name: m.full_name, email: m.email }); setOpen(false); setQuery(""); }}
+                  className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-primary/10 flex items-center gap-2"
+                >
+                  <span className="w-5 h-5 rounded-full bg-primary/15 text-primary text-[9px] font-medium flex items-center justify-center flex-shrink-0">
+                    {m.full_name.charAt(0)}
+                  </span>
+                  <span className="flex-1 min-w-0 truncate">{m.full_name}</span>
+                  <span className="text-text-muted/60 truncate">{m.department || m.role}</span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DepartmentGoalRow({
+  goal,
+  members,
+  onOpenGoal,
+  onAssign,
+  savingKey,
+}: {
+  goal: any;
+  members: { id: string; email: string; full_name: string; department: string; role: string }[];
+  onOpenGoal: (goal: any) => void;
+  onAssign: (goal: any, role: "defaulter" | "reviewer", member: { id: string; full_name: string; email: string } | null) => void;
+  savingKey: string | null;
+}) {
+  const progress = goal.progress ?? (goal.status === "completed" ? 100 : goal.status === "active" ? 60 : 20);
+  const taskCounts = goal.task_counts ?? { total: 0, completed: 0, in_progress: 0, pending: 0 };
   const getPriorityColor = (priority: string) => {
     switch (priority) {
       case "urgent": return "text-rose-400 bg-rose-500/10 border-rose-500/20";
@@ -357,6 +622,247 @@ function GoalSection() {
     }
   };
 
+  return (
+    <div
+      onClick={() => onOpenGoal(goal)}
+      className="w-full text-left p-3 rounded-xl bg-surface hover:bg-surface-light transition-all border border-border/50 hover:border-primary/40 hover:shadow-md cursor-pointer group"
+    >
+      <div className="flex items-center gap-3">
+        <div
+          className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
+            goal.status === "completed" ? "bg-emerald-500/10" :
+            goal.status === "active" ? "bg-primary/10" : "bg-yellow-500/10"
+          }`}
+        >
+          {goal.status === "completed" ? (
+            <CheckCircle className="w-4 h-4 text-emerald-400" />
+          ) : goal.status === "active" ? (
+            <Clock className="w-4 h-4 text-primary" />
+          ) : (
+            <AlertCircle className="w-4 h-4 text-yellow-400" />
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium truncate group-hover:text-primary transition-colors">{goal.title}</p>
+          <div className="flex items-center gap-3 text-[11px] text-text-muted mt-0.5">
+            <span className="flex items-center gap-1">
+              <Activity className="w-3 h-3" /> {taskCounts.completed || 0}/{taskCounts.total || 0} tasks
+            </span>
+          </div>
+        </div>
+        <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium border flex-shrink-0 ${getPriorityColor(goal.priority)}`}>
+          {goal.priority}
+        </span>
+        <div className="w-20 flex-shrink-0">
+          <div className="flex items-center gap-1">
+            <div className="flex-1 h-1.5 bg-background rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full ${
+                  progress >= 100 ? "bg-emerald-400" :
+                  progress >= 50 ? "bg-primary" :
+                  progress > 0 ? "bg-yellow-400" : "bg-gray-500/30"
+                }`}
+                style={{ width: `${Math.min(progress, 100)}%` }}
+              />
+            </div>
+            <span className="text-[10px] text-text-muted w-7 text-right">{progress}%</span>
+          </div>
+        </div>
+        <ChevronRight className="w-4 h-4 text-text-muted group-hover:text-primary transition-colors flex-shrink-0" />
+      </div>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="mt-2 pl-12 flex items-center gap-2"
+      >
+        <InlinePersonPicker
+          type="defaulter"
+          value={{ id: goal.assignee_id, name: goal.assignee_name }}
+          members={members}
+          saving={savingKey === `${goal.id || goal._id}:defaulter`}
+          onChange={(m) => onAssign(goal, "defaulter", m)}
+        />
+        <InlinePersonPicker
+          type="reviewer"
+          value={{ id: goal.reviewer_id, name: goal.reviewer_name }}
+          members={members}
+          saving={savingKey === `${goal.id || goal._id}:reviewer`}
+          onChange={(m) => onAssign(goal, "reviewer", m)}
+        />
+      </div>
+    </div>
+  );
+}
+
+function DepartmentGoalsModal({
+  department,
+  goals,
+  onClose,
+  onSelectGoal,
+  onAssignGoal,
+}: {
+  department: { name: string };
+  goals: any[];
+  onClose: () => void;
+  onSelectGoal: (goal: any) => void;
+  onAssignGoal: (goal: any, role: "defaulter" | "reviewer", member: { id: string; full_name: string; email: string } | null) => Promise<void> | void;
+}) {
+  const style = getDepartmentStyle(department.name);
+  const DeptIcon = style.icon;
+  const { organization } = useOrganizationStore();
+  const { members, fetchOrgMembers } = useOrgChartStore();
+  const orgId = organization?.id;
+  const [search, setSearch] = useState("");
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (orgId) fetchOrgMembers(orgId);
+  }, [orgId, fetchOrgMembers]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return goals;
+    return goals.filter((g) =>
+      (g.title || "").toLowerCase().includes(q) ||
+      (g.assignee_name || "").toLowerCase().includes(q) ||
+      (g.reviewer_name || "").toLowerCase().includes(q) ||
+      (g.status || "").toLowerCase().includes(q)
+    );
+  }, [goals, search]);
+
+  const activeCount = goals.filter((g) => g.status === "active").length;
+  const completedCount = goals.filter((g) => g.status === "completed").length;
+  const totalTasks = goals.reduce((acc, g) => acc + (g.task_counts?.total || 0), 0);
+  const completedTasks = goals.reduce((acc, g) => acc + (g.task_counts?.completed || 0), 0);
+  const aggregateProgress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+  const unassignedCount = goals.filter((g) => !g.assignee_id).length;
+
+  const handleAssign = async (
+    goal: any,
+    role: "defaulter" | "reviewer",
+    member: { id: string; full_name: string; email: string } | null
+  ) => {
+    const key = `${goal.id || goal._id}:${role}`;
+    setSavingKey(key);
+    try {
+      await onAssignGoal(goal, role, member);
+    } finally {
+      setSavingKey(null);
+    }
+  };
+
+  return (
+    <Modal open={true} onOpenChange={(open) => { if (!open) onClose(); }} size="xl">
+      <ModalHeader>
+        <ModalTitle>
+          <div className="flex items-center gap-2">
+            <div className={`w-8 h-8 rounded-xl bg-gradient-to-br ${style.bg} ${style.border} border flex items-center justify-center`}>
+              <DeptIcon className={`w-4 h-4 ${style.text}`} />
+            </div>
+            <div className="flex flex-col">
+              <span>{department.name} Goals</span>
+              <span className="text-[10px] text-text-muted font-normal">
+                {goals.length} goal{goals.length === 1 ? "" : "s"} · {activeCount} active · {completedCount} done · {unassignedCount} unassigned
+              </span>
+            </div>
+          </div>
+        </ModalTitle>
+        <ModalClose />
+      </ModalHeader>
+      <ModalContent>
+        <div className="space-y-3">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="p-3 rounded-xl bg-surface border border-border/50 text-center">
+              <p className="text-lg font-bold text-primary">{goals.length}</p>
+              <p className="text-[10px] text-text-muted">Total Goals</p>
+            </div>
+            <div className="p-3 rounded-xl bg-surface border border-border/50 text-center">
+              <p className="text-lg font-bold text-emerald-400">{completedTasks}/{totalTasks}</p>
+              <p className="text-[10px] text-text-muted">Tasks Done</p>
+            </div>
+            <div className="p-3 rounded-xl bg-surface border border-border/50 text-center">
+              <p className={`text-lg font-bold ${
+                aggregateProgress >= 100 ? "text-emerald-400" :
+                aggregateProgress >= 50 ? "text-primary" : "text-yellow-400"
+              }`}>{aggregateProgress}%</p>
+              <p className="text-[10px] text-text-muted">Progress</p>
+            </div>
+          </div>
+
+          <div className="p-2.5 rounded-lg bg-primary/5 border border-primary/20 text-[11px] text-text-muted flex items-center gap-2">
+            <User className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+            <span>
+              Use the <strong className="text-primary">Defaulter</strong> and <strong className="text-primary">Reviewer</strong> pickers below to assign each goal. Click a goal to open its full pipeline.
+            </span>
+          </div>
+
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={`Search ${department.name} goals...`}
+            icon={<Search className="w-3.5 h-3.5" />}
+            className="text-xs h-9"
+          />
+
+          {filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <Target className="w-8 h-8 text-text-muted/40 mb-2" />
+              <p className="text-sm text-text-muted">No goals match your search</p>
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-[50vh] overflow-y-auto custom-scrollbar pr-1">
+              {filtered.map((goal) => (
+                <DepartmentGoalRow
+                  key={goal.id || goal._id}
+                  goal={goal}
+                  members={members}
+                  onOpenGoal={onSelectGoal}
+                  onAssign={handleAssign}
+                  savingKey={savingKey}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </ModalContent>
+      <ModalFooter>
+        <Button variant="outline" onClick={onClose}>Close</Button>
+      </ModalFooter>
+    </Modal>
+  );
+}
+
+function GoalSection() {
+  const { organization } = useOrganizationStore();
+  const { goals, fetchGoals, updateGoal } = useGoalStore();
+  const orgId = organization?.id;
+  const [expandedGoal, setExpandedGoal] = useState<any>(null);
+  const [openDepartment, setOpenDepartment] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (orgId) fetchGoals(orgId);
+  }, [orgId, fetchGoals]);
+
+  const departments = useMemo(() => {
+    const map = new Map<string, { name: string; goals: any[] }>();
+    for (const g of goals) {
+      const raw = (g.department || "Unassigned").trim() || "Unassigned";
+      const key = raw.toLowerCase();
+      if (!map.has(key)) map.set(key, { name: raw, goals: [] });
+      map.get(key)!.goals.push(g);
+    }
+    return Array.from(map.values()).sort((a, b) => b.goals.length - a.goals.length);
+  }, [goals]);
+
+  const totalActive = goals.filter((g) => g.status === "active").length;
+  const totalCompleted = goals.filter((g) => g.status === "completed").length;
+  const totalTasks = goals.reduce((acc, g) => acc + (g.task_counts?.total || 0), 0);
+  const totalDone = goals.reduce((acc, g) => acc + (g.task_counts?.completed || 0), 0);
+  const overallProgress = totalTasks > 0 ? Math.round((totalDone / totalTasks) * 100) : 0;
+
+  const openDepartmentGoals = openDepartment
+    ? goals.filter((g) => (g.department || "Unassigned") === openDepartment)
+    : [];
+
   if (goals.length === 0) {
     return (
       <Card>
@@ -365,7 +871,7 @@ function GoalSection() {
             <Flag className="w-5 h-5 text-primary" />
             <CardTitle>Goals Pipeline</CardTitle>
           </div>
-          <CardDescription>Track your business goals and pipeline</CardDescription>
+          <CardDescription>Track your business goals and pipeline by department</CardDescription>
         </CardHeader>
         <CardContent>
           <EmptyStateTemplate
@@ -386,156 +892,152 @@ function GoalSection() {
               <Flag className="w-5 h-5 text-primary" />
               <CardTitle>Goals Pipeline</CardTitle>
             </div>
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" className="text-xs">
-                {goals.filter((g) => g.status === "active").length} active
-              </Badge>
-              <Badge variant="outline" className="text-xs">
-                {goals.length} total
-              </Badge>
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              <Badge variant="outline" className="text-xs">{goals.length} total</Badge>
+              <Badge variant="outline" className="text-xs">{totalActive} active</Badge>
+              <Badge variant="outline" className="text-xs">{totalCompleted} done</Badge>
             </div>
           </div>
-          <CardDescription>Click any goal to see the full task pipeline</CardDescription>
+          <CardDescription>
+            Goals grouped by department. Click a department to view its goals, then click any goal to manage its task pipeline, assignees and refinement chat.
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-3">
-            {goals.map((goal) => {
-              const progress = goal.progress ?? (goal.status === "completed" ? 100 : goal.status === "active" ? 60 : 20);
-              const taskCounts = goal.task_counts ?? { total: 0, completed: 0, in_progress: 0, pending: 0 };
-              const goalId = goal.id;
-              return (<Fragment key={goalId}>
+          <div className="mb-4 p-3 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 border border-primary/20">
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center gap-2">
+                <Target className="w-4 h-4 text-primary" />
+                <span className="text-sm font-semibold">Pipeline Progress</span>
+                <span className="text-[10px] text-text-muted">
+                  {totalDone} / {totalTasks} tasks
+                </span>
+              </div>
+              <span className={`text-sm font-bold ${
+                overallProgress >= 100 ? "text-emerald-400" :
+                overallProgress >= 50 ? "text-primary" : "text-yellow-400"
+              }`}>
+                {overallProgress}%
+              </span>
+            </div>
+            <div className="h-2 bg-surface rounded-full overflow-hidden border border-border/50">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${
+                  overallProgress >= 100 ? "bg-emerald-400" :
+                  overallProgress >= 50 ? "bg-primary" : "bg-yellow-400"
+                }`}
+                style={{ width: `${Math.min(overallProgress, 100)}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {departments.map((dept) => {
+              const style = getDepartmentStyle(dept.name);
+              const DeptIcon = style.icon;
+              const activeCount = dept.goals.filter((g) => g.status === "active").length;
+              const completedCount = dept.goals.filter((g) => g.status === "completed").length;
+              const dTasks = dept.goals.reduce((acc, g) => acc + (g.task_counts?.total || 0), 0);
+              const dDone = dept.goals.reduce((acc, g) => acc + (g.task_counts?.completed || 0), 0);
+              const dProgress = dTasks > 0 ? Math.round((dDone / dTasks) * 100) : 0;
+              const topGoals = [...dept.goals]
+                .sort((a, b) => (b.progress ?? 0) - (a.progress ?? 0))
+                .slice(0, 3);
+
+              return (
                 <button
-                  onClick={() => setExpandedGoal(goal)}
-                  className="w-full text-left flex items-center gap-4 p-4 rounded-xl bg-surface hover:bg-surface-light transition-all border border-border/50 hover:border-primary/30 hover:shadow-md cursor-pointer group"
+                  key={dept.name}
+                  onClick={() => setOpenDepartment(dept.name)}
+                  className={`group text-left p-4 rounded-2xl bg-gradient-to-br ${style.bg} ${style.border} border hover:shadow-lg hover:scale-[1.01] transition-all cursor-pointer`}
                 >
-                  <div
-                    className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                      goal.status === "completed"
-                        ? "bg-emerald-500/10"
-                        : goal.status === "active"
-                        ? "bg-primary/10"
-                        : "bg-yellow-500/10"
-                    }`}
-                  >
-                    {goal.status === "completed" ? (
-                      <CheckCircle className="w-5 h-5 text-emerald-400" />
-                    ) : goal.status === "active" ? (
-                      <Clock className="w-5 h-5 text-primary" />
-                    ) : (
-                      <AlertCircle className="w-5 h-5 text-yellow-400" />
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-9 h-9 rounded-xl bg-background/60 border ${style.border} flex items-center justify-center`}>
+                        <DeptIcon className={`w-4 h-4 ${style.text}`} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold capitalize leading-none">{dept.name}</p>
+                        <p className="text-[10px] text-text-muted mt-1">
+                          {dept.goals.length} goal{dept.goals.length === 1 ? "" : "s"}
+                        </p>
+                      </div>
+                    </div>
+                    <ChevronRight className={`w-4 h-4 ${style.text} opacity-50 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all`} />
+                  </div>
+
+                  <div className="flex items-center gap-2 mb-2 text-[10px]">
+                    {activeCount > 0 && (
+                      <span className="px-1.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                        {activeCount} active
+                      </span>
+                    )}
+                    {completedCount > 0 && (
+                      <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        {completedCount} done
+                      </span>
                     )}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium truncate group-hover:text-primary transition-colors">{goal.title}</p>
-                      {goal.status === "active" && (
-                        <span className="flex items-center gap-1 text-[10px] text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
-                          <Bell className="w-3 h-3" />
-                          In progress
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-3 text-xs text-text-muted mt-1">
-                      {goal.department && (
-                        <span className="capitalize px-2 py-0.5 rounded-full bg-surface border border-border/50">
-                          {goal.department}
-                        </span>
-                      )}
-                      {goal.assignee_name && (
-                        <span className="flex items-center gap-1">
-                          <User className="w-3 h-3" />
-                          {goal.assignee_name}
-                        </span>
-                      )}
-                      {(taskCounts.total || 0) > 0 ? (
-                        <span
-                          onClick={(e) => { e.stopPropagation(); toggleGoalTasks(goal.id); }}
-                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); toggleGoalTasks(goal.id); } }}
-                          tabIndex={0}
-                          role="button"
-                          className="text-text-muted/60 hover:text-primary cursor-pointer"
-                        >
-                          {taskCounts.completed || 0}/{taskCounts.total} tasks
-                          {showTasksFor.has(goal.id) ? " ▲" : " ▼"}
-                        </span>
-                      ) : (
-                        <span
-                          onClick={(e) => { e.stopPropagation(); toggleGoalTasks(goal.id); }}
-                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); toggleGoalTasks(goal.id); } }}
-                          tabIndex={0}
-                          role="button"
-                          className="text-text-muted/40 hover:text-primary cursor-pointer text-[10px]"
-                        >
-                          No tasks ▼
-                        </span>
-                      )}
-                    </div>
+
+                  <div className="space-y-1 mb-2">
+                    {topGoals.map((g) => (
+                      <div key={g.id || g._id} className="flex items-center gap-1.5 text-[11px] truncate">
+                        {g.status === "completed" ? (
+                          <CheckCircle className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+                        ) : g.status === "active" ? (
+                          <Clock className="w-3 h-3 text-primary flex-shrink-0" />
+                        ) : (
+                          <AlertCircle className="w-3 h-3 text-yellow-400 flex-shrink-0" />
+                        )}
+                        <span className="truncate text-text-muted">{g.title}</span>
+                      </div>
+                    ))}
+                    {dept.goals.length > topGoals.length && (
+                      <p className="text-[10px] text-text-muted/60">+{dept.goals.length - topGoals.length} more</p>
+                    )}
                   </div>
-                  <span
-                    className={`px-2.5 py-1 rounded-full text-xs font-medium border ${getPriorityColor(goal.priority)}`}
-                  >
-                    {goal.priority}
-                  </span>
-                  <div className="w-24">
-                    <div className="flex items-center gap-1">
-                      <div className="flex-1 h-1.5 bg-surface rounded-full overflow-hidden">
+
+                  {dTasks > 0 && (
+                    <div>
+                      <div className="flex items-center justify-between text-[10px] text-text-muted mb-1">
+                        <span>{dDone}/{dTasks} tasks</span>
+                        <span className={dProgress >= 100 ? "text-emerald-400" : dProgress >= 50 ? "text-primary" : "text-yellow-400"}>
+                          {dProgress}%
+                        </span>
+                      </div>
+                      <div className="h-1.5 bg-background/60 rounded-full overflow-hidden">
                         <div
-                          className={`h-full rounded-full ${
-                            progress >= 100
-                              ? "bg-emerald-400"
-                              : progress >= 50
-                              ? "bg-primary"
-                              : progress > 0
-                              ? "bg-yellow-400"
-                              : "bg-gray-500/30"
+                          className={`h-full rounded-full transition-all ${
+                            dProgress >= 100 ? "bg-emerald-400" :
+                            dProgress >= 50 ? "bg-primary" : "bg-yellow-400"
                           }`}
-                          style={{ width: `${Math.min(progress, 100)}%` }}
+                          style={{ width: `${Math.min(dProgress, 100)}%` }}
                         />
                       </div>
-                      <span className="text-[10px] text-text-muted w-6 text-right">{progress}%</span>
                     </div>
-                  </div>
-                  <ChevronRight className="w-4 h-4 text-text-muted group-hover:text-primary transition-colors flex-shrink-0" />
+                  )}
                 </button>
-                {showTasksFor.has(goal.id) && (
-                  <div className="mt-2 pl-14 pr-16 space-y-1.5">
-                    {loadingTasks.has(goal.id) ? (
-                      <div className="flex items-center gap-2 text-[10px] text-text-muted py-2">
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                        Loading tasks...
-                      </div>
-                    ) : (goalTasks[goal.id] || []).length === 0 ? (
-                      <p className="text-[10px] text-text-muted/60 py-1">No tasks yet</p>
-                    ) : (
-                      (goalTasks[goal.id] || []).map((task: any) => (
-                        <div key={task._id || task.id} className="flex items-center gap-2 py-1">
-                          {task.status === "completed" ? (
-                            <CheckCircle className="w-3 h-3 text-emerald-400 flex-shrink-0" />
-                          ) : task.status === "in_progress" ? (
-                            <Clock className="w-3 h-3 text-primary flex-shrink-0" />
-                          ) : (
-                            <AlertCircle className="w-3 h-3 text-yellow-400 flex-shrink-0" />
-                          )}
-                          <span className="text-xs truncate">{task.title}</span>
-                          <span className={`text-[9px] px-1 py-0.5 rounded-full border ml-auto flex-shrink-0 ${
-                            task.priority === "high" || task.priority === "urgent"
-                              ? "text-rose-400 bg-rose-500/10 border-rose-500/20"
-                              : task.priority === "medium"
-                              ? "text-yellow-400 bg-yellow-500/10 border-yellow-500/20"
-                              : "text-gray-400 bg-gray-500/10 border-gray-500/20"
-                          }`}>
-                            {task.priority}
-                          </span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                )}
-              </Fragment>);
+              );
             })}
           </div>
         </CardContent>
       </Card>
+
+      {openDepartment && (
+        <DepartmentGoalsModal
+          department={{ name: openDepartment }}
+          goals={openDepartmentGoals}
+          onClose={() => setOpenDepartment(null)}
+          onSelectGoal={(g) => { setOpenDepartment(null); setExpandedGoal(g); }}
+          onAssignGoal={async (g, role, member) => {
+            try {
+              await updateGoal(g.id || g._id, {
+                ...(role === "defaulter"
+                  ? { assignee_id: member?.id || undefined, assignee_name: member?.full_name || undefined }
+                  : { reviewer_id: member?.id || undefined, reviewer_name: member?.full_name || undefined }),
+              } as any);
+            } catch {}
+          }}
+        />
+      )}
 
       {expandedGoal && (
         <ExpandedGoalPipeline
@@ -694,6 +1196,11 @@ function AISummaryChat() {
             : `✅ File **${file.name}** uploaded and analyzed! Ask me anything about it.`,
         },
       ]);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("kpi-document-uploaded", { detail: { filename: file.name } })
+        );
+      }
     } catch (err: any) {
       setMessages((prev) => [
         ...prev,
@@ -739,6 +1246,11 @@ function AISummaryChat() {
           content: `✅ ${data.message}\n\n**Preview:** ${data.text_preview?.substring(0, 300)}...`,
         },
       ]);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("kpi-document-uploaded", { detail: { filename: url } })
+        );
+      }
     } catch (err: any) {
       setMessages((prev) => [
         ...prev,
@@ -1056,7 +1568,7 @@ function MarketTrendsSection() {
           </Badge>
         </div>
         <CardDescription>
-          Click any article to read the full story on the source website
+          Growth-driving market trends for {organization?.industry || "your industry"}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -1092,6 +1604,14 @@ function MarketTrendsSection() {
                   <p className="text-xs text-text-muted line-clamp-1 mt-0.5">
                     {article.description}
                   </p>
+                  {article.growth_impact && (
+                    <div className="mt-1.5">
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full border bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
+                        <TrendingUp className="w-2.5 h-2.5" />
+                        Growth driver: {article.growth_impact}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex items-center gap-2 mt-1.5">
                     <span className="text-[10px] text-text-muted/60">
                       {article.source}
@@ -1385,15 +1905,105 @@ function RevenueRiskRadar() {
   );
 }
 
-export default function DashboardView() {
+export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => void } = {}) {
   const { user } = useAuth();
+  const router = useRouter();
   const { organization } = useOrganizationStore();
   const { goals, fetchGoals } = useGoalStore();
+  const { members } = useOrgChartStore();
   const { adaptation, getAISummary } = useAIDashboardAdaptation();
   const [aiSummary, setAiSummary] = useState("");
-  const [kpiData, setKpiData] = useState<Record<string, any> | null>(null);
-  const [kpiLoading, setKpiLoading] = useState(false);
   const orgId = organization?.id;
+
+  const progressSignature = useMemo(
+    () => goals.map((g) => `${g.id}:${g.progress ?? 0}:${g.status}`).join("|"),
+    [goals]
+  );
+  const prevSignatureRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!orgId) return;
+    if (prevSignatureRef.current === null) {
+      prevSignatureRef.current = progressSignature;
+      return;
+    }
+    if (prevSignatureRef.current !== progressSignature && goals.length > 0) {
+      prevSignatureRef.current = progressSignature;
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("kpi-goal-updated", {
+            detail: { source: "goal", detail: "Goal progress changed" },
+          })
+        );
+      }
+    }
+  }, [progressSignature, goals.length, orgId]);
+  const [dismissedSetupCards, setDismissedSetupCards] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set();
+    try {
+      const raw = localStorage.getItem("yesboss_dismissed_setup_cards");
+      if (!raw) return new Set();
+      const arr = JSON.parse(raw);
+      return new Set(Array.isArray(arr) ? arr : []);
+    } catch {
+      return new Set();
+    }
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(
+        "yesboss_dismissed_setup_cards",
+        JSON.stringify(Array.from(dismissedSetupCards))
+      );
+    } catch {}
+  }, [dismissedSetupCards]);
+
+  const setupGoalsCount = goals.filter((g) => g.status !== "cancelled").length;
+  const memberCount = members.length;
+
+  const setupCards: Array<{
+    key: string;
+    title: string;
+    description: string;
+    icon: React.ElementType;
+    accent: string;
+    isDone: boolean;
+    onClick: () => void;
+  }> = [
+    {
+      key: "goal",
+      title: "Create your first goal",
+      description: "Set up your first business objective to start tracking progress",
+      icon: Target,
+      accent: "from-primary/20 to-purple-500/20",
+      isDone: setupGoalsCount > 0,
+      onClick: () => onCreateGoal?.(),
+    },
+    {
+      key: "org_chart",
+      title: "Build your org chart",
+      description: "Add members and reporting lines to power your goals",
+      icon: Network,
+      accent: "from-emerald-500/20 to-teal-500/20",
+      isDone: memberCount > 0,
+      onClick: () => router.push("/dashboard/orchestration"),
+    },
+    {
+      key: "team_structure",
+      title: "Define team structure",
+      description: "Set up roles, departments, and reporting relationships",
+      icon: Building2,
+      accent: "from-amber-500/20 to-orange-500/20",
+      isDone: memberCount > 0,
+      onClick: () => router.push("/dashboard/orchestration"),
+    },
+  ];
+
+  const visibleSetupCards = setupCards.filter(
+    (c) => !c.isDone && !dismissedSetupCards.has(c.key)
+  );
+  const showSetupCards = adaptation.showSetupWizard && visibleSetupCards.length > 0;
 
   useEffect(() => {
     if (orgId) fetchGoals(orgId);
@@ -1405,23 +2015,6 @@ export default function DashboardView() {
     }
   }, [adaptation.stage, getAISummary]);
 
-  useEffect(() => {
-    if (!orgId || !adaptation.showExecutiveKPIs) return;
-    let cancelled = false;
-    const fetchKpi = () => {
-      setKpiLoading(true);
-      fetch(`${API_URL}/dashboard/kpi?organization_id=${orgId}`)
-        .then((res) => res.ok ? res.json() : null)
-        .then((data) => {
-          if (!cancelled) { setKpiData(data); setKpiLoading(false); }
-        })
-        .catch(() => { if (!cancelled) setKpiLoading(false); });
-    };
-    fetchKpi();
-    const interval = setInterval(fetchKpi, 30000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [orgId, adaptation.showExecutiveKPIs]);
-
   const activeGoalCount = goals.filter(g => g.status === "active").length;
 
   const getStageLabel = (stage: OrgStage) => {
@@ -1430,14 +2023,6 @@ export default function DashboardView() {
       case "onboarding": return "Building Foundation";
       case "growing": return "Growth Mode";
       case "established": return "Executive View";
-    }
-  };
-
-  const getTrendIcon = (trend: string) => {
-    switch (trend) {
-      case "up": return <TrendingUp className="w-3 h-3 text-emerald-400" />;
-      case "down": return <TrendingDown className="w-3 h-3 text-rose-400" />;
-      default: return null;
     }
   };
 
@@ -1476,88 +2061,54 @@ export default function DashboardView() {
         </Card>
       )}
 
-      {adaptation.showSetupWizard && (
+      {showSetupCards && (
         <Card className="border-amber-500/20 bg-gradient-to-br from-amber-500/5 to-transparent">
           <CardContent className="p-6">
             <div className="flex items-start gap-4">
               <div className="w-12 h-12 rounded-2xl bg-amber-500/10 flex items-center justify-center flex-shrink-0">
                 <Info className="w-6 h-6 text-amber-400" />
               </div>
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <h3 className="font-semibold text-amber-400 mb-1">
                   {adaptation.stage === "new" ? "Welcome to Your Executive Dashboard" : "Great Start!"}
                 </h3>
                 <p className="text-sm text-text-muted mb-3">{adaptation.emptyStateMessage}</p>
-                {adaptation.suggestedFocus.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {adaptation.suggestedFocus.map((item, i) => (
-                      <span key={i} className="text-xs px-3 py-1.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                        {item}
-                      </span>
-                    ))}
-                  </div>
-                )}
+                <div className="flex flex-wrap gap-2">
+                  {visibleSetupCards.map((card) => {
+                    const Icon = card.icon;
+                    return (
+                      <button
+                        key={card.key}
+                        onClick={card.onClick}
+                        className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 hover:border-amber-500/40 transition-colors cursor-pointer"
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        {card.title}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
+              <button
+                onClick={() => {
+                  setDismissedSetupCards((prev) => {
+                    const next = new Set(prev);
+                    visibleSetupCards.forEach((c) => next.add(c.key));
+                    return next;
+                  });
+                }}
+                className="p-1.5 rounded-lg text-text-muted hover:text-foreground hover:bg-surface-light transition-colors cursor-pointer flex-shrink-0"
+                title="Dismiss"
+                aria-label="Dismiss welcome banner"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {adaptation.showExecutiveKPIs && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {kpiLoading ? (
-            Array.from({ length: 4 }).map((_, i) => (
-              <Card key={i} className="animate-pulse">
-                <CardHeader>
-                  <div className="w-10 h-10 rounded-xl bg-surface" />
-                </CardHeader>
-                <CardContent>
-                  <div className="h-8 w-20 bg-surface rounded mb-2" />
-                  <div className="h-4 w-16 bg-surface rounded" />
-                </CardContent>
-              </Card>
-            ))
-          ) : kpiData ? (
-            Object.entries(kpiData).slice(0, 8).map(([key, kpi]: [string, any], i) => {
-              const IconComponent = ICON_MAP[kpi.icon] || BarChart3;
-              return (
-                <Card key={key} className="card-hover animate-in fade-in slide-in-from-bottom-1 duration-300" style={{ animationDelay: `${i * 50}ms` }}>
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary/10 to-purple-500/10 flex items-center justify-center">
-                        <IconComponent className="w-5 h-5 text-primary" />
-                      </div>
-                      <div className="flex items-center gap-1">
-                        {getTrendIcon(kpi.trend)}
-                        <Badge variant="secondary" className="text-[10px]">{kpi.change || "---"}</Badge>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">{kpi.formatted ?? "---"}</div>
-                    <div className="text-sm text-text-muted">{kpi.label || key.replace(/_/g, " ")}</div>
-                    {kpi.description && (
-                      <p className="text-[10px] text-text-muted/60 mt-1">{kpi.description}</p>
-                    )}
-                  </CardContent>
-                </Card>
-              );
-            })
-          ) : (
-            Array.from({ length: 4 }).map((_, i) => (
-              <Card key={i}>
-                <CardHeader>
-                  <div className="w-10 h-10 rounded-xl bg-surface" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">--</div>
-                  <div className="text-sm text-text-muted">No data yet</div>
-                </CardContent>
-              </Card>
-            ))
-          )}
-        </div>
-      )}
+      <KPISuggestionsCard />
 
       <GoalSection />
 

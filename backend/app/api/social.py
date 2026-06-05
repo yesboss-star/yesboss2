@@ -30,12 +30,12 @@ class CompanyNameRequest(BaseModel):
 async def detect_social_links(request: DetectSocialRequest):
     if not request.domain:
         raise HTTPException(status_code=400, detail="Domain is required")
-    
+
     domain = request.domain.replace("https://", "").replace("http://", "").split("/")[0]
-    
-    social_data = await detect_social_presence(domain)
+
+    social_data = await detect_social_presence(domain, request.company_name or "")
     formatted = format_social_data(social_data)
-    
+
     return {
         "domain": domain,
         "social_links": formatted,

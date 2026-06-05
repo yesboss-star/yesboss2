@@ -574,6 +574,49 @@ async def delete_file(
     raise HTTPException(status_code=404, detail="File not found")
 
 
+class RenameFileRequest(BaseModel):
+    filename: str
+
+
+@router.patch("/files/{file_id}")
+async def rename_file(
+    file_id: str,
+    payload: RenameFileRequest,
+    current_user = Depends(get_current_user_optional)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    new_name = (payload.filename or "").strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="Filename is required")
+    if len(new_name) > 255:
+        raise HTTPException(status_code=400, detail="Filename too long (max 255 chars)")
+
+    if "/" in new_name or "\\" in new_name or "\x00" in new_name:
+        raise HTTPException(status_code=400, detail="Filename contains invalid characters")
+
+    doc = db.documents.find_one({"file_id": file_id})
+    if doc:
+        db.documents.update_one(
+            {"file_id": file_id},
+            {"$set": {"filename": new_name, "metadata.filename": new_name}}
+        )
+        return {"success": True, "file_id": file_id, "filename": new_name}
+
+    from bson import ObjectId
+    f = db.files.find_one({"_id": ObjectId(file_id) if ObjectId.is_valid(file_id) else file_id})
+    if f:
+        db.files.update_one(
+            {"_id": f["_id"]},
+            {"$set": {"filename": new_name}}
+        )
+        return {"success": True, "file_id": file_id, "filename": new_name}
+
+    raise HTTPException(status_code=404, detail="File not found")
+
+
 @router.get("/files/{file_id}/download")
 async def download_file(
     file_id: str,

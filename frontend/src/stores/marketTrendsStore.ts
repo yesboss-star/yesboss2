@@ -10,6 +10,7 @@ export interface TrendArticle {
   published_at: string;
   category: string[];
   image_url?: string;
+  growth_impact?: string;
 }
 
 interface MarketTrendsState {

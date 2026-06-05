@@ -62,27 +62,40 @@ async def get_market_news(
     )
 
     user_prompt = (
-        f"Generate 5 realistic market news articles about the {industry_name} industry"
+        f"Generate 5 realistic market trend articles for a business in the {industry_name} industry"
         + (f" specifically in {vertical}" if vertical else "")
-        + """. Each article must have these exact fields:
-- title: compelling headline
-- description: 1-2 sentence summary
-- source: real publication name (e.g., Bloomberg, TechCrunch, Reuters, Forbes)
+        + """. Every article MUST describe a market trend, shift, or signal that is actively driving or expected to drive revenue growth, market expansion, or competitive advantage for businesses in this space — not generic news.
+
+Focus areas to bias toward:
+- emerging customer demand, behavior shifts, or new buyer segments
+- technology, AI, or automation adoption that improves margins or unlocks new products
+- regulatory or policy changes opening up market opportunity
+- capital flows, M&A, or funding momentum signaling where the market is going
+- distribution, channel, or partnership shifts (e.g., marketplaces, platforms)
+- pricing, packaging, or business model innovations that expand the TAM
+- macro or industry indicators (e.g., CAGR, market size growth) that confirm tailwinds
+
+Each article must have these exact fields:
+- title: compelling headline framing a growth-driving trend (e.g., "AI-Powered Personalization Lifts DTC Conversion 32%" not "Company X Releases Feature Y")
+- description: 1-2 sentence summary that explicitly states WHY this trend creates a growth opportunity for a business in this industry and roughly how big the impact is
+- source: real publication name (e.g., Bloomberg, TechCrunch, Reuters, Forbes, McKinsey, Gartner, HBR)
 - url: A REAL, VERIFIABLE news URL from a well-known publication that matches the article content (e.g., https://techcrunch.com/2026/05/28/article-slug or https://www.reuters.com/business/article-slug). The URL must look authentic and point to a real, existing publication domain.
 - published_at: ISO date string within the last 7 days
-- category: array of category strings
+- category: array of category strings (use growth-driver tags like "demand", "technology", "regulation", "investment", "distribution", "pricing", "macro")
 - image_url: ""
+- growth_impact: short string (max 80 chars) summarizing the specific growth lever, e.g. "Unlocks 2x LTV via personalization" or "Opens EU compliance-ready demand pool"
 
 Return a JSON array. Example:
 [
   {
-    "title": "AI Startups Raise Record Funding",
-    "description": "Venture capital investment in AI reaches new highs...",
+    "title": "AI-Powered Personalization Lifts DTC E-commerce Conversion 32%",
+    "description": "Brands deploying real-time AI personalization in the first 30 days see a 32% lift in conversion and 18% higher AOV — a major growth lever for direct-to-consumer operators.",
     "source": "TechCrunch",
-    "url": "https://techcrunch.com/2026/05/28/ai-startups-record-funding",
+    "url": "https://techcrunch.com/2026/05/28/ai-personalization-dtc-conversion",
     "published_at": "2026-05-28T10:00:00Z",
-    "category": ["technology"],
-    "image_url": ""
+    "category": ["technology", "demand"],
+    "image_url": "",
+    "growth_impact": "2x LTV via personalization"
   }
 ]"""
     )
@@ -109,6 +122,7 @@ Return a JSON array. Example:
                 article["url"] = f"https://news.google.com/search?q={title_q}"
                 article.setdefault("category", [industry_name])
                 article.setdefault("image_url", "")
+                article.setdefault("growth_impact", "")
 
             return {
                 "query": query_description,
