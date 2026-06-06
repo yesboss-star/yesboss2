@@ -40,6 +40,7 @@ from .api.reports import router as reports_router
 from .api.market_trends import router as market_trends_router
 from .api.prompt import router as prompt_router
 from .api.assistant import router as assistant_router
+from .api.notifications import router as notifications_router
 from .core import settings
 from .core.database import connect_mongodb, close_mongodb
 from .core.qdrant import connect_qdrant, close_qdrant
@@ -164,4 +165,5 @@ app.include_router(reports_router, prefix="/api/v1/reports", tags=["Reports"])
 app.include_router(market_trends_router, prefix="/api/v1/trends", tags=["Market Trends"])
 app.include_router(prompt_router, prefix="/api/v1/prompt", tags=["Prompt Engine"])
 app.include_router(assistant_router, prefix="/api/v1/assistant", tags=["AI Assistant"])
+app.include_router(notifications_router, prefix="/api/v1/notifications", tags=["Notifications"])
 app.include_router(websocket_router, tags=["WebSocket"])

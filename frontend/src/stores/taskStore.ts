@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { getAuthHeaders } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -39,6 +40,8 @@ interface TaskState {
   setComments: (comments: TaskComment[]) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
+  updateTaskFromWs: (task: any) => void;
+  addTaskFromWs: (task: any) => void;
   fetchTasks: (orgId: string, filters?: { goal_id?: string; assignee_id?: string; status?: string }) => Promise<void>;
   fetchTaskWithComments: (taskId: string) => Promise<void>;
   createTask: (data: { title: string; description?: string; priority?: string; goal_id?: string; assignee_id?: string; organization_id: string }) => Promise<Task>;
@@ -64,6 +67,21 @@ export const useTaskStore = create<TaskState>()(
       setLoading: (loading) => set({ loading }),
       setError: (error) => set({ error }),
 
+      updateTaskFromWs: (task) => {
+        const mapped = { ...task, id: task._id || task.id };
+        set((state) => ({
+          tasks: state.tasks.map((t) => (t.id === mapped.id ? mapped : t)),
+          currentTask: state.currentTask?.id === mapped.id ? mapped : state.currentTask,
+        }));
+      },
+
+      addTaskFromWs: (task) => {
+        const mapped = { ...task, id: task._id || task.id };
+        set((state) => ({
+          tasks: [mapped, ...state.tasks],
+        }));
+      },
+
       fetchTasks: async (orgId, filters = {}) => {
         set({ loading: true, error: null });
         try {
@@ -72,7 +90,9 @@ export const useTaskStore = create<TaskState>()(
           if (filters.assignee_id) params.append("assignee_id", filters.assignee_id);
           if (filters.status) params.append("status", filters.status);
           
-          const response = await fetch(`${API_URL}/tasks?${params}`);
+          const response = await fetch(`${API_URL}/tasks?${params}`, {
+            headers: { ...getAuthHeaders() },
+          });
           if (!response.ok) throw new Error("Failed to fetch tasks");
           const result = await response.json();
           const tasks = (result.tasks || []).map((t: any) => ({
@@ -88,7 +108,9 @@ export const useTaskStore = create<TaskState>()(
       fetchTaskWithComments: async (taskId) => {
         set({ loading: true, error: null });
         try {
-          const response = await fetch(`${API_URL}/tasks/${taskId}`);
+          const response = await fetch(`${API_URL}/tasks/${taskId}`, {
+            headers: { ...getAuthHeaders() },
+          });
           if (!response.ok) throw new Error("Failed to fetch task");
           const result = await response.json();
           const task = {
@@ -116,7 +138,7 @@ export const useTaskStore = create<TaskState>()(
           const params = organization_id ? `?organization_id=${organization_id}` : "";
           const response = await fetch(`${API_URL}/tasks${params}`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { ...getAuthHeaders() },
             body: JSON.stringify(bodyData),
           });
           if (!response.ok) throw new Error("Failed to create task");
@@ -141,7 +163,7 @@ export const useTaskStore = create<TaskState>()(
         try {
           const response = await fetch(`${API_URL}/tasks/${taskId}`, {
             method: "PUT",
-            headers: { "Content-Type": "application/json" },
+            headers: { ...getAuthHeaders() },
             body: JSON.stringify(data),
           });
           if (!response.ok) throw new Error("Failed to update task");
@@ -166,6 +188,7 @@ export const useTaskStore = create<TaskState>()(
         try {
           const response = await fetch(`${API_URL}/tasks/${taskId}`, {
             method: "DELETE",
+            headers: { ...getAuthHeaders() },
           });
           if (!response.ok) throw new Error("Failed to delete task");
           set((state) => ({
@@ -182,6 +205,7 @@ export const useTaskStore = create<TaskState>()(
         try {
           const response = await fetch(`${API_URL}/tasks/${taskId}/complete`, {
             method: "POST",
+            headers: { ...getAuthHeaders() },
           });
           if (!response.ok) throw new Error("Failed to complete task");
           const result = await response.json();
@@ -199,6 +223,7 @@ export const useTaskStore = create<TaskState>()(
         try {
           const response = await fetch(`${API_URL}/tasks/${taskId}/approve`, {
             method: "POST",
+            headers: { ...getAuthHeaders() },
           });
           if (!response.ok) throw new Error("Failed to approve task");
           const result = await response.json();
@@ -216,7 +241,7 @@ export const useTaskStore = create<TaskState>()(
         try {
           const response = await fetch(`${API_URL}/tasks/${taskId}/comments`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { ...getAuthHeaders() },
             body: JSON.stringify({ content }),
           });
           if (!response.ok) throw new Error("Failed to add comment");

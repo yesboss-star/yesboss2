@@ -12,6 +12,31 @@ from bson import ObjectId
 router = APIRouter()
 
 
+async def create_notification(user_id: str, org_id: str, type: str, title: str, message: str, link: str = None, actor_id: str = None, actor_name: str = None, metadata: dict = None):
+    db = get_database()
+    if db is None:
+        return
+    notif_doc = {
+        "type": type,
+        "title": title,
+        "message": message,
+        "user_id": user_id,
+        "organization_id": org_id,
+        "link": link,
+        "actor_id": actor_id,
+        "actor_name": actor_name,
+        "metadata": metadata or {},
+        "read": False,
+        "created_at": datetime.utcnow(),
+    }
+    result = db.notifications.insert_one(notif_doc)
+    notif_doc["_id"] = str(result.inserted_id)
+    asyncio.create_task(ws_manager.send_personal_message(
+        {"type": "notification", "data": notif_doc},
+        user_id
+    ))
+
+
 class GoalCreate(BaseModel):
     title: str
     description: Optional[str] = None
@@ -131,6 +156,27 @@ async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user_
         {"type": "goal_created", "data": goal_doc},
         org_id
     ))
+
+    if user_id:
+        asyncio.create_task(create_notification(
+            user_id=user_id,
+            org_id=org_id,
+            type="goal_created",
+            title="Goal Created",
+            message=f"Goal created: {goal.title}",
+            link=f"/goals/{result.inserted_id}",
+        ))
+
+    if goal.assignee_id and goal.assignee_id != user_id:
+        asyncio.create_task(create_notification(
+            user_id=goal.assignee_id,
+            org_id=org_id,
+            type="goal_assigned",
+            title="New Goal Assigned",
+            message=f"Goal assigned: {goal.title}",
+            link=f"/goals/{result.inserted_id}",
+            actor_id=user_id,
+        ))
     
     return {"goal": goal_doc}
 
@@ -225,6 +271,31 @@ async def update_goal(goal_id: str, goal: GoalUpdate, current_user = Depends(get
     
     goal = db.goals.find_one({"_id": ObjectId(goal_id)})
     goal["_id"] = str(goal["_id"])
+
+    asyncio.create_task(ws_manager.broadcast_to_organization(
+        {"type": "goal_updated", "data": goal},
+        goal.get("organization_id", "")
+    ))
+
+    if goal.get("status") and goal.get("assignee_id"):
+        asyncio.create_task(create_notification(
+            user_id=goal["assignee_id"],
+            org_id=goal.get("organization_id", ""),
+            type="goal_status",
+            title=f"Goal Status: {goal['status'].title()}",
+            message=f"Goal '{goal.get('title')}' status updated to {goal['status']}",
+            link=f"/goals/{goal_id}",
+        ))
+
+    if goal.get("created_by") and goal.get("assignee_id") and goal["created_by"] != goal["assignee_id"]:
+        asyncio.create_task(create_notification(
+            user_id=goal["created_by"],
+            org_id=goal.get("organization_id", ""),
+            type="goal_status",
+            title=f"Goal Status: {goal['status'].title()}",
+            message=f"Goal '{goal.get('title')}' updated to {goal['status']}",
+            link=f"/goals/{goal_id}",
+        ))
     
     return {"goal": goal}
 

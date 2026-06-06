@@ -63,6 +63,8 @@ interface GoalState {
   setTasks: (tasks: Task[]) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
+  updateGoalFromWs: (goal: any) => void;
+  addGoalFromWs: (goal: any) => void;
   fetchGoals: (orgId: string) => Promise<void>;
   createGoal: (data: { title: string; description: string; priority: string; timeline?: string; department?: string; assignee_name?: string; reviewer_name?: string; assignee_id?: string; reviewer_id?: string; organization_id: string }) => Promise<Goal>;
   updateGoal: (goalId: string, data: Partial<Goal>) => Promise<void>;
@@ -89,6 +91,21 @@ export const useGoalStore = create<GoalState>()(
       setLoading: (loading) => set({ loading }),
       setError: (error) => set({ error }),
 
+      updateGoalFromWs: (goal) => {
+        const mapped = { ...goal, id: goal._id || goal.id };
+        set((state) => ({
+          goals: state.goals.map((g) => (g.id === mapped.id ? { ...g, ...mapped } : g)),
+          currentGoal: state.currentGoal?.id === mapped.id ? { ...state.currentGoal, ...mapped } : state.currentGoal,
+        }));
+      },
+
+      addGoalFromWs: (goal) => {
+        const mapped = { ...goal, id: goal._id || goal.id };
+        set((state) => ({
+          goals: [mapped, ...state.goals],
+        }));
+      },
+
       fetchGoals: async (orgId) => {
         set({ loading: true, error: null });
         try {
@@ -110,7 +127,7 @@ export const useGoalStore = create<GoalState>()(
         try {
           const response = await fetch(`${API_URL}/goals`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { ...getAuthHeaders() },
             body: JSON.stringify(data),
           });
           if (!response.ok) throw new Error("Failed to create goal");
@@ -135,7 +152,7 @@ export const useGoalStore = create<GoalState>()(
         try {
           const response = await fetch(`${API_URL}/goals/${goalId}`, {
             method: "PUT",
-            headers: { "Content-Type": "application/json" },
+            headers: { ...getAuthHeaders() },
             body: JSON.stringify(data),
           });
           if (!response.ok) throw new Error("Failed to update goal");
@@ -174,7 +191,7 @@ export const useGoalStore = create<GoalState>()(
         try {
           const response = await fetch(`${API_URL}/goals/generate-tasks`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { ...getAuthHeaders() },
             body: JSON.stringify({ goal_id: goalId, count }),
           });
           if (!response.ok) throw new Error("Failed to generate tasks");

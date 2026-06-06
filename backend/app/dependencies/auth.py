@@ -1,7 +1,8 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from ..core.supabase_client import get_supabase
 from typing import Optional
+from types import SimpleNamespace
 
 security = HTTPBearer(auto_error=False)
 
@@ -36,16 +37,33 @@ async def get_current_user(
 
 async def get_current_user_optional(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    x_user_id: Optional[str] = Header(None),
+    x_user_email: Optional[str] = Header(None),
 ):
-    supabase = get_supabase()
-    if not supabase or not credentials:
-        return None
+    if credentials:
+        supabase = get_supabase()
+        if supabase:
+            try:
+                response = supabase.auth.get_user(credentials.credentials)
+                return response.user
+            except Exception:
+                pass
 
-    try:
-        response = supabase.auth.get_user(credentials.credentials)
-        return response.user
-    except Exception:
-        return None
+    if x_user_id:
+        return SimpleNamespace(
+            id=x_user_id,
+            email=x_user_email or "",
+            user_metadata={},
+        )
+
+    if x_user_email:
+        return SimpleNamespace(
+            id=x_user_email,
+            email=x_user_email,
+            user_metadata={},
+        )
+
+    return None
 
 
 def require_role(required_role: str):

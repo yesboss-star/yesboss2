@@ -4,6 +4,7 @@ import "./globals.css";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { NotificationWatcher } from "@/components/NotificationWatcher";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -33,7 +34,9 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <ThemeProvider>
           <ThemeToggle />
-          <AuthProvider>{children}</AuthProvider>
+          <AuthProvider>
+            <NotificationWatcher>{children}</NotificationWatcher>
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>

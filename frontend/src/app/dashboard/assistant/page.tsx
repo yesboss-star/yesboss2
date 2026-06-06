@@ -12,7 +12,7 @@ import { Card, CardContent, Button, Badge } from "@/components/ui";
 import {
   Loader2, Sparkles, Send, CheckSquare, AlertCircle, Clock, Users, MessageSquare,
   Briefcase, FileText, X, UserPlus, ArrowRight, Check, Target, User as UserIcon,
-  Sparkle, Lightbulb, ChevronRight, ExternalLink, ListTodo, Upload, FileUp, RefreshCw,
+  Sparkle, Lightbulb, ChevronRight, ExternalLink, ListTodo, Upload, FileUp, RefreshCw, ArrowLeft,
 } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
@@ -787,6 +787,9 @@ function EmployeeAIAssistant() {
       <div className="h-[calc(100vh-8rem)] flex flex-col">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-4">
+            <button onClick={() => router.push("/dashboard/notifications")} className="p-2 rounded-lg hover:bg-surface text-text-muted hover:text-foreground transition-colors cursor-pointer">
+              <ArrowLeft className="w-5 h-5" />
+            </button>
             <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center">
               <Sparkles className="w-6 h-6 text-white" />
             </div>

@@ -14,7 +14,6 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
-  Bell,
   Search,
   Menu,
   X,
@@ -29,6 +28,7 @@ import {
 } from "lucide-react";
 import { Avatar, Badge, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui";
 import { ThemeToggleInline } from "@/components/ThemeToggleInline";
+import { NotificationDropdown } from "@/components/NotificationDropdown";
 
 interface NavItem {
   icon: React.ElementType;
@@ -56,7 +56,7 @@ const employeeNavItems: NavItem[] = [
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, role, signOut } = useAuth();
-  const { sidebarOpen, mobileSidebarOpen, setSidebarOpen, setMobileSidebarOpen, notifications, unreadCount } = useUIStore();
+  const { sidebarOpen, mobileSidebarOpen, setSidebarOpen, setMobileSidebarOpen } = useUIStore();
   const { organization } = useOrganizationStore();
   const pathname = usePathname();
   const [isMobile, setIsMobile] = useState(false);
@@ -70,7 +70,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
-  const isActive = (href: string) => pathname === href || pathname?.startsWith(href + "/");
+  const isActive = (href: string) => {
+    if (href === "/dashboard") return pathname === href;
+    return pathname === href || pathname?.startsWith(href + "/");
+  };
 
   const sidebarContent = (
     <div className="flex flex-col h-full">
@@ -223,14 +226,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
             <div className="flex items-center gap-3">
               <ThemeToggleInline />
-              <button className="relative p-2 rounded-lg hover:bg-surface text-text-muted hover:text-foreground transition-colors cursor-pointer">
-                <Bell className="w-5 h-5" />
-                {unreadCount > 0 && (
-                  <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-accent text-white text-[10px] font-bold flex items-center justify-center">
-                    {unreadCount}
-                  </span>
-                )}
-              </button>
+              <NotificationDropdown />
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

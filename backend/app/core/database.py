@@ -64,7 +64,7 @@ def connect_mongodb():
 
 def _ensure_collections(db: Database):
     collections = db.list_collection_names()
-    required = ["users", "organizations", "employees", "goals", "tasks", "workflows", "task_outcomes", "bottlenecks", "learning_patterns", "documents", "conversations", "uploads", "org_chart_members", "reports", "user_patterns"]
+    required = ["users", "organizations", "employees", "goals", "tasks", "workflows", "task_outcomes", "bottlenecks", "learning_patterns", "documents", "conversations", "uploads", "org_chart_members", "reports", "user_patterns", "notifications"]
     for col in required:
         if col not in collections:
             db.create_collection(col)
@@ -93,7 +93,12 @@ def _ensure_indexes(db: Database):
         
         db.workflows.create_index("organization_id")
         db.workflows.create_index([("organization_id", 1), ("created_at", -1)])
-        
+
+        db.notifications.create_index("user_id")
+        db.notifications.create_index([("user_id", 1), ("read", 1)])
+        db.notifications.create_index([("user_id", 1), ("created_at", -1)])
+        db.notifications.create_index([("organization_id", 1), ("created_at", -1)])
+
         logger.info("Database indexes created")
     except Exception as e:
         logger.warning(f"Index creation warning: {e}")
