@@ -405,7 +405,7 @@ def generate_docx(content: Dict[str, Any], org_name: str = "YesBoss") -> bytes:
 @router.get("/download/{report_id}")
 async def download_report(
     report_id: str,
-    format: str = Query("pdf", regex="^(pdf|docx)$"),
+    format: str = Query("pdf", pattern="^(pdf|docx)$"),
     current_user = Depends(get_current_user_optional)
 ):
     db = get_database()
