@@ -37,6 +37,10 @@ interface KPIState {
   addSuggestions: (orgId: string, suggestions: KPISuggestion[]) => void;
   acceptSuggestion: (orgId: string, suggestionId: string) => AcceptedKPI | null;
   dismissSuggestion: (orgId: string, suggestionId: string) => void;
+  addKPI: (
+    orgId: string,
+    data: { title: string; key?: string; category?: string; icon?: string; source?: KPISource; sourceDetail?: string }
+  ) => AcceptedKPI | null;
   removeKPI: (orgId: string, kpiId: string) => void;
   shouldSuggestNow: (orgId: string, intervalMs?: number) => boolean;
   markShown: (orgId: string) => void;
@@ -127,6 +131,46 @@ export const useKPIStore = create<KPIState>()(
             },
           };
         });
+      },
+
+      addKPI: (orgId, data) => {
+        if (!orgId || !data?.title) return null;
+        const baseTitle = String(data.title).trim().slice(0, 80);
+        if (!baseTitle) return null;
+        const keySource = (data.key || baseTitle)
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "_")
+          .replace(/^_+|_+$/g, "")
+          .slice(0, 60) || `kpi_${Date.now()}`;
+
+        let key = keySource;
+        let suffix = 1;
+        const existing = get().acceptedByOrg[orgId] || [];
+        const used = new Set(existing.map((k) => k.key));
+        while (used.has(key)) {
+          suffix += 1;
+          key = `${keySource}_${suffix}`;
+        }
+
+        const accepted: AcceptedKPI = {
+          id: `kpi-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          key,
+          title: baseTitle,
+          category: data.category,
+          icon: data.icon,
+          triggerSource: data.source || "ai",
+          triggerDetail: data.sourceDetail,
+          acceptedAt: Date.now(),
+        };
+
+        set((state) => ({
+          acceptedByOrg: {
+            ...state.acceptedByOrg,
+            [orgId]: [...(state.acceptedByOrg[orgId] || []), accepted],
+          },
+        }));
+
+        return accepted;
       },
 
       removeKPI: (orgId, kpiId) => {

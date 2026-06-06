@@ -6,6 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { useGoalStore } from "@/stores/goalStore";
 import { useTaskStore } from "@/stores/taskStore";
+import { useKPIStore } from "@/stores/kpiStore";
 import { useOrgChartStore } from "@/stores/orgChartStore";
 import { useMarketTrendsStore } from "@/stores/marketTrendsStore";
 import { useReportStore } from "@/stores/reportStore";
@@ -17,7 +18,7 @@ import {
   BarChart3, Target, Zap, Activity, ChevronRight,
   AlertTriangle, Info, Users, User, FileSpreadsheet, Paperclip,
   PieChart as PieChartIcon, Link2, X, Building2, Network,
-  Briefcase, Search, ChevronDown
+  Briefcase, Search, ChevronDown, Plus, AtSign
 } from "lucide-react";
 import {
   Card, CardHeader, CardTitle, CardDescription, CardContent,
@@ -1065,9 +1066,19 @@ function AISummaryChat() {
   const [urlValue, setUrlValue] = useState("");
   const [urlLoading, setUrlLoading] = useState(false);
   const [loadedFromApi, setLoadedFromApi] = useState(false);
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState("");
+  const [mentionStart, setMentionStart] = useState<number>(-1);
+  const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const mentionListRef = useRef<HTMLDivElement>(null);
   const { organization } = useOrganizationStore();
+  const { goals } = useGoalStore();
+  const { tasks, createTask } = useTaskStore();
+  const { members } = useOrgChartStore();
+  const { addKPI } = useKPIStore();
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1100,6 +1111,178 @@ function AISummaryChat() {
     if (messages.length > 0) saveMessages(messages);
   }, [messages, saveMessages]);
 
+  const mentionSuggestions = useMemo(() => {
+    if (!members?.length) return [] as any[];
+    const q = mentionQuery.trim().toLowerCase();
+    const list = members
+      .map((m: any) => ({ m, name: (m.full_name || "").trim() }))
+      .filter((x) => x.name)
+      .map((x) => {
+        const lower = x.name.toLowerCase();
+        const starts = q && lower.startsWith(q) ? 0 : 1;
+        const includes = q && lower.includes(q) ? 0 : 1;
+        return { member: x.m, name: x.name, rank: starts * 2 + includes };
+      })
+      .filter((x) => (q ? x.rank < 2 : true))
+      .sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name))
+      .slice(0, 6)
+      .map((x) => x.member);
+    return list;
+  }, [members, mentionQuery]);
+
+  const updateMentionState = useCallback(
+    (text: string, cursor: number) => {
+      const upto = text.slice(0, cursor);
+      const atIdx = upto.lastIndexOf("@");
+      if (atIdx === -1) {
+        setMentionOpen(false);
+        setMentionQuery("");
+        setMentionStart(-1);
+        return;
+      }
+      const between = upto.slice(atIdx + 1);
+      if (/\s/.test(between)) {
+        setMentionOpen(false);
+        setMentionQuery("");
+        setMentionStart(-1);
+        return;
+      }
+      setMentionOpen(true);
+      setMentionQuery(between);
+      setMentionStart(atIdx);
+      setMentionActiveIndex(0);
+    },
+    []
+  );
+
+  const insertMention = useCallback(
+    (member: any) => {
+      if (!member || mentionStart < 0) return;
+      const name = (member.full_name || "").trim();
+      if (!name) return;
+      const cursor = inputRef.current?.selectionStart ?? input.length;
+      const before = input.slice(0, mentionStart);
+      const afterStart = mentionStart + 1 + mentionQuery.length;
+      const after = input.slice(afterStart);
+      const inserted = `@${name} `;
+      const newText = `${before}${inserted}${after}`.replace(/\s+/g, " ");
+      setInput(newText);
+      setMentionOpen(false);
+      setMentionQuery("");
+      setMentionStart(-1);
+      requestAnimationFrame(() => {
+        const pos = (before + inserted).length;
+        inputRef.current?.focus();
+        inputRef.current?.setSelectionRange(pos, pos);
+      });
+    },
+    [mentionStart, mentionQuery, input]
+  );
+
+  const findMemberByName = useCallback(
+    (query: string) => {
+      if (!query || !members?.length) return null;
+      const q = query.trim().toLowerCase();
+      if (!q) return null;
+      const exact = members.find((m: any) => (m.full_name || "").toLowerCase() === q);
+      if (exact) return exact;
+      const startsWith = members.find((m: any) =>
+        (m.full_name || "").toLowerCase().startsWith(q)
+      );
+      if (startsWith) return startsWith;
+      const includes = members.find((m: any) =>
+        (m.full_name || "").toLowerCase().includes(q)
+      );
+      return includes || null;
+    },
+    [members]
+  );
+
+  const extractMentionTask = useCallback(
+    (msg: string): { assignee: any; taskTitle: string } | null => {
+      const atIdx = msg.indexOf("@");
+      if (atIdx === -1) return null;
+      const after = msg.slice(atIdx + 1);
+      const words = after.split(/\s+/).filter(Boolean);
+      for (let i = Math.min(5, words.length); i >= 1; i--) {
+        const candidate = words.slice(0, i).join(" ");
+        if (candidate.length > 40) continue;
+        const assignee = findMemberByName(candidate);
+        if (assignee) {
+          const taskTitle = words.slice(i).join(" ").trim() || assignee.full_name;
+          return { assignee, taskTitle };
+        }
+      }
+      return null;
+    },
+    [findMemberByName]
+  );
+
+  const extractKpiTitleFromAssistant = useCallback((reply: string): string | null => {
+    if (!reply) return null;
+    const cleaned = reply
+      .replace(/```[\s\S]*?```/g, " ")
+      .replace(/[*_`>#-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const metricMatch = cleaned.match(
+      /\b([A-Z][A-Za-z0-9 &/'-]{2,40}?(?:\s+(?:Rate|Ratio|Count|Score|Index|Margin|Growth|Trend|Value|Volume|NPS|CAC|LTV|MRR|ARR|Spend|Revenue|Cost|Sales|Conversion|Retention|Churn)))\b/
+    );
+    if (metricMatch) return metricMatch[1].slice(0, 60);
+    const firstBold = reply.match(/\*\*([^*\n]{4,60})\*\*/);
+    if (firstBold) return firstBold[1].trim().slice(0, 60);
+    const firstLine = cleaned.split(/[.\n!?]/)[0]?.trim();
+    if (firstLine && firstLine.length >= 4 && firstLine.length <= 60) return firstLine;
+    return null;
+  }, []);
+
+  const isKpiIntent = useCallback((msg: string): boolean => {
+    const m = msg.toLowerCase();
+    return /\b(add|track|make|create|set|turn|convert)\b[^.\n]{0,40}\bkpi\b/.test(m) ||
+      /\bkpi\b[^.\n]{0,40}\b(add|track|create|set|register|for)\b/.test(m);
+  }, []);
+
+  const handleAddAsKPI = useCallback(
+    (title?: string, sourceReply?: string) => {
+      if (!organization?.id) return;
+      const baseSource = sourceReply ||
+        [...messages].reverse().find((m) => m.role === "assistant")?.content ||
+        "";
+      const finalTitle = (title || extractKpiTitleFromAssistant(baseSource) || "").trim();
+      if (!finalTitle) {
+        const errMsgs = [
+          ...messages,
+          {
+            role: "assistant" as const,
+            content:
+              "I couldn't pin down which metric to track as a KPI from our last reply. Could you name it? (e.g. *Customer Churn Rate*)",
+          },
+        ];
+        setMessages(errMsgs);
+        saveMessages(errMsgs);
+        return;
+      }
+      const created = addKPI(organization.id, {
+        title: finalTitle,
+        source: "ai",
+        sourceDetail: "Added from AI Business Analytics chat",
+        category: "growth",
+        icon: "BarChart3",
+      });
+      const confirm = created
+        ? `✅ Added **${finalTitle}** as a new KPI card. It will start showing values as soon as the dashboard refreshes (every 30s).`
+        : `I couldn't add that KPI right now — please try again.`;
+      const next = [
+        ...messages,
+        { role: "user" as const, content: `Make this a KPI: ${finalTitle}` },
+        { role: "assistant" as const, content: confirm },
+      ];
+      setMessages(next);
+      saveMessages(next);
+    },
+    [organization?.id, messages, addKPI, extractKpiTitleFromAssistant, saveMessages]
+  );
+
   const sendMessage = async () => {
     if (!input.trim() || loading) return;
     const userMsg = input.trim();
@@ -1107,6 +1290,67 @@ function AISummaryChat() {
     const updated = [...messages, { role: "user" as const, content: userMsg }];
     setMessages(updated);
     saveMessages(updated);
+
+    const mentionTask = extractMentionTask(userMsg);
+    if (mentionTask && organization?.id) {
+      try {
+        await createTask({
+          organization_id: organization.id,
+          title: mentionTask.taskTitle,
+          assignee_id: mentionTask.assignee.id || mentionTask.assignee.email,
+          priority: "medium",
+        });
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("kpi-goal-updated", { detail: { source: "ai" } }));
+        }
+        const next = [
+          ...updated,
+          {
+            role: "assistant" as const,
+            content: `✅ Task **"${mentionTask.taskTitle}"** assigned to **${mentionTask.assignee.full_name}** and saved.`,
+          },
+        ];
+        setMessages(next);
+        saveMessages(next);
+        return;
+      } catch (err) {
+        const next = [
+          ...updated,
+          {
+            role: "assistant" as const,
+            content: `❌ I couldn't save that task: ${(err as Error)?.message || "unknown error"}. Try again in a moment.`,
+          },
+        ];
+        setMessages(next);
+        saveMessages(next);
+        return;
+      }
+    }
+
+    if (isKpiIntent(userMsg) && organization?.id) {
+      const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant")?.content;
+      const title = extractKpiTitleFromAssistant(lastAssistant || "");
+      if (title) {
+        const created = addKPI(organization.id, {
+          title,
+          source: "ai",
+          sourceDetail: "Added from AI Business Analytics chat",
+          category: "growth",
+          icon: "BarChart3",
+        });
+        const confirm = created
+          ? `✅ Added **${title}** as a new KPI card on your dashboard.`
+          : `I couldn't add that KPI right now.`;
+        const next = [
+          ...updated,
+          { role: "assistant" as const, content: confirm },
+        ];
+        setMessages(next);
+        saveMessages(next);
+        return;
+      }
+    }
+
     setLoading(true);
 
     fetch(`${API_URL}/executive-chat/history?organization_id=${organization?.id}`, {
@@ -1269,12 +1513,60 @@ function AISummaryChat() {
           <CardTitle>AI Business Analytics</CardTitle>
           <Badge variant="default" className="text-[10px] ml-2">Real-time</Badge>
         </div>
-        <CardDescription>
-          Ask about your business or upload files/URLs for analysis
-        </CardDescription>
       </CardHeader>
-      <CardContent className="flex-1 flex flex-col min-h-0">
+      <CardContent className="flex-1 flex flex-col min-h-0 pt-4">
         <div className="flex-1 overflow-y-auto space-y-3 mb-4 pr-2 custom-scrollbar" style={{ maxHeight: "320px" }}>
+          {messages.length === 0 && (
+            <div className="space-y-4 py-2">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-xl bg-surface border border-border/50 flex items-center justify-center flex-shrink-0">
+                  <Sparkles className="w-4 h-4 text-primary" />
+                </div>
+                <div className="max-w-[80%] p-3 rounded-2xl text-sm leading-relaxed bg-surface border border-border/50 text-text-muted">
+                  <p className="mb-1.5">
+                    <span className="font-semibold text-foreground">Hi{organization?.name ? `, I can see ${organization.name}` : ""}.</span>{" "}
+                    Here's what I have on you right now:
+                  </p>
+                  <ul className="text-[12px] space-y-0.5 list-disc pl-4">
+                    <li>{goals.length} goal{goals.length === 1 ? "" : "s"} ({goals.filter((g: any) => g.status === "active").length} active)</li>
+                    <li>{tasks.length} task{tasks.length === 1 ? "" : "s"} ({tasks.filter((t: any) => t.status === "completed").length} done)</li>
+                    <li>{members.length} team member{members.length === 1 ? "" : "s"}</li>
+                    <li>{organization?.industry ? `Industry: ${organization.industry}` : "Industry not set"}</li>
+                  </ul>
+                  <p className="mt-1.5 text-[12px]">
+                    Ask me anything about your business, or{" "}
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="text-primary hover:underline cursor-pointer"
+                    >
+                      upload a document
+                    </button>{" "}
+                    and I'll analyze it.
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pl-11">
+                {[
+                  "What's my team working on right now?",
+                  "Which goals are off track?",
+                  "Summarize my latest uploaded document",
+                  "What should I focus on this week?",
+                ].map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    onClick={() => {
+                      setInput(prompt);
+                    }}
+                    className="text-left text-[12px] px-3 py-2 rounded-xl border border-border/50 bg-surface/40 hover:bg-surface-light hover:border-primary/30 transition-colors text-text-muted"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {messages.map((msg, i) => (
             <div
               key={i}
@@ -1303,7 +1595,23 @@ function AISummaryChat() {
                 }`}
               >
                 {msg.role === "assistant" ? (
-                  <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                  <>
+                    <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                    <div className="mt-2 pt-2 border-t border-border/40 flex items-center gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => handleAddAsKPI(undefined, msg.content)}
+                        className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 hover:border-primary/50 transition-colors cursor-pointer"
+                        title="Add this metric to your KPI dashboard"
+                      >
+                        <Plus className="w-3 h-3" />
+                        Add as KPI
+                      </button>
+                      <span className="text-[10px] text-text-muted/70">
+                        or type: <code className="px-1 rounded bg-surface-light">add this as a KPI</code>
+                      </span>
+                    </div>
+                  </>
                 ) : (
                   msg.content
                 )}
@@ -1375,13 +1683,130 @@ function AISummaryChat() {
           >
             <Link2 className="w-4 h-4" />
           </Button>
-          <Input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask about your business or uploaded files..."
-            onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-            icon={<MessageSquare className="w-4 h-4 text-text-muted" />}
-          />
+          <div className="relative flex-1">
+            {mentionOpen && mentionSuggestions.length > 0 && (
+              <div
+                ref={mentionListRef}
+                className="absolute bottom-full left-0 right-0 mb-2 rounded-2xl border-2 border-primary/40 bg-surface/95 backdrop-blur-md shadow-2xl shadow-black/50 overflow-hidden z-50 ring-1 ring-primary/10"
+              >
+                <div className="px-3 py-2 flex items-center gap-2 border-b border-border/60 bg-gradient-to-r from-primary/10 to-purple-500/10">
+                  <div className="w-6 h-6 rounded-lg bg-primary/20 border border-primary/30 flex items-center justify-center flex-shrink-0">
+                    <AtSign className="w-3.5 h-3.5 text-primary" />
+                  </div>
+                  <p className="text-[11px] font-semibold text-foreground flex-1">
+                    {mentionQuery
+                      ? `People matching "@${mentionQuery}"`
+                      : "Mention a team member"}
+                  </p>
+                  <Badge variant="outline" className="text-[9px] font-medium">
+                    {mentionSuggestions.length}
+                  </Badge>
+                </div>
+                <ul className="max-h-60 overflow-y-auto custom-scrollbar py-1" role="listbox">
+                  {mentionSuggestions.map((m: any, idx: number) => {
+                    const isActive = idx === mentionActiveIndex;
+                    return (
+                      <li
+                        key={m.id || m.email || m.full_name}
+                        role="option"
+                        aria-selected={isActive}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          insertMention(m);
+                        }}
+                        onMouseEnter={() => setMentionActiveIndex(idx)}
+                        className={`flex items-center gap-3 mx-1.5 my-0.5 px-2.5 py-2 rounded-xl cursor-pointer transition-all ${
+                          isActive
+                            ? "bg-primary/15 text-foreground ring-1 ring-primary/30 shadow-sm"
+                            : "text-text-muted hover:bg-surface-light/60"
+                        }`}
+                      >
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 border ${
+                          isActive
+                            ? "bg-gradient-to-br from-primary to-purple-500 border-primary/50"
+                            : "bg-gradient-to-br from-primary/20 to-purple-500/20 border-primary/20"
+                        }`}>
+                          <span className={`text-xs font-bold ${
+                            isActive ? "text-white" : "text-primary"
+                          }`}>
+                            {(m.full_name || "?").trim().charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm font-medium truncate ${
+                            isActive ? "text-foreground" : "text-foreground/90"
+                          }`}>
+                            {m.full_name}
+                          </p>
+                          <p className="text-[11px] text-text-muted/70 truncate">
+                            {[m.role, m.department].filter(Boolean).join(" • ") || m.email}
+                          </p>
+                        </div>
+                        {isActive && (
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <kbd className="text-[9px] px-1.5 py-0.5 rounded border border-border/60 bg-surface text-text-muted font-mono">
+                              ↵
+                            </kbd>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+                <div className="px-3 py-1.5 flex items-center justify-between border-t border-border/60 bg-surface-light/30 text-[10px] text-text-muted/70">
+                  <div className="flex items-center gap-2">
+                    <kbd className="px-1 py-0.5 rounded border border-border/60 bg-surface font-mono">↑↓</kbd>
+                    <span>navigate</span>
+                    <kbd className="px-1 py-0.5 rounded border border-border/60 bg-surface font-mono ml-1">↵</kbd>
+                    <span>select</span>
+                  </div>
+                  <kbd className="px-1 py-0.5 rounded border border-border/60 bg-surface font-mono">esc</kbd>
+                </div>
+              </div>
+            )}
+            <Input
+              ref={inputRef}
+              value={input}
+              onChange={(e) => {
+                const next = e.target.value;
+                setInput(next);
+                const cursor = e.target.selectionStart ?? next.length;
+                updateMentionState(next, cursor);
+              }}
+              onKeyDown={(e) => {
+                if (mentionOpen && mentionSuggestions.length > 0) {
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setMentionActiveIndex((i) => (i + 1) % mentionSuggestions.length);
+                    return;
+                  }
+                  if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setMentionActiveIndex((i) =>
+                      (i - 1 + mentionSuggestions.length) % mentionSuggestions.length
+                    );
+                    return;
+                  }
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    insertMention(mentionSuggestions[mentionActiveIndex]);
+                    return;
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    setMentionOpen(false);
+                    return;
+                  }
+                }
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  sendMessage();
+                }
+              }}
+              placeholder="Ask, @ to mention someone, or 'add this as a KPI'…"
+              icon={<MessageSquare className="w-4 h-4 text-text-muted" />}
+            />
+          </div>
           <Button
             onClick={sendMessage}
             disabled={loading || !input.trim()}
@@ -2115,9 +2540,9 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
       {adaptation.showExecutiveKPIs && <DataCharts goals={goals} />}
 
       {adaptation.showGrokInsights && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="space-y-6">
           <AISummaryChat />
-          <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <WeeklyReportGenerator />
             <MarketTrendsSection />
           </div>
