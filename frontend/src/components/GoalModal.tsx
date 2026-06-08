@@ -110,6 +110,7 @@ export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
     description: "",
     priority: "medium",
     timeline: "",
+    due_date: "",
     department: "",
     assignee_id: "",
     assignee_name: "",
@@ -181,6 +182,7 @@ export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
         description: formData.description,
         priority: formData.priority,
         timeline: formData.timeline || undefined,
+        due_date: formData.due_date || undefined,
         department: formData.department || undefined,
         assignee_id: formData.assignee_id || undefined,
         assignee_name: formData.assignee_name || undefined,
@@ -191,6 +193,7 @@ export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
 
       setFormData({
         title: "", description: "", priority: "medium", timeline: "",
+        due_date: "",
         department: "", assignee_id: "", assignee_name: "",
         reviewer_id: "", reviewer_name: "",
       });
@@ -268,16 +271,8 @@ export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-2"><Calendar className="w-4 h-4 inline mr-1" />Timeline</label>
-              <select value={formData.timeline} onChange={(e) => setFormData({ ...formData, timeline: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm appearance-none cursor-pointer">
-                <option value="">No deadline</option>
-                <option value="1_week">1 Week</option>
-                <option value="2_weeks">2 Weeks</option>
-                <option value="1_month">1 Month</option>
-                <option value="3_months">3 Months</option>
-                <option value="6_months">6 Months</option>
-                <option value="1_year">1 Year</option>
-              </select>
+              <label className="block text-sm font-medium mb-2"><Calendar className="w-4 h-4 inline mr-1" />Deadline</label>
+              <input type="date" value={formData.due_date} onChange={(e) => setFormData({ ...formData, due_date: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm" />
             </div>
           </div>
 

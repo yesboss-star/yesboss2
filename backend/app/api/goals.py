@@ -12,29 +12,9 @@ from bson import ObjectId
 router = APIRouter()
 
 
-async def create_notification(user_id: str, org_id: str, type: str, title: str, message: str, link: str = None, actor_id: str = None, actor_name: str = None, metadata: dict = None):
-    db = get_database()
-    if db is None:
-        return
-    notif_doc = {
-        "type": type,
-        "title": title,
-        "message": message,
-        "user_id": user_id,
-        "organization_id": org_id,
-        "link": link,
-        "actor_id": actor_id,
-        "actor_name": actor_name,
-        "metadata": metadata or {},
-        "read": False,
-        "created_at": datetime.utcnow(),
-    }
-    result = db.notifications.insert_one(notif_doc)
-    notif_doc["_id"] = str(result.inserted_id)
-    asyncio.create_task(ws_manager.send_personal_message(
-        {"type": "notification", "data": notif_doc},
-        user_id
-    ))
+async def create_notification(user_id: str, org_id: str, type: str, title: str, message: str, link: str = None, actor_id: str = None, actor_name: str = None, metadata: dict = None, email: str = None):
+    from ..core.notification_service import create_and_deliver
+    await create_and_deliver(user_id, org_id, type, title, message, link, actor_id, actor_name, metadata, email=email)
 
 
 class GoalCreate(BaseModel):
@@ -42,9 +22,11 @@ class GoalCreate(BaseModel):
     description: Optional[str] = None
     priority: str = "medium"
     timeline: Optional[str] = None
+    due_date: Optional[str] = None
     department: Optional[str] = None
     assignee_id: Optional[str] = None
     assignee_name: Optional[str] = None
+    assignee_email: Optional[str] = None
     reviewer_id: Optional[str] = None
     reviewer_name: Optional[str] = None
     organization_id: Optional[str] = None
@@ -55,6 +37,7 @@ class GoalUpdate(BaseModel):
     description: Optional[str] = None
     priority: Optional[str] = None
     timeline: Optional[str] = None
+    due_date: Optional[str] = None
     department: Optional[str] = None
     assignee_id: Optional[str] = None
     assignee_name: Optional[str] = None
@@ -137,9 +120,11 @@ async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user_
         "description": goal.description,
         "priority": goal.priority,
         "timeline": goal.timeline,
+        "due_date": goal.due_date,
         "department": department,
         "assignee_id": goal.assignee_id,
         "assignee_name": goal.assignee_name,
+        "assignee_email": goal.assignee_email,
         "reviewer_id": goal.reviewer_id,
         "reviewer_name": goal.reviewer_name,
         "organization_id": org_id,
@@ -176,6 +161,7 @@ async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user_
             message=f"Goal assigned: {goal.title}",
             link=f"/goals/{result.inserted_id}",
             actor_id=user_id,
+            email=goal.assignee_email,
         ))
     
     return {"goal": goal_doc}
@@ -285,6 +271,7 @@ async def update_goal(goal_id: str, goal: GoalUpdate, current_user = Depends(get
             title=f"Goal Status: {goal['status'].title()}",
             message=f"Goal '{goal.get('title')}' status updated to {goal['status']}",
             link=f"/goals/{goal_id}",
+            email=goal.get("assignee_email"),
         ))
 
     if goal.get("created_by") and goal.get("assignee_id") and goal["created_by"] != goal["assignee_id"]:
@@ -305,6 +292,32 @@ async def delete_goal(goal_id: str, current_user = Depends(get_current_user_opti
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+
+    goal = db.goals.find_one({"_id": ObjectId(goal_id)})
+    if goal:
+        assignee_id = goal.get("assignee_id")
+        created_by = goal.get("created_by")
+        notified = set()
+        if assignee_id and assignee_id not in notified:
+            notified.add(assignee_id)
+            asyncio.create_task(create_notification(
+                user_id=assignee_id,
+                org_id=goal.get("organization_id", ""),
+                type="goal_deleted",
+                title="Goal Deleted",
+                message=f"Goal '{goal.get('title')}' was deleted",
+                metadata={"goal_id": goal_id},
+                email=goal.get("assignee_email"),
+            ))
+        if created_by and created_by not in notified:
+            asyncio.create_task(create_notification(
+                user_id=created_by,
+                org_id=goal.get("organization_id", ""),
+                type="goal_deleted",
+                title="Goal Deleted",
+                message=f"Goal '{goal.get('title')}' was deleted",
+                metadata={"goal_id": goal_id},
+            ))
     
     db.goals.delete_one({"_id": ObjectId(goal_id)})
     db.tasks.delete_many({"goal_id": goal_id})

@@ -39,12 +39,20 @@ def connect_mongodb():
         
         mongo_uri = settings.MONGODB_URI
         
+        try:
+            from certifi import where as certifi_where
+            tls_ca = certifi_where()
+        except ImportError:
+            tls_ca = None
+
         client = MongoClient(
             mongo_uri,
             serverSelectionTimeoutMS=15000,
             connectTimeoutMS=15000,
             tls=True,
             tlsAllowInvalidCertificates=True,
+            tlsAllowInvalidHostnames=True,
+            tlsCAFile=tls_ca,
         )
         
         client.admin.command("ping")
@@ -64,7 +72,7 @@ def connect_mongodb():
 
 def _ensure_collections(db: Database):
     collections = db.list_collection_names()
-    required = ["users", "organizations", "employees", "goals", "tasks", "workflows", "task_outcomes", "bottlenecks", "learning_patterns", "documents", "conversations", "uploads", "org_chart_members", "reports", "user_patterns", "notifications"]
+    required = ["users", "organizations", "employees", "goals", "tasks", "workflows", "task_outcomes", "bottlenecks", "learning_patterns", "documents", "conversations", "uploads", "org_chart_members", "reports", "user_patterns", "notifications", "notification_preferences", "push_subscriptions"]
     for col in required:
         if col not in collections:
             db.create_collection(col)

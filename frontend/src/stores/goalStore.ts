@@ -10,6 +10,7 @@ export interface Goal {
   description?: string;
   priority: string;
   timeline?: string;
+  due_date?: string;
   department?: string;
   assignee_id?: string;
   assignee_name?: string;
@@ -66,7 +67,7 @@ interface GoalState {
   updateGoalFromWs: (goal: any) => void;
   addGoalFromWs: (goal: any) => void;
   fetchGoals: (orgId: string) => Promise<void>;
-  createGoal: (data: { title: string; description: string; priority: string; timeline?: string; department?: string; assignee_name?: string; reviewer_name?: string; assignee_id?: string; reviewer_id?: string; organization_id: string }) => Promise<Goal>;
+  createGoal: (data: { title: string; description: string; priority: string; timeline?: string; due_date?: string; department?: string; assignee_name?: string; reviewer_name?: string; assignee_id?: string; reviewer_id?: string; organization_id: string }) => Promise<Goal>;
   updateGoal: (goalId: string, data: Partial<Goal>) => Promise<void>;
   deleteGoal: (goalId: string) => Promise<void>;
   generateTasks: (goalId: string, count?: number) => Promise<Task[]>;
@@ -122,7 +123,7 @@ export const useGoalStore = create<GoalState>()(
         }
       },
 
-      createGoal: async (data: { title: string; description: string; priority: string; timeline?: string; department?: string; assignee_name?: string; reviewer_name?: string; assignee_id?: string; reviewer_id?: string; organization_id: string }) => {
+      createGoal: async (data: { title: string; description: string; priority: string; timeline?: string; due_date?: string; department?: string; assignee_name?: string; reviewer_name?: string; assignee_id?: string; reviewer_id?: string; organization_id: string }) => {
         set({ loading: true, error: null });
         try {
           const response = await fetch(`${API_URL}/goals`, {

@@ -17,29 +17,9 @@ def get_user_org_id(user) -> Optional[str]:
     return None
 
 
-async def create_notification(user_id: str, org_id: str, type: str, title: str, message: str, link: str = None, actor_id: str = None, actor_name: str = None, metadata: dict = None):
-    db = get_database()
-    if db is None:
-        return
-    notif_doc = {
-        "type": type,
-        "title": title,
-        "message": message,
-        "user_id": user_id,
-        "organization_id": org_id,
-        "link": link,
-        "actor_id": actor_id,
-        "actor_name": actor_name,
-        "metadata": metadata or {},
-        "read": False,
-        "created_at": datetime.utcnow(),
-    }
-    result = db.notifications.insert_one(notif_doc)
-    notif_doc["_id"] = str(result.inserted_id)
-    asyncio.create_task(ws_manager.send_personal_message(
-        {"type": "notification", "data": notif_doc},
-        user_id
-    ))
+async def create_notification(user_id: str, org_id: str, type: str, title: str, message: str, link: str = None, actor_id: str = None, actor_name: str = None, metadata: dict = None, email: str = None):
+    from ..core.notification_service import create_and_deliver
+    await create_and_deliver(user_id, org_id, type, title, message, link, actor_id, actor_name, metadata, email=email)
 
 
 class TaskCreate(BaseModel):
@@ -48,6 +28,7 @@ class TaskCreate(BaseModel):
     priority: str = "medium"
     goal_id: Optional[str] = None
     assignee_id: Optional[str] = None
+    assignee_email: Optional[str] = None
     department: Optional[str] = None
     due_date: Optional[str] = None
     dependencies: Optional[List[str]] = None
@@ -88,6 +69,7 @@ async def create_task(task: TaskCreate, organization_id: Optional[str] = None, c
         "status": "pending",
         "goal_id": task.goal_id,
         "assignee_id": task.assignee_id,
+        "assignee_email": task.assignee_email,
         "department": task.department,
         "due_date": task.due_date,
         "dependencies": task.dependencies or [],
@@ -118,6 +100,7 @@ async def create_task(task: TaskCreate, organization_id: Optional[str] = None, c
             message=f"You have been assigned: {task.title}",
             link=f"/tasks/{result.inserted_id}",
             actor_id=user_id,
+            email=task.assignee_email,
         ))
     
     return {"task": task_doc}
@@ -214,6 +197,7 @@ async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get
                 title=f"Task {status_title}",
                 message=f"Task '{task_obj.get('title')}' is now {task.status}",
                 link=f"/tasks/{task_id}",
+                email=task_obj.get("assignee_email"),
             ))
     
     return {"task": task_obj}
@@ -224,6 +208,21 @@ async def delete_task(task_id: str, current_user = Depends(get_current_user_opti
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+
+    task = db.tasks.find_one({"_id": ObjectId(task_id)})
+    if task:
+        assignee_id = task.get("assignee_id")
+        assignee_email = task.get("assignee_email")
+        if assignee_id:
+            asyncio.create_task(create_notification(
+                user_id=assignee_id,
+                org_id=task.get("organization_id", ""),
+                type="task_deleted",
+                title="Task Deleted",
+                message=f"Task '{task.get('title')}' was deleted",
+                metadata={"task_id": task_id},
+                email=assignee_email,
+            ))
     
     db.tasks.delete_one({"_id": ObjectId(task_id)})
     db.task_comments.delete_many({"task_id": task_id})
@@ -279,16 +278,24 @@ async def approve_task(task_id: str, current_user = Depends(get_current_user_opt
     task_obj["_id"] = str(task_obj["_id"])
 
     org_id = task_obj.get("organization_id")
-    assignee = task_obj.get("assignee_id")
-    if org_id and assignee:
-        asyncio.create_task(create_notification(
-            user_id=assignee,
-            org_id=org_id,
-            type="task_approved",
-            title="Task Approved",
-            message=f"Task '{task_obj.get('title')}' has been approved",
-            link=f"/tasks/{task_id}",
+
+    if org_id:
+        asyncio.create_task(ws_manager.broadcast_to_organization(
+            {"type": "task_updated", "data": task_obj},
+            org_id,
         ))
+
+        assignee = task_obj.get("assignee_id")
+        if assignee:
+            asyncio.create_task(create_notification(
+                user_id=assignee,
+                org_id=org_id,
+                type="task_approved",
+                title="Task Approved",
+                message=f"Task '{task_obj.get('title')}' has been approved",
+                link=f"/tasks/{task_id}",
+                email=task_obj.get("assignee_email"),
+            ))
     
     return {"task": task_obj}
 
@@ -312,15 +319,22 @@ async def complete_task(task_id: str, current_user = Depends(get_current_user_op
     task_obj["_id"] = str(task_obj["_id"])
 
     org_id = task_obj.get("organization_id")
-    created_by = task_obj.get("created_by")
-    if org_id and created_by:
-        asyncio.create_task(create_notification(
-            user_id=created_by,
-            org_id=org_id,
-            type="task_completed",
-            title="Task Completed",
-            message=f"Task '{task_obj.get('title')}' has been marked complete",
-            link=f"/tasks/{task_id}",
+
+    if org_id:
+        asyncio.create_task(ws_manager.broadcast_to_organization(
+            {"type": "task_updated", "data": task_obj},
+            org_id,
         ))
+
+        created_by = task_obj.get("created_by")
+        if created_by:
+            asyncio.create_task(create_notification(
+                user_id=created_by,
+                org_id=org_id,
+                type="task_completed",
+                title="Task Completed",
+                message=f"Task '{task_obj.get('title')}' has been marked complete",
+                link=f"/tasks/{task_id}",
+            ))
     
     return {"task": task_obj}

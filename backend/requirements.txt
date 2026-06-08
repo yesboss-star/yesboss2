@@ -1,5 +1,6 @@
 fastapi
 uvicorn
+certifi
 pydantic
 pydantic-settings
 python-dotenv
@@ -33,3 +34,4 @@ aiohttp
 firebase-admin
 google-generativeai
 reportlab
+pywebpush

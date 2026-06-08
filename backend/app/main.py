@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -41,6 +42,8 @@ from .api.market_trends import router as market_trends_router
 from .api.prompt import router as prompt_router
 from .api.assistant import router as assistant_router
 from .api.notifications import router as notifications_router
+from .api.notification_preferences import router as notification_preferences_router
+from .api.push_subscriptions import router as push_subscriptions_router
 from .core import settings
 from .core.database import connect_mongodb, close_mongodb
 from .core.qdrant import connect_qdrant, close_qdrant
@@ -63,9 +66,21 @@ async def lifespan(app: FastAPI):
     create_collection("conversations", 1536)
     create_collection("workflows", 1536)
 
+    scheduler_task = None
+    try:
+        from .core.scheduler import scheduler_loop
+        scheduler_task = asyncio.create_task(scheduler_loop())
+        logger.info("Scheduler started")
+    except Exception as e:
+        logger.warning(f"Scheduler not started: {e}")
+
     logger.info("All services initialized")
 
     yield
+
+    if scheduler_task:
+        scheduler_task.cancel()
+        logger.info("Scheduler stopped")
 
     logger.info("Shutting down YesBoss API...")
     close_mongodb()
@@ -166,4 +181,6 @@ app.include_router(market_trends_router, prefix="/api/v1/trends", tags=["Market 
 app.include_router(prompt_router, prefix="/api/v1/prompt", tags=["Prompt Engine"])
 app.include_router(assistant_router, prefix="/api/v1/assistant", tags=["AI Assistant"])
 app.include_router(notifications_router, prefix="/api/v1/notifications", tags=["Notifications"])
+app.include_router(notification_preferences_router, prefix="/api/v1/notification-preferences", tags=["Notification Preferences"])
+app.include_router(push_subscriptions_router, prefix="/api/v1/push", tags=["Push Notifications"])
 app.include_router(websocket_router, tags=["WebSocket"])

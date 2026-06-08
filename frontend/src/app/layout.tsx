@@ -5,6 +5,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { NotificationWatcher } from "@/components/NotificationWatcher";
+import { NotificationToast } from "@/components/NotificationToast";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -35,7 +36,10 @@ export default function RootLayout({
         <ThemeProvider>
           <ThemeToggle />
           <AuthProvider>
-            <NotificationWatcher>{children}</NotificationWatcher>
+            <NotificationWatcher>
+              {children}
+              <NotificationToast />
+            </NotificationWatcher>
           </AuthProvider>
         </ThemeProvider>
       </body>

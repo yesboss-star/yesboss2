@@ -7,6 +7,23 @@ import { useTaskStore } from "@/stores/taskStore";
 import { useGoalStore } from "@/stores/goalStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { useAuth } from "@/contexts/AuthContext";
+import { registerPushNotifications } from "@/lib/pushNotifications";
+
+function playNotificationSound() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = 800;
+    osc.type = "sine";
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.3);
+  } catch {}
+}
 
 export function NotificationWatcher({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
@@ -14,6 +31,7 @@ export function NotificationWatcher({ children }: { children: React.ReactNode })
   const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef(0);
   const timerRef = useRef<any>(null);
+  const soundEnabledRef = useRef(true);
 
   const addNotification = useNotificationStore((s) => s.addNotification);
   const refreshUnreadCount = useNotificationStore((s) => s.refreshUnreadCount);
@@ -60,6 +78,7 @@ export function NotificationWatcher({ children }: { children: React.ReactNode })
                 const notif = { ...data, id: data._id || data.id };
                 addNotification(notif);
                 addUiNotification({ type: "info", title: notif.title, message: notif.message });
+                if (soundEnabledRef.current) playNotificationSound();
               }
               break;
             case "task_created":
@@ -100,6 +119,7 @@ export function NotificationWatcher({ children }: { children: React.ReactNode })
     fetchNotifications({ limit: 50 });
     refreshUnreadCount();
     connect();
+    registerPushNotifications();
 
     const pollInterval = setInterval(() => {
       refreshUnreadCount();
