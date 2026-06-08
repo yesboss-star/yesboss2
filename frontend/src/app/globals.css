@@ -18,20 +18,20 @@
 }
 
 [data-theme="light"] {
-  --background: rgb(243 241 236);
-  --foreground: #c86b4d;
-  --primary: #2c4c3b;
-  --primary-light: #3d6e55;
-  --accent: rgb(200 107 77);
-  --accent-hover: #c86b4d;
-  --surface: #e5e7eb;
-  --surface-light: #f5f3ee;
-  --border: #d4d2cd;
-  --border-light: #e5e3de;
-  --text-muted: #6b7280;
-  --gradient-start: #2c4c3b;
-  --gradient-end: #c86b4d;
-  --heading: #000000;
+  --background: #ffffff;
+  --foreground: #0b132b;
+  --primary: #5bc0be;
+  --primary-light: #7dd4d2;
+  --accent: #215554;
+  --accent-hover: #0b403f;
+  --surface: #f4f5f7;
+  --surface-light: #a9bbce;
+  --border: #d4d6dd;
+  --border-light: #a2a2a2;
+  --text-muted: #3a506b;
+  --gradient-start: #5bc0be;
+  --gradient-end: #0b132b;
+  --heading: #0b132b;
 }
 
 [data-theme="light"] h1,
@@ -40,7 +40,7 @@
 [data-theme="light"] h4,
 [data-theme="light"] h5,
 [data-theme="light"] h6 {
-  color: #000000;
+  color: var(--heading);
 }
 
 @theme {
@@ -126,13 +126,13 @@ body {
 }
 
 [data-theme="light"] .glass {
-  background: rgba(229, 231, 235, 0.7);
-  border-color: rgba(212, 210, 205, 0.6);
+  background: rgba(244, 245, 247, 0.7);
+  border-color: rgba(212, 214, 221, 0.6);
 }
 
 [data-theme="light"] .glass-light {
-  background: rgba(245, 243, 238, 0.6);
-  border-color: rgba(229, 227, 222, 0.5);
+  background: rgba(250, 251, 252, 0.6);
+  border-color: rgba(229, 231, 235, 0.5);
 }
 
 .gradient-text {
@@ -165,7 +165,7 @@ body {
 }
 
 [data-theme="light"] .card-hover:hover {
-  box-shadow: 0 20px 40px rgba(44, 76, 59, 0.1);
+  box-shadow: 0 20px 40px rgba(91, 192, 190, 0.15);
 }
 
 .claude-loader {
