@@ -13,13 +13,14 @@ import { useReportStore } from "@/stores/reportStore";
 import { useAIDashboardAdaptation, type OrgStage } from "@/hooks/useAIDashboardAdaptation";
 import { useSessionStore, type SessionMessage, type ClarifyingQuestion } from "@/stores/sessionStore";
 import {
-  Sparkles, Flag, Calendar, Clock, CheckCircle, AlertCircle,
+  Sparkles, Flag, Calendar, Clock, CheckCircle, Check, AlertCircle, ChevronDown,
   TrendingUp, TrendingDown, DollarSign, Shield, MessageSquare,
   FileText, Download, Send, Loader2, Newspaper, ExternalLink,
   BarChart3, Target, Zap, Activity, ChevronRight,
   AlertTriangle, Info, Users, User, FileSpreadsheet, Paperclip,
   PieChart as PieChartIcon, Link2, X, Building2, Network,
-  Briefcase, Search, ChevronDown, Plus, AtSign, Lightbulb, ArrowRight
+  Briefcase, Search, Plus, AtSign, Lightbulb, ArrowRight,
+  Edit3, Trash2,
 } from "lucide-react";
 import {
   Card, CardHeader, CardTitle, CardDescription, CardContent,
@@ -47,13 +48,13 @@ function renderMarkdown(text: string): string {
     line = line
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
       .replace(/\*(.+?)\*/g, "<em>$1</em>")
-      .replace(/`(.+?)`/g, "<code>$1</code>");
+      .replace(/`(.+?)`/g, "<code class=\"px-1 py-0.5 rounded bg-surface-light text-[11px]\">$1</code>");
 
     const headerMatch = line.match(/^(#{1,3})\s+(.+)/);
     if (headerMatch) {
       if (inList) { result.push(`</${listType}>`); inList = false; listType = null; }
       const level = headerMatch[1].length;
-      result.push(`<h${level} class="text-sm font-semibold mt-3 mb-1">${headerMatch[2]}</h${level}>`);
+      result.push(`<h${level} class="text-sm font-semibold mt-4 mb-2 text-foreground">${headerMatch[2]}</h${level}>`);
       continue;
     }
 
@@ -61,11 +62,11 @@ function renderMarkdown(text: string): string {
     if (bulletMatch) {
       if (!inList || listType !== "ul") {
         if (inList) result.push(`</${listType}>`);
-        result.push('<ul class="list-disc pl-4 space-y-0.5 my-1">');
+        result.push('<ul class="space-y-1 my-2">');
         inList = true;
         listType = "ul";
       }
-      result.push(`<li>${bulletMatch[1]}</li>`);
+      result.push(`<li class="flex items-start gap-2 text-sm"><span class="text-primary mt-1.5 flex-shrink-0 w-1.5 h-1.5 rounded-full bg-primary/60"></span><span>${bulletMatch[1]}</span></li>`);
       continue;
     }
 
@@ -73,22 +74,22 @@ function renderMarkdown(text: string): string {
     if (numMatch) {
       if (!inList || listType !== "ol") {
         if (inList) result.push(`</${listType}>`);
-        result.push('<ol class="list-decimal pl-4 space-y-0.5 my-1">');
+        result.push('<ol class="space-y-1.5 my-2 list-none">');
         inList = true;
         listType = "ol";
       }
-      result.push(`<li>${numMatch[1]}</li>`);
+      result.push(`<li class="flex items-start gap-2 text-sm"><span class="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-semibold flex items-center justify-center flex-shrink-0 mt-0.5">${numMatch[1].match(/^\d+/)?.[0] || "•"}</span><span>${numMatch[1].replace(/^\d+[.)]\s*/, "")}</span></li>`);
       continue;
     }
 
     if (line.trim() === "") {
       if (inList) { result.push(`</${listType}>`); inList = false; listType = null; }
-      result.push("<br/>");
+      result.push("<div class=\"h-2\"></div>");
       continue;
     }
 
     if (inList) { result.push(`</${listType}>`); inList = false; listType = null; }
-    result.push(`<p class="mb-1">${line}</p>`);
+    result.push(`<p class="text-sm leading-relaxed mb-2 text-foreground/90">${line}</p>`);
   }
 
   if (inList) result.push(`</${listType}>`);
@@ -1057,14 +1058,15 @@ function AISummaryChat() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [showUrlInput, setShowUrlInput] = useState(false);
-  const [urlValue, setUrlValue] = useState("");
-  const [urlLoading, setUrlLoading] = useState(false);
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [mentionOpen, setMentionOpen] = useState(false);
   const [mentionQuery, setMentionQuery] = useState("");
   const [mentionStart, setMentionStart] = useState<number>(-1);
   const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
-  const [showSessions, setShowSessions] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [pendingQuestion, setPendingQuestion] = useState<ClarifyingQuestion | null>(null);
+  const [questionCount, setQuestionCount] = useState(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -1290,9 +1292,43 @@ function AISummaryChat() {
   );
 
   const sendMessage = async () => {
-    if (!input.trim() || loading) return;
+    if ((!input.trim() && !attachedFile) || loading) return;
     const userMsg = input.trim();
     setInput("");
+
+    if (attachedFile && !userMsg) {
+      const s = activeSession || await ensureSession();
+      if (!s) return;
+      setLoading(true);
+      try {
+        const result = await uploadAttachedFile();
+        if (result) {
+          setMessages((prev) => [
+            ...prev,
+            { role: "user", content: `📎 Uploaded: **${attachedFile.name}**`, timestamp: Date.now() },
+            { role: "assistant", content: `✅ ${result}`, timestamp: Date.now() },
+          ]);
+        }
+      } catch (err: any) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: `❌ Upload failed: ${err.message || "Unknown error"}`, timestamp: Date.now() },
+        ]);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    if (attachedFile && userMsg) {
+      const s = activeSession || await ensureSession();
+      if (!s) return;
+      try {
+        await uploadAttachedFile(userMsg);
+      } catch {
+        // proceed with text-only send even if upload fails
+      }
+    }
 
     const s = activeSession || await ensureSession();
     if (!s) return;
@@ -1331,14 +1367,23 @@ function AISummaryChat() {
 
     if (isKpiIntent(userMsg) && organization?.id) {
       const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant")?.content;
-      const title = extractKpiTitleFromAssistant(lastAssistant || "");
+      const title = extractKpiTitleFromAssistant(lastAssistant || "") || userMsg.replace(/add|track|make|create|set|turn|convert|this|as|a|kpi/gi, "").trim();
       if (title) {
-        const created = addKPI(organization.id, { title, source: "ai", sourceDetail: "Added from AI Business Analytics chat", category: "growth", icon: "BarChart3" });
-        const confirm = created ? `✅ Added **${title}** as a new KPI card on your dashboard.` : `I couldn't add that KPI right now.`;
-        setMessages([...updated, { role: "assistant", content: confirm, timestamp: Date.now() }]);
+        const confirmQ: ClarifyingQuestion = {
+          id: `confirm_kpi_${Date.now()}`,
+          field_id: "confirm_kpi",
+          text: `I understand you want to track **${title}** as a KPI. Shall I add it to your dashboard?`,
+          options: [
+            { value: "yes", label: "Yes, add it" },
+            { value: "no", label: "No, thanks" },
+          ],
+          allow_custom: false,
+        };
+        setPendingQuestion(confirmQ);
+        setQuestionCount(c => c + 1);
         return;
       } else {
-        setMessages([...updated, { role: "assistant", content: "I see you want to track something as a KPI, but I couldn't identify which metric from our last reply. Could you tell me the specific metric name you'd like to track? (e.g. *Customer Churn Rate*)", timestamp: Date.now() }]);
+        setMessages([...updated, { role: "assistant", content: "I see you want to track something as a KPI. Could you tell me the specific metric name you'd like to track? (e.g. *Customer Churn Rate*)", timestamp: Date.now() }]);
         return;
       }
     }
@@ -1353,7 +1398,9 @@ function AISummaryChat() {
 
       if (data.type === "question" && data.question) {
         const q = data.question as ClarifyingQuestion;
-        setMessages([...updated, { role: "assistant", content: q.text, is_question: true, question_data: q, timestamp: Date.now() }]);
+        setPendingQuestion(q);
+        setQuestionCount(c => c + 1);
+        setMessages([...updated]);
       } else if (data.type === "answer" && data.answer) {
         let answer = data.answer;
         if (data.follow_up) answer += "\n\n" + data.follow_up;
@@ -1372,13 +1419,28 @@ function AISummaryChat() {
     const s = activeSession || await ensureSession();
     if (!s) return;
 
+    setPendingQuestion(null);
     const userMsg: SessionMessage = { role: "user", content: valueLabel, timestamp: Date.now() };
     const updated = [...messages, userMsg];
     setMessages(updated);
 
     updateSessionContext(s.id, { [fieldId]: value });
+
+    if (fieldId === "confirm_kpi" && organization?.id) {
+      if (value === "yes") {
+        const title = extractKpiTitleFromAssistant(pendingQuestion?.text || "") || "New KPI";
+        if (title) {
+          const created = addKPI(organization.id, { title, source: "ai", sourceDetail: "Added from AI Business Analytics chat", category: "growth", icon: "BarChart3" });
+          const confirm = created ? `✅ Added **${title}** as a new KPI card on your dashboard.` : `I couldn't add that KPI right now. Please try again.`;
+          setMessages([...updated, { role: "assistant", content: confirm, timestamp: Date.now() }]);
+        }
+      } else {
+        setMessages([...updated, { role: "assistant", content: "No problem! Let me know if you need anything else.", timestamp: Date.now() }]);
+      }
+      return;
+    }
+
     setLoading(true);
-    setMessages([...updated, { role: "assistant", content: "", is_loading: true, timestamp: Date.now() }]);
 
     try {
       const data = await apiAsk(valueLabel, { ...s.context, [fieldId]: value });
@@ -1386,7 +1448,8 @@ function AISummaryChat() {
 
       if (data.type === "question" && data.question) {
         const q = data.question as ClarifyingQuestion;
-        setMessages([...updated, { role: "assistant", content: q.text, is_question: true, question_data: q, timestamp: Date.now() }]);
+        setPendingQuestion(q);
+        setQuestionCount(c => c + 1);
       } else if (data.type === "answer" && data.answer) {
         let answer = data.answer;
         if (data.follow_up) answer += "\n\n" + data.follow_up;
@@ -1401,320 +1464,280 @@ function AISummaryChat() {
     }
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAttachFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !organization?.id) return;
+    if (file) {
+      setAttachedFile(file);
+    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
 
+  const removeAttachedFile = () => {
+    setAttachedFile(null);
+  };
+
+  const uploadAttachedFile = async (text?: string): Promise<string | null> => {
+    if (!attachedFile || !organization?.id) return null;
     setUploading(true);
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", attachedFile);
     formData.append("organization_id", organization.id);
+    if (text?.trim()) formData.append("text_context", text.trim());
 
     try {
       const response = await fetch(`${API_URL}/executive-chat/upload-and-analyze`, {
         method: "POST",
         body: formData,
       });
-
-      if (!response.ok) {
-        let errDetail = "Upload failed";
-        try { const errBody = await response.json(); errDetail = errBody.detail || errDetail; } catch {}
-        throw new Error(errDetail);
-      }
-
+      if (!response.ok) throw new Error("Upload failed");
       const data = await response.json();
-      setMessages((prev) => [
-        ...prev,
-        { role: "user", content: `📎 Uploaded: **${file.name}**`, timestamp: Date.now() },
-        { role: "assistant", content: data.message
-            ? `✅ ${data.message}\n\n**Preview:** ${data.text_preview?.substring(0, 300)}...`
-            : `✅ File **${file.name}** uploaded and analyzed! Ask me anything about it.`, timestamp: Date.now() },
-      ]);
+      const fileName = attachedFile.name;
+      setAttachedFile(null);
       if (typeof window !== "undefined") {
-        window.dispatchEvent(
-          new CustomEvent("kpi-document-uploaded", { detail: { filename: file.name } })
-        );
+        window.dispatchEvent(new CustomEvent("kpi-document-uploaded", { detail: { filename: fileName } }));
       }
+      return data.message || `File **${fileName}** processed.`;
     } catch (err: any) {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: `❌ Failed to upload and analyze **${file.name}**: ${err.message || "Unknown error"}`, timestamp: Date.now() },
-      ]);
+      setAttachedFile(null);
+      throw err;
     } finally {
       setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
-  const handleUrlUpload = async () => {
-    const url = urlValue.trim();
-    if (!url || !organization?.id || urlLoading) return;
-    setUrlLoading(true);
-    setShowUrlInput(false);
-    setUrlValue("");
+  const handleNewSession = async () => {
+    if (!organization?.id) return;
+    await createSession(organization.id, "New Chat");
+    setMessages([]);
+  };
 
-    const formData = new FormData();
-    formData.append("url", url);
-    formData.append("organization_id", organization.id);
+  const handleRenameConfirm = (sessionId: string) => {
+    if (renameValue.trim()) {
+      renameSession(sessionId, renameValue.trim());
+    }
+    setRenamingId(null);
+  };
 
-    setMessages((prev) => [...prev, { role: "user", content: `📎 Import from URL: ${url}`, timestamp: Date.now() }]);
-
-    try {
-      const response = await fetch(`${API_URL}/executive-chat/upload-url`, {
-        method: "POST",
-        body: formData,
-      });
-      if (!response.ok) {
-        let errDetail = "Upload failed";
-        try { const errBody = await response.json(); errDetail = errBody.detail || errDetail; } catch {}
-        throw new Error(errDetail);
-      }
-      const data = await response.json();
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: `✅ ${data.message}\n\n**Preview:** ${data.text_preview?.substring(0, 300)}...`, timestamp: Date.now() },
-      ]);
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(
-          new CustomEvent("kpi-document-uploaded", { detail: { filename: url } })
-        );
-      }
-    } catch (err: any) {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: `❌ Failed to import from URL: ${err.message || "Unknown error"}`, timestamp: Date.now() },
-      ]);
-    } finally {
-      setUrlLoading(false);
+  const handleDeleteSession = (sessionId: string) => {
+    deleteSession(sessionId);
+    if (sessionId === activeSessionId) {
+      setMessages([]);
     }
   };
 
   return (
-    <Card className="flex flex-col h-full">
-      <CardHeader className="flex-shrink-0">
+    <Card className="flex flex-col h-full min-h-[520px]">
+      <CardHeader className="flex-shrink-0 pb-2">
         <div className="flex items-center gap-2">
           <MessageSquare className="w-5 h-5 text-primary" />
           <CardTitle>AI Business Analytics</CardTitle>
           <Badge variant="default" className="text-[10px] ml-2">Real-time</Badge>
         </div>
-        <div className="flex items-center gap-1.5 mt-1">
-          <div className="relative">
+      </CardHeader>
+      <CardContent className="flex-1 flex min-h-0 p-0">
+        {/* Session Sidebar */}
+        <div className="w-52 flex-shrink-0 border-r border-border bg-surface/20 flex flex-col">
+          <div className="p-2.5 border-b border-border">
             <button
-              onClick={() => setShowSessions(!showSessions)}
-              className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] bg-surface-light border border-border hover:border-primary/30 text-text-muted hover:text-foreground transition-colors cursor-pointer"
+              onClick={handleNewSession}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs font-medium transition-colors cursor-pointer"
             >
-              <MessageSquare className="w-3 h-3" />
-              <span className="max-w-[120px] truncate">{activeSession?.title || "Dashboard Chat"}</span>
-              <ChevronDown className="w-3 h-3" />
+              <Plus className="w-3.5 h-3.5" />
+              New Session
             </button>
-            {showSessions && (
-              <div className="absolute top-full left-0 mt-1 w-52 rounded-xl border border-border bg-surface shadow-xl z-20 py-1 max-h-48 overflow-y-auto">
-                {sessions.length === 0 && (
-                  <p className="px-3 py-2 text-xs text-text-muted">No sessions yet</p>
+          </div>
+          <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5 custom-scrollbar">
+            {sessions.length === 0 && (
+              <p className="px-3 py-3 text-xs text-text-muted text-center">No sessions yet</p>
+            )}
+            {sessions.map((s) => (
+              <div
+                key={s.id}
+                onClick={() => { setActiveSession(s.id); setMessages(s.messages); }}
+                className={`group flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs cursor-pointer transition-all ${
+                  s.id === activeSessionId
+                    ? "bg-primary/15 text-foreground border border-primary/30"
+                    : "hover:bg-surface-light text-text-muted border border-transparent"
+                }`}
+              >
+                <MessageSquare className="w-3 h-3 flex-shrink-0" />
+                {renamingId === s.id ? (
+                  <input
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") handleRenameConfirm(s.id); }}
+                    onBlur={() => handleRenameConfirm(s.id)}
+                    className="flex-1 bg-surface border border-border rounded px-1 py-0.5 text-[11px] outline-none"
+                    autoFocus
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  <span className="flex-1 truncate">{s.title}</span>
                 )}
-                {sessions.map((s) => (
+                <div className="hidden group-hover:flex items-center gap-0.5">
                   <button
-                    key={s.id}
-                    onClick={() => { setActiveSession(s.id); setShowSessions(false); setMessages(s.messages); }}
-                    className={`w-full text-left flex items-center gap-2 px-3 py-2 text-xs hover:bg-surface-light transition-colors cursor-pointer ${s.id === activeSessionId ? "bg-primary/10 text-primary font-medium" : "text-text-muted"}`}
+                    onClick={(e) => { e.stopPropagation(); setRenamingId(s.id); setRenameValue(s.title); }}
+                    className="p-0.5 rounded hover:bg-surface-light text-text-muted hover:text-foreground cursor-pointer"
                   >
-                    <MessageSquare className="w-3 h-3 flex-shrink-0" />
-                    <span className="flex-1 truncate">{s.title}</span>
-                    {s.messages.length > 0 && (
-                      <span className="text-[9px] text-text-muted/50">{s.messages.length} msgs</span>
-                    )}
+                    <Edit3 className="w-3 h-3" />
                   </button>
-                ))}
-                <div className="border-t border-border/60 mt-1 pt-1">
                   <button
-                    onClick={async () => {
-                      if (organization?.id) {
-                        await createSession(organization.id, "New Chat");
-                        setShowSessions(false);
-                      }
-                    }}
-                    className="w-full text-left flex items-center gap-2 px-3 py-2 text-xs text-primary hover:bg-surface-light transition-colors cursor-pointer"
+                    onClick={(e) => { e.stopPropagation(); handleDeleteSession(s.id); }}
+                    className="p-0.5 rounded hover:bg-surface-light text-text-muted hover:text-rose-400 cursor-pointer"
                   >
-                    <Plus className="w-3 h-3" />
-                    New session
+                    <Trash2 className="w-3 h-3" />
                   </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Main Chat Area */}
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 max-h-[480px]">
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar min-h-0">
+            {messages.length === 0 && (
+              <div className="space-y-4 py-2">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-surface border border-border/50 flex items-center justify-center flex-shrink-0">
+                    <Sparkles className="w-4 h-4 text-primary" />
+                  </div>
+                  <div className="max-w-[80%] p-3 rounded-2xl text-sm leading-relaxed bg-surface border border-border/50 text-text-muted">
+                    <p className="mb-1.5">
+                      <span className="font-semibold text-foreground">Hi{organization?.name ? `, I can see ${organization.name}` : ""}.</span>{" "}
+                      Here's what I have on you right now:
+                    </p>
+                    <ul className="text-[12px] space-y-0.5 list-disc pl-4">
+                      <li>{goals.length} goal{goals.length === 1 ? "" : "s"} ({goals.filter((g: any) => g.status === "active").length} active)</li>
+                      <li>{tasks.length} task{tasks.length === 1 ? "" : "s"} ({tasks.filter((t: any) => t.status === "completed").length} done)</li>
+                      <li>{members.length} team member{members.length === 1 ? "" : "s"}</li>
+                      <li>{organization?.industry ? `Industry: ${organization.industry}` : "Industry not set"}</li>
+                    </ul>
+                    <p className="mt-1.5 text-[12px]">
+                      Ask me anything about your business, or{" "}
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="text-primary hover:underline cursor-pointer"
+                      >
+                        upload a document
+                      </button>{" "}
+                      and I'll analyze it.
+                    </p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pl-11">
+                  {[
+                    "What's my team working on right now?",
+                    "Which goals are off track?",
+                    "Summarize my latest uploaded document",
+                    "What should I focus on this week?",
+                  ].map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      onClick={() => {
+                        setInput(prompt);
+                      }}
+                      className="text-left text-[12px] px-3 py-2 rounded-xl border border-border/50 bg-surface/40 hover:bg-surface-light hover:border-primary/30 transition-colors text-text-muted"
+                    >
+                      {prompt}
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="flex-1 flex flex-col min-h-0 pt-4">
-        <div className="flex-1 overflow-y-auto space-y-3 mb-4 pr-2 custom-scrollbar" style={{ maxHeight: "320px" }}>
-          {messages.length === 0 && (
-            <div className="space-y-4 py-2">
-              <div className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded-xl bg-surface border border-border/50 flex items-center justify-center flex-shrink-0">
-                  <Sparkles className="w-4 h-4 text-primary" />
-                </div>
-                <div className="max-w-[80%] p-3 rounded-2xl text-sm leading-relaxed bg-surface border border-border/50 text-text-muted">
-                  <p className="mb-1.5">
-                    <span className="font-semibold text-foreground">Hi{organization?.name ? `, I can see ${organization.name}` : ""}.</span>{" "}
-                    Here's what I have on you right now:
-                  </p>
-                  <ul className="text-[12px] space-y-0.5 list-disc pl-4">
-                    <li>{goals.length} goal{goals.length === 1 ? "" : "s"} ({goals.filter((g: any) => g.status === "active").length} active)</li>
-                    <li>{tasks.length} task{tasks.length === 1 ? "" : "s"} ({tasks.filter((t: any) => t.status === "completed").length} done)</li>
-                    <li>{members.length} team member{members.length === 1 ? "" : "s"}</li>
-                    <li>{organization?.industry ? `Industry: ${organization.industry}` : "Industry not set"}</li>
-                  </ul>
-                  <p className="mt-1.5 text-[12px]">
-                    Ask me anything about your business, or{" "}
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="text-primary hover:underline cursor-pointer"
-                    >
-                      upload a document
-                    </button>{" "}
-                    and I'll analyze it.
-                  </p>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pl-11">
-                {[
-                  "What's my team working on right now?",
-                  "Which goals are off track?",
-                  "Summarize my latest uploaded document",
-                  "What should I focus on this week?",
-                ].map((prompt) => (
-                  <button
-                    key={prompt}
-                    type="button"
-                    onClick={() => {
-                      setInput(prompt);
-                    }}
-                    className="text-left text-[12px] px-3 py-2 rounded-xl border border-border/50 bg-surface/40 hover:bg-surface-light hover:border-primary/30 transition-colors text-text-muted"
+            {messages.map((msg, i) => {
+              if (msg.is_loading) {
+                return (
+                  <div key={i} className="flex items-start gap-3">
+                    <div className="w-7 h-7 rounded-full bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center flex-shrink-0 mt-1">
+                      <Sparkles className="w-3.5 h-3.5 text-white" />
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="claude-loader" />
+                      <span className="text-xs text-text-muted">Thinking...</span>
+                    </div>
+                  </div>
+                );
+              }
+              return (
+                <div
+                  key={i}
+                  className={`flex items-start gap-3 ${
+                    msg.role === "user" ? "flex-row-reverse" : ""
+                  } animate-in fade-in slide-in-from-bottom-1 duration-200`}
+                >
+                  <div
+                    className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-1 ${
+                      msg.role === "user"
+                        ? "bg-gradient-to-br from-primary to-purple-500"
+                        : "bg-gradient-to-br from-primary to-purple-500"
+                    }`}
                   >
-                    {prompt}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          {messages.map((msg, i) => {
-            if (msg.is_loading) {
-              return (
-                <div key={i} className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-surface border border-border/50 flex items-center justify-center flex-shrink-0">
-                    <Sparkles className="w-4 h-4 text-primary" />
+                    {msg.role === "user" ? (
+                      <span className="text-white font-bold text-xs">
+                        {user?.email?.charAt(0).toUpperCase() || "U"}
+                      </span>
+                    ) : (
+                      <Sparkles className="w-3.5 h-3.5 text-white" />
+                    )}
                   </div>
-                  <div className="claude-loader" />
-                </div>
-              );
-            }
-            if (msg.is_question && msg.question_data) {
-              return (
-                <div key={i} className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-surface border border-border/50 flex items-center justify-center flex-shrink-0">
-                    <Sparkles className="w-4 h-4 text-primary" />
-                  </div>
-                  <QuestionCard
-                    question={msg.question_data}
-                    onAnswer={(fieldId, value, label) => handleAnswerQuestion(fieldId, value, label)}
-                    onSkip={() => sendMessage()}
-                    disabled={loading}
-                  />
-                </div>
-              );
-            }
-            return (
-              <div
-                key={i}
-                className={`flex items-start gap-3 ${
-                  msg.role === "user" ? "flex-row-reverse" : ""
-                } animate-in fade-in slide-in-from-bottom-1 duration-200`}
-              >
-                <div
-                  className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                    msg.role === "user"
-                      ? "bg-gradient-to-br from-primary to-purple-500"
-                      : "bg-surface border border-border/50"
-                  }`}
-                >
-                  {msg.role === "user" ? (
-                    <span className="text-white font-bold text-xs">U</span>
-                  ) : (
-                    <Sparkles className="w-4 h-4 text-primary" />
-                  )}
-                </div>
-                <div
-                  className={`max-w-[80%] p-3 rounded-2xl text-sm leading-relaxed ${
-                    msg.role === "user"
-                      ? "bg-gradient-to-br from-primary/20 to-purple-500/20 text-foreground"
-                      : "bg-surface border border-border/50 text-text-muted"
-                  }`}
-                >
-                  {msg.role === "assistant" ? (
-                    <>
+                  <div
+                    className={`text-sm leading-relaxed ${
+                      msg.role === "user"
+                        ? "max-w-[75%] px-4 py-2.5 rounded-2xl bg-gradient-to-br from-primary/20 to-purple-500/20 text-foreground"
+                        : "max-w-[90%] text-foreground"
+                    }`}
+                  >
+                    {msg.role === "assistant" ? (
                       <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
-                      {(extractKpiTitleFromAssistant(msg.content)) && (
-                        <div className="mt-2 pt-2 border-t border-border/40 flex items-center gap-1.5 flex-wrap">
-                          <button
-                            type="button"
-                            onClick={() => handleAddAsKPI(undefined, msg.content)}
-                            className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 hover:border-primary/50 transition-colors cursor-pointer"
-                            title={`Add "${extractKpiTitleFromAssistant(msg.content)}" as a KPI`}
-                          >
-                            <Plus className="w-3 h-3" />
-                            Add as KPI
-                          </button>
-                          <span className="text-[10px] text-text-muted/70">
-                            or type: <code className="px-1 rounded bg-surface-light">add this as a KPI</code>
-                          </span>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    msg.content
-                  )}
+                    ) : (
+                      msg.content
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
           {uploading && (
             <div className="flex items-center gap-2 text-text-muted text-sm">
               <Loader2 className="w-4 h-4 animate-spin" />
               Uploading and analyzing file...
             </div>
           )}
-          {urlLoading && (
-            <div className="flex items-center gap-2 text-text-muted text-sm">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Fetching and analyzing URL...
-            </div>
-          )}
           <div ref={chatEndRef} />
-        </div>
-        {showUrlInput && (
-          <div className="flex gap-2 mb-2 flex-shrink-0">
-            <Input
-              value={urlValue}
-              onChange={(e) => setUrlValue(e.target.value)}
-              placeholder="Paste a file URL (PDF, DOCX, etc)..."
-              onKeyDown={(e) => e.key === "Enter" && handleUrlUpload()}
-              icon={<Link2 className="w-4 h-4 text-text-muted" />}
+          </div>
+        {pendingQuestion && (
+          <div className="flex-shrink-0 border-t border-border bg-surface/40 px-4 py-3">
+            <QuestionCard
+              question={pendingQuestion}
+              onAnswer={(fieldId, value, label) => handleAnswerQuestion(fieldId, value, label)}
+              onSkip={() => { setPendingQuestion(null); sendMessage(); }}
+              disabled={loading}
+              questionNumber={questionCount}
             />
-            <Button onClick={handleUrlUpload} disabled={urlLoading || !urlValue.trim()} size="icon" className="cursor-pointer flex-shrink-0">
-              <Send className="w-4 h-4" />
-            </Button>
-            <Button onClick={() => { setShowUrlInput(false); setUrlValue(""); }} variant="outline" size="icon" className="cursor-pointer flex-shrink-0">
-              X
-            </Button>
           </div>
         )}
-        <div className="flex gap-2 flex-shrink-0">
+        <div className="flex flex-col px-4 pb-4 pt-2 border-t border-border flex-shrink-0">
+          {attachedFile && (
+            <div className="flex items-center gap-2 mb-2 px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20 text-xs">
+              <Paperclip className="w-3.5 h-3.5 text-primary" />
+              <span className="flex-1 truncate text-foreground">{attachedFile.name}</span>
+              <button
+                onClick={removeAttachedFile}
+                className="p-0.5 rounded hover:bg-surface-light text-text-muted hover:text-rose-400 cursor-pointer"
+              >
+                X
+              </button>
+            </div>
+          )}
+          <div className="flex gap-2">
           <input
             ref={fileInputRef}
             type="file"
             accept=".pdf,.docx,.txt,.csv,.xlsx,.xls,.png,.jpg,.jpeg"
             className="hidden"
-            onChange={handleFileUpload}
+            onChange={handleAttachFile}
           />
           <Button
             onClick={() => fileInputRef.current?.click()}
@@ -1722,19 +1745,9 @@ function AISummaryChat() {
             variant="outline"
             size="icon"
             className="cursor-pointer flex-shrink-0"
-            title="Upload a file for analysis"
+            title="Attach a file"
           >
             <Paperclip className="w-4 h-4" />
-          </Button>
-          <Button
-            onClick={() => setShowUrlInput(!showUrlInput)}
-            disabled={urlLoading}
-            variant="outline"
-            size="icon"
-            className="cursor-pointer flex-shrink-0"
-            title="Import from URL"
-          >
-            <Link2 className="w-4 h-4" />
           </Button>
           <div className="relative flex-1">
             {mentionOpen && mentionSuggestions.length > 0 && (
@@ -1856,18 +1869,20 @@ function AISummaryChat() {
                   sendMessage();
                 }
               }}
-              placeholder="Ask, @ to mention someone, or 'add this as a KPI'…"
+              placeholder="Ask anything, or attach a file to analyze…"
               icon={<MessageSquare className="w-4 h-4 text-text-muted" />}
             />
           </div>
           <Button
             onClick={sendMessage}
-            disabled={loading || !input.trim()}
+            disabled={loading || (!input.trim() && !attachedFile)}
             size="icon"
             className="cursor-pointer flex-shrink-0"
           >
             <Send className="w-4 h-4" />
           </Button>
+        </div>
+        </div>
         </div>
       </CardContent>
     </Card>
@@ -2595,10 +2610,9 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
       {adaptation.showGrokInsights && (
         <div className="space-y-6">
           <AISummaryChat />
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <WeeklyReportGenerator />
-            <MarketTrendsSection />
-          </div>
+          <WeeklyReportGenerator />
+          {/* Market Trends disabled to save AI credits — re-enable when ready */}
+          {/* <MarketTrendsSection /> */}
         </div>
       )}
 
@@ -2612,14 +2626,38 @@ interface QuestionCardProps {
   onAnswer: (fieldId: string, value: string, label: string) => void;
   onSkip: () => void;
   disabled: boolean;
+  questionNumber?: number;
+  totalQuestions?: number;
 }
 
-function QuestionCard({ question, onAnswer, onSkip, disabled }: QuestionCardProps) {
+function QuestionCard({ question, onAnswer, onSkip, disabled, questionNumber, totalQuestions }: QuestionCardProps) {
+  const [answeredLabel, setAnsweredLabel] = useState<string | null>(null);
   const [customMode, setCustomMode] = useState(false);
   const [customValue, setCustomValue] = useState("");
 
+  const handleAnswer = (fieldId: string, value: string, label: string) => {
+    if (answeredLabel) return;
+    setAnsweredLabel(label);
+    onAnswer(fieldId, value, label);
+  };
+
   return (
     <div className="rounded-2xl bg-surface border border-primary/20 p-4 space-y-3 min-w-[280px] max-w-[80%]">
+      {questionNumber && (
+        <div className="flex items-center gap-2 mb-1">
+          {totalQuestions && totalQuestions > 1 ? (
+            <>
+              <div className="flex-1 h-1 bg-surface-light rounded-full overflow-hidden">
+                <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${(questionNumber / totalQuestions) * 100}%` }} />
+              </div>
+              <span className="text-[10px] text-text-muted font-medium whitespace-nowrap">Question {questionNumber} of {totalQuestions}</span>
+            </>
+          ) : (
+            <span className="text-[10px] text-text-muted font-medium">Question {questionNumber}</span>
+          )}
+        </div>
+      )}
+
       <div className="flex items-start gap-2">
         <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 mt-0.5">
           <Lightbulb className="w-3.5 h-3.5 text-primary" />
@@ -2627,14 +2665,19 @@ function QuestionCard({ question, onAnswer, onSkip, disabled }: QuestionCardProp
         <p className="text-sm text-foreground font-medium">{question.text}</p>
       </div>
 
-      {customMode ? (
+      {answeredLabel ? (
+        <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-primary/10 border border-primary/20 text-sm">
+          <Check className="w-4 h-4 text-primary flex-shrink-0" />
+          <span className="text-foreground">You selected: <strong>{answeredLabel}</strong></span>
+        </div>
+      ) : customMode ? (
         <div className="space-y-2">
           <input
             value={customValue}
             onChange={(e) => setCustomValue(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && customValue.trim()) {
-                onAnswer(question.field_id, customValue.trim(), customValue.trim());
+                handleAnswer(question.field_id, customValue.trim(), customValue.trim());
                 setCustomValue("");
                 setCustomMode(false);
               }
@@ -2647,7 +2690,7 @@ function QuestionCard({ question, onAnswer, onSkip, disabled }: QuestionCardProp
             <button
               onClick={() => {
                 if (customValue.trim()) {
-                  onAnswer(question.field_id, customValue.trim(), customValue.trim());
+                  handleAnswer(question.field_id, customValue.trim(), customValue.trim());
                   setCustomValue("");
                   setCustomMode(false);
                 }
@@ -2671,8 +2714,8 @@ function QuestionCard({ question, onAnswer, onSkip, disabled }: QuestionCardProp
           {question.options?.map((opt, idx) => (
             <button
               key={opt.value}
-              onClick={() => onAnswer(question.field_id, opt.value, opt.label)}
-              disabled={disabled}
+              onClick={() => handleAnswer(question.field_id, opt.value, opt.label)}
+              disabled={disabled || !!answeredLabel}
               className="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg bg-surface-light border border-border hover:border-primary/40 hover:bg-primary/5 text-sm transition-all disabled:opacity-50 cursor-pointer group"
             >
               <span className="w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-semibold flex items-center justify-center flex-shrink-0 group-hover:bg-primary/20 transition-colors">
@@ -2684,7 +2727,7 @@ function QuestionCard({ question, onAnswer, onSkip, disabled }: QuestionCardProp
           {question.allow_custom && (
             <button
               onClick={() => setCustomMode(true)}
-              disabled={disabled}
+              disabled={disabled || !!answeredLabel}
               className="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg border border-dashed border-border hover:border-primary/30 text-sm text-text-muted hover:text-foreground transition-all disabled:opacity-50 cursor-pointer"
             >
               <span className="w-6 h-6 rounded-full bg-surface-light text-text-muted text-xs flex items-center justify-center">✏️</span>
@@ -2694,15 +2737,17 @@ function QuestionCard({ question, onAnswer, onSkip, disabled }: QuestionCardProp
         </div>
       )}
 
-      <div className="flex items-center justify-between pt-1">
-        <button
-          onClick={onSkip}
-          disabled={disabled}
-          className="text-[10px] text-text-muted hover:text-foreground cursor-pointer disabled:opacity-50"
-        >
-          Skip this question →
-        </button>
-      </div>
+      {!answeredLabel && !customMode && (
+        <div className="flex items-center justify-between pt-1">
+          <button
+            onClick={onSkip}
+            disabled={disabled}
+            className="text-[10px] text-text-muted hover:text-foreground cursor-pointer disabled:opacity-50"
+          >
+            Skip this question →
+          </button>
+        </div>
+      )}
     </div>
   );
 }
