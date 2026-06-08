@@ -26,7 +26,7 @@ export function NotificationWatcher({ children }: { children: React.ReactNode })
   const addGoalFromWs = useGoalStore((s) => s.addGoalFromWs);
 
   const connect = useCallback(() => {
-    const userId = user?.uid || user?.id;
+    const userId = user?.uid;
     const orgId = organization?.id;
     if (!userId || !orgId) return;
 

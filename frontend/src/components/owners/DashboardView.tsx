@@ -11,6 +11,7 @@ import { useOrgChartStore } from "@/stores/orgChartStore";
 import { useMarketTrendsStore } from "@/stores/marketTrendsStore";
 import { useReportStore } from "@/stores/reportStore";
 import { useAIDashboardAdaptation, type OrgStage } from "@/hooks/useAIDashboardAdaptation";
+import { useSessionStore, type SessionMessage, type ClarifyingQuestion } from "@/stores/sessionStore";
 import {
   Sparkles, Flag, Calendar, Clock, CheckCircle, AlertCircle,
   TrendingUp, TrendingDown, DollarSign, Shield, MessageSquare,
@@ -18,7 +19,7 @@ import {
   BarChart3, Target, Zap, Activity, ChevronRight,
   AlertTriangle, Info, Users, User, FileSpreadsheet, Paperclip,
   PieChart as PieChartIcon, Link2, X, Building2, Network,
-  Briefcase, Search, ChevronDown, Plus, AtSign
+  Briefcase, Search, ChevronDown, Plus, AtSign, Lightbulb, ArrowRight
 } from "lucide-react";
 import {
   Card, CardHeader, CardTitle, CardDescription, CardContent,
@@ -1052,64 +1053,85 @@ function GoalSection() {
 }
 
 function AISummaryChat() {
-  const [messages, setMessages] = useState<{ role: string; content: string }[]>(() => {
-    try {
-      const saved = localStorage.getItem("yesboss-aisummary-chat");
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return [];
-  });
+  const [messages, setMessages] = useState<SessionMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [showUrlInput, setShowUrlInput] = useState(false);
   const [urlValue, setUrlValue] = useState("");
   const [urlLoading, setUrlLoading] = useState(false);
-  const [loadedFromApi, setLoadedFromApi] = useState(false);
   const [mentionOpen, setMentionOpen] = useState(false);
   const [mentionQuery, setMentionQuery] = useState("");
   const [mentionStart, setMentionStart] = useState<number>(-1);
   const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
+  const [showSessions, setShowSessions] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const mentionListRef = useRef<HTMLDivElement>(null);
+  const { user, role } = useAuth();
   const { organization } = useOrganizationStore();
   const { goals } = useGoalStore();
   const { tasks, createTask } = useTaskStore();
   const { members } = useOrgChartStore();
   const { addKPI } = useKPIStore();
+  const {
+    sessions, activeSessionId, fetchSessions, createSession,
+    setActiveSession, addMessage, updateLastMessage, updateSessionContext,
+    deleteSession, renameSession,
+  } = useSessionStore();
+  const initRef = useRef(false);
+
+  useEffect(() => {
+    if (!initRef.current && organization?.id) {
+      initRef.current = true;
+      fetchSessions(organization.id);
+    }
+  }, [organization?.id, fetchSessions]);
+
+  const activeSession = sessions.find((s) => s.id === activeSessionId);
+
+  useEffect(() => {
+    if (activeSession) {
+      setMessages(activeSession.messages);
+    }
+  }, [activeSession?.id]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  useEffect(() => {
-    if (!organization?.id || loadedFromApi) return;
-    fetch(`${API_URL}/executive-chat/history?organization_id=${organization.id}`)
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => {
-        if (data?.history?.length) {
-          const reversed = [...data.history].reverse().map((m: any) => ({
-            role: m.role,
-            content: m.content,
-          }));
-          setMessages(reversed);
-        }
-        setLoadedFromApi(true);
-      })
-      .catch(() => setLoadedFromApi(true));
-  }, [organization?.id, loadedFromApi]);
+  const ensureSession = async () => {
+    if (activeSession) return activeSession;
+    if (!organization?.id) return null;
+    const s = await createSession(organization.id, "Dashboard Chat");
+    return s || null;
+  };
 
-  const saveMessages = useCallback((msgs: { role: string; content: string }[]) => {
-    try {
-      localStorage.setItem("yesboss-aisummary-chat", JSON.stringify(msgs));
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    if (messages.length > 0) saveMessages(messages);
-  }, [messages, saveMessages]);
+  const apiAsk = async (text: string, ctx?: Record<string, string>) => {
+    const s = activeSession || await ensureSession();
+    if (!s) return null;
+    const mergedCtx = ctx ? { ...s.context, ...ctx } : s.context;
+    const history = messages.map((m) => ({ role: m.role, content: m.content || "" }));
+    const res = await fetch(`${API_URL}/assistant/ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: text,
+        session_id: s.id,
+        session_context: mergedCtx,
+        context: {
+          user_email: user?.email,
+          organization_id: organization?.id,
+          organization_name: organization?.name,
+          role: role || "owner",
+        },
+        conversation_history: history.slice(-10),
+      }),
+    });
+    if (!res.ok) throw new Error("Ask failed");
+    return res.json();
+  };
 
   const mentionSuggestions = useMemo(() => {
     if (!members?.length) return [] as any[];
@@ -1225,14 +1247,17 @@ function AISummaryChat() {
       .replace(/[*_`>#-]+/g, " ")
       .replace(/\s+/g, " ")
       .trim();
-    const metricMatch = cleaned.match(
-      /\b([A-Z][A-Za-z0-9 &/'-]{2,40}?(?:\s+(?:Rate|Ratio|Count|Score|Index|Margin|Growth|Trend|Value|Volume|NPS|CAC|LTV|MRR|ARR|Spend|Revenue|Cost|Sales|Conversion|Retention|Churn)))\b/
+
+    const metricSuffixes = "Rate|Ratio|Count|Score|Index|Margin|Growth|Trend|Volume|NPS|CAC|LTV|MRR|ARR|Velocity|Efficiency|Productivity|Engagement|Satisfaction|Pipeline|Runway|Burn|Retention|Conversion|Churn|Forecast|Throughput";
+
+    const suffixMatch = cleaned.match(
+      new RegExp("\\b([A-Za-z][A-Za-z0-9 &/'-]{2,50}?)\\s+(?:" + metricSuffixes + ")\\b", "i")
     );
-    if (metricMatch) return metricMatch[1].slice(0, 60);
-    const firstBold = reply.match(/\*\*([^*\n]{4,60})\*\*/);
-    if (firstBold) return firstBold[1].trim().slice(0, 60);
-    const firstLine = cleaned.split(/[.\n!?]/)[0]?.trim();
-    if (firstLine && firstLine.length >= 4 && firstLine.length <= 60) return firstLine;
+    if (suffixMatch) {
+      const t = suffixMatch[0].trim();
+      if (t.length >= 3 && t.length <= 60) return t.charAt(0).toUpperCase() + t.slice(1);
+    }
+
     return null;
   }, []);
 
@@ -1250,46 +1275,31 @@ function AISummaryChat() {
         "";
       const finalTitle = (title || extractKpiTitleFromAssistant(baseSource) || "").trim();
       if (!finalTitle) {
-        const errMsgs = [
-          ...messages,
-          {
-            role: "assistant" as const,
-            content:
-              "I couldn't pin down which metric to track as a KPI from our last reply. Could you name it? (e.g. *Customer Churn Rate*)",
-          },
-        ];
-        setMessages(errMsgs);
-        saveMessages(errMsgs);
+        setMessages([...messages, { role: "assistant", content: "I couldn't pin down which metric to track as a KPI from our last reply. Could you name it? (e.g. *Customer Churn Rate*)", timestamp: Date.now() }]);
         return;
       }
       const created = addKPI(organization.id, {
-        title: finalTitle,
-        source: "ai",
-        sourceDetail: "Added from AI Business Analytics chat",
-        category: "growth",
-        icon: "BarChart3",
+        title: finalTitle, source: "ai", sourceDetail: "Added from AI Business Analytics chat", category: "growth", icon: "BarChart3",
       });
       const confirm = created
         ? `✅ Added **${finalTitle}** as a new KPI card. It will start showing values as soon as the dashboard refreshes (every 30s).`
         : `I couldn't add that KPI right now — please try again.`;
-      const next = [
-        ...messages,
-        { role: "user" as const, content: `Make this a KPI: ${finalTitle}` },
-        { role: "assistant" as const, content: confirm },
-      ];
-      setMessages(next);
-      saveMessages(next);
+      setMessages([...messages, { role: "user", content: `Make this a KPI: ${finalTitle}`, timestamp: Date.now() }, { role: "assistant", content: confirm, timestamp: Date.now() }]);
     },
-    [organization?.id, messages, addKPI, extractKpiTitleFromAssistant, saveMessages]
+    [organization?.id, messages, addKPI, extractKpiTitleFromAssistant]
   );
 
   const sendMessage = async () => {
     if (!input.trim() || loading) return;
     const userMsg = input.trim();
     setInput("");
-    const updated = [...messages, { role: "user" as const, content: userMsg }];
+
+    const s = activeSession || await ensureSession();
+    if (!s) return;
+
+    const userMsgObj: SessionMessage = { role: "user", content: userMsg, timestamp: Date.now() };
+    const updated = [...messages, userMsgObj];
     setMessages(updated);
-    saveMessages(updated);
 
     const mentionTask = extractMentionTask(userMsg);
     if (mentionTask && organization?.id) {
@@ -1303,26 +1313,18 @@ function AISummaryChat() {
         if (typeof window !== "undefined") {
           window.dispatchEvent(new CustomEvent("kpi-goal-updated", { detail: { source: "ai" } }));
         }
-        const next = [
+        const next: SessionMessage[] = [
           ...updated,
-          {
-            role: "assistant" as const,
-            content: `✅ Task **"${mentionTask.taskTitle}"** assigned to **${mentionTask.assignee.full_name}** and saved.`,
-          },
+          { role: "assistant", content: `✅ Task **"${mentionTask.taskTitle}"** assigned to **${mentionTask.assignee.full_name}** and saved.`, timestamp: Date.now() },
         ];
         setMessages(next);
-        saveMessages(next);
         return;
       } catch (err) {
-        const next = [
+        const next: SessionMessage[] = [
           ...updated,
-          {
-            role: "assistant" as const,
-            content: `❌ I couldn't save that task: ${(err as Error)?.message || "unknown error"}. Try again in a moment.`,
-          },
+          { role: "assistant", content: `❌ I couldn't save that task: ${(err as Error)?.message || "unknown error"}. Try again in a moment.`, timestamp: Date.now() },
         ];
         setMessages(next);
-        saveMessages(next);
         return;
       }
     }
@@ -1331,75 +1333,69 @@ function AISummaryChat() {
       const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant")?.content;
       const title = extractKpiTitleFromAssistant(lastAssistant || "");
       if (title) {
-        const created = addKPI(organization.id, {
-          title,
-          source: "ai",
-          sourceDetail: "Added from AI Business Analytics chat",
-          category: "growth",
-          icon: "BarChart3",
-        });
-        const confirm = created
-          ? `✅ Added **${title}** as a new KPI card on your dashboard.`
-          : `I couldn't add that KPI right now.`;
-        const next = [
-          ...updated,
-          { role: "assistant" as const, content: confirm },
-        ];
-        setMessages(next);
-        saveMessages(next);
+        const created = addKPI(organization.id, { title, source: "ai", sourceDetail: "Added from AI Business Analytics chat", category: "growth", icon: "BarChart3" });
+        const confirm = created ? `✅ Added **${title}** as a new KPI card on your dashboard.` : `I couldn't add that KPI right now.`;
+        setMessages([...updated, { role: "assistant", content: confirm, timestamp: Date.now() }]);
+        return;
+      } else {
+        setMessages([...updated, { role: "assistant", content: "I see you want to track something as a KPI, but I couldn't identify which metric from our last reply. Could you tell me the specific metric name you'd like to track? (e.g. *Customer Churn Rate*)", timestamp: Date.now() }]);
         return;
       }
     }
 
     setLoading(true);
-
-    fetch(`${API_URL}/executive-chat/history?organization_id=${organization?.id}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ role: "user", content: userMsg }),
-    }).catch(() => {});
+    const loadingMsg: SessionMessage = { role: "assistant", content: "", is_loading: true, timestamp: Date.now() };
+    setMessages([...updated, loadingMsg]);
 
     try {
-      const history = messages.map((m) => ({
-        role: m.role === "assistant" ? "assistant" : "user",
-        content: m.content,
-      }));
+      const data = await apiAsk(userMsg);
+      if (!data) return;
 
-      const response = await fetch(`${API_URL}/executive-chat/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: userMsg,
-          organization_id: organization?.id,
-          context: {
-            organization: organization?.name,
-            industry: organization?.industry,
-            micro_vertical: organization?.micro_vertical,
-          },
-          history,
-        }),
-      });
-
-      if (!response.ok) throw new Error("Chat failed");
-
-      const data = await response.json();
-      const reply = data.message || "I've analyzed your query. Here are my insights...";
-      const final = [...updated, { role: "assistant" as const, content: reply }];
-      setMessages(final);
-      saveMessages(final);
-
-      fetch(`${API_URL}/executive-chat/history?organization_id=${organization?.id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: "assistant", content: reply }),
-      }).catch(() => {});
+      if (data.type === "question" && data.question) {
+        const q = data.question as ClarifyingQuestion;
+        setMessages([...updated, { role: "assistant", content: q.text, is_question: true, question_data: q, timestamp: Date.now() }]);
+      } else if (data.type === "answer" && data.answer) {
+        let answer = data.answer;
+        if (data.follow_up) answer += "\n\n" + data.follow_up;
+        setMessages([...updated, { role: "assistant", content: answer, is_answer: true, timestamp: Date.now() }]);
+      } else {
+        setMessages([...updated, { role: "assistant", content: "Thanks! Let me know if you have more questions.", timestamp: Date.now() }]);
+      }
     } catch {
-      const errMsgs = [
-        ...updated,
-        { role: "assistant" as const, content: "I'm having trouble connecting to my analysis engine. Please try again or check your connection." },
-      ];
-      setMessages(errMsgs);
-      saveMessages(errMsgs);
+      setMessages([...updated, { role: "assistant", content: "I'm having trouble connecting to my analysis engine. Please try again.", timestamp: Date.now() }]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAnswerQuestion = async (fieldId: string, value: string, valueLabel: string) => {
+    const s = activeSession || await ensureSession();
+    if (!s) return;
+
+    const userMsg: SessionMessage = { role: "user", content: valueLabel, timestamp: Date.now() };
+    const updated = [...messages, userMsg];
+    setMessages(updated);
+
+    updateSessionContext(s.id, { [fieldId]: value });
+    setLoading(true);
+    setMessages([...updated, { role: "assistant", content: "", is_loading: true, timestamp: Date.now() }]);
+
+    try {
+      const data = await apiAsk(valueLabel, { ...s.context, [fieldId]: value });
+      if (!data) return;
+
+      if (data.type === "question" && data.question) {
+        const q = data.question as ClarifyingQuestion;
+        setMessages([...updated, { role: "assistant", content: q.text, is_question: true, question_data: q, timestamp: Date.now() }]);
+      } else if (data.type === "answer" && data.answer) {
+        let answer = data.answer;
+        if (data.follow_up) answer += "\n\n" + data.follow_up;
+        setMessages([...updated, { role: "assistant", content: answer, is_answer: true, timestamp: Date.now() }]);
+      } else {
+        setMessages([...updated, { role: "assistant", content: "Thanks! Let me know if you have more questions.", timestamp: Date.now() }]);
+      }
+    } catch {
+      setMessages([...updated, { role: "assistant", content: "Something went wrong. Please try again.", timestamp: Date.now() }]);
     } finally {
       setLoading(false);
     }
@@ -1429,16 +1425,10 @@ function AISummaryChat() {
       const data = await response.json();
       setMessages((prev) => [
         ...prev,
-        {
-          role: "user",
-          content: `📎 Uploaded: **${file.name}**`,
-        },
-        {
-          role: "assistant",
-          content: data.message
+        { role: "user", content: `📎 Uploaded: **${file.name}**`, timestamp: Date.now() },
+        { role: "assistant", content: data.message
             ? `✅ ${data.message}\n\n**Preview:** ${data.text_preview?.substring(0, 300)}...`
-            : `✅ File **${file.name}** uploaded and analyzed! Ask me anything about it.`,
-        },
+            : `✅ File **${file.name}** uploaded and analyzed! Ask me anything about it.`, timestamp: Date.now() },
       ]);
       if (typeof window !== "undefined") {
         window.dispatchEvent(
@@ -1448,10 +1438,7 @@ function AISummaryChat() {
     } catch (err: any) {
       setMessages((prev) => [
         ...prev,
-        {
-          role: "assistant",
-          content: `❌ Failed to upload and analyze **${file.name}**: ${err.message || "Unknown error"}`,
-        },
+        { role: "assistant", content: `❌ Failed to upload and analyze **${file.name}**: ${err.message || "Unknown error"}`, timestamp: Date.now() },
       ]);
     } finally {
       setUploading(false);
@@ -1470,7 +1457,7 @@ function AISummaryChat() {
     formData.append("url", url);
     formData.append("organization_id", organization.id);
 
-    setMessages((prev) => [...prev, { role: "user", content: `📎 Import from URL: ${url}` }]);
+    setMessages((prev) => [...prev, { role: "user", content: `📎 Import from URL: ${url}`, timestamp: Date.now() }]);
 
     try {
       const response = await fetch(`${API_URL}/executive-chat/upload-url`, {
@@ -1485,10 +1472,7 @@ function AISummaryChat() {
       const data = await response.json();
       setMessages((prev) => [
         ...prev,
-        {
-          role: "assistant",
-          content: `✅ ${data.message}\n\n**Preview:** ${data.text_preview?.substring(0, 300)}...`,
-        },
+        { role: "assistant", content: `✅ ${data.message}\n\n**Preview:** ${data.text_preview?.substring(0, 300)}...`, timestamp: Date.now() },
       ]);
       if (typeof window !== "undefined") {
         window.dispatchEvent(
@@ -1498,7 +1482,7 @@ function AISummaryChat() {
     } catch (err: any) {
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: `❌ Failed to import from URL: ${err.message || "Unknown error"}` },
+        { role: "assistant", content: `❌ Failed to import from URL: ${err.message || "Unknown error"}`, timestamp: Date.now() },
       ]);
     } finally {
       setUrlLoading(false);
@@ -1512,6 +1496,52 @@ function AISummaryChat() {
           <MessageSquare className="w-5 h-5 text-primary" />
           <CardTitle>AI Business Analytics</CardTitle>
           <Badge variant="default" className="text-[10px] ml-2">Real-time</Badge>
+        </div>
+        <div className="flex items-center gap-1.5 mt-1">
+          <div className="relative">
+            <button
+              onClick={() => setShowSessions(!showSessions)}
+              className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] bg-surface-light border border-border hover:border-primary/30 text-text-muted hover:text-foreground transition-colors cursor-pointer"
+            >
+              <MessageSquare className="w-3 h-3" />
+              <span className="max-w-[120px] truncate">{activeSession?.title || "Dashboard Chat"}</span>
+              <ChevronDown className="w-3 h-3" />
+            </button>
+            {showSessions && (
+              <div className="absolute top-full left-0 mt-1 w-52 rounded-xl border border-border bg-surface shadow-xl z-20 py-1 max-h-48 overflow-y-auto">
+                {sessions.length === 0 && (
+                  <p className="px-3 py-2 text-xs text-text-muted">No sessions yet</p>
+                )}
+                {sessions.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => { setActiveSession(s.id); setShowSessions(false); setMessages(s.messages); }}
+                    className={`w-full text-left flex items-center gap-2 px-3 py-2 text-xs hover:bg-surface-light transition-colors cursor-pointer ${s.id === activeSessionId ? "bg-primary/10 text-primary font-medium" : "text-text-muted"}`}
+                  >
+                    <MessageSquare className="w-3 h-3 flex-shrink-0" />
+                    <span className="flex-1 truncate">{s.title}</span>
+                    {s.messages.length > 0 && (
+                      <span className="text-[9px] text-text-muted/50">{s.messages.length} msgs</span>
+                    )}
+                  </button>
+                ))}
+                <div className="border-t border-border/60 mt-1 pt-1">
+                  <button
+                    onClick={async () => {
+                      if (organization?.id) {
+                        await createSession(organization.id, "New Chat");
+                        setShowSessions(false);
+                      }
+                    }}
+                    className="w-full text-left flex items-center gap-2 px-3 py-2 text-xs text-primary hover:bg-surface-light transition-colors cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    New session
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="flex-1 flex flex-col min-h-0 pt-4">
@@ -1567,63 +1597,86 @@ function AISummaryChat() {
               </div>
             </div>
           )}
-          {messages.map((msg, i) => (
-            <div
-              key={i}
-              className={`flex items-start gap-3 ${
-                msg.role === "user" ? "flex-row-reverse" : ""
-              } animate-in fade-in slide-in-from-bottom-1 duration-200`}
-            >
+          {messages.map((msg, i) => {
+            if (msg.is_loading) {
+              return (
+                <div key={i} className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-surface border border-border/50 flex items-center justify-center flex-shrink-0">
+                    <Sparkles className="w-4 h-4 text-primary" />
+                  </div>
+                  <div className="claude-loader" />
+                </div>
+              );
+            }
+            if (msg.is_question && msg.question_data) {
+              return (
+                <div key={i} className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-surface border border-border/50 flex items-center justify-center flex-shrink-0">
+                    <Sparkles className="w-4 h-4 text-primary" />
+                  </div>
+                  <QuestionCard
+                    question={msg.question_data}
+                    onAnswer={(fieldId, value, label) => handleAnswerQuestion(fieldId, value, label)}
+                    onSkip={() => sendMessage()}
+                    disabled={loading}
+                  />
+                </div>
+              );
+            }
+            return (
               <div
-                className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                  msg.role === "user"
-                    ? "bg-gradient-to-br from-primary to-purple-500"
-                    : "bg-surface border border-border/50"
-                }`}
+                key={i}
+                className={`flex items-start gap-3 ${
+                  msg.role === "user" ? "flex-row-reverse" : ""
+                } animate-in fade-in slide-in-from-bottom-1 duration-200`}
               >
-                {msg.role === "user" ? (
-                  <span className="text-white font-bold text-xs">U</span>
-                ) : (
-                  <Sparkles className="w-4 h-4 text-primary" />
-                )}
+                <div
+                  className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                    msg.role === "user"
+                      ? "bg-gradient-to-br from-primary to-purple-500"
+                      : "bg-surface border border-border/50"
+                  }`}
+                >
+                  {msg.role === "user" ? (
+                    <span className="text-white font-bold text-xs">U</span>
+                  ) : (
+                    <Sparkles className="w-4 h-4 text-primary" />
+                  )}
+                </div>
+                <div
+                  className={`max-w-[80%] p-3 rounded-2xl text-sm leading-relaxed ${
+                    msg.role === "user"
+                      ? "bg-gradient-to-br from-primary/20 to-purple-500/20 text-foreground"
+                      : "bg-surface border border-border/50 text-text-muted"
+                  }`}
+                >
+                  {msg.role === "assistant" ? (
+                    <>
+                      <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                      {(extractKpiTitleFromAssistant(msg.content)) && (
+                        <div className="mt-2 pt-2 border-t border-border/40 flex items-center gap-1.5 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => handleAddAsKPI(undefined, msg.content)}
+                            className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 hover:border-primary/50 transition-colors cursor-pointer"
+                            title={`Add "${extractKpiTitleFromAssistant(msg.content)}" as a KPI`}
+                          >
+                            <Plus className="w-3 h-3" />
+                            Add as KPI
+                          </button>
+                          <span className="text-[10px] text-text-muted/70">
+                            or type: <code className="px-1 rounded bg-surface-light">add this as a KPI</code>
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    msg.content
+                  )}
+                </div>
               </div>
-              <div
-                className={`max-w-[80%] p-3 rounded-2xl text-sm leading-relaxed ${
-                  msg.role === "user"
-                    ? "bg-gradient-to-br from-primary/20 to-purple-500/20 text-foreground"
-                    : "bg-surface border border-border/50 text-text-muted"
-                }`}
-              >
-                {msg.role === "assistant" ? (
-                  <>
-                    <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
-                    <div className="mt-2 pt-2 border-t border-border/40 flex items-center gap-1.5 flex-wrap">
-                      <button
-                        type="button"
-                        onClick={() => handleAddAsKPI(undefined, msg.content)}
-                        className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 hover:border-primary/50 transition-colors cursor-pointer"
-                        title="Add this metric to your KPI dashboard"
-                      >
-                        <Plus className="w-3 h-3" />
-                        Add as KPI
-                      </button>
-                      <span className="text-[10px] text-text-muted/70">
-                        or type: <code className="px-1 rounded bg-surface-light">add this as a KPI</code>
-                      </span>
-                    </div>
-                  </>
-                ) : (
-                  msg.content
-                )}
-              </div>
-            </div>
-          ))}
-          {loading && (
-            <div className="flex items-center gap-2 text-text-muted text-sm">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Analyzing your business data...
-            </div>
-          )}
+            );
+          })}
           {uploading && (
             <div className="flex items-center gap-2 text-text-muted text-sm">
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -2550,6 +2603,106 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
       )}
 
       {adaptation.showRevenueRisk && <RevenueRiskRadar />}
+    </div>
+  );
+}
+
+interface QuestionCardProps {
+  question: ClarifyingQuestion;
+  onAnswer: (fieldId: string, value: string, label: string) => void;
+  onSkip: () => void;
+  disabled: boolean;
+}
+
+function QuestionCard({ question, onAnswer, onSkip, disabled }: QuestionCardProps) {
+  const [customMode, setCustomMode] = useState(false);
+  const [customValue, setCustomValue] = useState("");
+
+  return (
+    <div className="rounded-2xl bg-surface border border-primary/20 p-4 space-y-3 min-w-[280px] max-w-[80%]">
+      <div className="flex items-start gap-2">
+        <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+          <Lightbulb className="w-3.5 h-3.5 text-primary" />
+        </div>
+        <p className="text-sm text-foreground font-medium">{question.text}</p>
+      </div>
+
+      {customMode ? (
+        <div className="space-y-2">
+          <input
+            value={customValue}
+            onChange={(e) => setCustomValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && customValue.trim()) {
+                onAnswer(question.field_id, customValue.trim(), customValue.trim());
+                setCustomValue("");
+                setCustomMode(false);
+              }
+            }}
+            placeholder="Type your answer..."
+            autoFocus
+            className="w-full px-3 py-2 rounded-lg bg-surface-light border border-border focus:border-primary focus:outline-none text-sm"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                if (customValue.trim()) {
+                  onAnswer(question.field_id, customValue.trim(), customValue.trim());
+                  setCustomValue("");
+                  setCustomMode(false);
+                }
+              }}
+              disabled={!customValue.trim() || disabled}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
+            >
+              <ArrowRight className="w-3 h-3" />
+              Submit
+            </button>
+            <button
+              onClick={() => setCustomMode(false)}
+              className="px-3 py-1.5 rounded-lg bg-surface-light text-text-muted text-xs hover:text-foreground cursor-pointer"
+            >
+              Back
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          {question.options?.map((opt, idx) => (
+            <button
+              key={opt.value}
+              onClick={() => onAnswer(question.field_id, opt.value, opt.label)}
+              disabled={disabled}
+              className="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg bg-surface-light border border-border hover:border-primary/40 hover:bg-primary/5 text-sm transition-all disabled:opacity-50 cursor-pointer group"
+            >
+              <span className="w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-semibold flex items-center justify-center flex-shrink-0 group-hover:bg-primary/20 transition-colors">
+                {idx + 1}
+              </span>
+              <span className="text-foreground">{opt.label}</span>
+            </button>
+          ))}
+          {question.allow_custom && (
+            <button
+              onClick={() => setCustomMode(true)}
+              disabled={disabled}
+              className="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg border border-dashed border-border hover:border-primary/30 text-sm text-text-muted hover:text-foreground transition-all disabled:opacity-50 cursor-pointer"
+            >
+              <span className="w-6 h-6 rounded-full bg-surface-light text-text-muted text-xs flex items-center justify-center">✏️</span>
+              <span>Type my own answer</span>
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="flex items-center justify-between pt-1">
+        <button
+          onClick={onSkip}
+          disabled={disabled}
+          className="text-[10px] text-text-muted hover:text-foreground cursor-pointer disabled:opacity-50"
+        >
+          Skip this question →
+        </button>
+      </div>
     </div>
   );
 }

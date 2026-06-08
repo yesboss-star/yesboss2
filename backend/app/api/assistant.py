@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import re
+import uuid
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
@@ -1120,3 +1121,295 @@ async def assistant_chat(request: ChatRequest):
 async def _async_snapshot(db, org_id: str) -> Dict[str, Any]:
     """Async wrapper around the snapshot collector (kept for symmetry)."""
     return await _gather_org_snapshot(db, org_id)
+
+
+# ---------------------------------------------------------------------------
+# Smart Ask — answer directly OR ask clarifying questions
+# ---------------------------------------------------------------------------
+
+ASK_SYSTEM = """You are YesBoss's AI Business Analyst. Your job is to help business owners by either answering their question directly or asking smart clarifying questions.
+
+You have access to:
+1. The company's data snapshot (org profile, documents, goals, tasks, employees, previous chat context)
+2. A session context bag of previously gathered information from this session
+
+DECIDE: Can you give a SPECIFIC, USEFUL answer right now?
+
+YES → Give the answer. Be specific, reference company data when available. Lead with the key insight, then 2-5 bullets. End with a follow-up question or next step suggestion.
+
+NO → You need more information. Ask a SINGLE clarifying question. Structure it with:
+- A clear question
+- 3-5 numbered multiple-choice options covering the most likely answers
+- The field_id for what you're asking about (use snake_case like "monthly_revenue", "team_size", "main_challenge", etc.)
+- Allow the user to type a custom answer too
+
+RULES:
+- Never ask more than ONE question at a time
+- Each question must have numbered options (at least 3) plus custom text input
+- After the user answers, re-evaluate if you can answer NOW with the new context
+- Keep asking until you have enough to give a specific answer
+- When answering, be specific and reference company data by name
+- Never invent numbers — if you don't know, ask
+
+Respond ONLY with valid JSON in this exact format:
+
+For questions:
+{"type":"question","question":{"id":"q_xxx","field_id":"monthly_revenue","text":"What's your current monthly revenue?","options":[{"value":"under_10k","label":"Under $10K"},{"value":"10k_50k","label":"$10K - $50K"},{"value":"50k_200k","label":"$50K - $200K"},{"value":"over_200k","label":"Over $200K"}],"allow_custom":true},"answer":null}
+
+For answers:
+{"type":"answer","question":null,"answer":"Your specific answer here...","follow_up":"Optional follow-up question or next step suggestion."}"""
+
+
+class AskRequest(BaseModel):
+    message: str
+    session_id: Optional[str] = None
+    session_context: Optional[Dict[str, str]] = None
+    context: Optional[ChatContext] = None
+    conversation_history: Optional[List[Dict[str, str]]] = None
+
+
+class AskResponse(BaseModel):
+    type: str  # "question" | "answer"
+    question: Optional[Dict[str, Any]] = None
+    answer: Optional[str] = None
+    follow_up: Optional[str] = None
+    session_id: Optional[str] = None
+
+
+@router.post("/ask", response_model=AskResponse)
+async def smart_ask(request: AskRequest):
+    """Ask a question. If we have enough context, answer directly.
+    If not, return clarifying questions to gather context."""
+    text = (request.message or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="message is required")
+
+    ctx = request.context or ChatContext()
+    org_id = ctx.organization_id
+    db = get_database()
+
+    session_context = dict(request.session_context or {})
+    snap: Dict[str, Any] = {}
+    if db is not None and org_id:
+        try:
+            snap = await _gather_org_snapshot(db, org_id)
+        except Exception as e:
+            logger.warning("ask: snapshot failed: %s", e)
+
+    org_p = snap.get("org_profile") or {}
+    docs = snap.get("documents") or {}
+    goals = snap.get("goals") or {}
+    tasks = snap.get("tasks") or {}
+    employees = snap.get("employees") or {}
+
+    org_block = f"Organization: {ctx.organization_name or 'your business'}\n"
+    if org_p:
+        org_block += "\n".join(f"- {k}: {v}" for k, v in org_p.items() if v) + "\n"
+
+    doc_block = ""
+    if docs and (docs.get("analyzed_documents") or 0) > 0:
+        doc_block = f"Documents: {docs.get('analyzed_documents', 0)} analyzed\n"
+        for d in (docs.get("documents") or [])[:5]:
+            doc_block += f"- {d.get('filename')}: {(d.get('summary') or '')[:150]}\n"
+
+    goals_block = ""
+    if goals.get("titles"):
+        goals_block = f"Active goals ({goals.get('active', 0)}):\n" + "\n".join(f"- {t}" for t in goals["titles"][:5]) + "\n"
+
+    emp_block = ""
+    if employees.get("count", 0) > 0:
+        emp_block = f"Team: {employees['count']} people\n"
+
+    ctx_block = ""
+    if session_context:
+        ctx_block = "Session context (gathered so far):\n" + "\n".join(f"- {k}: {v}" for k, v in session_context.items()) + "\n"
+
+    history = (request.conversation_history or [])[-6:]
+    history_block = "\n".join(f"{m.get('role','')}: {m.get('content','')[:200]}" for m in history) if history else ""
+
+    prompt = (
+        f"{org_block}\n"
+        f"{doc_block}"
+        f"{goals_block}"
+        f"{emp_block}"
+        f"{ctx_block}\n"
+        f"Recent chat:\n{history_block}\n\n"
+        f"User's question:\n\"{text}\"\n\n"
+        "Decide: can you give a specific answer now? If yes, answer. If not, ask ONE clarifying question with numbered options."
+    )
+
+    fallback_question = {
+        "type": "question",
+        "question": {
+            "id": "q_fallback",
+            "field_id": "context",
+            "text": "Could you tell me more about what you're looking for so I can give a specific answer?",
+            "options": [
+                {"value": "financial", "label": "Financial/metrics info"},
+                {"value": "team_ops", "label": "Team/operations info"},
+                {"value": "strategy", "label": "Strategy/growth advice"},
+                {"value": "other", "label": "Something else"},
+            ],
+            "allow_custom": True,
+        },
+        "answer": None,
+    }
+
+    try:
+        raw = await get_ai_response(
+            prompt=prompt,
+            system_prompt=ASK_SYSTEM,
+            temperature=0.4,
+            max_tokens=800,
+        )
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```(?:json)?", "", cleaned).strip()
+            cleaned = re.sub(r"```$", "", cleaned).strip()
+        m = re.search(r"\{.*\}", cleaned, re.DOTALL)
+        if m:
+            cleaned = m.group(0)
+        parsed = json.loads(cleaned)
+        parsed_type = parsed.get("type", "question")
+
+        if parsed_type == "answer":
+            answer_text = (parsed.get("answer") or "").strip()
+            if not answer_text:
+                return AskResponse(**fallback_question)
+            return AskResponse(
+                type="answer",
+                answer=answer_text,
+                follow_up=parsed.get("follow_up"),
+                session_id=request.session_id,
+            )
+        else:
+            q = parsed.get("question", {})
+            q.setdefault("id", f"q_{uuid.uuid4().hex[:6]}")
+            q.setdefault("allow_custom", True)
+            q.setdefault("options", [{"value": "tell_me_more", "label": "Tell me more"}])
+            return AskResponse(
+                type="question",
+                question=q,
+                session_id=request.session_id,
+            )
+    except Exception as e:
+        logger.warning(f"smart_ask failed: {e}")
+        return AskResponse(**fallback_question)
+
+
+# ---------------------------------------------------------------------------
+# Session management
+# ---------------------------------------------------------------------------
+
+class SessionCreateRequest(BaseModel):
+    organization_id: str
+    title: Optional[str] = None
+
+
+class SessionUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    context: Optional[Dict[str, str]] = None
+
+
+@router.post("/sessions")
+async def create_session(request: SessionCreateRequest):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+    now = datetime.utcnow()
+    session = {
+        "title": request.title or "New Chat",
+        "organization_id": request.organization_id,
+        "messages": [],
+        "context": {},
+        "created_at": now,
+        "updated_at": now,
+    }
+    result = db.assistant_sessions.insert_one(session)
+    session["_id"] = str(result.inserted_id)
+    return session
+
+
+@router.get("/sessions")
+async def list_sessions(organization_id: str):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+    sessions = list(
+        db.assistant_sessions.find({"organization_id": organization_id})
+        .sort("updated_at", -1)
+        .limit(50)
+    )
+    for s in sessions:
+        s["_id"] = str(s["_id"])
+    return {"sessions": sessions}
+
+
+@router.get("/sessions/{session_id}")
+async def get_session(session_id: str):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+    try:
+        s = db.assistant_sessions.find_one({"_id": ObjectId(session_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found")
+    s["_id"] = str(s["_id"])
+    return s
+
+
+@router.put("/sessions/{session_id}")
+async def update_session(session_id: str, request: SessionUpdateRequest):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+    update = {"updated_at": datetime.utcnow()}
+    if request.title is not None:
+        update["title"] = request.title
+    if request.context is not None:
+        update["context"] = request.context
+    try:
+        db.assistant_sessions.update_one(
+            {"_id": ObjectId(session_id)},
+            {"$set": update},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not update session: {e}")
+    return {"success": True}
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+    try:
+        db.assistant_sessions.delete_one({"_id": ObjectId(session_id)})
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not delete session: {e}")
+    return {"success": True}
+
+
+class AddMessageRequest(BaseModel):
+    message: Dict[str, Any]
+
+
+@router.post("/sessions/{session_id}/messages")
+async def add_session_message(session_id: str, request: AddMessageRequest):
+    """Append a message to a session's message history."""
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+    try:
+        db.assistant_sessions.update_one(
+            {"_id": ObjectId(session_id)},
+            {
+                "$push": {"messages": request.message},
+                "$set": {"updated_at": datetime.utcnow()},
+            },
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not add message: {e}")
+    return {"success": True}

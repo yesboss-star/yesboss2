@@ -49,19 +49,45 @@ class ExecutiveResponse(BaseModel):
     timestamp: str
 
 
+async def _fetch_url_text(url: str, timeout: float = 30.0, max_retries: int = 1) -> str:
+    """Fetch a URL and return its text content, handling gzip decompression errors."""
+    import httpx
+    last_error = None
+    for attempt in range(1 + max_retries):
+        try:
+            headers = {}
+            if attempt > 0:
+                headers["Accept-Encoding"] = "identity"
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+                resp = await client.get(url, headers=headers)
+                resp.raise_for_status()
+                return resp.text
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(status_code=400, detail=f"Failed to fetch URL (status {e.response.status_code})")
+        except httpx.TimeoutException:
+            raise HTTPException(status_code=400, detail="URL fetch timed out")
+        except Exception as e:
+            err_str = str(e)
+            if "decompressobj" in err_str or "decompress" in err_str.lower() or "gzip" in err_str.lower():
+                last_error = e
+                continue
+            raise HTTPException(status_code=400, detail=f"Could not fetch URL: {err_str}")
+    raise HTTPException(status_code=400, detail=f"Could not fetch URL (decompression error after retry): {last_error}")
+
+
 async def scrape_website_text(url: str) -> str:
     try:
-        import httpx
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.get(url, follow_redirects=True)
-            if resp.status_code == 200:
-                import re
-                text = resp.text
-                text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL)
-                text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL)
-                text = re.sub(r'<[^>]+>', ' ', text)
-                text = re.sub(r'\s+', ' ', text).strip()
-                return text[:3000]
+        text = await _fetch_url_text(url, timeout=8.0)
+        if not text:
+            return ""
+        import re
+        text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL)
+        text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL)
+        text = re.sub(r'<[^>]+>', ' ', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text[:3000]
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning(f"Website scrape failed for {url}: {e}")
     return ""
@@ -281,17 +307,33 @@ async def upload_from_url(
         raise HTTPException(status_code=500, detail="Database not configured")
 
     import httpx
-    try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            resp = await client.get(url)
-            if resp.status_code != 200:
-                raise HTTPException(status_code=400, detail=f"Failed to fetch URL (status {resp.status_code})")
-            contents = resp.content
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=400, detail="URL fetch timed out")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Could not fetch URL: {str(e)}")
-
+    last_fetch_error = None
+    contents = None
+    content_type = ""
+    for attempt in range(2):
+        try:
+            headers = {}
+            if attempt > 0:
+                headers["Accept-Encoding"] = "identity"
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                resp = await client.get(url, headers=headers)
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=400, detail=f"Failed to fetch URL (status {resp.status_code})")
+                contents = resp.content
+                content_type = resp.headers.get("content-type", "")
+                break
+        except httpx.TimeoutException:
+            raise HTTPException(status_code=400, detail="URL fetch timed out")
+        except HTTPException:
+            raise
+        except Exception as e:
+            err_str = str(e)
+            if "decompressobj" in err_str or "decompress" in err_str.lower() or "gzip" in err_str.lower():
+                last_fetch_error = e
+                continue
+            raise HTTPException(status_code=400, detail=f"Could not fetch URL: {err_str}")
+    if contents is None:
+        raise HTTPException(status_code=400, detail=f"Could not fetch URL (decompression error after retry): {last_fetch_error}")
     if len(contents) > 25 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 25MB)")
 
@@ -300,8 +342,7 @@ async def upload_from_url(
     from ..core.file_processor import extract_text, chunk_text, generate_embeddings, store_embeddings_in_qdrant
     import mimetypes
 
-    content_type = resp.headers.get("content-type", "")
-
+    is_html = "html" in content_type
     ext_map = {
         "application/pdf": ".pdf",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
@@ -312,8 +353,6 @@ async def upload_from_url(
         "image/png": ".png",
         "image/jpeg": ".jpg",
     }
-
-    is_html = "html" in content_type
 
     if is_html:
         html_raw = contents.decode("utf-8", errors="ignore")

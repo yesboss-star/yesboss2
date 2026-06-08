@@ -83,6 +83,18 @@
       "uses": 1,
       "created_at": 1780719495,
       "last_used": 1780719495
+    },
+    {
+      "value": "Media & Entertainment",
+      "uses": 1,
+      "created_at": 1780891613,
+      "last_used": 1780891613
+    },
+    {
+      "value": "streaming",
+      "uses": 1,
+      "created_at": 1780891613,
+      "last_used": 1780891613
     }
   ],
   "micro_verticals": [
@@ -246,6 +258,13 @@
       "created_at": 1780636245,
       "last_used": 1780636245,
       "industry": "IT Services & Consulting"
+    },
+    {
+      "value": "Video Streaming",
+      "uses": 1,
+      "created_at": 1780891668,
+      "last_used": 1780891668,
+      "industry": "Media & Entertainment"
     }
   ],
   "company_names": []

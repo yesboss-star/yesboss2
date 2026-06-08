@@ -423,22 +423,34 @@ Domain: {org.get('domain', 'N/A')}
         try:
             import httpx
             import re
-            async with httpx.AsyncClient(timeout=8.0) as client:
-                resp = await client.get(url, follow_redirects=True)
-                if resp.status_code == 200:
-                    text = resp.text
-                    text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL)
-                    text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL)
-                    text = re.sub(r'<[^>]+>', ' ', text)
-                    text = re.sub(r'\s+', ' ', text).strip()
-                    content = text[:2000]
-                    return (
-                        f"===== WEBSITE CONTENT (from {url}) =====\n"
-                        f"{content}\n"
-                        f"=====================================\n"
-                    )
+            last_err = None
+            for attempt in range(2):
+                try:
+                    headers = {}
+                    if attempt > 0:
+                        headers["Accept-Encoding"] = "identity"
+                    async with httpx.AsyncClient(timeout=8.0) as client:
+                        resp = await client.get(url, follow_redirects=True, headers=headers)
+                        if resp.status_code == 200:
+                            text = resp.text
+                            text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL)
+                            text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL)
+                            text = re.sub(r'<[^>]+>', ' ', text)
+                            text = re.sub(r'\s+', ' ', text).strip()
+                            content = text[:2000]
+                            return (
+                                f"===== WEBSITE CONTENT (from {url}) =====\n"
+                                f"{content}\n"
+                                f"=====================================\n"
+                            )
+                except Exception as e2:
+                    err_str = str(e2)
+                    if "decompressobj" in err_str or "gzip" in err_str.lower():
+                        last_err = e2
+                        continue
+                    raise
         except Exception as e:
-            logger.warning(f"Website scrape failed for {url}: {e}")
+            logger.warning(f"Website scrape failed for {url}: {last_err or e}")
         return ""
 
     async def _build_user_patterns(self, org_id: str, user_id: Optional[str] = None) -> str:

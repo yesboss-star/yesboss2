@@ -8,9 +8,6 @@ import { useUIStore } from "@/stores/uiStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import {
   LayoutDashboard,
-  CheckSquare,
-  BarChart3,
-  Users,
   Settings,
   ChevronLeft,
   ChevronRight,
@@ -20,11 +17,9 @@ import {
   LogOut,
   User,
   Building2,
-  Sparkles,
   Share2,
   Zap,
   FolderOpen,
-
 } from "lucide-react";
 import { Avatar, Badge, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui";
 import { ThemeToggleInline } from "@/components/ThemeToggleInline";
@@ -38,20 +33,11 @@ interface NavItem {
   section?: string;
 }
 
-const ownerNavItems: NavItem[] = [
+const navItems: NavItem[] = [
   { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
   { icon: Share2, label: "Orchestration", href: "/dashboard/orchestration" },
   { icon: Zap, label: "AI Task Cascade", href: "/dashboard/task" },
   { icon: FolderOpen, label: "Uploaded Data", href: "/dashboard/data" },
-];
-
-const employeeNavItems: NavItem[] = [
-  { icon: LayoutDashboard, label: "My Workspace", href: "/dashboard" },
-  { icon: CheckSquare, label: "My Tasks", href: "/tasks" },
-  { icon: Sparkles, label: "AI Assistant", href: "/dashboard/assistant", badge: "NEW" },
-  { icon: Users, label: "Team", href: "/dashboard/team" },
-  { icon: BarChart3, label: "Reports", href: "/dashboard/reports" },
-  { icon: Settings, label: "Settings", href: "/dashboard/settings" },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -60,8 +46,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const { organization } = useOrganizationStore();
   const pathname = usePathname();
   const [isMobile, setIsMobile] = useState(false);
-
-  const navItems = role === "owner" ? ownerNavItems : employeeNavItems;
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 1024);
