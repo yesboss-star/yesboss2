@@ -8,6 +8,182 @@ from ..core.chatbot import OnboardingChatbot, store_conversation, get_conversati
 router = APIRouter()
 
 
+class EmployeePersonaQuestionRequest(BaseModel):
+    department: Optional[str] = ""
+    role: Optional[str] = ""
+    manager_name: Optional[str] = ""
+    organization_name: Optional[str] = ""
+    previous_answers: Optional[list[dict]] = []
+    question_count: int = 0
+    more_time_agreed: bool = False
+    provider: Optional[str] = None
+
+
+@router.post("/employee-persona/generate-question")
+async def generate_employee_persona_question(request: EmployeePersonaQuestionRequest):
+    from ..core.ai_client import get_ai_response
+    from ..core.prompt_engine import MasterPromptEngine
+    from ..core.database import get_database
+
+    num_answers = len(request.previous_answers or [])
+
+    context_parts = [
+        f"- Role: {request.role or 'Not specified'}",
+        f"- Department: {request.department or 'Not specified'}",
+        f"- Organization: {request.organization_name or 'Not specified'}",
+    ]
+    if request.manager_name:
+        context_parts.append(f"- Manager: {request.manager_name}")
+    employee_context = "\n".join(context_parts)
+
+    db = get_database()
+    engine = MasterPromptEngine(db) if db is not None else None
+    engine_context = f"===== EMPLOYEE CONTEXT =====\n{employee_context}\n=============================\n"
+    if engine:
+        persona = engine._get_persona_instructions("employee_persona_builder")
+        engine_context += f"\n===== PERSONA =====\n{persona}\n====================\n"
+
+    # Enforce minimum 3 questions before offering more time
+    # If more_time_agreed, allow up to 3 additional questions
+    if request.more_time_agreed and num_answers >= 3:
+        max_extra = 3
+        remaining = max_extra - (num_answers - 3)
+        if remaining <= 0:
+            return {"question_number": num_answers + 1}
+
+    if num_answers == 0:
+        prompt = f"""{engine_context}
+
+You are meeting this employee for the first time. Ask ONE genuine, friendly question that helps you understand WHO they are as a team member — not just what they do, but how they work best, what motivates them, what makes their day productive.
+
+This is NOT a survey. This is a real conversation starter.
+
+Return ONLY valid JSON:
+{{
+    "question": "A genuine, human question about their work style, preferences, or challenges",
+    "options": ["Realistic option 1", "Realistic option 2", "Realistic option 3"],
+    "time_estimate": <integer 1-5>,
+    "need_more_time": false
+}}
+
+Rules:
+- Question must feel like a real conversation, not a form
+- Options should reflect actual work-style archetypes
+- Keep it warm and friendly — this is a new team member
+- You MUST ask at least 3 questions total before deciding you have enough info"""
+    else:
+        answers_text = "\n".join([f"Q: {a.get('question', '')}\nA: {a.get('answer', '')}" for a in request.previous_answers[-5:]])
+
+        prompt = f"""{engine_context}
+
+CONVERSATION SO FAR:
+{answers_text}
+
+Based on their LAST answer, generate ONE follow-up question that goes deeper into what they revealed about their work style. This should feel like a natural continuation — like you're genuinely getting to know them as a colleague.
+
+If their last answer revealed something interesting (a pain point, a preference, a work habit), ask about THAT specifically.
+If they gave a generic answer, try a different angle to get to something real.
+
+You must ask at least 3 questions before you can stop.
+""" + (
+    "After 3 questions, if you still need to understand more about this person, set need_more_time to true so we can ask them if they have more time. Otherwise set need_more_time to false to finish."
+    if not request.more_time_agreed else
+    "The user agreed to more questions. Ask 1-3 more follow-ups to round out your understanding, then stop. Set need_more_time to false when done."
+) + """
+
+Return ONLY valid JSON:
+{{
+    "question": "A natural follow-up based on their last answer",
+    "options": ["Option that connects to their answer", "Another relevant option", "A different angle option"],
+    "time_estimate": <integer 1-5>,
+    "need_more_time": <boolean>
+}}
+
+Rules:
+- Question MUST connect to their previous answer
+- Options should branch differently based on what they said
+- time_estimate: 1-5 minutes
+- Keep it conversational, warm, and never robotic"""
+
+    try:
+        response = await get_ai_response(
+            prompt=prompt,
+            system_prompt="You are a warm, empathetic AI colleague getting to know a new team member. Generate ONE thoughtful question with 3 realistic options. Return ONLY valid JSON.",
+            provider=request.provider,
+            temperature=0.8,
+            max_tokens=400
+        )
+
+        import json
+        import re
+
+        json_str = response.strip()
+        if '{' in json_str and '}' in json_str:
+            start = json_str.find('{')
+            end = json_str.rfind('}') + 1
+            json_str = json_str[start:end]
+
+        data = json.loads(json_str)
+
+        need_more = data.get("need_more_time", False)
+
+        # Enforce minimum 3 questions
+        if num_answers < 3:
+            need_more = False
+        elif num_answers == 3 and not request.more_time_agreed:
+            need_more = True
+
+        return {
+            "question": data.get("question", "How do you prefer to receive feedback on your work?"),
+            "options": data.get("options", ["Quick async comments", "Scheduled 1:1 meetings", "Written feedback in documents"]),
+            "time_estimate": data.get("time_estimate", 3),
+            "need_more_time": need_more,
+            "question_number": num_answers + 1
+        }
+    except Exception as e:
+        fallback_questions = [
+            {
+                "question": "How do you prefer to receive feedback on your work?",
+                "options": ["Quick async comments (Slack, etc.)", "Scheduled 1:1 meetings", "Written feedback in documents"],
+                "time_estimate": 2,
+                "need_more_time": False,
+            },
+            {
+                "question": "What's your ideal way to communicate with your team throughout the day?",
+                "options": ["Quick chat messages", "Schedule calls when needed", "Async updates via shared docs"],
+                "time_estimate": 2,
+                "need_more_time": False,
+            },
+            {
+                "question": "What tools or apps do you rely on most to get your work done?",
+                "options": ["Project management tools (Jira, Asana, etc.)", "Communication tools (Slack, Teams)", "Documentation tools (Notion, Confluence)"],
+                "time_estimate": 2,
+                "need_more_time": False,
+            },
+            {
+                "question": "What's typically the biggest challenge in your daily workflow?",
+                "options": ["Too many meetings / interruptions", "Unclear priorities or requirements", "Cross-team coordination bottlenecks"],
+                "time_estimate": 2,
+                "need_more_time": False,
+            },
+            {
+                "question": "How do you like to track your own progress and stay organized?",
+                "options": ["Personal task lists / checklists", "Calendar blocking and time management", "Collaborative project boards"],
+                "time_estimate": 1,
+                "need_more_time": False,
+            },
+        ]
+
+        idx = min(num_answers, len(fallback_questions) - 1)
+        fb = fallback_questions[idx]
+        need_more = fb.get("need_more_time", False)
+        if num_answers < 3:
+            need_more = False
+        elif num_answers == 3 and not request.more_time_agreed:
+            need_more = True
+        return {**fb, "need_more_time": need_more, "question_number": num_answers + 1}
+
+
 class StartChatRequest(BaseModel):
     user_id: str
     company_profile: Optional[dict] = None

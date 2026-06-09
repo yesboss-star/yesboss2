@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Badge } from "@/components/ui";
 import {
@@ -17,6 +17,7 @@ import {
   Check,
   X,
   AlertTriangle,
+  RefreshCw,
 } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
@@ -55,7 +56,7 @@ interface UploadStatus {
 export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void }) {
   const { organization } = useOrganizationStore();
   const [files, setFiles] = useState<UploadedFile[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [deleting, setDeleting] = useState<string | null>(null);
   const [uploading, setUploading] = useState<UploadStatus[]>([]);
@@ -77,12 +78,6 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
       })
       .catch(() => setLoading(false));
   }, [organization]);
-
-  useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect */
-    loadFiles();
-    /* eslint-enable react-hooks/set-state-in-effect */
-  }, [loadFiles]);
 
   const handleDelete = async (fileId: string) => {
     if (!confirm("Delete this file? This cannot be undone.")) return;
@@ -257,9 +252,19 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
             <HardDrive className="w-5 h-5 text-primary" />
             <CardTitle>Your Files</CardTitle>
           </div>
-          <Badge variant="outline" className="text-xs">
-            {files.length} file{files.length !== 1 ? "s" : ""}
-          </Badge>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={loadFiles}
+              disabled={loading}
+              className="p-1.5 rounded-lg hover:bg-surface-light text-text-muted hover:text-foreground transition-colors cursor-pointer disabled:opacity-50"
+              title="Refresh file list"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            </button>
+            <Badge variant="outline" className="text-xs">
+              {files.length} file{files.length !== 1 ? "s" : ""}
+            </Badge>
+          </div>
         </div>
         <CardDescription>
           Every file you&apos;ve uploaded is stored and analyzed by AI for business insights.

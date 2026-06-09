@@ -10,9 +10,7 @@ export default function Footer() {
         <div className="grid md:grid-cols-4 gap-12 mb-12">
           <div className="md:col-span-1">
             <div className="flex items-center gap-2 mb-4">
-              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center">
-                <span className="text-white font-bold text-lg">Y</span>
-              </div>
+              <img src="/yesboss-logo.svg" alt="YesBoss" className="w-9 h-9" />
               <span className="text-xl font-bold tracking-tight">
                 Yes<span className="text-primary">Boss</span>
               </span>

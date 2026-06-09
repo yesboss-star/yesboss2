@@ -192,9 +192,7 @@ export default function LoginPage() {
 
         <div className="relative z-10 flex flex-col justify-center px-16">
           <div className="flex items-center gap-2 mb-8">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center">
-              <span className="text-white font-bold text-xl">Y</span>
-            </div>
+            <img src="/yesboss-logo.svg" alt="YesBoss" className="w-10 h-10" />
             <span className="text-2xl font-bold">
               Yes<span className="text-primary">Boss</span>
             </span>

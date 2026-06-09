@@ -45,6 +45,16 @@ PERSONA_INSTRUCTIONS = {
         "Each question builds on previous answers to form a complete picture. "
         "Never ask generic questions — always tailor to their specific industry and context."
     ),
+    "employee_persona_builder": (
+        "You are YesBoss, an AI teammate helping a new employee set up their "
+        "personalized workspace. You ask thoughtful, friendly questions about "
+        "their work style, communication preferences, tools they use, "
+        "challenges they face, and how they collaborate best. "
+        "You are warm, conversational, and remember every detail they share. "
+        "Each question builds on previous answers to build a complete picture "
+        "of how they work best. Never ask generic questions — always tailor "
+        "to their specific role, department, and what they've already shared."
+    ),
     "onboarding_assistant": (
         "You are YesBoss AI, an intelligent business analysis assistant helping "
         "a business owner through onboarding. You explain your capabilities, "
@@ -137,6 +147,7 @@ AGENT_TYPES = [
     {"id": "task_planner", "name": "Task Planner"},
     {"id": "goal_architect", "name": "Goal Architect"},
     {"id": "persona_builder", "name": "Persona Builder"},
+    {"id": "employee_persona_builder", "name": "Employee Persona Builder"},
     {"id": "onboarding_assistant", "name": "Onboarding Assistant"},
     {"id": "expert_finance", "name": "Finance Expert"},
     {"id": "expert_operations", "name": "Operations Expert"},
@@ -160,6 +171,7 @@ AGENT_SECTION_MAP: Dict[str, Set[str]] = {
     "task_planner":           {"org", "goals", "tasks", "team", "docs", "patterns"},
     "goal_architect":         {"org", "goals", "tasks", "team", "docs", "website", "patterns"},
     "persona_builder":        {"org", "docs", "website", "patterns"},
+    "employee_persona_builder": set(),
     "onboarding_assistant":   {"org"},
     "expert_finance":         {"org", "goals", "tasks", "team", "patterns"},
     "expert_operations":      {"org", "goals", "tasks", "team", "patterns"},

@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useDocumentStore, type DocumentSuggestion } from "@/stores/documentStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { downloadDocumentTemplate } from "@/lib/documentTemplates";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui";
-import { Sparkles, FileText, FileDown, Loader2, Lightbulb } from "lucide-react";
+import { Sparkles, FileText, FileDown, Loader2, Lightbulb, RefreshCw } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -41,43 +41,28 @@ export function SuggestedDocumentsCard({ orgMeta, title = "Documents that drive 
   const { organization } = useOrganizationStore();
   const orgId = organization?.id;
   const [templateDownloading, setTemplateDownloading] = useState<string | null>(null);
-  const [uploadedFilenames, setUploadedFilenames] = useState<{ filename: string }[]>([]);
 
-  useEffect(() => {
-    if (!orgId) return;
+  const loadData = useCallback(() => {
+    if (!orgId || !orgMeta.organizationName) return;
     fetch(`${API_URL}/executive-chat/files?organization_id=${orgId}`)
       .then((r) => r.json())
       .then((data) => {
         const files = Array.isArray(data?.files) ? data.files : [];
-        setUploadedFilenames(files.map((f: { filename: string }) => ({ filename: f.filename })));
+        const filenames = files.map((f: { filename: string }) => ({ filename: f.filename }));
+        fetchDocSuggestions({
+          domain: orgMeta.domain || "",
+          company_name: orgMeta.organizationName,
+          industry: orgMeta.industry || "",
+          micro_vertical: orgMeta.microVertical || "",
+          size: orgMeta.size || "",
+          existing_documents:
+            orgMeta.existingDocuments && orgMeta.existingDocuments.length > 0
+              ? orgMeta.existingDocuments
+              : filenames,
+        });
       })
-      .catch(() => {
-        setUploadedFilenames([]);
-      });
-  }, [orgId]);
-
-  useEffect(() => {
-    if (!orgMeta.organizationName) return;
-    fetchDocSuggestions({
-      domain: orgMeta.domain || "",
-      company_name: orgMeta.organizationName,
-      industry: orgMeta.industry || "",
-      micro_vertical: orgMeta.microVertical || "",
-      size: orgMeta.size || "",
-      existing_documents:
-        orgMeta.existingDocuments && orgMeta.existingDocuments.length > 0
-          ? orgMeta.existingDocuments
-          : uploadedFilenames,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    orgMeta.organizationName,
-    orgMeta.industry,
-    orgMeta.microVertical,
-    orgMeta.size,
-    orgMeta.domain,
-    uploadedFilenames,
-  ]);
+      .catch(() => {});
+  }, [orgId, orgMeta, fetchDocSuggestions]);
 
   const handleTemplateDownload = async (s: DocumentSuggestion) => {
     const key = s.title;
@@ -102,14 +87,19 @@ export function SuggestedDocumentsCard({ orgMeta, title = "Documents that drive 
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-primary" />
             <CardTitle>{title}</CardTitle>
           </div>
-          {suggestionsLoading && (
-            <Loader2 className="w-4 h-4 text-text-muted animate-spin" />
-          )}
+          <button
+            onClick={loadData}
+            disabled={suggestionsLoading}
+            className="p-1.5 rounded-lg hover:bg-surface-light text-text-muted hover:text-foreground transition-colors cursor-pointer disabled:opacity-50"
+            title="Refresh suggestions"
+          >
+            <RefreshCw className={`w-4 h-4 ${suggestionsLoading ? "animate-spin" : ""}`} />
+          </button>
         </div>
         <CardDescription>
           AI-tailored suggestions based on your industry, stage and what you have already uploaded.

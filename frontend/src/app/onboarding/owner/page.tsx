@@ -1233,9 +1233,7 @@ function OwnerOnboardingContent() {
       <header className="border-b border-border">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2 cursor-pointer">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center">
-              <span className="text-white font-bold">Y</span>
-            </div>
+            <img src="/yesboss-logo.svg" alt="YesBoss" className="w-8 h-8" />
             <span className="text-lg font-bold">
               Yes<span className="text-primary">Boss</span>
             </span>

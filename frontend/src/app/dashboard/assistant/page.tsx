@@ -283,7 +283,7 @@ function AssistantInner() {
 
   return (
     <DashboardLayout>
-      <div className="flex h-[calc(100vh-5rem)] gap-0">
+      <div className="flex h-[calc(100vh-7rem)] md:h-[calc(100vh-8rem)] gap-0 overflow-hidden">
         {/* Session Sidebar */}
         <div className={`${sidebarOpen ? "w-64" : "w-0"} transition-all duration-300 overflow-hidden flex-shrink-0 border-r border-border`}>
           <div className="h-full flex flex-col bg-surface/30">

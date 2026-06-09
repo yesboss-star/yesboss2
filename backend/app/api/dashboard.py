@@ -5,6 +5,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from ..core.database import get_database
 from ..dependencies.auth import get_current_user, get_current_user_optional
+from ..core.cache import cache
 from bson import ObjectId
 
 router = APIRouter()
@@ -330,6 +331,10 @@ async def get_dashboard_kpi(
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
 
+    cached = cache.get("kpi", {"org_id": org_id})
+    if cached is not None:
+        return cached
+
     org = db.organizations.find_one({"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id})
     org_industry = org.get("industry", "") if org else ""
     org_micro_vertical = org.get("micro_vertical", "") if org else ""
@@ -470,6 +475,8 @@ async def get_dashboard_kpi(
                         kpi_response[item["key"]] = item
     except Exception as e:
         logger.warning(f"AI KPI suggestion failed: {e}")
+
+    cache.set("kpi", {"org_id": org_id}, kpi_response)
 
     return kpi_response
 

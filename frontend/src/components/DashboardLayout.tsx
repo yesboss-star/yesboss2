@@ -63,9 +63,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between p-4 border-b border-border">
         <Link href="/" className="flex items-center gap-2 cursor-pointer">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center flex-shrink-0">
-            <span className="text-white font-bold text-sm">Y</span>
-          </div>
+          <img src="/yesboss-logo.svg" alt="YesBoss" className="w-8 h-8 flex-shrink-0" />
           {sidebarOpen && (
             <span className="text-lg font-bold whitespace-nowrap">
               Yes<span className="text-primary">Boss</span>

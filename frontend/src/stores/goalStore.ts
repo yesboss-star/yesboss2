@@ -110,7 +110,7 @@ export const useGoalStore = create<GoalState>()(
       fetchGoals: async (orgId) => {
         set({ loading: true, error: null });
         try {
-          const response = await fetch(`${API_URL}/goals?organization_id=${orgId}`);
+          const response = await fetch(`${API_URL}/goals?organization_id=${orgId}&limit=20`);
           if (!response.ok) throw new Error("Failed to fetch goals");
           const result = await response.json();
           const goals = (result.goals || []).map((g: any) => ({

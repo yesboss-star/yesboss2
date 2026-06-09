@@ -32,7 +32,6 @@ import { useOrgChartStore } from "@/stores/orgChartStore";
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
 const SUGGEST_INTERVAL_MS = 5 * 60 * 1000;
-const VALUE_REFRESH_MS = 30 * 1000;
 const SUGGEST_DEBOUNCE_MS = 4 * 1000;
 const EMPTY_ARRAY: never[] = [];
 
@@ -531,10 +530,6 @@ export default function KPISuggestionsCard() {
   useEffect(() => {
     if (!orgId) return;
     fetchValues();
-    const id = setInterval(() => {
-      fetchValues();
-    }, VALUE_REFRESH_MS);
-    return () => clearInterval(id);
   }, [orgId, fetchValues]);
 
   useEffect(() => {
@@ -747,19 +742,22 @@ export default function KPISuggestionsCard() {
 
         {acceptedKPIs.length > 0 && (
           <div className="space-y-2.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <BarChart3 className="w-3.5 h-3.5 text-primary" />
-                <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">
-                  Your live KPIs
-                </p>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <BarChart3 className="w-3.5 h-3.5 text-primary" />
+                  <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">
+                    Your live KPIs
+                  </p>
+                </div>
+                <button
+                  onClick={fetchValues}
+                  disabled={valuesLoading}
+                  className="p-1 rounded-lg hover:bg-surface-light text-text-muted hover:text-foreground transition-colors cursor-pointer disabled:opacity-50"
+                  title="Refresh KPI values"
+                >
+                  <RefreshCw className={`w-3 h-3 ${valuesLoading ? "animate-spin" : ""}`} />
+                </button>
               </div>
-              {valuesLoading && (
-                <span className="text-[10px] text-text-muted flex items-center gap-1">
-                  <Loader2 className="w-2.5 h-2.5 animate-spin" /> refreshing
-                </span>
-              )}
-            </div>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
               {acceptedKPIs.map((kpi) => (
                 <AcceptedKPITile

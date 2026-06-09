@@ -18,7 +18,7 @@ import {
   BarChart3, Target, Zap, Activity, ChevronRight,
   AlertTriangle, Info, Users, User, FileSpreadsheet,
   PieChart as PieChartIcon, Link2, X, Building2, Network,
-  Briefcase, Search,
+  Briefcase, Search, RefreshCw,
 } from "lucide-react";
 import {
   Card, CardHeader, CardTitle, CardDescription, CardContent,
@@ -1377,72 +1377,70 @@ function RevenueRiskRadar() {
   const [loading, setLoading] = useState(true);
   const { organization } = useOrganizationStore();
 
-  useEffect(() => {
+  const fetchRisk = useCallback(() => {
     if (!organization?.id) return;
-    let cancelled = false;
-    const fetchRisk = () => {
-      fetch(`${API_URL}/dashboard/kpi?organization_id=${organization.id}`)
-        .then((r) => r.json())
-        .then((data) => {
-          if (cancelled) return;
-          const computed = [];
-          if (data.goals_active) {
-            const val = data.goals_active.value;
-            computed.push({
-              title: "Goal Completion Risk",
-              level: val > 5 ? "high" : val > 2 ? "medium" : "low",
-              value: Math.min(val * 15, 95),
-              description: `${val} active goals in progress`,
-              impact: val > 5 ? "High - review priorities" : val > 2 ? "Medium - monitor progress" : "Low - on track",
-              icon: Target,
-            });
-          }
-          if (data.completion_rate) {
-            const rate = data.completion_rate.value;
-            computed.push({
-              title: "Task Completion Rate",
-              level: rate < 30 ? "high" : rate < 60 ? "medium" : "low",
-              value: 100 - rate,
-              description: `${rate}% tasks completed`,
-              impact: rate >= 60 ? "Good momentum" : rate >= 30 ? "Needs attention" : "Critical - intervene",
-              icon: CheckCircle,
-            });
-          }
-          if (data.team_size) {
-            computed.push({
-              title: "Team Capacity",
-              level: "medium",
-              value: Math.min(data.team_size.value * 10, 80),
-              description: `${data.team_size.value} team members`,
-              impact: "Monitor team workload distribution",
-              icon: Activity,
-            });
-          }
-          if (data.tasks_pipeline) {
-            const pend = data.tasks_pipeline.change?.match(/(\d+) pending/);
-            const pendingCount = pend ? parseInt(pend[1]) : 0;
-            computed.push({
-              title: "Task Backlog",
-              level: pendingCount > 10 ? "high" : pendingCount > 5 ? "medium" : "low",
-              value: Math.min(pendingCount * 8, 90),
-              description: `${pendingCount} pending tasks in queue`,
-              impact: pendingCount > 10 ? "High - assign resources" : pendingCount > 5 ? "Medium - review priorities" : "Low - manageable",
-              icon: Clock,
-            });
-          }
-          setRisks(computed.length > 0 ? computed : [
-            { title: "No Risk Data", level: "low", value: 0, description: "Add goals and tasks to see risk analysis", impact: "Start creating goals", icon: Shield },
-          ]);
-          setLoading(false);
-        })
-        .catch(() => {
-          if (!cancelled) { setRisks([]); setLoading(false); }
-        });
-    };
-    fetchRisk();
-    const interval = setInterval(fetchRisk, 30000);
-    return () => { cancelled = true; clearInterval(interval); };
+    setLoading(true);
+    fetch(`${API_URL}/dashboard/kpi?organization_id=${organization.id}`)
+      .then((r) => r.json())
+      .then((data) => {
+        const computed = [];
+        if (data.goals_active) {
+          const val = data.goals_active.value;
+          computed.push({
+            title: "Goal Completion Risk",
+            level: val > 5 ? "high" : val > 2 ? "medium" : "low",
+            value: Math.min(val * 15, 95),
+            description: `${val} active goals in progress`,
+            impact: val > 5 ? "High - review priorities" : val > 2 ? "Medium - monitor progress" : "Low - on track",
+            icon: Target,
+          });
+        }
+        if (data.completion_rate) {
+          const rate = data.completion_rate.value;
+          computed.push({
+            title: "Task Completion Rate",
+            level: rate < 30 ? "high" : rate < 60 ? "medium" : "low",
+            value: 100 - rate,
+            description: `${rate}% tasks completed`,
+            impact: rate >= 60 ? "Good momentum" : rate >= 30 ? "Needs attention" : "Critical - intervene",
+            icon: CheckCircle,
+          });
+        }
+        if (data.team_size) {
+          computed.push({
+            title: "Team Capacity",
+            level: "medium",
+            value: Math.min(data.team_size.value * 10, 80),
+            description: `${data.team_size.value} team members`,
+            impact: "Monitor team workload distribution",
+            icon: Activity,
+          });
+        }
+        if (data.tasks_pipeline) {
+          const pend = data.tasks_pipeline.change?.match(/(\d+) pending/);
+          const pendingCount = pend ? parseInt(pend[1]) : 0;
+          computed.push({
+            title: "Task Backlog",
+            level: pendingCount > 10 ? "high" : pendingCount > 5 ? "medium" : "low",
+            value: Math.min(pendingCount * 8, 90),
+            description: `${pendingCount} pending tasks in queue`,
+            impact: pendingCount > 10 ? "High - assign resources" : pendingCount > 5 ? "Medium - review priorities" : "Low - manageable",
+            icon: Clock,
+          });
+        }
+        setRisks(computed.length > 0 ? computed : [
+          { title: "No Risk Data", level: "low", value: 0, description: "Add goals and tasks to see risk analysis", impact: "Start creating goals", icon: Shield },
+        ]);
+        setLoading(false);
+      })
+      .catch(() => {
+        setRisks([]); setLoading(false);
+      });
   }, [organization?.id]);
+
+  useEffect(() => {
+    fetchRisk();
+  }, [fetchRisk]);
 
   const getRiskColor = (level: string) => {
     switch (level) {
@@ -1455,10 +1453,19 @@ function RevenueRiskRadar() {
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center gap-2">
-          <Shield className="w-5 h-5 text-primary" />
-          <CardTitle>Business Risk Radar</CardTitle>
-          <Badge variant="warning" className="text-[10px] ml-2">Real-time</Badge>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Shield className="w-5 h-5 text-primary" />
+            <CardTitle>Business Risk Radar</CardTitle>
+          </div>
+          <button
+            onClick={fetchRisk}
+            disabled={loading}
+            className="p-1.5 rounded-lg hover:bg-surface-light text-text-muted hover:text-foreground transition-colors cursor-pointer disabled:opacity-50"
+            title="Refresh risk analysis"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+          </button>
         </div>
         <CardDescription>AI-analyzed risks based on your actual business data</CardDescription>
       </CardHeader>

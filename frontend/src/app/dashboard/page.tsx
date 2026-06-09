@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUIStore } from "@/stores/uiStore";
@@ -64,6 +64,18 @@ export default function DashboardPage() {
   const [tasksLoading, setTasksLoading] = useState(false);
   const [kpiData, setKpiData] = useState<Record<string, KPIItem>>({});
   const [kpiLoading, setKpiLoading] = useState(false);
+  const [showAIChat, setShowAIChat] = useState(false);
+  const aiChatRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!aiChatRef.current || showAIChat) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) setShowAIChat(true); },
+      { threshold: 0.1 }
+    );
+    observer.observe(aiChatRef.current);
+    return () => observer.disconnect();
+  }, [showAIChat]);
 
 
   const getKpiIcon = (iconName: string) => {
@@ -130,8 +142,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (role === "employee" && organization?.id) {
-      const timer = setTimeout(() => { fetchEmployeeData(); }, 100);
-      return () => clearTimeout(timer);
+      fetchEmployeeData();
     }
   }, [role, organization?.id, user?.email]);
 
@@ -396,8 +407,12 @@ export default function DashboardPage() {
         </Card>
 
         {role === "employee" && (
-          <div className="h-[600px]">
-            <AISummaryChat />
+          <div ref={aiChatRef} className="h-[600px]">
+            {showAIChat ? <AISummaryChat /> : (
+              <div className="w-full h-full rounded-xl glass flex items-center justify-center">
+                <p className="text-text-muted text-sm">Scroll to load AI Assistant</p>
+              </div>
+            )}
           </div>
         )}
 

@@ -24,9 +24,7 @@ export default function Navbar() {
     >
       <nav className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2 cursor-pointer">
-          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center">
-            <span className="text-white font-bold text-lg">Y</span>
-          </div>
+          <img src="/yesboss-logo.svg" alt="YesBoss" className="w-9 h-9" />
           <span className="text-xl font-bold tracking-tight">
             Yes<span className="text-primary">Boss</span>
           </span>

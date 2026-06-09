@@ -16,13 +16,12 @@ import {
   Sparkles,
   Search,
   X,
-  GitBranch,
 } from "lucide-react";
 import Link from "next/link";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
-type EmployeeStep = "department" | "org-detect" | "manager" | "hierarchy" | "persona" | "complete";
+type EmployeeStep = "department" | "org-detect" | "manager" | "persona";
 
 interface Employee {
   _id: string;
@@ -31,14 +30,6 @@ interface Employee {
   role: string;
   department: string;
   manager_id?: string;
-}
-
-interface OrgNode {
-  id: string;
-  name: string;
-  role: string;
-  department: string;
-  children: OrgNode[];
 }
 
 export default function EmployeeOnboarding() {
@@ -67,24 +58,26 @@ export default function EmployeeOnboarding() {
   const [selectedSubordinates, setSelectedSubordinates] = useState<Employee[]>([]);
   const [orgSearchResults, setOrgSearchResults] = useState<{_id: string; name: string; domain: string; industry: string}[]>([]);
   const [orgSearchLoading, setOrgSearchLoading] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-
-  interface PersonaMessage {
-    id: string;
-    role: "ai" | "user";
-    content: string;
+  interface PersonaQuestion {
+    question: string;
+    options: string[];
+    time_estimate: number;
+    need_more_time: boolean;
+    question_number: number;
   }
-  const [personaMessages, setPersonaMessages] = useState<PersonaMessage[]>([]);
-  const [personaInput, setPersonaInput] = useState("");
+  const [currentQuestion, setCurrentQuestion] = useState<PersonaQuestion | null>(null);
   const [personaLoading, setPersonaLoading] = useState(false);
+  const [personaAnswers, setPersonaAnswers] = useState<{question: string; answer: string}[]>([]);
+  const [customAnswer, setCustomAnswer] = useState("");
+  const [showCustomInput, setShowCustomInput] = useState(false);
+  const [showMoreTime, setShowMoreTime] = useState(false);
+  const [isRedirecting, setIsRedirecting] = useState(false);
 
   const steps = [
     { id: "department", label: "Department", icon: User },
     { id: "org-detect", label: "Organization", icon: Building2 },
     { id: "manager", label: "Reporting", icon: Users },
-    { id: "hierarchy", label: "Team", icon: GitBranch },
     { id: "persona", label: "AI Persona", icon: MessageSquare },
-    { id: "complete", label: "Done", icon: CheckCircle },
   ];
 
   const currentStepIndex = steps.findIndex((s) => s.id === step);
@@ -197,36 +190,6 @@ export default function EmployeeOnboarding() {
     }
   };
 
-  const buildHierarchy = (employees: Employee[], managerId: string): OrgNode[] => {
-    const employeeMap = new Map<string, OrgNode>();
-    employees.forEach((emp) => {
-      employeeMap.set(emp._id, {
-        id: emp._id,
-        name: emp.full_name,
-        role: emp.role,
-        department: emp.department,
-        children: [],
-      });
-    });
-
-    const roots: OrgNode[] = [];
-    employees.forEach((emp) => {
-      const node = employeeMap.get(emp._id)!;
-      if (emp._id === managerId || !emp.manager_id) {
-        roots.push(node);
-      } else {
-        const manager = employeeMap.get(emp.manager_id);
-        if (manager) {
-          manager.children.push(node);
-        } else {
-          roots.push(node);
-        }
-      }
-    });
-
-    return roots;
-  };
-
   const searchOrganizations = async (query: string) => {
     if (query.length < 2) {
       setOrgSearchResults([]);
@@ -268,108 +231,115 @@ export default function EmployeeOnboarding() {
     setOrgSearchResults([]);
   };
 
-  const initPersonaChat = () => {
-    setPersonaLoading(true);
-    fetch(`${API_URL}/chatbot/persona-questions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        department: empData.department,
-        role: empData.role,
-        manager_name: empData.managerName,
-        organization_name: empData.orgName,
-      }),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        const initialMessage: PersonaMessage = {
-          id: `msg_${Math.random().toString(36).substring(7)}`,
-          role: "ai",
-          content: data.message || getDefaultWelcomeMessage(),
-        };
-        setPersonaMessages([initialMessage]);
-      })
-      .catch(() => {
-        const initialMessage: PersonaMessage = {
-          id: `msg_${Math.random().toString(36).substring(7)}`,
-          role: "ai",
-          content: getDefaultWelcomeMessage(),
-        };
-        setPersonaMessages([initialMessage]);
-      })
-      .finally(() => {
-        setPersonaLoading(false);
+  const goToDashboard = async () => {
+    if (isRedirecting) return;
+    setIsRedirecting(true);
+    await saveEmployeePersona();
+    if (empData.orgName) {
+      setOrganization({
+        id: empData.orgId || Math.random().toString(36).substring(2, 9),
+        name: empData.orgName,
+        domain: empData.orgDomain,
+        industry: "",
+        size: "",
+        createdAt: new Date().toISOString(),
       });
+    }
+    router.push("/dashboard");
   };
 
-  const getDefaultWelcomeMessage = () => {
-    const messages: Record<string, string> = {
-      Engineering: `Welcome to ${empData.orgName || "your company"}! I see you're in Engineering as a ${empData.role || "team member"}. To help you work more effectively, I'd like to learn about your workflow. What's your preferred way to receive task updates and progress reports?`,
-      Marketing: `Welcome to ${empData.orgName || "your company"}! I see you're in Marketing as a ${empData.role || "team member"}. Let's personalize your experience. How do you prefer to track campaign progress and receive updates on your projects?`,
-      Sales: `Welcome to ${empData.orgName || "your company"}! I see you're in Sales as a ${empData.role || "team member"}. To help you close more deals, I'd like to understand your workflow. How do you prefer to receive leads and track your pipeline updates?`,
-      Operations: `Welcome to ${empData.orgName || "your company"}! I see you're in Operations as a ${empData.role || "team member"}. Let's optimize your workflow. How do you prefer to receive task updates and coordinate with your team?`,
-      Finance: `Welcome to ${empData.orgName || "your company"}! I see you're in Finance as a ${empData.role || "team member"}. To help you manage finances effectively, I'd like to learn about your preferences. How do you prefer to receive financial report updates and approval requests?`,
-    };
-    return messages[empData.department] || `Welcome to ${empData.orgName || "your company"}! I see you're in the ${empData.department || "your"} department as a ${empData.role || "team member"}. To personalize your AI assistant, tell me - how do you prefer to receive task updates and project notifications?`;
-  };
-
-  const sendPersonaMessage = async () => {
-    if (!personaInput.trim()) return;
-    
-    const userMessage: PersonaMessage = {
-      id: Date.now().toString(),
-      role: "user",
-      content: personaInput,
-    };
-    setPersonaMessages((prev) => [...prev, userMessage]);
-    setPersonaInput("");
+  const generateNextQuestion = async (answers: {question: string; answer: string}[]) => {
     setPersonaLoading(true);
-
     try {
-      const res = await fetch(`${API_URL}/chatbot/persona-response`, {
+      const res = await fetch(`${API_URL}/chatbot/employee-persona/generate-question`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: [...personaMessages, userMessage],
-          context: {
-            department: empData.department,
-            role: empData.role,
-            manager_name: empData.managerName,
-          },
+          department: empData.department,
+          role: empData.role,
+          manager_name: empData.managerName,
+          organization_name: empData.orgName,
+          previous_answers: answers,
+          question_count: answers.length,
+          more_time_agreed: false,
         }),
       });
       if (res.ok) {
         const data = await res.json();
-        const aiMessage: PersonaMessage = {
-          id: Date.now().toString(),
-          role: "ai",
-          content: data.response || "Thank you for sharing that! Is there anything else about your work style or preferences you'd like to tell me?",
-        };
-        setPersonaMessages((prev) => [...prev, aiMessage]);
+        if (data.question) {
+          setCurrentQuestion(data);
+          setShowCustomInput(false);
+          setCustomAnswer("");
+        } else {
+          await goToDashboard();
+        }
       } else {
-        setPersonaMessages((prev) => [...prev, {
-          id: Date.now().toString(),
-          role: "ai",
-          content: "Thanks for sharing! One more question - what's typically the biggest bottleneck or challenge you face in your daily workflow?",
-        }]);
+        await goToDashboard();
       }
     } catch {
-      setPersonaMessages((prev) => [...prev, {
-        id: Date.now().toString(),
-        role: "ai",
-        content: "Thanks for sharing! Can you tell me about your communication preferences - do you prefer detailed updates or quick summaries?",
-      }]);
+      await goToDashboard();
     } finally {
       setPersonaLoading(false);
     }
   };
 
-  const saveEmployeePersona = async () => {
-    setIsSaving(true);
+  const handlePersonaAnswer = async (answer: string) => {
+    const answeredQuestion = currentQuestion;
+    const updatedAnswers = [...personaAnswers, { question: answeredQuestion?.question || "", answer }];
+    setPersonaAnswers(updatedAnswers);
+    setCurrentQuestion(null);
+
+    if (answeredQuestion?.need_more_time && !showMoreTime) {
+      setShowMoreTime(true);
+    } else {
+      await generateNextQuestion(updatedAnswers);
+    }
+  };
+
+  const handleMoreTimeContinue = async () => {
+    setShowMoreTime(false);
+    setPersonaLoading(true);
     try {
-      const userMessages = personaMessages
-        .filter((m) => m.role === "user")
-        .map((m) => m.content);
+      const res = await fetch(`${API_URL}/chatbot/employee-persona/generate-question`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          department: empData.department,
+          role: empData.role,
+          manager_name: empData.managerName,
+          organization_name: empData.orgName,
+          previous_answers: personaAnswers,
+          question_count: personaAnswers.length,
+          more_time_agreed: true,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.question) {
+          setCurrentQuestion(data);
+          setShowCustomInput(false);
+          setCustomAnswer("");
+        } else {
+          await goToDashboard();
+        }
+      } else {
+        await goToDashboard();
+      }
+    } catch {
+      await goToDashboard();
+    } finally {
+      setPersonaLoading(false);
+    }
+  };
+
+  const handleMoreTimeSkip = async () => {
+    setShowMoreTime(false);
+    await goToDashboard();
+  };
+
+  const saveEmployeePersona = async () => {
+    try {
+      const userMessages = personaAnswers.map((a) => a.answer);
       
       await fetch(`${API_URL}/employees/persona`, {
         method: "POST",
@@ -388,29 +358,7 @@ export default function EmployeeOnboarding() {
         }),
       });
     } catch {
-    } finally {
-      setIsSaving(false);
     }
-  };
-
-  const createWorkspaceNow = () => {
-    if (empData.orgName) {
-      setOrganization({
-        id: empData.orgId || Math.random().toString(36).substring(2, 9),
-        name: empData.orgName,
-        domain: empData.orgDomain,
-        industry: "",
-        size: "",
-        createdAt: new Date().toISOString(),
-      });
-    }
-    saveEmployeePersona();
-    router.push("/dashboard");
-  };
-
-  const createWorkspaceLater = () => {
-    saveEmployeePersona();
-    router.push("/");
   };
 
   useEffect(() => {
@@ -460,22 +408,17 @@ export default function EmployeeOnboarding() {
   }, [step, user?.email]);
 
   useEffect(() => {
-    if (step === "persona" && personaMessages.length === 0) {
-      const timer = setTimeout(() => {
-        initPersonaChat();
-      }, 100);
-      return () => clearTimeout(timer);
+    if (step === "persona" && personaAnswers.length === 0 && !currentQuestion && !personaLoading) {
+      generateNextQuestion([]);
     }
-  }, [step, personaMessages.length]);
+  }, [step]);
 
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2 cursor-pointer">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center">
-              <span className="text-white font-bold">Y</span>
-            </div>
+            <img src="/yesboss-logo.svg" alt="YesBoss" className="w-8 h-8" />
             <span className="text-lg font-bold">
               Yes<span className="text-primary">Boss</span>
             </span>
@@ -866,107 +809,8 @@ export default function EmployeeOnboarding() {
               <button
                 onClick={() => {
                   setEmpData({ ...empData, subordinates: selectedSubordinates.map((s) => s._id) });
-                  setStep("hierarchy");
+                  setStep("persona");
                 }}
-                className="flex-1 py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 flex items-center justify-center gap-2"
-              >
-                Continue
-                <ArrowRight className="w-5 h-5" />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {step === "hierarchy" && (
-          <div className="max-w-2xl mx-auto">
-            <div className="text-center mb-8">
-              <h1 className="text-3xl font-bold mb-2">
-                Your <span className="gradient-text">Team Structure</span>
-              </h1>
-              <p className="text-text-muted">
-                Here&apos;s how you fit into the organization. This helps us route tasks correctly.
-              </p>
-            </div>
-
-            <div className="glass rounded-2xl p-6 mb-6">
-              {loading ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                </div>
-              ) : true ? (
-                <div className="space-y-4">
-                  <div className="flex flex-col items-center">
-                    <div className="w-16 h-16 rounded-full bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center text-white font-bold text-xl">
-                      {user?.email?.charAt(0).toUpperCase() || "U"}
-                    </div>
-                    <p className="mt-2 font-semibold">{user?.email?.split("@")[0] || "You"}</p>
-                    <p className="text-sm text-text-muted">{empData.role || "Team Member"}</p>
-                    <p className="text-xs text-primary">{empData.department} Department</p>
-                  </div>
-
-                  {empData.managerId && (
-                    <>
-                      <div className="flex justify-center">
-                        <div className="w-px h-8 bg-border" />
-                      </div>
-                      <div className="flex flex-col items-center">
-                        <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center">
-                          <Users className="w-6 h-6 text-primary" />
-                        </div>
-                        <p className="mt-2 text-sm font-medium">{empData.managerName}</p>
-                        <p className="text-xs text-text-muted">Manager</p>
-                      </div>
-                    </>
-                  )}
-
-                  {selectedSubordinates.length > 0 && (
-                    <>
-                      <div className="flex justify-center">
-                        <div className="w-px h-8 bg-border" />
-                      </div>
-                      <div className="text-center">
-                        <p className="text-sm text-text-muted mb-3">Direct Reports ({selectedSubordinates.length})</p>
-                        <div className="flex flex-wrap justify-center gap-3">
-                          {selectedSubordinates.map((sub) => (
-                            <div
-                              key={sub._id}
-                              className="flex items-center gap-2 p-2 rounded-lg bg-surface border border-border"
-                            >
-                              <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
-                                <span className="text-xs text-primary font-medium">
-                                  {sub.full_name.charAt(0)}
-                                </span>
-                              </div>
-                              <div>
-                                <p className="text-xs font-medium">{sub.full_name}</p>
-                                <p className="text-xs text-text-muted">{sub.role}</p>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              ) : (
-                <div className="text-center py-8">
-                  <GitBranch className="w-12 h-12 text-text-muted mx-auto mb-4" />
-                  <p className="text-text-muted">No other team members found</p>
-                  <p className="text-sm text-text-muted">You&apos;re the first in this organization!</p>
-                </div>
-              )}
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={() => setStep("manager")}
-                className="flex-1 py-4 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer flex items-center justify-center gap-2"
-              >
-                <ArrowLeft className="w-5 h-5" />
-                Back
-              </button>
-              <button
-                onClick={() => setStep("persona")}
                 className="flex-1 py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 flex items-center justify-center gap-2"
               >
                 Continue
@@ -990,187 +834,141 @@ export default function EmployeeOnboarding() {
 
             <div className="glass rounded-2xl overflow-hidden mb-6">
               <div className="p-6 space-y-4 max-h-96 overflow-y-auto">
-                {personaLoading && personaMessages.length === 0 && (
+                {personaAnswers.length === 0 && personaLoading && (
                   <div className="flex items-center justify-center py-8">
                     <Loader2 className="w-6 h-6 animate-spin text-primary" />
-                    <span className="ml-2 text-text-muted">Loading your personalized questions...</span>
+                    <span className="ml-2 text-text-muted">Getting to know you...</span>
                   </div>
                 )}
-                {personaMessages.map((msg) => (
-                  <div key={msg.id} className={`flex gap-3 ${msg.role === "user" ? "justify-end" : ""}`}>
-                    {msg.role === "ai" ? (
-                      <>
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center flex-shrink-0">
-                          <span className="text-xs text-white font-bold">AI</span>
-                        </div>
-                        <div className="glass-light rounded-lg px-4 py-2 text-sm max-w-md">
-                          {msg.content}
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="bg-primary/20 rounded-lg px-4 py-2 text-sm max-w-md">
-                          {msg.content}
-                        </div>
-                        <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
-                          <span className="text-xs text-primary font-bold">
-                            {user?.email?.charAt(0).toUpperCase() || "U"}
-                          </span>
-                        </div>
-                      </>
-                    )}
+
+                {personaAnswers.map((qa, i) => (
+                  <div key={i} className="space-y-2">
+                    <div className="flex justify-end">
+                      <div className="bg-primary/20 rounded-lg px-4 py-2 text-sm max-w-md">
+                        {qa.answer}
+                      </div>
+                    </div>
                   </div>
                 ))}
-                {personaLoading && personaMessages.length > 0 && (
+
+                {showMoreTime && (
+                  <div className="text-center py-6">
+                    <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+                      <Sparkles className="w-8 h-8 text-primary" />
+                    </div>
+                    <h3 className="text-lg font-semibold mb-2">Want to share more?</h3>
+                    <p className="text-sm text-text-muted mb-6 max-w-sm mx-auto">
+                      We&apos;ve learned a lot so far! Would you like to answer a few more questions to help your AI assistant understand you even better?
+                    </p>
+                    <div className="flex gap-3 justify-center">
+                      <button
+                        onClick={handleMoreTimeSkip}
+                        disabled={isRedirecting}
+                        className="px-6 py-3 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer"
+                      >
+                        No, I&apos;m good
+                      </button>
+                      <button
+                        onClick={handleMoreTimeContinue}
+                        disabled={personaLoading}
+                        className="px-6 py-3 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer flex items-center gap-2"
+                      >
+                        {personaLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                        Yes, let&apos;s continue
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {currentQuestion && !showMoreTime && (
+                  <div className="space-y-4">
+                    <div className="flex gap-3">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center flex-shrink-0">
+                        <span className="text-xs text-white font-bold">AI</span>
+                      </div>
+                      <div className="flex-1">
+                        <div className="glass-light rounded-lg px-4 py-3 text-sm mb-3">
+                          <div className="text-xs text-primary font-medium mb-1">
+                            Question {currentQuestion.question_number}
+                          </div>
+                          {currentQuestion.question}
+                        </div>
+                        <div className="space-y-2">
+                          {currentQuestion.options.map((opt, idx) => (
+                            <button
+                              key={idx}
+                              onClick={() => handlePersonaAnswer(opt)}
+                              disabled={personaLoading}
+                              className="w-full text-left px-4 py-3 rounded-xl border border-border hover:border-primary hover:bg-primary/5 transition-all text-sm cursor-pointer disabled:opacity-50"
+                            >
+                              {opt}
+                            </button>
+                          ))}
+                          {!showCustomInput ? (
+                            <button
+                              onClick={() => setShowCustomInput(true)}
+                              className="w-full text-center px-4 py-2 text-sm text-text-muted hover:text-foreground transition-colors cursor-pointer"
+                            >
+                              Or write your own answer...
+                            </button>
+                          ) : (
+                            <div className="flex gap-2">
+                              <input
+                                type="text"
+                                value={customAnswer}
+                                onChange={(e) => setCustomAnswer(e.target.value)}
+                                onKeyDown={(e) => e.key === "Enter" && customAnswer.trim() && handlePersonaAnswer(customAnswer)}
+                                placeholder="Type your answer..."
+                                disabled={personaLoading}
+                                className="flex-1 px-4 py-2.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm"
+                              />
+                              <button
+                                onClick={() => customAnswer.trim() && handlePersonaAnswer(customAnswer)}
+                                disabled={personaLoading || !customAnswer.trim()}
+                                className="px-4 py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-white text-sm font-medium transition-all cursor-pointer disabled:opacity-50"
+                              >
+                                Send
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {personaLoading && currentQuestion && !showMoreTime && (
                   <div className="flex gap-3">
                     <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center flex-shrink-0">
                       <span className="text-xs text-white font-bold">AI</span>
                     </div>
-                    <div className="glass-light rounded-lg px-4 py-2 text-sm max-w-md flex items-center gap-2">
+                    <div className="glass-light rounded-lg px-4 py-2 text-sm flex items-center gap-2">
                       <Loader2 className="w-4 h-4 animate-spin" />
                       <span className="text-text-muted">Thinking...</span>
                     </div>
                   </div>
                 )}
               </div>
-
-              <div className="border-t border-border p-4">
-                <div className="flex gap-3">
-                  <input
-                    type="text"
-                    value={personaInput}
-                    onChange={(e) => setPersonaInput(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && !personaLoading && sendPersonaMessage()}
-                    placeholder="Type your response..."
-                    disabled={personaLoading}
-                    className="flex-1 px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm disabled:opacity-50"
-                  />
-                  <button
-                    onClick={sendPersonaMessage}
-                    disabled={personaLoading || !personaInput.trim()}
-                    className="px-6 py-3 rounded-xl bg-accent hover:bg-accent-hover text-white font-medium transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                  >
-                    {personaLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Send"}
-                  </button>
-                </div>
-              </div>
             </div>
 
             <div className="flex gap-3">
               <button
-                onClick={() => setStep("hierarchy")}
+                onClick={() => setStep("manager")}
                 className="flex-1 py-4 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer flex items-center justify-center gap-2"
               >
                 <ArrowLeft className="w-5 h-5" />
                 Back
               </button>
               <button
-                onClick={() => setStep("complete")}
-                className="flex-1 py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 flex items-center justify-center gap-2"
+                onClick={goToDashboard}
+                disabled={isRedirecting}
+                className="flex-1 py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 flex items-center justify-center gap-2 disabled:opacity-50"
               >
+                {isRedirecting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 Complete Setup
                 <ArrowRight className="w-5 h-5" />
               </button>
             </div>
-          </div>
-        )}
-
-        {step === "complete" && (
-          <div className="max-w-xl mx-auto text-center">
-            <div className="w-24 h-24 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto mb-8 animate-float">
-              <CheckCircle className="w-12 h-12 text-emerald-400" />
-            </div>
-
-            <h1 className="text-4xl font-bold mb-4">
-              Welcome to <span className="gradient-text">{empData.orgName}</span>
-            </h1>
-            <p className="text-text-muted text-lg mb-12">
-              Your workspace is ready. You&apos;re set up as{" "}
-              {empData.role || "team member"} in the {empData.department || "your"} department.
-            </p>
-
-            <div className="grid grid-cols-2 gap-4 mb-8">
-              {[
-                { label: "Department", value: empData.department || "—" },
-                { label: "Manager", value: empData.managerName || "Not set" },
-                { label: "Organization", value: empData.orgName || "—" },
-                { label: "AI Assistant", value: "Active" },
-              ].map((stat, i) => (
-                <div key={i} className="glass rounded-xl p-6">
-                  <div className="text-lg font-bold text-primary">{stat.value}</div>
-                  <div className="text-sm text-text-muted mt-1">{stat.label}</div>
-                </div>
-              ))}
-            </div>
-
-            <div className="glass rounded-xl p-6 mb-8 text-left">
-              <h3 className="font-semibold mb-4 flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-primary" />
-                Your AI Assistant knows:
-              </h3>
-              <ul className="space-y-2 text-sm text-text-muted">
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-emerald-400" />
-                  Your communication preferences
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-emerald-400" />
-                  Workflow challenges and bottlenecks
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-emerald-400" />
-                  Team structure and reporting lines
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-emerald-400" />
-                  Department and role context
-                </li>
-              </ul>
-            </div>
-
-            <div className="text-left mb-6">
-              <p className="text-lg font-medium mb-4">How would you like to proceed?</p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <button
-                  onClick={createWorkspaceNow}
-                  disabled={isSaving}
-                  className="p-6 rounded-xl border-2 border-primary bg-primary/10 hover:bg-primary/20 transition-all cursor-pointer text-left"
-                >
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
-                      <ArrowRight className="w-5 h-5 text-primary" />
-                    </div>
-                    <span className="font-semibold">Create Workspace Now</span>
-                  </div>
-                  <p className="text-sm text-text-muted">
-                    Go directly to your dashboard with tasks, notifications, and reporting views
-                  </p>
-                </button>
-
-                <button
-                  onClick={createWorkspaceLater}
-                  disabled={isSaving}
-                  className="p-6 rounded-xl border-2 border-border hover:border-border-light transition-all cursor-pointer text-left"
-                >
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="w-10 h-10 rounded-xl bg-surface flex items-center justify-center">
-                      <Loader2 className="w-5 h-5 text-text-muted" />
-                    </div>
-                    <span className="font-semibold">Create Later</span>
-                  </div>
-                  <p className="text-sm text-text-muted">
-                    Save your AI intelligence and setup details for later
-                  </p>
-                </button>
-              </div>
-            </div>
-
-            {isSaving && (
-              <div className="flex items-center justify-center gap-2 text-text-muted">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span className="text-sm">Saving your preferences...</span>
-              </div>
-            )}
           </div>
         )}
       </div>
