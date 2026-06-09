@@ -6,12 +6,14 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1
 
 export interface Task {
   id: string;
+  _id?: string;
   title: string;
   description?: string;
   priority: string;
   status: string;
   goal_id?: string;
   assignee_id?: string;
+  assignee_email?: string;
   department?: string;
   due_date?: string;
   dependencies: string[];
@@ -44,7 +46,7 @@ interface TaskState {
   addTaskFromWs: (task: any) => void;
   fetchTasks: (orgId: string, filters?: { goal_id?: string; assignee_id?: string; status?: string }) => Promise<void>;
   fetchTaskWithComments: (taskId: string) => Promise<void>;
-  createTask: (data: { title: string; description?: string; priority?: string; goal_id?: string; assignee_id?: string; organization_id: string }) => Promise<Task>;
+  createTask: (data: { title: string; description?: string; priority?: string; goal_id?: string; assignee_id?: string; assignee_email?: string; department?: string; due_date?: string; organization_id: string }) => Promise<Task>;
   updateTask: (taskId: string, data: Partial<Task>) => Promise<void>;
   deleteTask: (taskId: string) => Promise<void>;
   completeTask: (taskId: string) => Promise<void>;

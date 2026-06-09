@@ -1,18 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { useTaskStore } from "@/stores/taskStore";
 import { useGoalStore } from "@/stores/goalStore";
+import { useOrgChartStore } from "@/stores/orgChartStore";
 import DashboardLayout from "@/components/DashboardLayout";
 import TaskView from "@/components/owners/TaskView";
 import TaskCard from "@/components/TaskCard";
+import TaskModal from "@/components/TaskModal";
 import { Card, CardContent, Badge, Button, Input } from "@/components/ui";
 import {
   Plus, LayoutGrid, List, Search, CheckSquare,
-  Clock, AlertCircle
+  Clock, AlertCircle, Users, User
 } from "lucide-react";
 
 type ViewMode = "list" | "board";
@@ -24,10 +26,23 @@ export default function TaskPage() {
   const { organization } = useOrganizationStore();
   const { tasks, fetchTasks, loading: tasksLoading } = useTaskStore();
   const { goals, fetchGoals } = useGoalStore();
+  const { members, fetchOrgMembers } = useOrgChartStore();
 
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [filterStatus, setFilterStatus] = useState<FilterStatus>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [showTaskModal, setShowTaskModal] = useState(false);
+  const [taskView, setTaskView] = useState<"my" | "team">("my");
+
+  const userEmail = (user as any)?.email || "";
+
+  const directReports = useMemo(() => {
+    return members.filter((m) => m.manager_email?.toLowerCase() === userEmail.toLowerCase());
+  }, [members, userEmail]);
+
+  const directReportEmails = useMemo(() => {
+    return new Set(directReports.map((m) => m.email.toLowerCase()));
+  }, [directReports]);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -54,20 +69,35 @@ export default function TaskPage() {
     if (organization?.id) {
       fetchGoals(organization.id);
       fetchTasks(organization.id);
+      fetchOrgMembers(organization.id);
     }
-  }, [organization?.id, fetchGoals, fetchTasks]);
+  }, [organization?.id, fetchGoals, fetchTasks, fetchOrgMembers]);
 
-  const filteredTasks = tasks.filter((task) => {
+  const visibleTasks = useMemo(() => {
+    if (role === "owner") return tasks;
+    if (taskView === "my") {
+      return tasks.filter((t) => {
+        const assignee = (t.assignee_email || t.assignee_id || "").toLowerCase();
+        return assignee === userEmail.toLowerCase();
+      });
+    }
+    return tasks.filter((t) => {
+      const assignee = (t.assignee_email || t.assignee_id || "").toLowerCase();
+      return directReportEmails.has(assignee);
+    });
+  }, [tasks, role, taskView, userEmail, directReportEmails]);
+
+  const filteredTasks = visibleTasks.filter((task) => {
     if (filterStatus !== "all" && task.status !== filterStatus) return false;
     if (searchQuery && !task.title.toLowerCase().includes(searchQuery.toLowerCase())) return false;
     return true;
   });
 
   const taskStats = {
-    total: tasks.length,
-    pending: tasks.filter(t => t.status === "pending").length,
-    inProgress: tasks.filter(t => t.status === "in_progress").length,
-    completed: tasks.filter(t => t.status === "completed").length,
+    total: visibleTasks.length,
+    pending: visibleTasks.filter(t => t.status === "pending").length,
+    inProgress: visibleTasks.filter(t => t.status === "in_progress").length,
+    completed: visibleTasks.filter(t => t.status === "completed").length,
   };
 
   const getColumnTasks = (status: string) => {
@@ -85,13 +115,41 @@ export default function TaskPage() {
           <div>
             <h1 className="text-2xl md:text-3xl font-bold">AI Task Cascade</h1>
             <p className="text-text-muted mt-1">
-              Manage and track all tasks across your organization
+              {role === "employee"
+                ? taskView === "my"
+                  ? "Your personal tasks and assignments"
+                  : `Tasks from your ${directReports.length} direct report${directReports.length !== 1 ? "s" : ""}`
+                : "Manage and track all tasks across your organization"}
             </p>
           </div>
-          <Button onClick={() => router.push("/tasks/new")} className="flex items-center gap-2 cursor-pointer">
-            <Plus className="w-4 h-4" />
-            New Task
-          </Button>
+          <div className="flex items-center gap-3">
+            {role === "employee" && directReports.length > 0 && (
+              <div className="flex items-center gap-1 border border-border rounded-lg p-1">
+                <button
+                  onClick={() => setTaskView("my")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-all cursor-pointer ${
+                    taskView === "my" ? "bg-primary text-white" : "text-text-muted hover:text-foreground"
+                  }`}
+                >
+                  <User className="w-4 h-4" />
+                  My Tasks
+                </button>
+                <button
+                  onClick={() => setTaskView("team")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-all cursor-pointer ${
+                    taskView === "team" ? "bg-primary text-white" : "text-text-muted hover:text-foreground"
+                  }`}
+                >
+                  <Users className="w-4 h-4" />
+                  Team Tasks
+                </button>
+              </div>
+            )}
+            <Button onClick={() => setShowTaskModal(true)} className="flex items-center gap-2 cursor-pointer">
+              <Plus className="w-4 h-4" />
+              New Task
+            </Button>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -142,7 +200,7 @@ export default function TaskPage() {
                 </div>
                 <div>
                   <p className="text-2xl font-bold">
-                    {tasks.filter(t => t.priority === "urgent" || t.priority === "high").length}
+                    {visibleTasks.filter(t => t.priority === "urgent" || t.priority === "high").length}
                   </p>
                   <p className="text-sm text-text-muted">High Priority</p>
                 </div>
@@ -229,8 +287,8 @@ export default function TaskPage() {
                 </p>
               </div>
             ) : (
-              filteredTasks.map((task) => (
-                <TaskCard key={task.id} task={task} showGoal={!!task.goal_id} />
+              filteredTasks.map((task, idx) => (
+                <TaskCard key={task.id || task._id || `task-${idx}`} task={task} showGoal={!!task.goal_id} />
               ))
             )}
           </div>
@@ -246,7 +304,7 @@ export default function TaskPage() {
                   </div>
                   <div className="space-y-2">
                     {columnTasks.map((task) => (
-                      <TaskCard key={task.id} task={task} />
+                      <TaskCard key={task.id || task._id} task={task} />
                     ))}
                   </div>
                 </div>
@@ -260,6 +318,8 @@ export default function TaskPage() {
           <TaskView />
         </div>
       </div>
+
+      <TaskModal isOpen={showTaskModal} onClose={() => setShowTaskModal(false)} />
     </DashboardLayout>
   );
 }

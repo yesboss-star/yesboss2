@@ -19,19 +19,21 @@
 
 [data-theme="light"] {
   --background: #ffffff;
-  --foreground: #0b132b;
-  --primary: #5bc0be;
-  --primary-light: #7dd4d2;
-  --accent: #215554;
-  --accent-hover: #0b403f;
-  --surface: #f4f5f7;
-  --surface-light: #a9bbce;
-  --border: #d4d6dd;
-  --border-light: #a2a2a2;
-  --text-muted: #3a506b;
-  --gradient-start: #5bc0be;
-  --gradient-end: #0b132b;
-  --heading: #0b132b;
+  --foreground: #1a1a1a;
+  --primary: #2C2C2A;
+  --primary-light: #7F77DD;
+  --brand: #7F77DD;
+  --accent: #5DCAA5;
+  --accent-hover: #4AB894;
+  --surface: #F1EFE8;
+  --surface-light: #F8F7F2;
+  --border: #E0DDD4;
+  --border-light: #D0CDC4;
+  --text-muted: #5F5EFA;
+  --danger: #E24B4A;
+  --gradient-start: #7F77DD;
+  --gradient-end: #5DCAA5;
+  --heading: #2C2C2A;
 }
 
 [data-theme="light"] h1,
@@ -55,6 +57,8 @@
   --color-border: var(--border);
   --color-border-light: var(--border-light);
   --color-text-muted: var(--text-muted);
+  --color-brand: var(--brand);
+  --color-danger: var(--danger);
   --font-sans: 'Inter', var(--font-geist-sans), system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', var(--font-geist-mono), monospace;
 }
@@ -192,4 +196,22 @@ body {
 }
 @keyframes claude-spin {
   100% { transform: rotate(1turn); }
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
 }

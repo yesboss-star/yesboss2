@@ -391,7 +391,7 @@ function OwnerOnboardingContent() {
     // Debounced re-analyze when the user types/pastes a website URL.
     // Only fires for a clean domain (has at least one dot) and only when
     // it differs from the email-derived domain we already analyzed.
-    /* eslint-disable react-hooks/set-state-in-effect */
+     
     const url = (orgData.website_url || "").trim();
     if (!url) return;
     const cleanDomain = processDomain(url);
@@ -405,14 +405,14 @@ function OwnerOnboardingContent() {
     }, 1200);
 
     return () => clearTimeout(handle);
-    /* eslint-enable react-hooks/set-state-in-effect */
+     
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgData.website_url]);
 
   useEffect(() => {
     // When the user enters the file-upload step, ask the AI for
     // growth-driven document recommendations based on the org's context.
-    /* eslint-disable react-hooks/set-state-in-effect */
+     
     if (step !== "file-upload") return;
     const companyName = orgData.name || lastAnalysisRef.current?.company_name || "";
     if (!companyName) return;
@@ -424,7 +424,7 @@ function OwnerOnboardingContent() {
       size: orgData.size || "",
       existing_documents: uploadedFiles.map((f) => ({ filename: f.name })),
     });
-    /* eslint-enable react-hooks/set-state-in-effect */
+     
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
 

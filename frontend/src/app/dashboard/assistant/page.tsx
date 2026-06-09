@@ -296,7 +296,7 @@ function AssistantInner() {
                 New Chat
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
               {sessions.map((session) => (
                 <div
                   key={session.id}
@@ -361,7 +361,7 @@ function AssistantInner() {
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 custom-scrollbar">
             {messages.length === 0 && (
               <div className="flex flex-col items-center justify-center h-full text-center space-y-4">
                 <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary/20 to-purple-500/20 flex items-center justify-center">

@@ -135,7 +135,7 @@ export default function ProfilePage() {
       runAutoDetect();
     }
     /* eslint-enable react-hooks/set-state-in-effect */
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [organization, runAutoDetect]);
 
   const updateLink = (index: number, url: string) => {
