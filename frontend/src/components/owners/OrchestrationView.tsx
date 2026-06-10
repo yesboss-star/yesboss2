@@ -73,7 +73,7 @@ function TreeNode({
   onDelete: (memberId: string) => void;
   onSelect: (member: OrgMember) => void;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const hasChildren = node.children && node.children.length > 0;
 
   const isRoot =
@@ -82,7 +82,7 @@ function TreeNode({
     node.role?.toLowerCase() === "owner";
 
   return (
-    <div className="flex items-start gap-0">
+    <div className="flex items-start">
       <div className="relative group flex-shrink-0">
         <div
           onClick={() => onSelect(node)}
@@ -141,6 +141,7 @@ function TreeNode({
             <button
               onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
               className="absolute -right-2 top-1/2 -translate-y-1/2 translate-x-full w-5 h-5 rounded-full bg-surface border border-border flex items-center justify-center hover:bg-primary/10 hover:border-primary/30 transition-all z-10 cursor-pointer shadow-sm"
+              title={expanded ? "Collapse" : "Expand"}
             >
               {expanded ? (
                 <Minus className="w-3 h-3 text-text-muted" />
@@ -156,12 +157,12 @@ function TreeNode({
       {hasChildren && expanded && (
         <div className="flex items-stretch ml-1">
           <div className="w-4 flex items-center">
-            <div className="h-0.5 bg-border/60 w-full" />
+            <div className="h-px bg-border/60 w-full" />
           </div>
           <div className="border-l-2 border-border/60 pl-4 flex flex-col gap-2">
             {node.children!.map((child, i) => (
               <div key={child.id || i} className="relative">
-                <div className="absolute left-0 top-1/2 -translate-x-full w-4 h-0.5 bg-border/60" />
+                <div className="absolute left-0 top-1/2 -translate-x-full w-4 h-px bg-border/60" />
                 <TreeNode node={child} onAdd={onAdd} onDelete={onDelete} onSelect={onSelect} />
               </div>
             ))}
@@ -549,8 +550,8 @@ export default function OrchestrationView() {
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto pb-4">
-              <div className="flex gap-6 min-w-max">
-                  {tree.map((rootNode, i) => (
+              <div className="flex flex-col gap-6 min-w-max">
+                {tree.map((rootNode, i) => (
                   <TreeNode
                     key={rootNode.id || i}
                     node={rootNode}

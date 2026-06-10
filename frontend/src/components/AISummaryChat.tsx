@@ -231,7 +231,7 @@ export default function AISummaryChat() {
   const { user, role } = useAuth();
   const { organization } = useOrganizationStore();
   const { goals } = useGoalStore();
-  const { tasks, createTask } = useTaskStore();
+  const { tasks } = useTaskStore();
   const { members } = useOrgChartStore();
 
   const directReportEmails = useMemo(() => {
@@ -266,6 +266,7 @@ export default function AISummaryChat() {
     sessions, activeSessionId, createSession,
     setActiveSession, updateSessionContext,
     deleteSession, renameSession,
+    addMessage, updateLastMessage,
   } = useSessionStore();
   const initRef = useRef(false);
 
@@ -417,26 +418,6 @@ export default function AISummaryChat() {
     [members]
   );
 
-  const extractMentionTask = useCallback(
-    (msg: string): { assignee: any; taskTitle: string } | null => {
-      const atIdx = msg.indexOf("@");
-      if (atIdx === -1) return null;
-      const after = msg.slice(atIdx + 1);
-      const words = after.split(/\s+/).filter(Boolean);
-      for (let i = Math.min(5, words.length); i >= 1; i--) {
-        const candidate = words.slice(0, i).join(" ");
-        if (candidate.length > 40) continue;
-        const assignee = findMemberByName(candidate);
-        if (assignee) {
-          const taskTitle = words.slice(i).join(" ").trim() || assignee.full_name;
-          return { assignee, taskTitle };
-        }
-      }
-      return null;
-    },
-    [findMemberByName]
-  );
-
   const extractKpiTitleFromAssistant = useCallback((reply: string): string | null => {
     if (!reply) return null;
     const cleaned = reply
@@ -467,12 +448,16 @@ export default function AISummaryChat() {
   const handleAddAsKPI = useCallback(
     (title?: string, sourceReply?: string) => {
       if (!organization?.id) return;
+      const activeSess = useSessionStore.getState().getActiveSession();
+      const sessId = activeSess?.id;
       const baseSource = sourceReply ||
         [...messages].reverse().find((m) => m.role === "assistant")?.content ||
         "";
       const finalTitle = (title || extractKpiTitleFromAssistant(baseSource) || "").trim();
       if (!finalTitle) {
-        setMessages([...messages, { role: "assistant", content: "I couldn't pin down which metric to track as a KPI from our last reply. Could you name it? (e.g. *Customer Churn Rate*)", timestamp: Date.now() }]);
+        const noKpiMsg: SessionMessage = { role: "assistant", content: "I couldn't pin down which metric to track as a KPI from our last reply. Could you name it? (e.g. *Customer Churn Rate*)", timestamp: Date.now() };
+        setMessages([...messages, noKpiMsg]);
+        if (sessId) addMessage(sessId, noKpiMsg);
         return;
       }
       const created = addKPI(organization.id, {
@@ -481,9 +466,12 @@ export default function AISummaryChat() {
       const confirm = created
         ? `✅ Added **${finalTitle}** as a new KPI card. It will start showing values as soon as the dashboard refreshes (every 30s).`
         : `I couldn't add that KPI right now — please try again.`;
-      setMessages([...messages, { role: "user", content: `Make this a KPI: ${finalTitle}`, timestamp: Date.now() }, { role: "assistant", content: confirm, timestamp: Date.now() }]);
+      const userKpiMsg: SessionMessage = { role: "user", content: `Make this a KPI: ${finalTitle}`, timestamp: Date.now() };
+      const asstKpiMsg: SessionMessage = { role: "assistant", content: confirm, timestamp: Date.now() };
+      setMessages([...messages, userKpiMsg, asstKpiMsg]);
+      if (sessId) { addMessage(sessId, userKpiMsg); addMessage(sessId, asstKpiMsg); }
     },
-    [organization?.id, messages, addKPI, extractKpiTitleFromAssistant]
+    [organization?.id, messages, addKPI, addMessage, extractKpiTitleFromAssistant]
   );
 
   const sendMessage = async () => {
@@ -498,17 +486,16 @@ export default function AISummaryChat() {
       try {
         const result = await uploadAttachedFile();
         if (result) {
-          setMessages((prev) => [
-            ...prev,
-            { role: "user", content: `📎 Uploaded: **${attachedFile.name}**`, timestamp: Date.now() },
-            { role: "assistant", content: `✅ ${result}`, timestamp: Date.now() },
-          ]);
+          const fileMsg: SessionMessage = { role: "user", content: `📎 Uploaded: **${attachedFile.name}**`, timestamp: Date.now() };
+          const resultMsg: SessionMessage = { role: "assistant", content: `✅ ${result}`, timestamp: Date.now() };
+          setMessages((prev) => [...prev, fileMsg, resultMsg]);
+          addMessage(s.id, fileMsg);
+          addMessage(s.id, resultMsg);
         }
       } catch (err: any) {
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: `❌ Upload failed: ${err.message || "Unknown error"}`, timestamp: Date.now() },
-        ]);
+        const errMsg: SessionMessage = { role: "assistant", content: `❌ Upload failed: ${err.message || "Unknown error"}`, timestamp: Date.now() };
+        setMessages((prev) => [...prev, errMsg]);
+        addMessage(s.id, errMsg);
       } finally {
         setLoading(false);
       }
@@ -531,34 +518,7 @@ export default function AISummaryChat() {
     const userMsgObj: SessionMessage = { role: "user", content: userMsg, timestamp: Date.now() };
     const updated = [...messages, userMsgObj];
     setMessages(updated);
-
-    const mentionTask = extractMentionTask(userMsg);
-    if (mentionTask && organization?.id) {
-      try {
-        await createTask({
-          organization_id: organization.id,
-          title: mentionTask.taskTitle,
-          assignee_id: mentionTask.assignee.id || mentionTask.assignee.email,
-          priority: "medium",
-        });
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new CustomEvent("kpi-goal-updated", { detail: { source: "ai" } }));
-        }
-        const next: SessionMessage[] = [
-          ...updated,
-          { role: "assistant", content: `✅ Task **"${mentionTask.taskTitle}"** assigned to **${mentionTask.assignee.full_name}** and saved.`, timestamp: Date.now() },
-        ];
-        setMessages(next);
-        return;
-      } catch (err) {
-        const next: SessionMessage[] = [
-          ...updated,
-          { role: "assistant", content: `❌ I couldn't save that task: ${(err as Error)?.message || "unknown error"}. Try again in a moment.`, timestamp: Date.now() },
-        ];
-        setMessages(next);
-        return;
-      }
-    }
+    addMessage(s.id, userMsgObj);
 
     if (isKpiIntent(userMsg) && organization?.id) {
       const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant")?.content;
@@ -578,7 +538,9 @@ export default function AISummaryChat() {
         setQuestionCount(c => c + 1);
         return;
       } else {
-        setMessages([...updated, { role: "assistant", content: "I see you want to track something as a KPI. Could you tell me the specific metric name you'd like to track? (e.g. *Customer Churn Rate*)", timestamp: Date.now() }]);
+        const kpiMsg: SessionMessage = { role: "assistant", content: "I see you want to track something as a KPI. Could you tell me the specific metric name you'd like to track? (e.g. *Customer Churn Rate*)", timestamp: Date.now() };
+        setMessages([...updated, kpiMsg]);
+        addMessage(s.id, kpiMsg);
         return;
       }
     }
@@ -593,18 +555,26 @@ export default function AISummaryChat() {
 
       if (data.type === "question" && data.question) {
         const q = data.question as ClarifyingQuestion;
+        const qMsg: SessionMessage = { role: "assistant", content: q.text, is_question: true, timestamp: Date.now() };
         setPendingQuestion(q);
         setQuestionCount(c => c + 1);
-        setMessages([...updated]);
+        setMessages([...updated, qMsg]);
+        addMessage(s.id, qMsg);
       } else if (data.type === "answer" && data.answer) {
         let answer = data.answer;
         if (data.follow_up) answer += "\n\n" + data.follow_up;
-        setMessages([...updated, { role: "assistant", content: answer, is_answer: true, timestamp: Date.now() }]);
+        const answerMsg: SessionMessage = { role: "assistant", content: answer, is_answer: true, timestamp: Date.now() };
+        setMessages([...updated, answerMsg]);
+        addMessage(s.id, answerMsg);
       } else {
-        setMessages([...updated, { role: "assistant", content: "Thanks! Let me know if you have more questions.", timestamp: Date.now() }]);
+        const fallbackMsg: SessionMessage = { role: "assistant", content: "Thanks! Let me know if you have more questions.", timestamp: Date.now() };
+        setMessages([...updated, fallbackMsg]);
+        addMessage(s.id, fallbackMsg);
       }
     } catch {
-      setMessages([...updated, { role: "assistant", content: "I'm having trouble connecting to my analysis engine. Please try again.", timestamp: Date.now() }]);
+      const errMsg: SessionMessage = { role: "assistant", content: "I'm having trouble connecting to my analysis engine. Please try again.", timestamp: Date.now() };
+      setMessages([...updated, errMsg]);
+      addMessage(s.id, errMsg);
     } finally {
       setLoading(false);
     }
@@ -618,6 +588,7 @@ export default function AISummaryChat() {
     const userMsg: SessionMessage = { role: "user", content: valueLabel, timestamp: Date.now() };
     const updated = [...messages, userMsg];
     setMessages(updated);
+    addMessage(s.id, userMsg);
 
     updateSessionContext(s.id, { [fieldId]: value });
 
@@ -627,10 +598,14 @@ export default function AISummaryChat() {
         if (title) {
           const created = addKPI(organization.id, { title, source: "ai", sourceDetail: "Added from AI Business Analytics chat", category: "growth", icon: "BarChart3" });
           const confirm = created ? `✅ Added **${title}** as a new KPI card on your dashboard.` : `I couldn't add that KPI right now. Please try again.`;
-          setMessages([...updated, { role: "assistant", content: confirm, timestamp: Date.now() }]);
+          const kpiMsg: SessionMessage = { role: "assistant", content: confirm, timestamp: Date.now() };
+          setMessages([...updated, kpiMsg]);
+          addMessage(s.id, kpiMsg);
         }
       } else {
-        setMessages([...updated, { role: "assistant", content: "No problem! Let me know if you need anything else.", timestamp: Date.now() }]);
+        const noMsg: SessionMessage = { role: "assistant", content: "No problem! Let me know if you need anything else.", timestamp: Date.now() };
+        setMessages([...updated, noMsg]);
+        addMessage(s.id, noMsg);
       }
       return;
     }
@@ -643,17 +618,26 @@ export default function AISummaryChat() {
 
       if (data.type === "question" && data.question) {
         const q = data.question as ClarifyingQuestion;
+        const qMsg: SessionMessage = { role: "assistant", content: q.text, is_question: true, timestamp: Date.now() };
         setPendingQuestion(q);
         setQuestionCount(c => c + 1);
+        setMessages([...updated, qMsg]);
+        addMessage(s.id, qMsg);
       } else if (data.type === "answer" && data.answer) {
         let answer = data.answer;
         if (data.follow_up) answer += "\n\n" + data.follow_up;
-        setMessages([...updated, { role: "assistant", content: answer, is_answer: true, timestamp: Date.now() }]);
+        const answerMsg: SessionMessage = { role: "assistant", content: answer, is_answer: true, timestamp: Date.now() };
+        setMessages([...updated, answerMsg]);
+        addMessage(s.id, answerMsg);
       } else {
-        setMessages([...updated, { role: "assistant", content: "Thanks! Let me know if you have more questions.", timestamp: Date.now() }]);
+        const fallbackMsg: SessionMessage = { role: "assistant", content: "Thanks! Let me know if you have more questions.", timestamp: Date.now() };
+        setMessages([...updated, fallbackMsg]);
+        addMessage(s.id, fallbackMsg);
       }
     } catch {
-      setMessages([...updated, { role: "assistant", content: "Something went wrong. Please try again.", timestamp: Date.now() }]);
+      const errMsg: SessionMessage = { role: "assistant", content: "Something went wrong. Please try again.", timestamp: Date.now() };
+      setMessages([...updated, errMsg]);
+      addMessage(s.id, errMsg);
     } finally {
       setLoading(false);
     }
@@ -814,49 +798,26 @@ export default function AISummaryChat() {
         <div className="flex-1 flex flex-col min-w-0 min-h-0 max-h-[480px]">
           <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar min-h-0">
             {messages.length === 0 && (
-              <div className="space-y-4 py-2">
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-surface border border-border/50 flex items-center justify-center flex-shrink-0">
-                    <Sparkles className="w-4 h-4 text-primary" />
-                  </div>
-                  <div className="max-w-[80%] p-3 rounded-2xl text-sm leading-relaxed bg-surface border border-border/50 text-text-muted">
-                    <p className="mb-1.5">
-                      <span className="font-semibold text-foreground">Hi{organization?.name ? `, I can see ${organization.name}` : ""}.</span>{" "}
-                      Here's what I have on you right now:
-                    </p>
-                    <ul className="text-[12px] space-y-0.5 list-disc pl-4">
-                      <li>{myGoals.length} goal{myGoals.length === 1 ? "" : "s"} ({myGoals.filter((g: any) => g.status === "active").length} active)</li>
-                      <li>{myTasks.length} task{myTasks.length === 1 ? "" : "s"} ({myTasks.filter((t: any) => t.status === "completed").length} done)</li>
-                      <li>{members.length} team member{members.length === 1 ? "" : "s"}</li>
-                      <li>{organization?.industry ? `Industry: ${organization.industry}` : "Industry not set"}</li>
-                    </ul>
-                    <p className="mt-1.5 text-[12px]">
-                      Ask me anything about your business, or{" "}
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        className="text-primary hover:underline cursor-pointer"
-                      >
-                        upload a document
-                      </button>{" "}
-                      and I'll analyze it.
-                    </p>
-                  </div>
+              <div className="flex flex-col items-center justify-center h-full text-center px-4">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary/20 to-purple-500/20 flex items-center justify-center mb-4">
+                  <Sparkles className="w-6 h-6 text-primary" />
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pl-11">
+                <h2 className="text-lg font-semibold text-foreground mb-1">How can I help you today?</h2>
+                <p className="text-sm text-text-muted max-w-sm mb-6">
+                  Ask me anything about your business — goals, tasks, documents, or advice.
+                </p>
+                <div className="flex flex-wrap gap-2 justify-center">
                   {[
-                    "What's my team working on right now?",
-                    "Which goals are off track?",
-                    "Summarize my latest uploaded document",
                     "What should I focus on this week?",
+                    "Summarize my latest document",
+                    "How are my goals tracking?",
+                    "Give me business advice",
                   ].map((prompt) => (
                     <button
                       key={prompt}
                       type="button"
-                      onClick={() => {
-                        setInput(prompt);
-                      }}
-                      className="text-left text-[12px] px-3 py-2 rounded-xl border border-border/50 bg-surface/40 hover:bg-surface-light hover:border-primary/30 transition-colors text-text-muted"
+                      onClick={() => setInput(prompt)}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-surface border border-border/50 hover:border-primary/30 hover:bg-surface-light transition-colors text-text-muted cursor-pointer"
                     >
                       {prompt}
                     </button>

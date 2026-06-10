@@ -25,6 +25,11 @@ from ..core.database import get_database
 from ..dependencies.auth import get_current_user_optional
 from .websocket import manager as ws_manager
 
+
+async def create_notification(user_id: str, org_id: str, type: str, title: str, message: str, link: str = None, actor_id: str = None, actor_name: str = None, metadata: dict = None, email: str = None):
+    from ..core.notification_service import create_and_deliver
+    await create_and_deliver(user_id, org_id, type, title, message, link, actor_id, actor_name, metadata, email=email)
+
 logger = logging.getLogger("yesboss.assistant")
 
 router = APIRouter()
@@ -377,18 +382,27 @@ async def next_counter_question(request: CounterQuestionRequest):
 # ---------------------------------------------------------------------------
 
 def _find_employee(db, org_id: str, query: str):
-    """Find a team member by free-form text: full_name OR email OR first name."""
+    """Find a team member by free-form text: full_name OR email OR first name.
+    Searches both `employees` and `org_chart_members` collections (they're separate)."""
     if not query:
         return None
     q = re.escape(query.strip())
-    return db.employees.find_one({
+    filter = {
         "organization_id": org_id,
         "$or": [
             {"full_name": {"$regex": q, "$options": "i"}},
             {"email": {"$regex": q, "$options": "i"}},
             {"full_name": {"$regex": r"\b" + q, "$options": "i"}},
         ],
-    })
+    }
+    emp = db.employees.find_one(filter)
+    if emp:
+        return emp
+    member = db.org_chart_members.find_one(filter)
+    if member:
+        member["_id"] = str(member["_id"])
+        return member
+    return None
 
 
 @router.post("/people/search")
@@ -565,7 +579,8 @@ async def delegate_task(request: DelegateRequest):
         except Exception as e:
             logger.warning("Sub-task generation failed in delegate: %s", e)
 
-    # 4) Real-time push
+    # 4) Real-time push + notifications
+    user_id = (request.context.user_email if request.context else None)
     try:
         asyncio.create_task(ws_manager.broadcast_to_organization(
             {"type": "goal_created", "data": goal_doc}, org_id
@@ -579,6 +594,24 @@ async def delegate_task(request: DelegateRequest):
             ))
     except Exception as e:
         logger.warning("WebSocket broadcast failed in delegate: %s", e)
+
+    try:
+        # In-app + email notification for the assignee
+        assignee_id = str(emp["_id"])
+        asyncio.create_task(create_notification(
+            user_id=assignee_id, org_id=org_id, type="goal_assigned",
+            title="New Goal Assigned", message=f"Goal assigned: {title}",
+            link=f"/goals/{goal_id}",
+            actor_id=user_id, email=emp.get("email"),
+        ))
+        asyncio.create_task(create_notification(
+            user_id=assignee_id, org_id=org_id, type="task_assigned",
+            title="New Task Assigned", message=f"You have been assigned: {title}",
+            link=f"/tasks/{task_id}",
+            actor_id=user_id, email=emp.get("email"),
+        ))
+    except Exception as e:
+        logger.warning("Notification delivery failed in delegate: %s", e)
 
     return {
         "success": True,
@@ -1124,46 +1157,68 @@ async def _async_snapshot(db, org_id: str) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Smart Ask — answer directly OR ask clarifying questions
+# Smart Ask — understand → check docs → answer or ask
 # ---------------------------------------------------------------------------
 
-ASK_SYSTEM = """You are YesBoss's AI Business Analyst. Your job is to help business owners with concise, structured, engaging answers.
+ASK_SYSTEM = """You are YesBoss's AI Business Analyst. You help business owners and employees with smart, engaging, context-aware answers.
 
-You have access to:
-1. The company's data snapshot (org profile, documents, goals, tasks, employees, previous chat context)
-2. A session context bag of previously gathered information from this session
+## YOUR DECISION PROCESS
 
-DECIDE: Do you know enough about this business to give a specific answer?
+STEP 1 — UNDERSTAND what the user wants. Classify their question:
+- "general_knowledge" — they want advice, explanations, ideas (e.g. "What is unit economics?", "How do I improve retention?", "Give me marketing ideas"). These do NOT need company data.
+- "company_data" — they ask about THEIR business (e.g. "How much can I spend?", "What's our revenue?", "Can we afford 8 lakhs?", "Show my tasks"). These NEED data from docs/tasks/goals.
+- "delegate" — they want to assign a task or goal to a specific team member (e.g. "send this to X", "assign to Y", "create a task for Z", "give this to someone"). If the assignee and task details are clear from the conversation context, create the task WITHOUT asking questions.
 
-NO → Ask for the missing info FIRST before giving any advice. Ask a SINGLE clarifying question:
-- A clear, friendly question
-- 3-5 numbered multiple-choice options covering the most likely answers
-- The field_id for what you're asking about
-- Allow custom text input
-- If you have no company data at all, ask them to upload documents or describe their business
+STEP 2 — Can you answer right now?
+- For "general_knowledge": answer directly with a friendly, engaging response. Be concise but warm. Use examples. Keep it light.
+- For "company_data": check ALL uploaded documents, goals, tasks, and session context FIRST. If the answer is in them, use it. If not, check if you have enough to give a partial answer. If you truly cannot answer, ask ONE specific question for the missing info.
+- For "delegate": if you know who to assign to AND what the task is about (from conversation history + session context), output a delegate response with the task details. If you are missing critical info (assignee name OR task title), ask ONE question for the missing piece.
 
-YES → Give the answer ONLY if you have actual company data to reference. Structure answers like this:
-- Start with a 1-line summary of the key insight
-- Then 3-5 short, scannable bullet points (1-2 lines each)
-- End with 1 follow-up question or next step
-- NEVER write walls of text. Keep paragraphs to 1-2 sentences max.
-- Use formatting: **bold** for key numbers/terms, bullet lists for actions
-- Be conversational but tight — like a smart colleague, not a textbook
+STEP 3 — Answer format:
+- Start with a short, direct answer (1-2 sentences)
+- Then 2-4 bullet points if useful
+- End with a light follow-up if it adds value
+- Use natural, conversational language — like a smart friend helping out
+- Use 1-2 emojis max when it feels natural
+- NEVER: be robotic, use corporate jargon, say "certainly", or write walls of text
+- NEVER: ask questions the user has already answered (check session_context)
+- NEVER: ask more than ONE question at a time
+- When referencing a document, mention its name casually (e.g. "I saw in your Q3 report that...")
 
-RULES:
-- Never ask more than ONE question at a time
-- After the user answers, re-evaluate and answer or ask the next question
-- When answering, MUST reference actual company data by name — if you have none, say so and ask for it
-- Never invent numbers or metrics
-- Keep answers short and punchy — if your answer exceeds 8 lines, tighten it
+## CONVERSATION STYLE
+- Talk like a sharp colleague, not a chatbot
+- Short sentences. Punchy. Human.
+- If the user sounds unsure, be encouraging
+- If they ask a silly question, be gentle — everyone starts somewhere
+- Keep answers under 8 lines total. Tight = respectful.
 
-Respond ONLY with valid JSON in this exact format:
+## EXAMPLE FLOWS
+User: "I want to buy something for 8 lakhs"
+→ Check documents for budget/financial data
+→ If a doc shows "available budget: 15 lakhs" → "You've got 15 lakhs in your budget — you're good to spend 8! 🎉"
+→ If no budget doc exists → "Do you have a budget sheet or financial report I can check? I want to make sure 8 lakhs works before you commit."
 
-For questions:
-{"type":"question","question":{"id":"q_xxx","field_id":"monthly_revenue","text":"What's your current monthly revenue?","options":[{"value":"under_10k","label":"Under $10K"},{"value":"10k_50k","label":"$10K - $50K"},{"value":"50k_200k","label":"$50K - $200K"},{"value":"over_200k","label":"Over $200K"}],"allow_custom":true},"answer":null}
+User: "What should I focus on this week?"
+→ Check goals, tasks, session_context
+→ If goals/tasks exist → "You've got 3 active goals and 5 tasks in progress. I'd start with the Q4 hiring push — it's the only one marked high priority. Want me to break it into steps?"
+→ If nothing exists → "Looks like your plate is clear right now. Want to set a goal for the week?"
 
-For answers:
-{"type":"answer","question":null,"answer":"Your specific answer here (max 8 lines)...","follow_up":"Optional 1-line follow-up question."}"""
+User: "send this to Prafullata and add it as task to her" (after discussing hiring 6 marketing interns)
+→ Check conversation history — see the context is about hiring marketing interns
+→ Output delegate: {"type":"delegate","assignee_name":"Prafullata","title":"Hire 6 marketing interns","description":"Draft job post and initiate hiring for 6 marketing interns, 10k/month stipend, 6 months duration","priority":"medium","answer":"Done! I've created a task **\"Hire 6 marketing interns\"** for **Prafullata**. She'll see it on her dashboard. 🎉"}
+
+User: "assign the Q4 report to John"
+→ If John is a known team member and Q4 report context is in conversation history → delegate
+→ If no context → {"type":"question","question":{...}}
+
+## RESPONSE FORMATS
+
+For answers: {"type":"answer","answer":"your answer here (max 8 lines)","follow_up":"optional 1-line follow-up"}
+
+For questions: {"type":"question","question":{"id":"q_xxx","field_id":"field_name","text":"one clear question","options":[{"value":"opt1","label":"Option 1"},...],"allow_custom":true},"answer":null}
+
+For delegation (when user wants to assign a task to someone AND you have enough context):
+{"type":"delegate","assignee_name":"full name of person","assignee_email":"their email if known","title":"short task title (2-8 words)","description":"optional detail about the task","priority":"medium|high|low","answer":"confirmation message to show the user (1-2 sentences)"}"""
 
 
 class AskRequest(BaseModel):
@@ -1184,8 +1239,7 @@ class AskResponse(BaseModel):
 
 @router.post("/ask", response_model=AskResponse)
 async def smart_ask(request: AskRequest):
-    """Ask a question. If we have enough context, answer directly.
-    If not, return clarifying questions to gather context."""
+    """Ask a question. Understands intent → checks uploaded docs → answers directly or asks for missing info."""
     text = (request.message or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="message is required")
@@ -1210,17 +1264,31 @@ async def smart_ask(request: AskRequest):
 
     org_block = f"Organization: {ctx.organization_name or 'your business'}\n"
     if org_p:
-        org_block += "\n".join(f"- {k}: {v}" for k, v in org_p.items() if v) + "\n"
+        org_lines = [f"- {k}: {v}" for k, v in org_p.items() if v]
+        if org_lines:
+            org_block += "\n".join(org_lines) + "\n"
 
     doc_block = ""
     if docs and (docs.get("analyzed_documents") or 0) > 0:
-        doc_block = f"Documents: {docs.get('analyzed_documents', 0)} analyzed\n"
-        for d in (docs.get("documents") or [])[:5]:
-            doc_block += f"- {d.get('filename')}: {(d.get('summary') or '')[:150]}\n"
+        doc_block = f"Uploaded documents ({docs.get('analyzed_documents', 0)} analyzed):\n"
+        for d in (docs.get("documents") or [])[:8]:
+            line = f"- {d.get('filename')}: {(d.get('summary') or '')[:200]}"
+            metrics = d.get("key_metrics") or []
+            if metrics:
+                kv = ", ".join(f"{m.get('name')}={m.get('value')}" for m in metrics[:3])
+                line += f" [{kv}]"
+            decisions = d.get("decisions") or []
+            if decisions:
+                line += f" | decisions: {'; '.join(decisions[:2])}"
+            doc_block += line + "\n"
 
     goals_block = ""
     if goals.get("titles"):
-        goals_block = f"Active goals ({goals.get('active', 0)}):\n" + "\n".join(f"- {t}" for t in goals["titles"][:5]) + "\n"
+        goals_block = f"Goals ({goals.get('active', 0)} active of {goals.get('count', 0)}):\n" + "\n".join(f"- {t}" for t in goals["titles"][:5]) + "\n"
+
+    tasks_block = ""
+    if tasks.get("total", 0) > 0:
+        tasks_block = f"Tasks: {tasks.get('total', 0)} total ({tasks.get('pending', 0)} pending, {tasks.get('in_progress', 0)} in progress)\n"
 
     emp_block = ""
     if employees.get("count", 0) > 0:
@@ -1228,20 +1296,21 @@ async def smart_ask(request: AskRequest):
 
     ctx_block = ""
     if session_context:
-        ctx_block = "Session context (gathered so far):\n" + "\n".join(f"- {k}: {v}" for k, v in session_context.items()) + "\n"
+        ctx_block = "What we already know from this chat:\n" + "\n".join(f"- {k}: {v}" for k, v in session_context.items()) + "\n"
 
-    history = (request.conversation_history or [])[-6:]
-    history_block = "\n".join(f"{m.get('role','')}: {m.get('content','')[:200]}" for m in history) if history else ""
+    history = (request.conversation_history or [])[-8:]
+    history_block = "\n".join(f"{m.get('role','')}: {m.get('content','')[:300]}" for m in history) if history else ""
 
     prompt = (
         f"{org_block}\n"
         f"{doc_block}"
         f"{goals_block}"
+        f"{tasks_block}"
         f"{emp_block}"
         f"{ctx_block}\n"
         f"Recent chat:\n{history_block}\n\n"
-        f"User's question:\n\"{text}\"\n\n"
-        "Decide: can you give a specific answer now? If yes, answer. If not, ask ONE clarifying question with numbered options."
+        f"User's message:\n\"{text}\"\n\n"
+        "Decide: answer directly or ask one question for missing info."
     )
 
     fallback_question = {
@@ -1249,11 +1318,11 @@ async def smart_ask(request: AskRequest):
         "question": {
             "id": "q_fallback",
             "field_id": "context",
-            "text": "Could you tell me more about what you're looking for so I can give a specific answer?",
+            "text": "Could you tell me a bit more so I can give you a better answer?",
             "options": [
-                {"value": "financial", "label": "Financial/metrics info"},
-                {"value": "team_ops", "label": "Team/operations info"},
-                {"value": "strategy", "label": "Strategy/growth advice"},
+                {"value": "financial", "label": "Something about money or numbers"},
+                {"value": "team_ops", "label": "Something about the team or work"},
+                {"value": "strategy", "label": "Advice or ideas"},
                 {"value": "other", "label": "Something else"},
             ],
             "allow_custom": True,
@@ -1265,8 +1334,8 @@ async def smart_ask(request: AskRequest):
         raw = await get_ai_response(
             prompt=prompt,
             system_prompt=ASK_SYSTEM,
-            temperature=0.4,
-            max_tokens=800,
+            temperature=0.5,
+            max_tokens=1100,
         )
         cleaned = raw.strip()
         if cleaned.startswith("```"):
@@ -1277,6 +1346,39 @@ async def smart_ask(request: AskRequest):
             cleaned = m.group(0)
         parsed = json.loads(cleaned)
         parsed_type = parsed.get("type", "question")
+
+        if parsed_type == "delegate":
+            # Create task via delegate logic
+            assignee_name = parsed.get("assignee_name", "").strip()
+            task_title = parsed.get("title", "").strip()
+            if not task_title or not assignee_name:
+                return AskResponse(**fallback_question)
+            try:
+                delegate_req = DelegateRequest(
+                    title=task_title,
+                    description=parsed.get("description"),
+                    assignee_name=assignee_name,
+                    priority=parsed.get("priority", "medium"),
+                    create_tasks=True,
+                    task_count=3,
+                    context=ctx,
+                )
+                delegate_result = await delegate_task(delegate_req)
+                answer_text = parsed.get("answer") or f"✅ Task **\"{task_title}\"** created and assigned to **{assignee_name}**."
+                if delegate_result.get("sub_tasks"):
+                    answer_text += f"\n\nI also broke it into {len(delegate_result['sub_tasks'])} smaller steps."
+                return AskResponse(
+                    type="answer",
+                    answer=answer_text,
+                    session_id=request.session_id,
+                )
+            except Exception as e:
+                logger.warning(f"delegate from ask failed: {e}")
+                return AskResponse(
+                    type="answer",
+                    answer=f"I couldn't create that task right now. The system said: {e}. Want to try again?",
+                    session_id=request.session_id,
+                )
 
         if parsed_type == "answer":
             answer_text = (parsed.get("answer") or "").strip()
