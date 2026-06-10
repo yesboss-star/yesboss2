@@ -2,7 +2,7 @@ import logging
 import asyncio
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Union
 from datetime import datetime
 from ..core.database import get_database
 from ..dependencies.auth import get_current_user, get_current_user_optional
@@ -17,6 +17,14 @@ async def create_notification(user_id: str, org_id: str, type: str, title: str, 
     await create_and_deliver(user_id, org_id, type, title, message, link, actor_id, actor_name, metadata, email=email)
 
 
+def _normalize_list(v):
+    if v is None:
+        return None
+    if isinstance(v, str):
+        return [v]
+    return list(v)
+
+
 class GoalCreate(BaseModel):
     title: str
     description: Optional[str] = None
@@ -24,11 +32,11 @@ class GoalCreate(BaseModel):
     timeline: Optional[str] = None
     due_date: Optional[str] = None
     department: Optional[str] = None
-    assignee_id: Optional[str] = None
-    assignee_name: Optional[str] = None
+    assignee_id: Optional[Union[str, List[str]]] = None
+    assignee_name: Optional[Union[str, List[str]]] = None
     assignee_email: Optional[str] = None
-    reviewer_id: Optional[str] = None
-    reviewer_name: Optional[str] = None
+    reviewer_id: Optional[Union[str, List[str]]] = None
+    reviewer_name: Optional[Union[str, List[str]]] = None
     organization_id: Optional[str] = None
 
 
@@ -39,10 +47,10 @@ class GoalUpdate(BaseModel):
     timeline: Optional[str] = None
     due_date: Optional[str] = None
     department: Optional[str] = None
-    assignee_id: Optional[str] = None
-    assignee_name: Optional[str] = None
-    reviewer_id: Optional[str] = None
-    reviewer_name: Optional[str] = None
+    assignee_id: Optional[Union[str, List[str]]] = None
+    assignee_name: Optional[Union[str, List[str]]] = None
+    reviewer_id: Optional[Union[str, List[str]]] = None
+    reviewer_name: Optional[Union[str, List[str]]] = None
     status: Optional[str] = None
     success_criteria: Optional[str] = None
     kpis: Optional[str] = None
@@ -115,6 +123,11 @@ async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user_
             logger = logging.getLogger("yesboss.goals")
             logger.warning(f"AI department analysis failed, leaving unassigned: {e}")
     
+    assignee_ids = _normalize_list(goal.assignee_id) or []
+    assignee_names = _normalize_list(goal.assignee_name) or []
+    reviewer_ids = _normalize_list(goal.reviewer_id) or []
+    reviewer_names = _normalize_list(goal.reviewer_name) or []
+    
     goal_doc = {
         "title": goal.title,
         "description": goal.description,
@@ -122,11 +135,11 @@ async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user_
         "timeline": goal.timeline,
         "due_date": goal.due_date,
         "department": department,
-        "assignee_id": goal.assignee_id,
-        "assignee_name": goal.assignee_name,
+        "assignee_id": assignee_ids,
+        "assignee_name": assignee_names,
         "assignee_email": goal.assignee_email,
-        "reviewer_id": goal.reviewer_id,
-        "reviewer_name": goal.reviewer_name,
+        "reviewer_id": reviewer_ids,
+        "reviewer_name": reviewer_names,
         "organization_id": org_id,
         "created_by": user_id,
         "status": "active",
@@ -152,17 +165,18 @@ async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user_
             link=f"/goals/{result.inserted_id}",
         ))
 
-    if goal.assignee_id and goal.assignee_id != user_id:
-        asyncio.create_task(create_notification(
-            user_id=goal.assignee_id,
-            org_id=org_id,
-            type="goal_assigned",
-            title="New Goal Assigned",
-            message=f"Goal assigned: {goal.title}",
-            link=f"/goals/{result.inserted_id}",
-            actor_id=user_id,
-            email=goal.assignee_email,
-        ))
+    for aid in assignee_ids:
+        if aid != user_id:
+            asyncio.create_task(create_notification(
+                user_id=aid,
+                org_id=org_id,
+                type="goal_assigned",
+                title="New Goal Assigned",
+                message=f"Goal assigned: {goal.title}",
+                link=f"/goals/{result.inserted_id}",
+                actor_id=user_id,
+                email=goal.assignee_email,
+            ))
     
     return {"goal": goal_doc}
 
@@ -208,6 +222,12 @@ async def list_goals(
     
     for goal in goals:
         goal["_id"] = str(goal["_id"])
+        for f in ("assignee_id", "assignee_name", "reviewer_id", "reviewer_name"):
+            raw = goal.get(f)
+            if isinstance(raw, str):
+                goal[f] = [raw]
+            elif raw is None:
+                goal[f] = []
         goal_id = goal["_id"]
         tc = task_map.get(goal_id, {"total": 0, "completed": 0, "in_progress": 0, "pending": 0})
         goal["progress"] = round((tc["completed"] / tc["total"] * 100) if tc["total"] > 0 else 0, 1)
@@ -233,6 +253,12 @@ async def get_goal(goal_id: str, current_user = Depends(get_current_user_optiona
         raise HTTPException(status_code=404, detail="Goal not found")
     
     goal["_id"] = str(goal["_id"])
+    for f in ("assignee_id", "assignee_name", "reviewer_id", "reviewer_name"):
+        raw = goal.get(f)
+        if isinstance(raw, str):
+            goal[f] = [raw]
+        elif raw is None:
+            goal[f] = []
     
     tasks = list(db.tasks.find({"goal_id": goal_id}))
     for task in tasks:
@@ -247,7 +273,14 @@ async def update_goal(goal_id: str, goal: GoalUpdate, current_user = Depends(get
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
-    update_data = {k: v for k, v in goal.model_dump().items() if v is not None}
+    update_data = {}
+    for k, v in goal.model_dump().items():
+        if v is None:
+            continue
+        if k in ("assignee_id", "assignee_name", "reviewer_id", "reviewer_name"):
+            update_data[k] = _normalize_list(v) or []
+        else:
+            update_data[k] = v
     update_data["updated_at"] = datetime.utcnow()
     
     db.goals.update_one(
@@ -257,32 +290,42 @@ async def update_goal(goal_id: str, goal: GoalUpdate, current_user = Depends(get
     
     goal = db.goals.find_one({"_id": ObjectId(goal_id)})
     goal["_id"] = str(goal["_id"])
+    for f in ("assignee_id", "assignee_name", "reviewer_id", "reviewer_name"):
+        raw = goal.get(f)
+        if isinstance(raw, str):
+            goal[f] = [raw]
+        elif raw is None:
+            goal[f] = []
 
     asyncio.create_task(ws_manager.broadcast_to_organization(
         {"type": "goal_updated", "data": goal},
         goal.get("organization_id", "")
     ))
 
-    if goal.get("status") and goal.get("assignee_id"):
-        asyncio.create_task(create_notification(
-            user_id=goal["assignee_id"],
-            org_id=goal.get("organization_id", ""),
-            type="goal_status",
-            title=f"Goal Status: {goal['status'].title()}",
-            message=f"Goal '{goal.get('title')}' status updated to {goal['status']}",
-            link=f"/goals/{goal_id}",
-            email=goal.get("assignee_email"),
-        ))
+    assignee_ids = goal.get("assignee_id") or []
+    if goal.get("status") and assignee_ids:
+        for aid in assignee_ids:
+            asyncio.create_task(create_notification(
+                user_id=aid,
+                org_id=goal.get("organization_id", ""),
+                type="goal_status",
+                title=f"Goal Status: {goal['status'].title()}",
+                message=f"Goal '{goal.get('title')}' status updated to {goal['status']}",
+                link=f"/goals/{goal_id}",
+                email=goal.get("assignee_email"),
+            ))
 
-    if goal.get("created_by") and goal.get("assignee_id") and goal["created_by"] != goal["assignee_id"]:
-        asyncio.create_task(create_notification(
-            user_id=goal["created_by"],
-            org_id=goal.get("organization_id", ""),
-            type="goal_status",
-            title=f"Goal Status: {goal['status'].title()}",
-            message=f"Goal '{goal.get('title')}' updated to {goal['status']}",
-            link=f"/goals/{goal_id}",
-        ))
+    if goal.get("created_by") and assignee_ids:
+        for aid in assignee_ids:
+            if goal["created_by"] != aid:
+                asyncio.create_task(create_notification(
+                    user_id=goal["created_by"],
+                    org_id=goal.get("organization_id", ""),
+                    type="goal_status",
+                    title=f"Goal Status: {goal['status'].title()}",
+                    message=f"Goal '{goal.get('title')}' updated to {goal['status']}",
+                    link=f"/goals/{goal_id}",
+                ))
     
     return {"goal": goal}
 
@@ -295,20 +338,23 @@ async def delete_goal(goal_id: str, current_user = Depends(get_current_user_opti
 
     goal = db.goals.find_one({"_id": ObjectId(goal_id)})
     if goal:
-        assignee_id = goal.get("assignee_id")
+        assignee_ids = goal.get("assignee_id") or []
+        if isinstance(assignee_ids, str):
+            assignee_ids = [assignee_ids]
         created_by = goal.get("created_by")
         notified = set()
-        if assignee_id and assignee_id not in notified:
-            notified.add(assignee_id)
-            asyncio.create_task(create_notification(
-                user_id=assignee_id,
-                org_id=goal.get("organization_id", ""),
-                type="goal_deleted",
-                title="Goal Deleted",
-                message=f"Goal '{goal.get('title')}' was deleted",
-                metadata={"goal_id": goal_id},
-                email=goal.get("assignee_email"),
-            ))
+        for aid in assignee_ids:
+            if aid and aid not in notified:
+                notified.add(aid)
+                asyncio.create_task(create_notification(
+                    user_id=aid,
+                    org_id=goal.get("organization_id", ""),
+                    type="goal_deleted",
+                    title="Goal Deleted",
+                    message=f"Goal '{goal.get('title')}' was deleted",
+                    metadata={"goal_id": goal_id},
+                    email=goal.get("assignee_email"),
+                ))
         if created_by and created_by not in notified:
             asyncio.create_task(create_notification(
                 user_id=created_by,
@@ -381,10 +427,12 @@ async def generate_tasks_from_goal(request: TaskGenerate, current_user = Depends
         ]
     
     created_tasks = []
+    goal_assignee_ids = goal.get("assignee_id") or []
+    goal_reviewer_ids = goal.get("reviewer_id") or []
+    if isinstance(goal_assignee_ids, str): goal_assignee_ids = [goal_assignee_ids]
+    if isinstance(goal_reviewer_ids, str): goal_reviewer_ids = [goal_reviewer_ids]
     for i, task_data in enumerate(tasks_data):
-        assignee_id = goal.get("assignee_id")
-        reviewer_id = goal.get("reviewer_id")
-        assign_person = assignee_id if i % 2 == 0 else reviewer_id
+        assign_person = (goal_assignee_ids or [None])[0] if i % 2 == 0 else (goal_reviewer_ids or [None])[0]
         task_doc = {
             "title": task_data.get("title", "Untitled Task"),
             "description": task_data.get("description", ""),
@@ -430,12 +478,14 @@ async def create_tasks_from_suggestions(
         raise HTTPException(status_code=404, detail="Goal not found")
 
     org_id = goal.get("organization_id", "")
-    assignee_id = goal.get("assignee_id")
-    reviewer_id = goal.get("reviewer_id")
+    goal_assignee_ids = goal.get("assignee_id") or []
+    goal_reviewer_ids = goal.get("reviewer_id") or []
+    if isinstance(goal_assignee_ids, str): goal_assignee_ids = [goal_assignee_ids]
+    if isinstance(goal_reviewer_ids, str): goal_reviewer_ids = [goal_reviewer_ids]
 
     created_tasks = []
     for i, task_data in enumerate(request.tasks):
-        assign_person = assignee_id if i % 2 == 0 else reviewer_id
+        assign_person = (goal_assignee_ids or [None])[0] if i % 2 == 0 else (goal_reviewer_ids or [None])[0]
         task_doc = {
             "title": task_data.get("title", "Untitled Task"),
             "description": task_data.get("description", ""),
@@ -522,6 +572,12 @@ async def patch_goal_breakdown(
     if not goal:
         raise HTTPException(status_code=404, detail="Goal not found")
     goal["_id"] = str(goal["_id"])
+    for f in ("assignee_id", "assignee_name", "reviewer_id", "reviewer_name"):
+        raw = goal.get(f)
+        if isinstance(raw, str):
+            goal[f] = [raw]
+        elif raw is None:
+            goal[f] = []
 
     return {"goal": goal}
 
@@ -720,6 +776,12 @@ async def goal_breakdown_chat(
     updated_goal = db.goals.find_one({"_id": ObjectId(goal_id)})
     if updated_goal:
         updated_goal["_id"] = str(updated_goal["_id"])
+        for f in ("assignee_id", "assignee_name", "reviewer_id", "reviewer_name"):
+            raw = updated_goal.get(f)
+            if isinstance(raw, str):
+                updated_goal[f] = [raw]
+            elif raw is None:
+                updated_goal[f] = []
 
     return {
         "response": cleaned_response,

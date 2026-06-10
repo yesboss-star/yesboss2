@@ -12,10 +12,10 @@ export interface Goal {
   timeline?: string;
   due_date?: string;
   department?: string;
-  assignee_id?: string;
-  assignee_name?: string;
-  reviewer_id?: string;
-  reviewer_name?: string;
+  assignee_id?: string[];
+  assignee_name?: string[];
+  reviewer_id?: string[];
+  reviewer_name?: string[];
   status: string;
   created_at: string;
   updated_at: string;
@@ -67,7 +67,7 @@ interface GoalState {
   updateGoalFromWs: (goal: any) => void;
   addGoalFromWs: (goal: any) => void;
   fetchGoals: (orgId: string) => Promise<void>;
-  createGoal: (data: { title: string; description: string; priority: string; timeline?: string; due_date?: string; department?: string; assignee_name?: string; reviewer_name?: string; assignee_id?: string; reviewer_id?: string; organization_id: string }) => Promise<Goal>;
+  createGoal: (data: { title: string; description: string; priority: string; timeline?: string; due_date?: string; department?: string; assignee_name?: string[]; reviewer_name?: string[]; assignee_id?: string[]; reviewer_id?: string[]; organization_id: string }) => Promise<Goal>;
   updateGoal: (goalId: string, data: Partial<Goal>) => Promise<void>;
   deleteGoal: (goalId: string) => Promise<void>;
   generateTasks: (goalId: string, count?: number) => Promise<Task[]>;
@@ -113,17 +113,24 @@ export const useGoalStore = create<GoalState>()(
           const response = await fetch(`${API_URL}/goals?organization_id=${orgId}&limit=20`);
           if (!response.ok) throw new Error("Failed to fetch goals");
           const result = await response.json();
-          const goals = (result.goals || []).map((g: any) => ({
-            ...g,
-            id: g._id || g.id,
-          }));
+          const goals = (result.goals || []).map((g: any) => {
+            const normalizeField = (v: any) => Array.isArray(v) ? v : (v ? [v] : []);
+            return {
+              ...g,
+              id: g._id || g.id,
+              assignee_id: normalizeField(g.assignee_id),
+              assignee_name: normalizeField(g.assignee_name),
+              reviewer_id: normalizeField(g.reviewer_id),
+              reviewer_name: normalizeField(g.reviewer_name),
+            };
+          });
           set({ goals, loading: false });
         } catch (error: any) {
           set({ error: error.message, loading: false });
         }
       },
 
-      createGoal: async (data: { title: string; description: string; priority: string; timeline?: string; due_date?: string; department?: string; assignee_name?: string; reviewer_name?: string; assignee_id?: string; reviewer_id?: string; organization_id: string }) => {
+      createGoal: async (data: { title: string; description: string; priority: string; timeline?: string; due_date?: string; department?: string; assignee_name?: string[]; reviewer_name?: string[]; assignee_id?: string[]; reviewer_id?: string[]; organization_id: string }) => {
         set({ loading: true, error: null });
         try {
           const response = await fetch(`${API_URL}/goals`, {
@@ -133,9 +140,14 @@ export const useGoalStore = create<GoalState>()(
           });
           if (!response.ok) throw new Error("Failed to create goal");
           const result = await response.json();
+          const normalizeField = (v: any) => Array.isArray(v) ? v : (v ? [v] : []);
           const goal = {
             ...result.goal,
             id: result.goal._id || result.goal.id,
+            assignee_id: normalizeField(result.goal.assignee_id),
+            assignee_name: normalizeField(result.goal.assignee_name),
+            reviewer_id: normalizeField(result.goal.reviewer_id),
+            reviewer_name: normalizeField(result.goal.reviewer_name),
           };
           set((state) => ({
             goals: [goal, ...state.goals],
@@ -158,7 +170,15 @@ export const useGoalStore = create<GoalState>()(
           });
           if (!response.ok) throw new Error("Failed to update goal");
           const result = await response.json();
-          const updatedGoal = { ...result.goal, id: result.goal._id || result.goal.id };
+          const normalizeField = (v: any) => Array.isArray(v) ? v : (v ? [v] : []);
+          const updatedGoal = {
+            ...result.goal,
+            id: result.goal._id || result.goal.id,
+            assignee_id: normalizeField(result.goal.assignee_id),
+            assignee_name: normalizeField(result.goal.assignee_name),
+            reviewer_id: normalizeField(result.goal.reviewer_id),
+            reviewer_name: normalizeField(result.goal.reviewer_name),
+          };
           set((state) => ({
             goals: state.goals.map((g) => (g.id === goalId ? updatedGoal : g)),
             currentGoal: state.currentGoal?.id === goalId ? updatedGoal : state.currentGoal,
@@ -214,9 +234,14 @@ export const useGoalStore = create<GoalState>()(
           const response = await fetch(`${API_URL}/goals/${goalId}`);
           if (!response.ok) throw new Error("Failed to fetch goal");
           const result = await response.json();
+          const normalizeField = (v: any) => Array.isArray(v) ? v : (v ? [v] : []);
           const goal = {
             ...result.goal,
             id: result.goal._id || result.goal.id,
+            assignee_id: normalizeField(result.goal.assignee_id),
+            assignee_name: normalizeField(result.goal.assignee_name),
+            reviewer_id: normalizeField(result.goal.reviewer_id),
+            reviewer_name: normalizeField(result.goal.reviewer_name),
           };
           const tasks = (result.tasks || []).map((t: any) => ({
             ...t,
@@ -244,7 +269,15 @@ export const useGoalStore = create<GoalState>()(
           });
           if (!response.ok) throw new Error("Failed to update goal breakdown");
           const result = await response.json();
-          const updatedGoal = { ...result.goal, id: result.goal._id || result.goal.id };
+          const normalizeField = (v: any) => Array.isArray(v) ? v : (v ? [v] : []);
+          const updatedGoal = {
+            ...result.goal,
+            id: result.goal._id || result.goal.id,
+            assignee_id: normalizeField(result.goal.assignee_id),
+            assignee_name: normalizeField(result.goal.assignee_name),
+            reviewer_id: normalizeField(result.goal.reviewer_id),
+            reviewer_name: normalizeField(result.goal.reviewer_name),
+          };
           set((state) => ({
             goals: state.goals.map((g) => (g.id === goalId ? updatedGoal : g)),
             currentGoal: state.currentGoal?.id === goalId ? updatedGoal : state.currentGoal,
@@ -268,7 +301,15 @@ export const useGoalStore = create<GoalState>()(
           if (!response.ok) throw new Error("Failed to send goal chat message");
           const result = await response.json();
           if (result.goal) {
-            const updatedGoal = { ...result.goal, id: result.goal._id || result.goal.id };
+            const normalizeField = (v: any) => Array.isArray(v) ? v : (v ? [v] : []);
+            const updatedGoal = {
+              ...result.goal,
+              id: result.goal._id || result.goal.id,
+              assignee_id: normalizeField(result.goal.assignee_id),
+              assignee_name: normalizeField(result.goal.assignee_name),
+              reviewer_id: normalizeField(result.goal.reviewer_id),
+              reviewer_name: normalizeField(result.goal.reviewer_name),
+            };
             set((state) => ({
               goals: state.goals.map((g) => (g.id === goalId ? updatedGoal : g)),
               currentGoal: state.currentGoal?.id === goalId ? updatedGoal : state.currentGoal,

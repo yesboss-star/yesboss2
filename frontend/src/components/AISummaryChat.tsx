@@ -248,8 +248,10 @@ export default function AISummaryChat() {
     const email = user?.email?.toLowerCase() || "";
     return tasks.filter((t) => {
       const assigneeEmail = (t.assignee_email || "").toLowerCase();
-      const assigneeId = (t.assignee_id || "").toLowerCase();
-      return assigneeEmail === email || assigneeId === email || directReportEmails.has(assigneeEmail) || directReportEmails.has(assigneeId);
+      const assigneeIds = t.assignee_id || [];
+      const inAssignees = assigneeIds.some((id) => id.toLowerCase() === email);
+      const inDirectReports = assigneeIds.some((id) => directReportEmails.has(id.toLowerCase()));
+      return assigneeEmail === email || inAssignees || directReportEmails.has(assigneeEmail) || inDirectReports;
     });
   }, [tasks, role, user?.email, directReportEmails]);
 
@@ -257,8 +259,8 @@ export default function AISummaryChat() {
     if (role === "owner") return goals;
     const email = user?.email?.toLowerCase() || "";
     return goals.filter((g) => {
-      const assigneeId = (g.assignee_id || "").toLowerCase();
-      return assigneeId === email;
+      const ids = g.assignee_id || [];
+      return ids.some((id) => id.toLowerCase() === email);
     });
   }, [goals, role, user?.email]);
   const { addKPI } = useKPIStore();

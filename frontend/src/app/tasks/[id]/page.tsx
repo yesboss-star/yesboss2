@@ -106,6 +106,7 @@ export default function TaskDetailPage() {
 
   const relatedGoal = currentTask?.goal_id ? goals.find(g => g.id === currentTask.goal_id) : null;
   const isOwner = (user as any)?.user_metadata?.role === "owner";
+  const assigneeIds = Array.isArray(currentTask?.assignee_id) ? currentTask.assignee_id : (currentTask?.assignee_id ? [currentTask.assignee_id] : []);
 
   if (!currentTask && loading) {
     return (
@@ -252,12 +253,16 @@ export default function TaskDetailPage() {
                     <p className="text-sm">User</p>
                   </div>
                 </div>
-                {currentTask.assignee_id && (
-                  <div className="flex items-center gap-3">
-                    <User className="w-4 h-4 text-text-muted" />
+                {assigneeIds.length > 0 && (
+                  <div className="flex items-start gap-3">
+                    <User className="w-4 h-4 text-text-muted mt-0.5" />
                     <div>
-                      <p className="text-xs text-text-muted">Assignee</p>
-                      <p className="text-sm">User ID: {currentTask.assignee_id}</p>
+                      <p className="text-xs text-text-muted">Assignees</p>
+                      <div className="flex flex-col gap-1 mt-1">
+                        {assigneeIds.map((aid) => (
+                          <p key={aid} className="text-sm">{aid}</p>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 )}

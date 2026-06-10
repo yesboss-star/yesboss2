@@ -77,13 +77,15 @@ export default function TaskPage() {
     if (role === "owner") return tasks;
     if (taskView === "my") {
       return tasks.filter((t) => {
-        const assignee = (t.assignee_email || t.assignee_id || "").toLowerCase();
-        return assignee === userEmail.toLowerCase();
+        const ids = t.assignee_id || [];
+        return ids.some((id) => id.toLowerCase() === userEmail.toLowerCase()) ||
+          (t.assignee_email || "").toLowerCase() === userEmail.toLowerCase();
       });
     }
     return tasks.filter((t) => {
-      const assignee = (t.assignee_email || t.assignee_id || "").toLowerCase();
-      return directReportEmails.has(assignee);
+      const ids = t.assignee_id || [];
+      return ids.some((id) => directReportEmails.has(id.toLowerCase())) ||
+        directReportEmails.has((t.assignee_email || "").toLowerCase());
     });
   }, [tasks, role, taskView, userEmail, directReportEmails]);
 
@@ -272,6 +274,11 @@ export default function TaskPage() {
           </div>
         </div>
 
+        <div className="border-t border-border pt-6">
+          <h2 className="text-lg font-semibold mb-4">Task Cascade</h2>
+          <TaskView />
+        </div>
+
         {viewMode === "list" ? (
           <div className="space-y-2">
             {tasksLoading ? (
@@ -312,11 +319,6 @@ export default function TaskPage() {
             })}
           </div>
         )}
-
-        <div className="border-t border-border pt-6">
-          <h2 className="text-lg font-semibold mb-4">Task Cascade</h2>
-          <TaskView />
-        </div>
       </div>
 
       <TaskModal isOpen={showTaskModal} onClose={() => setShowTaskModal(false)} />

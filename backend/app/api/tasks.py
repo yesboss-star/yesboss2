@@ -1,7 +1,7 @@
 import asyncio
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Union
 from datetime import datetime
 from ..core.database import get_database
 from ..dependencies.auth import get_current_user_optional
@@ -22,12 +22,19 @@ async def create_notification(user_id: str, org_id: str, type: str, title: str, 
     await create_and_deliver(user_id, org_id, type, title, message, link, actor_id, actor_name, metadata, email=email)
 
 
+def _normalize_assignee_ids(v):
+    if v is None:
+        return None
+    if isinstance(v, str):
+        return [v]
+    return list(v)
+
 class TaskCreate(BaseModel):
     title: str
     description: Optional[str] = None
     priority: str = "medium"
     goal_id: Optional[str] = None
-    assignee_id: Optional[str] = None
+    assignee_id: Optional[Union[str, List[str]]] = None
     assignee_email: Optional[str] = None
     department: Optional[str] = None
     due_date: Optional[str] = None
@@ -40,7 +47,7 @@ class TaskUpdate(BaseModel):
     description: Optional[str] = None
     priority: Optional[str] = None
     status: Optional[str] = None
-    assignee_id: Optional[str] = None
+    assignee_id: Optional[Union[str, List[str]]] = None
     due_date: Optional[str] = None
     dependencies: Optional[List[str]] = None
     reviewers: Optional[List[str]] = None
@@ -62,13 +69,15 @@ async def create_task(task: TaskCreate, organization_id: Optional[str] = None, c
     
     user_id = getattr(current_user, 'id', None) or str(current_user) if current_user else None
     
+    assignee_ids = _normalize_assignee_ids(task.assignee_id) or []
+    
     task_doc = {
         "title": task.title,
         "description": task.description,
         "priority": task.priority,
         "status": "pending",
         "goal_id": task.goal_id,
-        "assignee_id": task.assignee_id,
+        "assignee_id": assignee_ids,
         "assignee_email": task.assignee_email,
         "department": task.department,
         "due_date": task.due_date,
@@ -87,13 +96,13 @@ async def create_task(task: TaskCreate, organization_id: Optional[str] = None, c
         {"type": "task_created", "data": task_doc},
         org_id
     ))
-    if task.assignee_id:
+    for aid in assignee_ids:
         asyncio.create_task(ws_manager.send_personal_message(
             {"type": "task_assigned", "data": task_doc},
-            task.assignee_id
+            aid
         ))
         asyncio.create_task(create_notification(
-            user_id=task.assignee_id,
+            user_id=aid,
             org_id=org_id,
             type="task_assigned",
             title="New Task Assigned",
@@ -128,7 +137,7 @@ async def list_tasks(
     if goal_id:
         query["goal_id"] = goal_id
     if assignee_id:
-        query["assignee_id"] = assignee_id
+        query["assignee_id"] = {"$in": [assignee_id] if isinstance(assignee_id, str) else assignee_id}
     if status:
         query["status"] = status
     if priority:
@@ -140,6 +149,11 @@ async def list_tasks(
     
     for task in tasks:
         task["_id"] = str(task["_id"])
+        raw = task.get("assignee_id")
+        if isinstance(raw, str):
+            task["assignee_id"] = [raw]
+        elif raw is None:
+            task["assignee_id"] = []
     
     return {"tasks": tasks}
 
@@ -156,6 +170,11 @@ async def get_task(task_id: str, current_user = Depends(get_current_user_optiona
         raise HTTPException(status_code=404, detail="Task not found")
     
     task["_id"] = str(task["_id"])
+    raw = task.get("assignee_id")
+    if isinstance(raw, str):
+        task["assignee_id"] = [raw]
+    elif raw is None:
+        task["assignee_id"] = []
     
     comments = list(db.task_comments.find({"task_id": task_id}).sort("created_at", 1))
     for comment in comments:
@@ -170,7 +189,14 @@ async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
-    update_data = {k: v for k, v in task.model_dump().items() if v is not None}
+    update_data = {}
+    for k, v in task.model_dump().items():
+        if v is None:
+            continue
+        if k == "assignee_id":
+            update_data[k] = _normalize_assignee_ids(v) or []
+        else:
+            update_data[k] = v
     update_data["updated_at"] = datetime.utcnow()
     
     db.tasks.update_one(
@@ -180,6 +206,11 @@ async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get
     
     task_obj = db.tasks.find_one({"_id": ObjectId(task_id)})
     task_obj["_id"] = str(task_obj["_id"])
+    raw = task_obj.get("assignee_id")
+    if isinstance(raw, str):
+        task_obj["assignee_id"] = [raw]
+    elif raw is None:
+        task_obj["assignee_id"] = []
     
     org_id = task_obj.get("organization_id")
     if org_id:
@@ -190,15 +221,16 @@ async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get
 
         if task.status and task_obj.get("assignee_id"):
             status_title = task.status.replace("_", " ").title()
-            asyncio.create_task(create_notification(
-                user_id=task_obj["assignee_id"],
-                org_id=org_id,
-                type="task_status",
-                title=f"Task {status_title}",
-                message=f"Task '{task_obj.get('title')}' is now {task.status}",
-                link=f"/tasks/{task_id}",
-                email=task_obj.get("assignee_email"),
-            ))
+            for aid in task_obj["assignee_id"]:
+                asyncio.create_task(create_notification(
+                    user_id=aid,
+                    org_id=org_id,
+                    type="task_status",
+                    title=f"Task {status_title}",
+                    message=f"Task '{task_obj.get('title')}' is now {task.status}",
+                    link=f"/tasks/{task_id}",
+                    email=task_obj.get("assignee_email"),
+                ))
     
     return {"task": task_obj}
 
@@ -211,11 +243,13 @@ async def delete_task(task_id: str, current_user = Depends(get_current_user_opti
 
     task = db.tasks.find_one({"_id": ObjectId(task_id)})
     if task:
-        assignee_id = task.get("assignee_id")
+        raw_assignees = task.get("assignee_id", [])
+        if isinstance(raw_assignees, str):
+            raw_assignees = [raw_assignees]
         assignee_email = task.get("assignee_email")
-        if assignee_id:
+        for aid in raw_assignees or []:
             asyncio.create_task(create_notification(
-                user_id=assignee_id,
+                user_id=aid,
                 org_id=task.get("organization_id", ""),
                 type="task_deleted",
                 title="Task Deleted",
@@ -276,6 +310,11 @@ async def approve_task(task_id: str, current_user = Depends(get_current_user_opt
     
     task_obj = db.tasks.find_one({"_id": ObjectId(task_id)})
     task_obj["_id"] = str(task_obj["_id"])
+    raw = task_obj.get("assignee_id")
+    if isinstance(raw, str):
+        task_obj["assignee_id"] = [raw]
+    elif raw is None:
+        task_obj["assignee_id"] = []
 
     org_id = task_obj.get("organization_id")
 
@@ -285,10 +324,9 @@ async def approve_task(task_id: str, current_user = Depends(get_current_user_opt
             org_id,
         ))
 
-        assignee = task_obj.get("assignee_id")
-        if assignee:
+        for aid in task_obj.get("assignee_id") or []:
             asyncio.create_task(create_notification(
-                user_id=assignee,
+                user_id=aid,
                 org_id=org_id,
                 type="task_approved",
                 title="Task Approved",
@@ -317,6 +355,11 @@ async def complete_task(task_id: str, current_user = Depends(get_current_user_op
     
     task_obj = db.tasks.find_one({"_id": ObjectId(task_id)})
     task_obj["_id"] = str(task_obj["_id"])
+    raw = task_obj.get("assignee_id")
+    if isinstance(raw, str):
+        task_obj["assignee_id"] = [raw]
+    elif raw is None:
+        task_obj["assignee_id"] = []
 
     org_id = task_obj.get("organization_id")
 

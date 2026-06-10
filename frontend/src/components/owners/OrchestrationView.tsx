@@ -270,10 +270,12 @@ export default function OrchestrationView() {
           t.status !== "cancelled"
       );
       if (orgTask) {
-        const matched = members.find((m) => m.email === orgTask.assignee_id);
+        const assigneeIds = orgTask.assignee_id || [];
+        const firstAssignee = assigneeIds[0] || "";
+        const matched = members.find((m) => assigneeIds.includes(m.email));
         setExistingOrgTask({
-          assignee_email: orgTask.assignee_id || "",
-          assignee_name: matched?.full_name || orgTask.assignee_id || "",
+          assignee_email: firstAssignee,
+          assignee_name: matched?.full_name || firstAssignee,
           status: orgTask.status,
         });
       } else {
@@ -359,10 +361,9 @@ export default function OrchestrationView() {
           assignForm.message ||
           "Set up the organization chart with team members, roles, and reporting structure.",
         priority: "high",
-        assignee_name:
-          members.find((m) => m.email === assignForm.assignee_email)?.full_name ||
-          assignForm.assignee_email,
-        reviewer_name: user?.email || "",
+        assignee_id: assignForm.assignee_email ? [assignForm.assignee_email] : undefined,
+        assignee_name: [members.find((m) => m.email === assignForm.assignee_email)?.full_name || assignForm.assignee_email || ""],
+        reviewer_name: user?.email ? [user.email] : [],
         organization_id: organization.id,
       });
 
@@ -374,7 +375,7 @@ export default function OrchestrationView() {
           "Please set up the organization chart with team members, roles, and reporting structure.",
         priority: "high",
         goal_id: goal.id,
-        assignee_id: assignForm.assignee_email,
+        assignee_id: assignForm.assignee_email ? [assignForm.assignee_email] : undefined,
         organization_id: organization.id,
       });
 
@@ -854,9 +855,9 @@ export default function OrchestrationView() {
             <div className="relative">
               <input
                 type="text"
-                value={showAssigneeSuggestions ? assigneeQuery : (assigneeSelected?.full_name || assignForm.assignee_name || "")}
+                value={assigneeQuery}
                 onChange={(e) => { setAssigneeQuery(e.target.value); setShowAssigneeSuggestions(true); }}
-                onFocus={() => { setAssigneeQuery(assigneeSelected?.full_name || assignForm.assignee_name || ""); setShowAssigneeSuggestions(true); }}
+                onFocus={() => setShowAssigneeSuggestions(true)}
                 placeholder="Search name or email..."
                 className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm focus:border-primary focus:outline-none pr-8"
               />
@@ -866,8 +867,11 @@ export default function OrchestrationView() {
               <div className="absolute z-50 mt-1 left-0 right-0 bg-background border border-border rounded-xl shadow-2xl max-h-48 overflow-y-auto">
                 {filteredAssignees.slice(0, 10).map((m) => (
                   <button key={m.email} type="button"
-                    onClick={() => { setAssignForm({ ...assignForm, assignee_email: m.email, assignee_name: m.full_name }); setShowAssigneeSuggestions(false); setAssigneeQuery(m.full_name); }}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-surface flex items-center gap-2">
+                    onClick={() => { setAssignForm({ ...assignForm, assignee_email: m.email, assignee_name: m.full_name }); setShowAssigneeSuggestions(false); setAssigneeQuery(""); }}
+                    className={`w-full text-left px-3 py-2 text-sm hover:bg-surface flex items-center gap-2 ${assignForm.assignee_email === m.email ? "bg-primary/10" : ""}`}>
+                    <div className={`w-3.5 h-3.5 rounded border-2 flex items-center justify-center flex-shrink-0 ${assignForm.assignee_email === m.email ? "bg-primary border-primary" : "border-border"}`}>
+                      {assignForm.assignee_email === m.email && <Check className="w-2.5 h-2.5 text-white" />}
+                    </div>
                     <span className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-[9px] font-medium text-primary flex-shrink-0">{m.full_name.charAt(0)}</span>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-xs font-medium">{m.full_name}</p>

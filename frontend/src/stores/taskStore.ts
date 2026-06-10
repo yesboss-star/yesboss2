@@ -12,7 +12,7 @@ export interface Task {
   priority: string;
   status: string;
   goal_id?: string;
-  assignee_id?: string;
+  assignee_id?: string[];
   assignee_email?: string;
   department?: string;
   due_date?: string;
@@ -46,7 +46,7 @@ interface TaskState {
   addTaskFromWs: (task: any) => void;
   fetchTasks: (orgId: string, filters?: { goal_id?: string; assignee_id?: string; status?: string }) => Promise<void>;
   fetchTaskWithComments: (taskId: string) => Promise<void>;
-  createTask: (data: { title: string; description?: string; priority?: string; goal_id?: string; assignee_id?: string; assignee_email?: string; department?: string; due_date?: string; organization_id: string }) => Promise<Task>;
+  createTask: (data: { title: string; description?: string; priority?: string; goal_id?: string; assignee_id?: string[]; assignee_email?: string; department?: string; due_date?: string; organization_id: string }) => Promise<Task>;
   updateTask: (taskId: string, data: Partial<Task>) => Promise<void>;
   deleteTask: (taskId: string) => Promise<void>;
   completeTask: (taskId: string) => Promise<void>;
@@ -63,14 +63,22 @@ export const useTaskStore = create<TaskState>()(
       loading: false,
       error: null,
 
-      setTasks: (tasks) => set({ tasks }),
+      setTasks: (tasks) => {
+        const deduped = tasks.filter((t, i, a) => a.findIndex((x) => x.id === t.id) === i);
+        set({ tasks: deduped });
+      },
       setCurrentTask: (task) => set({ currentTask: task }),
       setComments: (comments) => set({ comments }),
       setLoading: (loading) => set({ loading }),
       setError: (error) => set({ error }),
 
       updateTaskFromWs: (task) => {
-        const mapped = { ...task, id: task._id || task.id };
+        const raw = task.assignee_id;
+        const mapped = {
+          ...task,
+          id: task._id || task.id,
+          assignee_id: Array.isArray(raw) ? raw : (raw ? [raw] : []),
+        };
         set((state) => ({
           tasks: state.tasks.map((t) => (t.id === mapped.id ? mapped : t)),
           currentTask: state.currentTask?.id === mapped.id ? mapped : state.currentTask,
@@ -78,10 +86,18 @@ export const useTaskStore = create<TaskState>()(
       },
 
       addTaskFromWs: (task) => {
-        const mapped = { ...task, id: task._id || task.id };
-        set((state) => ({
-          tasks: [mapped, ...state.tasks],
-        }));
+        const raw = task.assignee_id;
+        const mapped = {
+          ...task,
+          id: task._id || task.id,
+          assignee_id: Array.isArray(raw) ? raw : (raw ? [raw] : []),
+        };
+        set((state) => {
+          if (state.tasks.find((t) => t.id === mapped.id)) {
+            return { tasks: state.tasks.map((t) => (t.id === mapped.id ? mapped : t)) };
+          }
+          return { tasks: [mapped, ...state.tasks] };
+        });
       },
 
       fetchTasks: async (orgId, filters = {}) => {
@@ -97,11 +113,16 @@ export const useTaskStore = create<TaskState>()(
           });
           if (!response.ok) throw new Error("Failed to fetch tasks");
           const result = await response.json();
-          const tasks = (result.tasks || []).map((t: any) => ({
-            ...t,
-            id: t._id || t.id,
-          }));
-          set({ tasks, loading: false });
+          const tasks = (result.tasks || []).map((t: any) => {
+            const raw = t.assignee_id;
+            return {
+              ...t,
+              id: t._id || t.id,
+              assignee_id: Array.isArray(raw) ? raw : (raw ? [raw] : []),
+            };
+          });
+          const deduped = tasks.filter((t: any, i: number, a: any[]) => a.findIndex((x: any) => x.id === t.id) === i);
+          set({ tasks: deduped, loading: false });
         } catch (error: any) {
           set({ error: error.message, loading: false });
         }
@@ -115,9 +136,11 @@ export const useTaskStore = create<TaskState>()(
           });
           if (!response.ok) throw new Error("Failed to fetch task");
           const result = await response.json();
+          const rawTask = result.task;
           const task = {
-            ...result.task,
-            id: result.task._id || result.task.id,
+            ...rawTask,
+            id: rawTask._id || rawTask.id,
+            assignee_id: Array.isArray(rawTask.assignee_id) ? rawTask.assignee_id : (rawTask.assignee_id ? [rawTask.assignee_id] : []),
           };
           const comments = (result.comments || []).map((c: any) => ({
             ...c,
@@ -145,9 +168,11 @@ export const useTaskStore = create<TaskState>()(
           });
           if (!response.ok) throw new Error("Failed to create task");
           const result = await response.json();
+          const raw = result.task.assignee_id;
           const task = {
             ...result.task,
             id: result.task._id || result.task.id,
+            assignee_id: Array.isArray(raw) ? raw : (raw ? [raw] : []),
           };
           set((state) => ({
             tasks: [task, ...state.tasks],
@@ -170,9 +195,11 @@ export const useTaskStore = create<TaskState>()(
           });
           if (!response.ok) throw new Error("Failed to update task");
           const result = await response.json();
+          const raw = result.task.assignee_id;
           const task = {
             ...result.task,
             id: result.task._id || result.task.id,
+            assignee_id: Array.isArray(raw) ? raw : (raw ? [raw] : []),
           };
           set((state) => ({
             tasks: state.tasks.map((t) => (t.id === taskId ? task : t)),
@@ -211,9 +238,14 @@ export const useTaskStore = create<TaskState>()(
           });
           if (!response.ok) throw new Error("Failed to complete task");
           const result = await response.json();
+          const raw = result.task.assignee_id;
+          const task = {
+            ...result.task,
+            assignee_id: Array.isArray(raw) ? raw : (raw ? [raw] : []),
+          };
           set((state) => ({
-            tasks: state.tasks.map((t) => (t.id === taskId ? result.task : t)),
-            currentTask: state.currentTask?.id === taskId ? result.task : state.currentTask,
+            tasks: state.tasks.map((t) => (t.id === taskId ? task : t)),
+            currentTask: state.currentTask?.id === taskId ? task : state.currentTask,
           }));
         } catch (error: any) {
           set({ error: error.message });
@@ -229,9 +261,14 @@ export const useTaskStore = create<TaskState>()(
           });
           if (!response.ok) throw new Error("Failed to approve task");
           const result = await response.json();
+          const raw = result.task.assignee_id;
+          const task = {
+            ...result.task,
+            assignee_id: Array.isArray(raw) ? raw : (raw ? [raw] : []),
+          };
           set((state) => ({
-            tasks: state.tasks.map((t) => (t.id === taskId ? result.task : t)),
-            currentTask: state.currentTask?.id === taskId ? result.task : state.currentTask,
+            tasks: state.tasks.map((t) => (t.id === taskId ? task : t)),
+            currentTask: state.currentTask?.id === taskId ? task : state.currentTask,
           }));
         } catch (error: any) {
           set({ error: error.message });

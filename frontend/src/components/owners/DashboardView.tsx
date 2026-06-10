@@ -113,11 +113,11 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
   const handleTaskAssigneeChange = async (task: any, member: { id: string; full_name: string; email: string } | null) => {
     const taskId = task._id || task.id;
     if (!taskId) return;
-    const nextAssigneeId = member?.id ?? null;
+    const nextAssigneeIds = member?.id ? [member.id] : [];
     const nextAssigneeName = member?.full_name ?? "";
-    setTasks((prev) => prev.map((t) => (t._id === taskId || t.id === taskId ? { ...t, assignee_id: nextAssigneeId, assignee_name: nextAssigneeName } : t)));
+    setTasks((prev) => prev.map((t) => (t._id === taskId || t.id === taskId ? { ...t, assignee_id: nextAssigneeIds, assignee_name: nextAssigneeName } : t)));
     try {
-      await updateTask(taskId, { assignee_id: nextAssigneeId || undefined } as any);
+      await updateTask(taskId, { assignee_id: nextAssigneeIds.length > 0 ? nextAssigneeIds : undefined } as any);
     } catch {
       loadTasks();
     }
@@ -315,7 +315,7 @@ function TaskRow({
       .slice(0, 8);
   }, [members, query, department]);
 
-  const selected = task.assignee_name || (task.assignee_id && members.find((m) => m.id === task.assignee_id)?.full_name);
+  const selected = task.assignee_name || (task.assignee_id && task.assignee_id.length > 0 && members.find((m) => task.assignee_id.includes(m.id))?.full_name);
 
   const statusOptions = [
     { value: "pending", label: "Pending" },
@@ -384,7 +384,7 @@ function TaskRow({
               />
             </div>
             <div className="max-h-44 overflow-y-auto">
-              {task.assignee_id && (
+              {task.assignee_id && task.assignee_id.length > 0 && (
                 <button
                   type="button"
                   onClick={() => { onAssigneeChange(null); setOpen(false); setQuery(""); }}
