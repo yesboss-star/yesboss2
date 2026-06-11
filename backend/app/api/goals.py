@@ -640,14 +640,17 @@ async def goal_breakdown_chat(
     for msg in history[-10:]:
         conversation.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
 
-    # Track if enough goal details exist to generate task suggestions
-    has_goal_details = bool(
-        goal.get("success_criteria") or goal.get("kpis") or goal.get("timeline_detail")
-    )
+    # Check for delete/remove goal intent before calling AI
+    import re as _re
+    if request.message and _re.search(r"\b(delete|remove|get\s+rid\s+of|scrap|drop)\s+(this\s+)?(goal|task)\b", request.message.lower()):
+        await delete_goal(goal_id, None)
+        return {"response": f"✅ **{goal.get('title', 'Goal')}** has been deleted.", "probing_questions": [], "structured_update": {}, "task_suggestions": [], "goal": None}
 
     system_prompt = (
         "You are a Goal Architect AI. Be concise. Ask ONE short, specific question at a time to understand the goal. "
         "Keep responses under 3 sentences. User answers should also be kept specific.\n\n"
+        "Step 0 — Before responding, analyze the goal itself: what's the title, description, department. "
+        "If the user already provided enough detail, answer directly. If not, ask.\n\n"
         "After your short response, include a JSON block with any field updates:\n"
         "---GOAL_UPDATE---\n"
         '{"success_criteria": "...", "kpis": "...", '
@@ -656,21 +659,23 @@ async def goal_breakdown_chat(
         "Only include fields that were discussed. Use empty string for unchanged.\n\n"
     )
 
-    if has_goal_details:
-        system_prompt += (
-            "Now suggest 3-5 actionable sub-tasks to achieve this goal.\n"
-            "After the GOAL_UPDATE block, add:\n"
-            "---TASK_SUGGESTIONS---\n"
-            '[{"title": "Brief task", "description": "One-line detail", "priority": "medium"}, ...]\n'
-            "---END_TASK_SUGGESTIONS---\n"
-        )
-    else:
-        system_prompt += (
-            "The goal needs more detail. Ask ONE specific question at a time (e.g. if hiring: "
-            "\"Which department?\" → user replies → \"What position?\" → user replies → \"Salary range?\"). "
-            "Never ask multiple questions in one message. Stay concise. "
-            "Do NOT generate task suggestions until success_criteria is filled."
-        )
+    system_prompt += (
+        "Now suggest 3-5 actionable sub-tasks to achieve this goal.\n"
+        "Think from OWNER's perspective — what decisions/actions does the owner need to take, "
+        "not just execution tasks for employees.\n"
+        "After the GOAL_UPDATE block, add:\n"
+        "---TASK_SUGGESTIONS---\n"
+        '[{"title": "Brief task", "description": "Why this matters for the owner", "priority": "medium"}, ...]\n'
+        "---END_TASK_SUGGESTIONS---\n\n"
+        "If you want to suggest quick answer chips for the user, add:\n"
+        "---SUGGESTION_CHIPS---\n"
+        '[{"label": "Short chip text", "value": "what to send on click"}, ...]\n'
+        "---END_SUGGESTION_CHIPS---\n\n"
+        "If you ask a question that would benefit from structured options, add:\n"
+        "---QUESTION_OPTIONS---\n"
+        '[{"value": "option_id", "label": "Option text"}, ...]\n'
+        "---END_QUESTION_OPTIONS---\n"
+    )
 
     user_prompt = f"{context}\n\nGoal title: {goal.get('title')}\n\nUser message: {request.message}\n\nProbing questions to consider: {probing}"
 
@@ -683,8 +688,8 @@ async def goal_breakdown_chat(
         ai_response = await get_chat_response(
             messages=messages,
             provider="xai",
-            temperature=0.7,
-            max_tokens=1500,
+            temperature=0.4,
+            max_tokens=800,
         )
     except Exception as e:
         logger = logging.getLogger("yesboss.goals")
@@ -729,6 +734,45 @@ async def goal_breakdown_chat(
             cleaned_response = cleaned_response.replace(task_match.group(0), "").strip()
         except json.JSONDecodeError:
             pass
+
+    # Parse suggestion chips and question options from AI response
+    suggestion_chips = []
+    chips_match = re.search(
+        r"---SUGGESTION_CHIPS---\s*(\[.*?\])\s*(?:---END_SUGGESTION_CHIPS---)?",
+        cleaned_response, re.DOTALL,
+    )
+    if chips_match:
+        try:
+            chips = json.loads(chips_match.group(1))
+            if isinstance(chips, list):
+                suggestion_chips = chips[:6]
+                cleaned_response = cleaned_response.replace(chips_match.group(0), "").strip()
+        except json.JSONDecodeError:
+            pass
+
+    question_options = []
+    qopt_match = re.search(
+        r"---QUESTION_OPTIONS---\s*(\[.*?\])\s*(?:---END_QUESTION_OPTIONS---)?",
+        cleaned_response, re.DOTALL,
+    )
+    if qopt_match:
+        try:
+            parsed_qopts = json.loads(qopt_match.group(1))
+            if isinstance(parsed_qopts, list):
+                question_options = parsed_qopts[:6]
+                cleaned_response = cleaned_response.replace(qopt_match.group(0), "").strip()
+        except json.JSONDecodeError:
+            pass
+
+    # If no structured question_options, try parsing "Options: A, B, C" from free text
+    if not question_options and "Options:" in cleaned_response:
+        import re as _re_opts
+        opt_match = _re_opts.search(r"(?:^|\n)(?:\d+[.)]\s*)?Options?:\s*(.+?)(?:\n|$)", cleaned_response)
+        if opt_match:
+            raw = opt_match.group(1)
+            parts = [p.strip().rstrip(".") for p in raw.split(",") if p.strip()]
+            if len(parts) >= 2:
+                question_options = [{"value": p.lower().replace(" ", "_"), "label": p} for p in parts]
 
     # Update goal with parsed fields and add to breakdown history
     update_data = {"updated_at": datetime.utcnow()}
@@ -788,5 +832,7 @@ async def goal_breakdown_chat(
         "probing_questions": probing,
         "structured_update": structured_update,
         "task_suggestions": task_suggestions,
+        "suggestion_chips": suggestion_chips,
+        "question_options": question_options,
         "goal": updated_goal,
     }

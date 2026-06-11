@@ -481,46 +481,63 @@ export default function AISummaryChat() {
     const userMsg = input.trim();
     setInput("");
 
-    if (attachedFile && !userMsg) {
-      const s = activeSession || await ensureSession();
-      if (!s) return;
-      setLoading(true);
-      try {
-        const result = await uploadAttachedFile();
-        if (result) {
-          const fileMsg: SessionMessage = { role: "user", content: `📎 Uploaded: **${attachedFile.name}**`, timestamp: Date.now() };
-          const resultMsg: SessionMessage = { role: "assistant", content: `✅ ${result}`, timestamp: Date.now() };
-          setMessages((prev) => [...prev, fileMsg, resultMsg]);
-          addMessage(s.id, fileMsg);
-          addMessage(s.id, resultMsg);
+    // Get or create session ONCE — reuse across all calls in this function
+    const session = activeSession || await ensureSession();
+    if (!session) return;
+    const s = session;
+
+    // Upload file first (if attached) — before answering a question or sending text
+    if (attachedFile) {
+      const fileName = attachedFile.name;
+      if (userMsg) {
+        // File + text: upload with text context, then proceed
+        try {
+          await uploadAttachedFile(userMsg);
+          updateSessionContext(s.id, { recently_uploaded_file: fileName });
+        } catch { /* proceed */ }
+      } else {
+        // File-only: upload, show result, done
+        setLoading(true);
+        try {
+          const result = await uploadAttachedFile();
+          if (result) {
+            const fileMsg: SessionMessage = { role: "user", content: `📎 Uploaded: **${fileName}**`, timestamp: Date.now() };
+            const resultMsg: SessionMessage = { role: "assistant", content: `✅ ${result}`, timestamp: Date.now() };
+            setMessages((prev) => [...prev, fileMsg, resultMsg]);
+            addMessage(s.id, fileMsg);
+            addMessage(s.id, resultMsg);
+            updateSessionContext(s.id, { recently_uploaded_file: fileName });
+          }
+        } catch (err: any) {
+          const errMsg: SessionMessage = { role: "assistant", content: `❌ Upload failed: ${err.message || "Unknown error"}`, timestamp: Date.now() };
+          setMessages((prev) => [...prev, errMsg]);
+          addMessage(s.id, errMsg);
+        } finally {
+          setLoading(false);
         }
-      } catch (err: any) {
-        const errMsg: SessionMessage = { role: "assistant", content: `❌ Upload failed: ${err.message || "Unknown error"}`, timestamp: Date.now() };
-        setMessages((prev) => [...prev, errMsg]);
-        addMessage(s.id, errMsg);
-      } finally {
-        setLoading(false);
+        return;
       }
+    }
+
+    // If file uploaded with text + question pending → answer it
+    if (pendingQuestion) {
+      setPendingQuestion(null);
+      await handleAnswerQuestion(pendingQuestion.field_id, userMsg, userMsg, s);
       return;
     }
 
-    if (attachedFile && userMsg) {
-      const s = activeSession || await ensureSession();
-      if (!s) return;
-      try {
-        await uploadAttachedFile(userMsg);
-      } catch {
-        // proceed with text-only send even if upload fails
-      }
-    }
-
-    const s = activeSession || await ensureSession();
-    if (!s) return;
+    // No question pending — send as regular message (file already uploaded if any)
+    if (!userMsg) return;
 
     const userMsgObj: SessionMessage = { role: "user", content: userMsg, timestamp: Date.now() };
     const updated = [...messages, userMsgObj];
     setMessages(updated);
     addMessage(s.id, userMsgObj);
+
+    if (s.title === "New Chat" || s.title === "Dashboard Chat") {
+      const autoTitle = userMsg.replace(/^(create|set|make|add)\s+(a\s+|an\s+)?/i, "").trim().slice(0, 50);
+      if (autoTitle) renameSession(s.id, autoTitle);
+    }
 
     if (isKpiIntent(userMsg) && organization?.id) {
       const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant")?.content;
@@ -557,11 +574,18 @@ export default function AISummaryChat() {
 
       if (data.type === "question" && data.question) {
         const q = data.question as ClarifyingQuestion;
-        const qMsg: SessionMessage = { role: "assistant", content: q.text, is_question: true, timestamp: Date.now() };
-        setPendingQuestion(q);
-        setQuestionCount(c => c + 1);
-        setMessages([...updated, qMsg]);
-        addMessage(s.id, qMsg);
+        const hasOptions = q.options && q.options.length > 0;
+        if (hasOptions) {
+          const qMsg: SessionMessage = { role: "assistant", content: q.text, is_question: true, timestamp: Date.now() };
+          setPendingQuestion(q);
+          setQuestionCount(c => c + 1);
+          setMessages([...updated, qMsg]);
+          addMessage(s.id, qMsg);
+        } else {
+          const qMsg: SessionMessage = { role: "assistant", content: q.text, timestamp: Date.now() };
+          setMessages([...updated, qMsg]);
+          addMessage(s.id, qMsg);
+        }
       } else if (data.type === "answer" && data.answer) {
         let answer = data.answer;
         if (data.follow_up) answer += "\n\n" + data.follow_up;
@@ -582,8 +606,8 @@ export default function AISummaryChat() {
     }
   };
 
-  const handleAnswerQuestion = async (fieldId: string, value: string, valueLabel: string) => {
-    const s = activeSession || await ensureSession();
+  const handleAnswerQuestion = async (fieldId: string, value: string, valueLabel: string, existingSession?: any) => {
+    const s = existingSession || activeSession || await ensureSession();
     if (!s) return;
 
     setPendingQuestion(null);
@@ -620,11 +644,18 @@ export default function AISummaryChat() {
 
       if (data.type === "question" && data.question) {
         const q = data.question as ClarifyingQuestion;
-        const qMsg: SessionMessage = { role: "assistant", content: q.text, is_question: true, timestamp: Date.now() };
-        setPendingQuestion(q);
-        setQuestionCount(c => c + 1);
-        setMessages([...updated, qMsg]);
-        addMessage(s.id, qMsg);
+        const hasOptions = q.options && q.options.length > 0;
+        if (hasOptions) {
+          const qMsg: SessionMessage = { role: "assistant", content: q.text, is_question: true, timestamp: Date.now() };
+          setPendingQuestion(q);
+          setQuestionCount(c => c + 1);
+          setMessages([...updated, qMsg]);
+          addMessage(s.id, qMsg);
+        } else {
+          const qMsg: SessionMessage = { role: "assistant", content: q.text, timestamp: Date.now() };
+          setMessages([...updated, qMsg]);
+          addMessage(s.id, qMsg);
+        }
       } else if (data.type === "answer" && data.answer) {
         let answer = data.answer;
         if (data.follow_up) answer += "\n\n" + data.follow_up;

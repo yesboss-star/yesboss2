@@ -52,6 +52,7 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [goalData, setGoalData] = useState(goal);
+  const [chatPanelOpen, setChatPanelOpen] = useState(true);
   const { updateTask } = useTaskStore();
   const { members, fetchOrgMembers } = useOrgChartStore();
 
@@ -135,148 +136,197 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
   };
 
   return (
-      <Modal open={true} onOpenChange={(open) => { if (!open) onClose(); }} size="xl">
-      <ModalHeader>
-        <ModalTitle>
-          <div className="flex items-center gap-2">
-            <Flag className="w-5 h-5 text-primary" />
-            <span>{goal.title}</span>
-          </div>
-        </ModalTitle>
-        <ModalClose />
-      </ModalHeader>
-      <ModalContent>
-        <div className="space-y-4">
-          <div className="flex items-center gap-4 flex-wrap">
-            {goal.department && (
-              <span className="text-xs px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 capitalize flex items-center gap-1">
-                <Briefcase className="w-3 h-3" /> {goal.department}
-              </span>
-            )}
-            {goal.priority && (
-              <span className={`text-xs px-2.5 py-1 rounded-full border ${
-                goal.priority === "urgent" ? "text-rose-400 bg-rose-500/10 border-rose-500/20" :
-                goal.priority === "high" ? "text-orange-400 bg-orange-500/10 border-orange-500/20" :
-                "text-yellow-400 bg-yellow-500/10 border-yellow-500/20"
-              }`}>
-                {goal.priority}
-              </span>
-            )}
-            {goal.timeline && (
-              <span className="text-xs flex items-center gap-1 text-text-muted">
-                <Calendar className="w-3 h-3" /> {goal.timeline.replace(/_/g, " ")}
-              </span>
-            )}
-            <Badge variant={goal.status === "completed" ? "success" : goal.status === "active" ? "info" : "warning"}>
-              {goal.status}
-            </Badge>
-          </div>
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-10">
+      {/* Backdrop */}
+      <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
 
-          {goal.description && (
-            <p className="text-sm text-text-muted bg-surface p-3 rounded-xl border border-border/50">
-              {goal.description}
-            </p>
-          )}
-
-          {(goalData.assignee_name || goalData.reviewer_name) && (
-            <div className="flex items-center gap-2 text-sm text-text-muted">
-              <User className="w-4 h-4" />
-              {goalData.assignee_name && <span><strong>Assignee:</strong> {goalData.assignee_name}</span>}
-              {goalData.reviewer_name && <span className="ml-2"><strong>Reviewer:</strong> {goalData.reviewer_name}</span>}
+      <div className="relative z-10 flex gap-4 items-start max-w-[90vw]">
+        {/* Goal Details Card */}
+        <div className="w-[528px] max-w-full glass rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[calc(100vh-80px)]">
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+            <div className="flex items-center gap-2 min-w-0">
+              <Flag className="w-5 h-5 text-primary flex-shrink-0" />
+              <span className="text-lg font-semibold truncate">{goal.title}</span>
             </div>
-          )}
-
-          <div className="p-4 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 border border-primary/20">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <Target className="w-4 h-4 text-primary" />
-                <span className="text-sm font-semibold">Overall Goal Progress</span>
-              </div>
-              <span className={`text-lg font-bold ${
-                computedProgress >= 100 ? "text-emerald-400" :
-                computedProgress >= 50 ? "text-primary" : "text-yellow-400"
-              }`}>
-                {computedProgress}%
-              </span>
-            </div>
-            <div className="h-2.5 bg-surface rounded-full overflow-hidden border border-border/50">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${
-                  computedProgress >= 100 ? "bg-emerald-400" :
-                  computedProgress >= 50 ? "bg-primary" : "bg-yellow-400"
-                }`}
-                style={{ width: `${Math.min(computedProgress, 100)}%` }}
-              />
-            </div>
-            <p className="text-[10px] text-text-muted mt-1.5">
-              {taskCounts.completed} of {taskCounts.total} tasks completed
-            </p>
+            <button onClick={onClose} className="rounded-lg p-2 text-text-muted hover:text-foreground hover:bg-surface transition-colors cursor-pointer flex-shrink-0">
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              { label: "Completed", value: statusCounts.completed, color: "text-emerald-400" },
-              { label: "In Progress", value: statusCounts.in_progress, color: "text-primary" },
-              { label: "Pending", value: statusCounts.pending, color: "text-yellow-400" },
-            ].map((s, i) => (
-              <div key={i} className="p-3 rounded-xl bg-surface border border-border/50 text-center">
-                <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
-                <p className="text-[10px] text-text-muted">{s.label}</p>
+          {/* Scrollable content */}
+          <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-4">
+            <div className="space-y-4">
+              {/* Badges */}
+              <div className="flex items-center gap-3 flex-wrap">
+                {goal.department && (
+                  <span className="text-xs px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 capitalize flex items-center gap-1">
+                    <Briefcase className="w-3 h-3" /> {goal.department}
+                  </span>
+                )}
+                {goal.priority && (
+                  <span className={`text-xs px-2.5 py-1 rounded-full border ${
+                    goal.priority === "urgent" ? "text-rose-400 bg-rose-500/10 border-rose-500/20" :
+                    goal.priority === "high" ? "text-orange-400 bg-orange-500/10 border-orange-500/20" :
+                    "text-yellow-400 bg-yellow-500/10 border-yellow-500/20"
+                  }`}>
+                    {goal.priority}
+                  </span>
+                )}
+                {goal.timeline && (
+                  <span className="text-xs flex items-center gap-1 text-text-muted">
+                    <Calendar className="w-3 h-3" /> {goal.timeline.replace(/_/g, " ")}
+                  </span>
+                )}
+                <Badge variant={goal.status === "completed" ? "success" : goal.status === "active" ? "info" : "warning"}>
+                  {goal.status}
+                </Badge>
               </div>
-            ))}
-          </div>
 
-          <div>
-            <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
-              <Activity className="w-4 h-4 text-primary" />
-              Task Pipeline ({tasks.length})
-            </h4>
-            {loading ? (
-              <div className="flex items-center justify-center py-4">
-                <Loader2 className="w-5 h-5 animate-spin text-primary" />
-              </div>
-            ) : tasks.length === 0 ? (
-              <p className="text-xs text-text-muted text-center py-4">No tasks created for this goal yet.</p>
-            ) : (
-              <div className="space-y-2 max-h-72 overflow-y-auto custom-scrollbar pr-1">
-                {tasks.map((task: any) => (
-                  <TaskRow
-                    key={task._id || task.id}
-                    task={task}
-                    members={members}
-                    department={goalData.department}
-                    onAssigneeChange={(member) => handleTaskAssigneeChange(task, member)}
-                    onStatusChange={(status) => handleTaskStatusChange(task, status)}
-                    getStatusColor={getStatusColor}
+              {/* Description */}
+              {goal.description && (
+                <p className="text-sm text-text-muted bg-surface p-3 rounded-xl border border-border/50">
+                  {goal.description}
+                </p>
+              )}
+
+              {/* Assignee/Reviewer */}
+              {(goalData.assignee_name || goalData.reviewer_name) && (
+                <div className="flex items-center gap-2 text-sm text-text-muted">
+                  <User className="w-4 h-4" />
+                  {goalData.assignee_name && <span><strong>Assignee:</strong> {goalData.assignee_name}</span>}
+                  {goalData.reviewer_name && <span className="ml-2"><strong>Reviewer:</strong> {goalData.reviewer_name}</span>}
+                </div>
+              )}
+
+              {/* Progress */}
+              <div className="p-4 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 border border-primary/20">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Target className="w-4 h-4 text-primary" />
+                    <span className="text-sm font-semibold">Overall Goal Progress</span>
+                  </div>
+                  <span className={`text-lg font-bold ${
+                    computedProgress >= 100 ? "text-emerald-400" :
+                    computedProgress >= 50 ? "text-primary" : "text-yellow-400"
+                  }`}>
+                    {computedProgress}%
+                  </span>
+                </div>
+                <div className="h-2.5 bg-surface rounded-full overflow-hidden border border-border/50">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${
+                      computedProgress >= 100 ? "bg-emerald-400" :
+                      computedProgress >= 50 ? "bg-primary" : "bg-yellow-400"
+                    }`}
+                    style={{ width: `${Math.min(computedProgress, 100)}%` }}
                   />
+                </div>
+                <p className="text-[10px] text-text-muted mt-1.5">
+                  {taskCounts.completed} of {taskCounts.total} tasks completed
+                </p>
+              </div>
+
+              {/* Status counts */}
+              <div className="grid grid-cols-3 gap-3">
+                {[
+                  { label: "Completed", value: statusCounts.completed, color: "text-emerald-400" },
+                  { label: "In Progress", value: statusCounts.in_progress, color: "text-primary" },
+                  { label: "Pending", value: statusCounts.pending, color: "text-yellow-400" },
+                ].map((s, i) => (
+                  <div key={i} className="p-3 rounded-xl bg-surface border border-border/50 text-center">
+                    <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
+                    <p className="text-[10px] text-text-muted">{s.label}</p>
+                  </div>
                 ))}
               </div>
-            )}
+
+              {/* Tasks */}
+              <div>
+                <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-primary" />
+                  Task Pipeline ({tasks.length})
+                </h4>
+                {loading ? (
+                  <div className="flex items-center justify-center py-4">
+                    <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                  </div>
+                ) : tasks.length === 0 ? (
+                  <p className="text-xs text-text-muted text-center py-4">No tasks created for this goal yet.</p>
+                ) : (
+                  <div className="space-y-2 max-h-72 overflow-y-auto custom-scrollbar pr-1">
+                    {tasks.map((task: any) => (
+                      <TaskRow
+                        key={task._id || task.id}
+                        task={task}
+                        members={members}
+                        department={goalData.department}
+                        onAssigneeChange={(member) => handleTaskAssigneeChange(task, member)}
+                        onStatusChange={(status) => handleTaskStatusChange(task, status)}
+                        getStatusColor={getStatusColor}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Chat toggle button */}
+              <button
+                onClick={() => setChatPanelOpen(!chatPanelOpen)}
+                className="flex items-center gap-2 text-sm font-medium text-primary hover:text-primary/80 transition-colors cursor-pointer"
+              >
+                <MessageSquare className="w-4 h-4" />
+                <span>{chatPanelOpen ? "Hide" : "Open"} Goal Refinement Chat</span>
+              </button>
+            </div>
           </div>
 
-          <GoalDetailChat
-            goalId={goal.id || goal._id}
-            goalTitle={goal.title}
-            initialBreakdown={goalData.breakdown_history || goal.breakdown_history || []}
-            existingFields={{
-              success_criteria: goalData.success_criteria || goal.success_criteria,
-              kpis: goalData.kpis || goal.kpis,
-              timeline_detail: goalData.timeline_detail || goal.timeline_detail,
-              dependencies: goalData.dependencies || goal.dependencies,
-            }}
-            assigneeName={goalData.assignee_name}
-            assigneeId={goalData.assignee_id}
-            reviewerName={goalData.reviewer_name}
-            reviewerId={goalData.reviewer_id}
-            organizationId={propOrgId || goal.organization_id}
-            onGoalUpdate={handleGoalUpdate}
-          />
+          {/* Footer */}
+          <div className="flex items-center justify-end px-6 py-4 border-t border-border">
+            <Button variant="outline" onClick={onClose}>Close</Button>
+          </div>
         </div>
-      </ModalContent>
-      <ModalFooter>
-        <Button variant="outline" onClick={onClose}>Close</Button>
-      </ModalFooter>
-    </Modal>
+
+        {/* Chat Side Panel */}
+        {chatPanelOpen && (
+          <div className="w-[528px] max-w-full bg-surface border border-border rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-right fade-in duration-200 flex flex-col h-[calc(100vh-80px)]">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="w-4 h-4 text-primary" />
+                <span className="text-sm font-semibold">Goal Refinement Chat</span>
+              </div>
+              <button
+                onClick={() => setChatPanelOpen(false)}
+                className="p-1 rounded-lg hover:bg-surface-light text-text-muted hover:text-foreground transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 flex flex-col min-h-0 p-4">
+              <GoalDetailChat
+                goalId={goal.id || goal._id}
+                goalTitle={goal.title}
+                initialBreakdown={goalData.breakdown_history || goal.breakdown_history || []}
+                existingFields={{
+                  success_criteria: goalData.success_criteria || goal.success_criteria,
+                  kpis: goalData.kpis || goal.kpis,
+                  timeline_detail: goalData.timeline_detail || goal.timeline_detail,
+                  dependencies: goalData.dependencies || goal.dependencies,
+                }}
+                assigneeName={goalData.assignee_name}
+                assigneeId={goalData.assignee_id}
+                reviewerName={goalData.reviewer_name}
+                reviewerId={goalData.reviewer_id}
+                organizationId={propOrgId || goal.organization_id}
+                onGoalUpdate={handleGoalUpdate}
+                defaultExpanded
+                hideToggleHeader
+              />
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
