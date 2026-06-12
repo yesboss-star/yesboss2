@@ -493,8 +493,8 @@ async def create_tasks_from_suggestions(
             "status": "pending",
             "goal_id": request.goal_id,
             "organization_id": org_id,
-            "assignee_id": assign_person or assignee_id,
-            "reviewers": [reviewer_id] if reviewer_id else [],
+            "assignee_id": assign_person or (goal_assignee_ids[0] if goal_assignee_ids else None),
+            "reviewers": [goal_reviewer_ids[0]] if goal_reviewer_ids else [],
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow(),
         }
@@ -620,12 +620,15 @@ async def goal_breakdown_chat(
         "dependencies": goal.get("dependencies", ""),
     }
 
-    probing = await engine.generate_probing_questions(
-        goal_title=goal.get("title", ""),
-        org_id=org_id,
-        user_id=user_id,
-        existing_fields=existing,
-    )
+    probing = []
+    if not existing.get("success_criteria"):
+        probing.append("What does success look like in numbers?")
+    if not existing.get("kpis"):
+        probing.append("What specific KPIs track progress?")
+    if not existing.get("timeline_detail"):
+        probing.append("What's the target deadline and milestones?")
+    if not existing.get("dependencies"):
+        probing.append("What teams or resources are needed?")
 
     context = await engine.build_prompt(
         org_id=org_id,
@@ -647,34 +650,39 @@ async def goal_breakdown_chat(
         return {"response": f"✅ **{goal.get('title', 'Goal')}** has been deleted.", "probing_questions": [], "structured_update": {}, "task_suggestions": [], "goal": None}
 
     system_prompt = (
-        "You are a Goal Architect AI. Be concise. Ask ONE short, specific question at a time to understand the goal. "
-        "Keep responses under 3 sentences. User answers should also be kept specific.\n\n"
-        "Step 0 — Before responding, analyze the goal itself: what's the title, description, department. "
-        "If the user already provided enough detail, answer directly. If not, ask.\n\n"
-        "After your short response, include a JSON block with any field updates:\n"
+        "You are an Owner's Goal Assistant. Understand first, then recommend.\n\n"
+        "FLOW:\n"
+        "1. If context is lacking → ask ONE question at a time using ---QUESTION_OPTIONS--- "
+        "with 3-5 selectable options. Never ask multiple questions at once. "
+        "Wait for the owner to answer before asking the next question.\n"
+        "2. If you have enough context → give recommendations via ---SUGGESTION_CHIPS--- "
+        "(2-4 chips) + ---TASK_SUGGESTIONS---.\n\n"
+        "FORMAT FOR ONE QUESTION (use this when you need clarification):\n"
+        "Ask a single question as text, then:\n"
+        "---QUESTION_OPTIONS---\n"
+        '[{"value": "option_id", "label": "Clear option (6-10 words)"}, ...]\n'
+        "---END_QUESTION_OPTIONS---\n"
+        "Example: 'Which area should we focus on first?' then 3-5 option chips.\n\n"
+        "FORMAT FOR RECOMMENDATIONS (use when context is sufficient):\n"
+        "---SUGGESTION_CHIPS---\n"
+        '[{"label": "Actionable decision (6-10 words)", "value": "action_id"}, '
+        '{"label": "Something else?", "value": "open_ended"}]\n'
+        "---END_SUGGESTION_CHIPS---\n\n"
+        "Then sub-tasks:\n"
+        "---TASK_SUGGESTIONS---\n"
+        '[{"title": "Sub-task title", "description": "Short context", "priority": "high"}, ...]\n'
+        "---END_TASK_SUGGESTIONS---\n\n"
+        "RULES:\n"
+        "- Focus ONLY on this goal. Don't mix others.\n"
+        "- ONE question per response. Never list multiple questions.\n"
+        "- Use real names, numbers, budgets from context.\n"
+        "- Check history. Never repeat chips or ideas already discussed.\n"
+        "- After recommendations, optionally include GOAL_UPDATE.\n\n"
         "---GOAL_UPDATE---\n"
         '{"success_criteria": "...", "kpis": "...", '
         '"timeline_detail": "...", "dependencies": "..."}\n'
         "---END_GOAL_UPDATE---\n\n"
-        "Only include fields that were discussed. Use empty string for unchanged.\n\n"
-    )
-
-    system_prompt += (
-        "Now suggest 3-5 actionable sub-tasks to achieve this goal.\n"
-        "Think from OWNER's perspective — what decisions/actions does the owner need to take, "
-        "not just execution tasks for employees.\n"
-        "After the GOAL_UPDATE block, add:\n"
-        "---TASK_SUGGESTIONS---\n"
-        '[{"title": "Brief task", "description": "Why this matters for the owner", "priority": "medium"}, ...]\n'
-        "---END_TASK_SUGGESTIONS---\n\n"
-        "If you want to suggest quick answer chips for the user, add:\n"
-        "---SUGGESTION_CHIPS---\n"
-        '[{"label": "Short chip text", "value": "what to send on click"}, ...]\n'
-        "---END_SUGGESTION_CHIPS---\n\n"
-        "If you ask a question that would benefit from structured options, add:\n"
-        "---QUESTION_OPTIONS---\n"
-        '[{"value": "option_id", "label": "Option text"}, ...]\n'
-        "---END_QUESTION_OPTIONS---\n"
+        "Use empty string for unchanged fields.\n"
     )
 
     user_prompt = f"{context}\n\nGoal title: {goal.get('title')}\n\nUser message: {request.message}\n\nProbing questions to consider: {probing}"
@@ -689,7 +697,7 @@ async def goal_breakdown_chat(
             messages=messages,
             provider="xai",
             temperature=0.4,
-            max_tokens=800,
+            max_tokens=500,
         )
     except Exception as e:
         logger = logging.getLogger("yesboss.goals")

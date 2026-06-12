@@ -6,7 +6,7 @@ import {
   MessageSquare, Send, Loader2, Sparkles,
   Target, CheckCircle, Clock, AlertTriangle, Link2,
   ChevronDown, ChevronUp, Square, CheckSquare, Plus,
-  User, X, Search, Paperclip
+  User, X, Search, Paperclip, Lightbulb
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Badge, Button, Input } from "@/components/ui";
 
@@ -127,13 +127,9 @@ export default function GoalDetailChat({
         content: m.content,
       }));
     }
-    return [
-      {
-        role: "assistant",
-        content: `Let's refine **${goalTitle}** together. I'll ask specific questions to understand your goal, then suggest actionable sub-tasks. What would you like to start with?`,
-      },
-    ];
+    return [];
   });
+  const [hasAutoAnalyzed, setHasAutoAnalyzed] = useState(false);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(defaultExpanded);
@@ -142,6 +138,9 @@ export default function GoalDetailChat({
   const [selectedTasks, setSelectedTasks] = useState<Set<number>>(new Set());
   const [creatingTasks, setCreatingTasks] = useState(false);
   const [createdTaskCount, setCreatedTaskCount] = useState(0);
+  const [suggestionChips, setSuggestionChips] = useState<{ label: string; value: string }[]>([]);
+  const [taskSuggestionsExpanded, setTaskSuggestionsExpanded] = useState(true);
+  const [pendingQuestion, setPendingQuestion] = useState<{ options: { value: string; label: string }[] } | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -188,13 +187,24 @@ export default function GoalDetailChat({
   };
 
   useEffect(() => {
-    // Auto-analyze on mount if no existing messages and not already expanded with history
-    if (initialBreakdown.length === 0 && defaultExpanded) {
+    if (initialBreakdown.length === 0 && defaultExpanded && !hasAutoAnalyzed) {
+      setHasAutoAnalyzed(true);
+      setMessages([{ role: "assistant", content: `🔍 Analyzing your goal **${goalTitle}**...` }]);
       goalChat(goalId, "Analyze this goal and help me improve it").then((result) => {
         if (result.response) {
-          setMessages((prev) => [...prev, { role: "assistant", content: result.response }]);
+          setMessages([{ role: "assistant", content: result.response }]);
         }
-      }).catch(() => {});
+        if (result.task_suggestions?.length > 0) {
+          setTaskSuggestions(result.task_suggestions);
+        }
+        if (result.question_options?.length > 0) {
+          setPendingQuestion({ options: result.question_options });
+        } else if (result.suggestion_chips?.length > 0) {
+          setSuggestionChips(result.suggestion_chips);
+        }
+      }).catch(() => {
+        setMessages([{ role: "assistant", content: `Let's refine **${goalTitle}**. What would you like to start with?` }]);
+      });
     }
   }, []);
 
@@ -294,45 +304,51 @@ export default function GoalDetailChat({
     try {
       const created = await createTasksFromSuggestions(goalId, selected);
       setCreatedTaskCount((prev) => prev + created.length);
-      setTaskSuggestions([]);
-      setSelectedTasks(new Set());
-    } catch {}
+    } catch (e) {
+      console.error("Failed to create tasks:", e);
+    }
+    setTaskSuggestions([]);
+    setSelectedTasks(new Set());
     setCreatingTasks(false);
+  };
+
+  const sendMessageWithValue = async (value: string, displayLabel?: string) => {
+    if (!value || loading) return;
+    setPendingQuestion(null);
+    setMessages((prev) => [...prev, { role: "user", content: displayLabel || value }]);
+    setLoading(true);
+    try {
+      const result = await goalChat(goalId, value);
+      if (result.goal === null) {
+        onGoalDelete?.();
+        return;
+      }
+      setMessages((prev) => [...prev, { role: "assistant", content: result.response }]);
+      if (result.task_suggestions && result.task_suggestions.length > 0) {
+        setTaskSuggestions(result.task_suggestions);
+        setSelectedTasks(new Set(result.task_suggestions.map((_: any, i: number) => i)));
+      } else {
+        setTaskSuggestions([]);
+      }
+      if (result.question_options?.length > 0) {
+        setPendingQuestion({ options: result.question_options });
+      } else if (result.suggestion_chips?.length > 0) {
+        setSuggestionChips(result.suggestion_chips);
+      } else {
+        setSuggestionChips([]);
+      }
+    } catch (e) {
+      setMessages((prev) => [...prev, { role: "assistant", content: "Sorry, I had trouble processing that. Please try again." }]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const sendMessage = async () => {
     const msg = input.trim();
     if (!msg || loading) return;
-
     setInput("");
-    setMessages((prev) => [...prev, { role: "user", content: msg }]);
-    setLoading(true);
-
-    try {
-      const result = await goalChat(goalId, msg);
-      if (result.goal === null) {
-        onGoalDelete?.();
-        return;
-      }
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: result.response },
-      ]);
-      if (result.task_suggestions && result.task_suggestions.length > 0) {
-        setTaskSuggestions(result.task_suggestions);
-        setSelectedTasks(new Set(result.task_suggestions.map((_: any, i: number) => i)));
-      }
-    } catch (e) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: "Sorry, I had trouble processing that. Please try again.",
-        },
-      ]);
-    } finally {
-      setLoading(false);
-    }
+    await sendMessageWithValue(msg);
   };
 
   const hasFields =
@@ -342,7 +358,7 @@ export default function GoalDetailChat({
     existingFields.dependencies;
 
   return (
-    <div className={hideToggleHeader ? "" : "border-t border-border/50 pt-4 mt-4"}>
+    <div className={hideToggleHeader ? "h-full flex flex-col" : "border-t border-border/50 pt-4 mt-4"}>
       {!hideToggleHeader && (
         <button
           onClick={() => setExpanded(!expanded)}
@@ -482,55 +498,67 @@ export default function GoalDetailChat({
           {/* Task Suggestions with checkboxes */}
           {taskSuggestions.length > 0 && (
             <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
-              <div className="flex items-center justify-between mb-2">
+              <button
+                onClick={() => setTaskSuggestionsExpanded(!taskSuggestionsExpanded)}
+                className="w-full flex items-center justify-between cursor-pointer"
+              >
                 <h4 className="text-xs font-semibold text-emerald-400 flex items-center gap-1">
                   <CheckSquare className="w-3 h-3" />
-                  Suggested Sub-Tasks
+                  Suggested Sub-Tasks ({taskSuggestions.length})
                 </h4>
-                <Button
-                  onClick={handleCreateTasks}
-                  disabled={selectedTasks.size === 0 || creatingTasks}
-                  size="sm"
-                  className="cursor-pointer text-[10px] h-7"
-                >
-                  {creatingTasks ? (
-                    <Loader2 className="w-3 h-3 animate-spin mr-1" />
-                  ) : (
-                    <Plus className="w-3 h-3 mr-1" />
-                  )}
-                  Create {selectedTasks.size > 0 ? `(${selectedTasks.size})` : ""}
-                </Button>
-              </div>
-              <div className="space-y-1.5">
-                {taskSuggestions.map((task, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => toggleTask(idx)}
-                    className="w-full text-left flex items-center gap-2 p-2 rounded-lg hover:bg-emerald-500/10 transition-colors cursor-pointer group"
-                  >
-                    {selectedTasks.has(idx) ? (
-                      <CheckSquare className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                    ) : (
-                      <Square className="w-4 h-4 text-text-muted group-hover:text-emerald-400 flex-shrink-0" />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium">{task.title}</p>
-                      {task.description && (
-                        <p className="text-[10px] text-text-muted truncate">{task.description}</p>
+                <div className="flex items-center gap-2">
+                  {taskSuggestionsExpanded ? <ChevronUp className="w-3 h-3 text-emerald-400" /> : <ChevronDown className="w-3 h-3 text-emerald-400" />}
+                </div>
+              </button>
+              {taskSuggestionsExpanded && (
+                <>
+                  <div className="flex items-center justify-end mt-2 mb-2">
+                    <Button
+                      onClick={handleCreateTasks}
+                      disabled={selectedTasks.size === 0 || creatingTasks}
+                      size="sm"
+                      className="cursor-pointer text-[10px] h-7"
+                    >
+                      {creatingTasks ? (
+                        <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                      ) : (
+                        <Plus className="w-3 h-3 mr-1" />
                       )}
-                    </div>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full border flex-shrink-0 ${
-                      task.priority === "high" || task.priority === "urgent"
-                        ? "text-rose-400 bg-rose-500/10 border-rose-500/20"
-                        : task.priority === "medium"
-                        ? "text-yellow-400 bg-yellow-500/10 border-yellow-500/20"
-                        : "text-gray-400 bg-gray-500/10 border-gray-500/20"
-                    }`}>
-                      {task.priority}
-                    </span>
-                  </button>
-                ))}
-              </div>
+                      Create {selectedTasks.size > 0 ? `(${selectedTasks.size})` : ""}
+                    </Button>
+                  </div>
+                  <div className="space-y-1.5">
+                    {taskSuggestions.map((task, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => toggleTask(idx)}
+                        className="w-full text-left flex items-center gap-2 p-2 rounded-lg hover:bg-emerald-500/10 transition-colors cursor-pointer group"
+                      >
+                        {selectedTasks.has(idx) ? (
+                          <CheckSquare className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                        ) : (
+                          <Square className="w-4 h-4 text-text-muted group-hover:text-emerald-400 flex-shrink-0" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium">{task.title}</p>
+                          {task.description && (
+                            <p className="text-[10px] text-text-muted truncate">{task.description}</p>
+                          )}
+                        </div>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full border flex-shrink-0 ${
+                          task.priority === "high" || task.priority === "urgent"
+                            ? "text-rose-400 bg-rose-500/10 border-rose-500/20"
+                            : task.priority === "medium"
+                            ? "text-yellow-400 bg-yellow-500/10 border-yellow-500/20"
+                            : "text-gray-400 bg-gray-500/10 border-gray-500/20"
+                        }`}>
+                          {task.priority}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -620,6 +648,44 @@ export default function GoalDetailChat({
               <div className="flex items-center gap-2 text-text-muted text-xs">
                 <Loader2 className="w-3 h-3 animate-spin" />
                 Refining goal...
+              </div>
+            )}
+            {pendingQuestion && !loading && (
+              <div className="rounded-2xl bg-surface border border-primary/20 p-4 space-y-3 ml-8">
+                <div className="flex items-start gap-2">
+                  <Lightbulb className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
+                  <p className="text-sm text-foreground font-medium">Choose an option:</p>
+                </div>
+                <div className="grid grid-cols-1 gap-2">
+                  {pendingQuestion.options.map((opt, i) => (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        sendMessageWithValue(opt.value, opt.label);
+                        setPendingQuestion(null);
+                      }}
+                      className="w-full text-left p-2.5 rounded-lg bg-primary/5 border border-primary/15 text-sm text-foreground hover:bg-primary/10 hover:border-primary/30 transition-all cursor-pointer"
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {!pendingQuestion && suggestionChips.length > 0 && (
+              <div className="grid grid-cols-1 gap-2 pt-2 ml-8">
+                {suggestionChips.map((chip, i) => (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      sendMessageWithValue(chip.value, chip.label);
+                      setSuggestionChips([]);
+                    }}
+                    className="w-full text-left p-3 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 border border-primary/20 text-sm text-foreground hover:from-primary/10 hover:to-purple-500/10 hover:border-primary/30 transition-all cursor-pointer shadow-sm"
+                  >
+                    <span className="font-medium">{chip.label}</span>
+                  </button>
+                ))}
               </div>
             )}
             <div ref={chatEndRef} />
@@ -783,55 +849,67 @@ export default function GoalDetailChat({
             {/* Task Suggestions with checkboxes */}
             {taskSuggestions.length > 0 && (
               <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
-                <div className="flex items-center justify-between mb-2">
+                <button
+                  onClick={() => setTaskSuggestionsExpanded(!taskSuggestionsExpanded)}
+                  className="w-full flex items-center justify-between cursor-pointer"
+                >
                   <h4 className="text-xs font-semibold text-emerald-400 flex items-center gap-1">
                     <CheckSquare className="w-3 h-3" />
-                    Suggested Sub-Tasks
+                    Suggested Sub-Tasks ({taskSuggestions.length})
                   </h4>
-                  <Button
-                    onClick={handleCreateTasks}
-                    disabled={selectedTasks.size === 0 || creatingTasks}
-                    size="sm"
-                    className="cursor-pointer text-[10px] h-7"
-                  >
-                    {creatingTasks ? (
-                      <Loader2 className="w-3 h-3 animate-spin mr-1" />
-                    ) : (
-                      <Plus className="w-3 h-3 mr-1" />
-                    )}
-                    Create {selectedTasks.size > 0 ? `(${selectedTasks.size})` : ""}
-                  </Button>
-                </div>
-                <div className="space-y-1.5">
-                  {taskSuggestions.map((task, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => toggleTask(idx)}
-                      className="w-full text-left flex items-center gap-2 p-2 rounded-lg hover:bg-emerald-500/10 transition-colors cursor-pointer group"
-                    >
-                      {selectedTasks.has(idx) ? (
-                        <CheckSquare className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                      ) : (
-                        <Square className="w-4 h-4 text-text-muted group-hover:text-emerald-400 flex-shrink-0" />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium">{task.title}</p>
-                        {task.description && (
-                          <p className="text-[10px] text-text-muted truncate">{task.description}</p>
+                  <div className="flex items-center gap-2">
+                    {taskSuggestionsExpanded ? <ChevronUp className="w-3 h-3 text-emerald-400" /> : <ChevronDown className="w-3 h-3 text-emerald-400" />}
+                  </div>
+                </button>
+                {taskSuggestionsExpanded && (
+                  <>
+                    <div className="flex items-center justify-end mt-2 mb-2">
+                      <Button
+                        onClick={handleCreateTasks}
+                        disabled={selectedTasks.size === 0 || creatingTasks}
+                        size="sm"
+                        className="cursor-pointer text-[10px] h-7"
+                      >
+                        {creatingTasks ? (
+                          <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                        ) : (
+                          <Plus className="w-3 h-3 mr-1" />
                         )}
-                      </div>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full border flex-shrink-0 ${
-                        task.priority === "high" || task.priority === "urgent"
-                          ? "text-rose-400 bg-rose-500/10 border-rose-500/20"
-                          : task.priority === "medium"
-                          ? "text-yellow-400 bg-yellow-500/10 border-yellow-500/20"
-                          : "text-gray-400 bg-gray-500/10 border-gray-500/20"
-                      }`}>
-                        {task.priority}
-                      </span>
-                    </button>
-                  ))}
-                </div>
+                        Create {selectedTasks.size > 0 ? `(${selectedTasks.size})` : ""}
+                      </Button>
+                    </div>
+                    <div className="space-y-1.5">
+                      {taskSuggestions.map((task, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => toggleTask(idx)}
+                          className="w-full text-left flex items-center gap-2 p-2 rounded-lg hover:bg-emerald-500/10 transition-colors cursor-pointer group"
+                        >
+                          {selectedTasks.has(idx) ? (
+                            <CheckSquare className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                          ) : (
+                            <Square className="w-4 h-4 text-text-muted group-hover:text-emerald-400 flex-shrink-0" />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium">{task.title}</p>
+                            {task.description && (
+                              <p className="text-[10px] text-text-muted truncate">{task.description}</p>
+                            )}
+                          </div>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full border flex-shrink-0 ${
+                            task.priority === "high" || task.priority === "urgent"
+                              ? "text-rose-400 bg-rose-500/10 border-rose-500/20"
+                              : task.priority === "medium"
+                              ? "text-yellow-400 bg-yellow-500/10 border-yellow-500/20"
+                              : "text-gray-400 bg-gray-500/10 border-gray-500/20"
+                          }`}>
+                            {task.priority}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
@@ -919,6 +997,44 @@ export default function GoalDetailChat({
               <div className="flex items-center gap-2 text-text-muted text-xs">
                 <Loader2 className="w-3 h-3 animate-spin" />
                 Refining goal...
+              </div>
+            )}
+            {pendingQuestion && !loading && (
+              <div className="rounded-2xl bg-surface border border-primary/20 p-4 space-y-3 ml-8">
+                <div className="flex items-start gap-2">
+                  <Lightbulb className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
+                  <p className="text-sm text-foreground font-medium">Choose an option:</p>
+                </div>
+                <div className="grid grid-cols-1 gap-2">
+                  {pendingQuestion.options.map((opt, i) => (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        sendMessageWithValue(opt.value, opt.label);
+                        setPendingQuestion(null);
+                      }}
+                      className="w-full text-left p-2.5 rounded-lg bg-primary/5 border border-primary/15 text-sm text-foreground hover:bg-primary/10 hover:border-primary/30 transition-all cursor-pointer"
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {!pendingQuestion && suggestionChips.length > 0 && (
+              <div className="grid grid-cols-1 gap-2 pt-2 ml-8">
+                {suggestionChips.map((chip, i) => (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      sendMessageWithValue(chip.value, chip.label);
+                      setSuggestionChips([]);
+                    }}
+                    className="w-full text-left p-3 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 border border-primary/20 text-sm text-foreground hover:from-primary/10 hover:to-purple-500/10 hover:border-primary/30 transition-all cursor-pointer shadow-sm"
+                  >
+                    <span className="font-medium">{chip.label}</span>
+                  </button>
+                ))}
               </div>
             )}
             <div ref={chatEndRef} />

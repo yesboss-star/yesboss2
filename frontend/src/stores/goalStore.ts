@@ -73,7 +73,7 @@ interface GoalState {
   generateTasks: (goalId: string, count?: number) => Promise<Task[]>;
   fetchGoalWithTasks: (goalId: string) => Promise<{ goal: Goal; tasks: Task[] }>;
   updateGoalBreakdown: (goalId: string, data: Partial<Goal>) => Promise<Goal>;
-  goalChat: (goalId: string, message: string) => Promise<{ response: string; probing_questions: string[]; structured_update: Record<string, string>; task_suggestions: TaskSuggestion[]; goal: Goal }>;
+  goalChat: (goalId: string, message: string) => Promise<{ response: string; probing_questions: string[]; structured_update: Record<string, string>; task_suggestions: TaskSuggestion[]; suggestion_chips: { label: string; value: string }[]; question_options: { value: string; label: string }[]; goal: Goal }>;
   createTasksFromSuggestions: (goalId: string, tasks: TaskSuggestion[]) => Promise<Task[]>;
 }
 

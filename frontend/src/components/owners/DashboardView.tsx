@@ -57,6 +57,11 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
   const { members, fetchOrgMembers } = useOrgChartStore();
 
   useEffect(() => {
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = ""; };
+  }, []);
+
+  useEffect(() => {
     setGoalData(goal);
   }, [goal]);
 
@@ -136,7 +141,7 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-10">
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-10 overflow-hidden">
       {/* Backdrop */}
       <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
 
