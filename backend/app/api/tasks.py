@@ -87,6 +87,9 @@ async def create_task(task: TaskCreate, organization_id: Optional[str] = None, c
         "created_by": user_id,
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
+        "escalation_level": 0,
+        "owner_escalated": False,
+        "owner_escalated_at": None,
     }
     
     result = db.tasks.insert_one(task_doc)
@@ -123,6 +126,8 @@ async def list_tasks(
     priority: Optional[str] = None,
     department: Optional[str] = None,
     organization_id: Optional[str] = None,
+    overdue: bool = Query(False),
+    escalation_level: Optional[int] = Query(None),
     current_user = Depends(get_current_user_optional)
 ):
     db = get_database()
@@ -140,10 +145,16 @@ async def list_tasks(
         query["assignee_id"] = {"$in": [assignee_id] if isinstance(assignee_id, str) else assignee_id}
     if status:
         query["status"] = status
+    if overdue:
+        now = datetime.utcnow()
+        query["due_date"] = {"$lt": now.isoformat()}
+        query["status"] = {"$nin": ["completed", "approved"]}
     if priority:
         query["priority"] = priority
     if department:
         query["department"] = department
+    if escalation_level is not None:
+        query["escalation_level"] = escalation_level
     
     tasks = list(db.tasks.find(query).sort("created_at", -1))
     

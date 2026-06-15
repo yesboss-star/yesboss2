@@ -80,9 +80,9 @@
     },
     {
       "value": "E-commerce & Online Retail",
-      "uses": 1,
+      "uses": 2,
       "created_at": 1780719495,
-      "last_used": 1780719495
+      "last_used": 1781279115
     },
     {
       "value": "Media & Entertainment",
@@ -95,6 +95,12 @@
       "uses": 1,
       "created_at": 1780891613,
       "last_used": 1780891613
+    },
+    {
+      "value": "SaaS & Cloud Computing",
+      "uses": 1,
+      "created_at": 1781279157,
+      "last_used": 1781279157
     }
   ],
   "micro_verticals": [
@@ -265,6 +271,13 @@
       "created_at": 1780891668,
       "last_used": 1780891668,
       "industry": "Media & Entertainment"
+    },
+    {
+      "value": "Development process docs",
+      "uses": 1,
+      "created_at": 1781279182,
+      "last_used": 1781279182,
+      "industry": "E-commerce & Online Retail"
     }
   ],
   "company_names": []

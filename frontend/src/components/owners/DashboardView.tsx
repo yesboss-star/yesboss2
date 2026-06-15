@@ -1598,6 +1598,27 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
       }
     }
   }, [progressSignature, goals.length, orgId]);
+  const [escalatedTasks, setEscalatedTasks] = useState<any[]>([]);
+  const [escalationsLoading, setEscalationsLoading] = useState(false);
+
+  const fetchEscalations = useCallback(async () => {
+    if (!orgId) return;
+    setEscalationsLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/tasks?organization_id=${orgId}&overdue=true&escalation_level=2`);
+      if (res.ok) {
+        const data = await res.json();
+        setEscalatedTasks(data.tasks || []);
+      }
+    } catch {} finally {
+      setEscalationsLoading(false);
+    }
+  }, [orgId]);
+
+  useEffect(() => {
+    if (orgId) fetchEscalations();
+  }, [orgId, fetchEscalations]);
+
   const [dismissedSetupCards, setDismissedSetupCards] = useState<Set<string>>(() => {
     if (typeof window === "undefined") return new Set();
     try {
@@ -1785,6 +1806,59 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
       )}
 
       {adaptation.showRevenueRisk && <RevenueRiskRadar />}
+
+      {escalatedTasks.length > 0 && (
+        <Card className="border-rose-500/20 bg-gradient-to-br from-rose-500/5 to-transparent">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-rose-400" />
+                <CardTitle>Escalations</CardTitle>
+              </div>
+              <Badge variant="warning" className="text-xs">{escalatedTasks.length} escalated</Badge>
+            </div>
+            <CardDescription>Tasks escalated to owner — overdue 3+ days</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {escalationsLoading ? (
+              <div className="flex items-center justify-center py-4">
+                <Loader2 className="w-5 h-5 animate-spin text-primary" />
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {escalatedTasks.slice(0, 5).map((task: any) => {
+                  const dueStr = task.due_date || "";
+                  const daysOverdue = dueStr
+                    ? Math.floor((Date.now() - new Date(dueStr).getTime()) / 86400000)
+                    : 0;
+                  const assignee = task.assignee_email || (task.assignee_id?.[0] || "Unassigned");
+                  return (
+                    <div key={task._id} className="flex items-center gap-3 p-3 rounded-xl bg-surface border border-rose-500/10">
+                      <div className="w-8 h-8 rounded-lg bg-rose-500/10 flex items-center justify-center flex-shrink-0">
+                        <AlertCircle className="w-4 h-4 text-rose-400" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{task.title}</p>
+                        <p className="text-xs text-text-muted">
+                          {assignee} · {daysOverdue}d overdue
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="cursor-pointer flex-shrink-0"
+                        onClick={() => router.push(`/dashboard/tasks/${task._id}`)}
+                      >
+                        View
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
