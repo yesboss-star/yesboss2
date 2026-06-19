@@ -139,3 +139,50 @@ Return a JSON array. Example:
         "articles": [],
         "source": "ai",
     }
+
+
+@router.get("/impact/{organization_id}")
+async def get_market_impact(
+    organization_id: str,
+    current_user = Depends(get_current_user_optional)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    impact = db.market_impacts.find_one({"organization_id": organization_id})
+    if not impact:
+        from ..core.market_impact import analyze_market_impact
+        impact = await analyze_market_impact(db, organization_id)
+
+    impact.pop("_id", None)
+    return {"impact": impact}
+
+
+@router.post("/refresh-impact/{organization_id}")
+async def refresh_market_impact(
+    organization_id: str,
+    current_user = Depends(get_current_user_optional)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    from ..core.market_impact import analyze_market_impact
+    impact = await analyze_market_impact(db, organization_id)
+    impact.pop("_id", None)
+    return {"impact": impact}
+
+
+@router.get("/recommendations/{organization_id}")
+async def get_investment_recommendations(
+    organization_id: str,
+    current_user = Depends(get_current_user_optional)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    from ..core.market_impact import get_investment_recommendations
+    result = await get_investment_recommendations(db, organization_id)
+    return result

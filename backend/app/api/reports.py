@@ -293,6 +293,84 @@ async def list_reports(current_user = Depends(get_current_user)):
             r["summary"] = r["content"].get("summary", {})
     return {"reports": reports}
 
+@router.post("/generate/employee")
+async def generate_employee_report_endpoint(
+    request: ReportRequest,
+    current_user = Depends(get_current_user_optional)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    org_id = request.organization_id or get_user_org_id(current_user)
+    if not org_id:
+        raise HTTPException(status_code=400, detail="Organization ID required")
+
+    from ..core.report_generator import generate_employee_report
+
+    if not request.organization_id:
+        member = db.org_chart_members.find_one({"organization_id": org_id})
+        if member:
+            employee_email = member.get("email")
+        else:
+            email = getattr(current_user, 'email', None) or getattr(current_user, 'id', None)
+            if not email:
+                raise HTTPException(status_code=400, detail="Could not determine employee. Pass organization_id for a specific employee.")
+            employee_email = email
+    else:
+        employee_email = request.organization_id
+
+    report = await generate_employee_report(db, org_id, employee_email, request.period)
+    return {"report": report}
+
+
+@router.post("/generate/all-employees")
+async def generate_all_employee_reports(
+    request: ReportRequest,
+    current_user = Depends(get_current_user_optional)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    org_id = request.organization_id or get_user_org_id(current_user)
+    if not org_id:
+        raise HTTPException(status_code=400, detail="Organization ID required")
+
+    from ..core.report_generator import generate_employee_report
+
+    members = list(db.org_chart_members.find({"organization_id": org_id}))
+    if not members:
+        raise HTTPException(status_code=400, detail="No employees found in organization")
+
+    reports = []
+    for m in members:
+        email = m.get("email", "")
+        if email:
+            try:
+                r = await generate_employee_report(db, org_id, email, request.period)
+                reports.append(r)
+            except Exception as e:
+                logger.warning(f"Failed to generate report for {email}: {e}")
+
+    return {"reports": reports, "total": len(reports)}
+
+
+@router.get("/health/{organization_id}")
+async def get_org_health(
+    organization_id: str,
+    current_user = Depends(get_current_user_optional)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    from ..core.report_generator import generate_org_health
+
+    health = await generate_org_health(db, organization_id)
+    return {"health": health}
+
+
 def generate_docx(content: Dict[str, Any], org_name: str = "YesBoss") -> bytes:
     from docx import Document
     from docx.shared import Inches, Pt, RGBColor

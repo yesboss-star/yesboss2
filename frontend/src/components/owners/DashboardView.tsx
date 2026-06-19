@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganizationStore } from "@/stores/organizationStore";
-import { useGoalStore } from "@/stores/goalStore";
+import { useGoalStore, type Strategy } from "@/stores/goalStore";
 import { useTaskStore } from "@/stores/taskStore";
 import { useOrgChartStore } from "@/stores/orgChartStore";
 import { useMarketTrendsStore } from "@/stores/marketTrendsStore";
@@ -18,7 +18,7 @@ import {
   BarChart3, Target, Zap, Activity, ChevronRight,
   AlertTriangle, Info, Users, User, FileSpreadsheet,
   PieChart as PieChartIcon, Link2, X, Building2, Network,
-  Briefcase, Search, RefreshCw,
+  Briefcase, Search, RefreshCw, Upload,
 } from "lucide-react";
 import {
   Card, CardHeader, CardTitle, CardDescription, CardContent,
@@ -33,6 +33,10 @@ import {
 import GoalDetailChat from "@/components/owners/GoalDetailChat";
 import KPISuggestionsCard from "@/components/owners/KPISuggestionsCard";
 import AISummaryChat from "@/components/AISummaryChat";
+import MeetingUploadModal from "@/components/owners/MeetingUploadModal";
+import ZohoCalendarBooking from "@/components/owners/ZohoCalendarBooking";
+import OrgHealthWidget from "@/components/owners/OrgHealthWidget";
+import MarketImpactCard from "@/components/owners/MarketImpactCard";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -54,7 +58,10 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
   const [goalData, setGoalData] = useState(goal);
   const [chatPanelOpen, setChatPanelOpen] = useState(true);
   const { updateTask } = useTaskStore();
+  const { generateStrategies, selectStrategy } = useGoalStore();
   const { members, fetchOrgMembers } = useOrgChartStore();
+  const [confirmingStrategy, setConfirmingStrategy] = useState<{ index: number; strat: any } | null>(null);
+  const [selecting, setSelecting] = useState(false);
 
   useEffect(() => {
     document.body.style.overflow = "hidden";
@@ -246,6 +253,90 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
                 ))}
               </div>
 
+              {/* Strategies */}
+              <div>
+                <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                  <Target className="w-4 h-4 text-primary" />
+                  Strategic Approaches
+                </h4>
+                {!goalData.strategies || goalData.strategies.length === 0 ? (
+                  <div className="p-4 rounded-xl bg-surface border border-primary/20 text-center">
+                    <p className="text-xs text-text-muted mb-2">No strategies generated yet. Generate AI-powered strategic approaches for this goal.</p>
+                    <button
+                      onClick={async () => {
+                        try {
+                          const strategies = await generateStrategies(goalData.id || goalData._id);
+                          setGoalData((prev: any) => ({ ...prev, strategies, strategy_status: "generated" }));
+                        } catch {}
+                      }}
+                      className="px-4 py-2 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-xs font-medium cursor-pointer"
+                    >
+                      Generate Strategies
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {goalData.strategies.map((strat: any, i: number) => {
+                      const isSelected = goalData.selected_strategy?.index === i;
+                      return (
+                        <div
+                          key={i}
+                          className={`p-3 rounded-xl border transition-all ${
+                            isSelected
+                              ? "bg-emerald-500/10 border-emerald-500/30"
+                              : "bg-surface border-border/50 hover:border-primary/40"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-semibold">{strat.name}</span>
+                                {strat.market_aligned && (
+                                  <Badge variant="info" className="text-[10px]">Market-Aligned</Badge>
+                                )}
+                                {isSelected && (
+                                  <Badge variant="success" className="text-[10px]">Selected</Badge>
+                                )}
+                              </div>
+                              <p className="text-xs text-text-muted mt-1">{strat.description}</p>
+                              <div className="flex flex-wrap gap-2 mt-2 text-[10px] text-text-muted">
+                                <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {strat.estimated_timeline || "TBD"}</span>
+                                <span className="flex items-center gap-1"><TrendingUp className="w-3 h-3" /> {strat.expected_impact || "N/A"}</span>
+                              </div>
+                              {strat.key_risks && strat.key_risks.length > 0 && (
+                                <div className="mt-2">
+                                  <p className="text-[10px] font-medium text-rose-400 mb-1">Risks:</p>
+                                  <ul className="list-disc list-inside text-[10px] text-text-muted space-y-0.5">
+                                    {strat.key_risks.slice(0, 3).map((risk: string, j: number) => (
+                                      <li key={j}>{risk}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                              {strat.resources_needed && strat.resources_needed.length > 0 && (
+                                <div className="mt-1.5 flex flex-wrap gap-1">
+                                  {strat.resources_needed.slice(0, 4).map((res: string, j: number) => (
+                                    <span key={j} className="px-1.5 py-0.5 rounded-full bg-primary/5 border border-primary/20 text-[9px] text-text-muted">{res}</span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                            {!isSelected && goalData.strategy_status !== "tasks_created" && (
+                              <button
+                                onClick={() => setConfirmingStrategy({ index: i, strat })}
+                                className="px-3 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-xs font-medium cursor-pointer flex-shrink-0"
+                              >
+                                Select
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
               {/* Tasks */}
               <div>
                 <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
@@ -329,9 +420,64 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
               />
             </div>
           </div>
-        )}
+          )}
+
+          {/* Strategy Confirmation Modal */}
+          <Modal open={!!confirmingStrategy} onOpenChange={(open: boolean) => { if (!open) setConfirmingStrategy(null); }} size="md">
+            <ModalHeader>
+              <ModalTitle>Confirm Strategy Selection</ModalTitle>
+              <ModalClose />
+            </ModalHeader>
+            <ModalContent>
+              {confirmingStrategy && (
+                <div className="py-2 space-y-4">
+                  <div className="flex items-start gap-3 p-4 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 border border-primary/20">
+                    <Target className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-sm font-semibold">{confirmingStrategy.strat.name}</p>
+                      <p className="text-xs text-text-muted mt-1">{confirmingStrategy.strat.description}</p>
+                    </div>
+                  </div>
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
+                    <p className="text-xs text-text-muted">
+                      This will generate 3-7 tasks from this strategy and add them to this goal. Tasks can be reviewed and edited after creation.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </ModalContent>
+            <ModalFooter>
+              <Button variant="outline" onClick={() => setConfirmingStrategy(null)} disabled={selecting}>
+                Cancel
+              </Button>
+              <Button
+                onClick={async () => {
+                  if (!confirmingStrategy) return;
+                  setSelecting(true);
+                  try {
+                    const result = await selectStrategy(goalData.id || goalData._id, confirmingStrategy.index, propOrgId);
+                    setGoalData((prev: any) => ({
+                      ...prev,
+                      selected_strategy: { index: confirmingStrategy.index, name: confirmingStrategy.strat.name },
+                      strategy_status: "tasks_created",
+                    }));
+                    loadTasks();
+                    setConfirmingStrategy(null);
+                  } catch {} finally {
+                    setSelecting(false);
+                  }
+                }}
+                disabled={selecting}
+                className="cursor-pointer"
+              >
+                {selecting ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <CheckCircle className="w-4 h-4 mr-1" />}
+                {selecting ? "Creating Tasks..." : "Create Tasks"}
+              </Button>
+            </ModalFooter>
+          </Modal>
+        </div>
       </div>
-    </div>
   );
 }
 
@@ -1619,6 +1765,29 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
     if (orgId) fetchEscalations();
   }, [orgId, fetchEscalations]);
 
+  const [showMeetingModal, setShowMeetingModal] = useState(false);
+  const [showBookingModal, setShowBookingModal] = useState(false);
+  const [meetingHistory, setMeetingHistory] = useState<any[]>([]);
+  const [meetingHistoryLoading, setMeetingHistoryLoading] = useState(false);
+
+  const fetchMeetingHistory = useCallback(async () => {
+    if (!orgId) return;
+    setMeetingHistoryLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/meetings/history?organization_id=${orgId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setMeetingHistory(data.meetings || []);
+      }
+    } catch {} finally {
+      setMeetingHistoryLoading(false);
+    }
+  }, [orgId]);
+
+  useEffect(() => {
+    if (orgId) fetchMeetingHistory();
+  }, [orgId, fetchMeetingHistory]);
+
   const [dismissedSetupCards, setDismissedSetupCards] = useState<Set<string>>(() => {
     if (typeof window === "undefined") return new Set();
     try {
@@ -1798,10 +1967,10 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
 
       {adaptation.showGrokInsights && (
         <div className="space-y-6">
+          <OrgHealthWidget orgId={orgId} compact />
           <AISummaryChat />
+          <MarketImpactCard orgId={orgId} />
           <WeeklyReportGenerator />
-          {/* Market Trends disabled to save AI credits — re-enable when ready */}
-          {/* <MarketTrendsSection /> */}
         </div>
       )}
 
@@ -1858,6 +2027,74 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
             )}
           </CardContent>
         </Card>
+      )}
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Upload className="w-5 h-5 text-primary" />
+              <CardTitle>Meeting Notes</CardTitle>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="primary" onClick={() => setShowMeetingModal(true)} className="cursor-pointer">
+                <Upload className="w-4 h-4" />
+                Upload Meeting
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setShowBookingModal(true)} className="cursor-pointer">
+                <Calendar className="w-4 h-4" />
+                Book Meeting
+              </Button>
+            </div>
+          </div>
+          <CardDescription>Upload meeting notes to auto-create tasks via AI</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {meetingHistoryLoading ? (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="w-5 h-5 animate-spin text-primary" />
+            </div>
+          ) : meetingHistory.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-6 text-center">
+              <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-3">
+                <Upload className="w-6 h-6 text-primary/60" />
+              </div>
+              <p className="text-sm text-text-muted">No meetings uploaded yet</p>
+              <p className="text-xs text-text-muted/60 mt-1">Upload meeting notes to extract tasks automatically</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {meetingHistory.slice(0, 5).map((m: any) => (
+                <div key={m.id} className="flex items-center gap-3 p-3 rounded-xl bg-surface border border-border/50">
+                  <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                    <FileText className="w-4 h-4 text-primary" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{m.title}</p>
+                    <p className="text-xs text-text-muted">
+                      {m.task_count || 0} tasks · {m.created_at ? new Date(m.created_at).toLocaleDateString() : ""}
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="text-xs flex-shrink-0">{m.task_count || 0}</Badge>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <MeetingUploadModal
+        open={showMeetingModal}
+        onOpenChange={setShowMeetingModal}
+        onSuccess={() => fetchMeetingHistory()}
+      />
+
+      {showBookingModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowBookingModal(false)}>
+          <div className="w-full max-w-lg mx-4" onClick={(e) => e.stopPropagation()}>
+            <ZohoCalendarBooking onClose={() => setShowBookingModal(false)} />
+          </div>
+        </div>
       )}
     </div>
   );

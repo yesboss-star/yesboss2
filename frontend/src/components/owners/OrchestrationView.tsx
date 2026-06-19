@@ -25,6 +25,7 @@ import {
   UserCheck,
   Building2,
   ChevronDown,
+  Check,
 } from "lucide-react";
 import {
   Card,

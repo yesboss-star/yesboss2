@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUIStore } from "@/stores/uiStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
-import { useSessionStore, type ChatSession, type SessionMessage, type ClarifyingQuestion } from "@/stores/sessionStore";
+import { useSessionStore, type ChatSession, type SessionMessage, type ClarifyingQuestion, type BookingParams } from "@/stores/sessionStore";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, Button } from "@/components/ui";
 import {
@@ -35,6 +35,52 @@ export default function AssistantPage() {
     }>
       <AssistantInner />
     </Suspense>
+  );
+}
+
+function BookingCard({ params, onBook }: { params: BookingParams; onBook: (time: string) => void }) {
+  const slots = params.available_slots;
+  const booked = params.booking_result?.booked;
+
+  if (booked) {
+    const r = params.booking_result;
+    return (
+      <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/20 p-4 space-y-2">
+        <div className="flex items-center gap-2 text-emerald-400 font-medium">
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+          Meeting Booked
+        </div>
+        <p className="text-sm text-foreground font-medium">{r?.title || "Meeting"}</p>
+        <p className="text-xs text-text-muted">
+          {r?.start?.slice(8, 14) || ""} – {r?.end?.slice(8, 14) || ""}
+        </p>
+        <p className="text-xs text-text-muted">
+          {r?.attendees?.length || 0} attendee(s)
+        </p>
+      </div>
+    );
+  }
+
+  if (!slots || slots.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-2xl bg-surface border border-border p-4 space-y-3">
+      <p className="text-xs font-medium text-text-muted uppercase tracking-wider">Available Slots</p>
+      <div className="grid grid-cols-2 gap-2">
+        {slots.slice(0, 8).map((slot, i) => (
+          <button
+            key={i}
+            onClick={() => onBook(slot.start)}
+            className="px-3 py-2 rounded-lg bg-primary/10 hover:bg-primary/20 border border-primary/20 text-sm font-medium text-primary transition-all cursor-pointer"
+          >
+            {slot.start.slice(0, 5)} – {slot.end.slice(0, 5)}
+          </button>
+        ))}
+      </div>
+      <p className="text-[10px] text-text-muted">Click a slot to book instantly</p>
+    </div>
   );
 }
 
@@ -147,6 +193,16 @@ function AssistantInner() {
           is_answer: true,
           timestamp: Date.now(),
         });
+      } else if (data.type === "meeting_booking") {
+        let answer = data.answer || "";
+        const bp = data.booking_params;
+        updateLastMessage(activeSession.id, {
+          role: "assistant",
+          content: answer,
+          is_booking: true,
+          booking_params: bp,
+          timestamp: Date.now(),
+        });
       } else {
         updateLastMessage(activeSession.id, {
           role: "assistant",
@@ -225,6 +281,16 @@ function AssistantInner() {
           is_answer: true,
           timestamp: Date.now(),
         });
+      } else if (data.type === "meeting_booking") {
+        let answer = data.answer || "";
+        const bp = data.booking_params;
+        updateLastMessage(activeSession.id, {
+          role: "assistant",
+          content: answer,
+          is_booking: true,
+          booking_params: bp,
+          timestamp: Date.now(),
+        });
       } else {
         updateLastMessage(activeSession.id, {
           role: "assistant",
@@ -249,6 +315,44 @@ function AssistantInner() {
     const lastMsg = activeSession.messages[activeSession.messages.length - 1];
     if (lastMsg?.is_question) {
       handleAnswerQuestion("skipped", "skipped", "Skip this question");
+    }
+  };
+
+  const bookSlot = async (time: string) => {
+    if (!activeSession || isAsking) return;
+    const text = `book the meeting at ${time}`;
+    const userMsg: SessionMessage = { role: "user", content: text, timestamp: Date.now() };
+    addMessage(activeSession.id, userMsg);
+    setIsAsking(true);
+    const loadingMsg: SessionMessage = { role: "assistant", content: "", is_loading: true, timestamp: Date.now() };
+    addMessage(activeSession.id, loadingMsg);
+    try {
+      const history = [...activeSession.messages, userMsg].map((m) => ({ role: m.role, content: m.content }));
+      const res = await fetch(`${API_URL}/assistant/ask`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: text,
+          session_id: activeSession.id,
+          session_context: activeSession.context,
+          context: { user_email: user?.email, organization_id: organization?.id, organization_name: organization?.name, role: role || "owner" },
+          conversation_history: history.slice(-10),
+        }),
+      });
+      if (!res.ok) throw new Error("Ask failed");
+      const data = await res.json();
+      updateLastMessage(activeSession.id, { is_loading: false });
+      if (data.type === "answer" && data.answer) {
+        let answer = data.answer;
+        if (data.follow_up) answer += "\n\n" + data.follow_up;
+        updateLastMessage(activeSession.id, { role: "assistant", content: answer, is_answer: true, timestamp: Date.now() });
+      } else {
+        updateLastMessage(activeSession.id, { role: "assistant", content: data.answer || "Done! Check your calendar.", is_answer: true, timestamp: Date.now() });
+      }
+    } catch {
+      updateLastMessage(activeSession.id, { role: "assistant", content: "Couldn't book. Try again?", is_loading: false, timestamp: Date.now() });
+    } finally {
+      setIsAsking(false);
     }
   };
 
@@ -402,6 +506,11 @@ function AssistantInner() {
                       onAnswer={(fieldId, value, label) => handleAnswerQuestion(fieldId, value, label)}
                       onSkip={handleSkipQuestion}
                       disabled={isAsking}
+                    />
+                  ) : msg.is_booking && msg.booking_params ? (
+                    <BookingCard
+                      params={msg.booking_params}
+                      onBook={(time) => bookSlot(time)}
                     />
                   ) : (
                     <div className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${

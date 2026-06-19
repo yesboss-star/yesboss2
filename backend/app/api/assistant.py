@@ -688,6 +688,231 @@ For "company" answers also include:
 Respond with ONLY valid JSON. No markdown, no commentary."""
 
 
+def resolve_mentions(text: str, db, org_id: str) -> List[str]:
+    if not text:
+        return []
+    names = re.findall(r'@(\w[\w\s.-]+?)(?:\s|$|[,;:.!?])', text + " ")
+    resolved = []
+    seen = set()
+    for name in names:
+        name = name.strip()
+        if not name or name.lower() in seen:
+            continue
+        seen.add(name.lower())
+        member = db.org_chart_members.find_one({
+            "organization_id": org_id,
+            "full_name": {"$regex": f"^{re.escape(name)}$", "$options": "i"},
+        })
+        if member:
+            resolved.append(member.get("email", "").lower())
+    return list(set(resolved))
+
+
+async def handle_meeting_booking(booking_params: dict, db, org_id: str, user_id: str) -> Dict[str, Any]:
+    """Handle meeting booking: resolve attendees, check freebusy, book."""
+    import re as _re
+    from datetime import datetime, timedelta
+
+    attendee_names = booking_params.get("attendee_names", [])
+    date_str = booking_params.get("date", "")
+    duration = int(booking_params.get("duration_minutes", 60))
+    title = booking_params.get("title", "Meeting")
+    description = booking_params.get("description", "")
+    preferred_time = booking_params.get("preferred_time", "")
+
+    # Resolve names to emails
+    attendee_emails = []
+    for name in attendee_names:
+        member = db.org_chart_members.find_one({
+            "organization_id": org_id,
+            "$or": [
+                {"email": {"$regex": f"^{_re.escape(name)}$", "$options": "i"}},
+                {"full_name": {"$regex": f"^{_re.escape(name)}$", "$options": "i"}},
+            ]
+        })
+        if member:
+            attendee_emails.append(member.get("email", "").lower())
+        elif "@" in name:
+            attendee_emails.append(name.lower())
+
+    if not attendee_emails:
+        return {"error": "Could not find any attendees in your team. Make sure they are added to the org chart."}
+
+    from ..core.zoho import ZohoCalendar, ZohoOAuth
+    zoho = ZohoOAuth(db)
+
+    organizer_token = await zoho.get_valid_token(user_id) if user_id else None
+    if not organizer_token:
+        token_doc = db.zoho_tokens.find_one({"org_id": org_id})
+        if token_doc:
+            organizer_token = await zoho.get_valid_token(token_doc["user_id"])
+    if not organizer_token:
+        return {"error": "No Zoho account connected. Please connect Zoho in Settings first."}
+
+    parsed_date = None
+    if date_str:
+        try:
+            parsed_date = datetime.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            try:
+                parsed_date = datetime.strptime(date_str, "%d/%m/%Y")
+            except ValueError:
+                parsed_date = datetime.now()
+    if not parsed_date:
+        parsed_date = datetime.now()
+
+    date_key = parsed_date.strftime("%Y-%m-%d")
+    start_str = parsed_date.strftime("%Y%m%dT000000")
+    end_str = parsed_date.strftime("%Y%m%dT235959")
+
+    # Gather busy blocks for all attendees
+    all_busy = []
+    for email in attendee_emails:
+        blocks = await ZohoCalendar.check_freebusy(organizer_token, email, start_str, end_str)
+        for b in blocks:
+            fb_start = b.get("startTime", "")
+            fb_end = b.get("endTime", "")
+            if fb_start and fb_end:
+                try:
+                    s = datetime.strptime(fb_start.replace("T", ""), "%Y%m%d%H%M%S")
+                    e = datetime.strptime(fb_end.replace("T", ""), "%Y%m%d%H%M%S")
+                    all_busy.append({"start": s.strftime("%H:%M"), "end": e.strftime("%H:%M")})
+                except Exception:
+                    pass
+
+    # Compute available slots (9 AM – 6 PM workday)
+    available = []
+    work_start = 9
+    work_end = 18
+    current = parsed_date.replace(hour=work_start, minute=0, second=0)
+    end_of_day = parsed_date.replace(hour=work_end, minute=0, second=0)
+
+    while current + timedelta(minutes=duration) <= end_of_day:
+        slot_end = current + timedelta(minutes=duration)
+        slot_start_str = current.strftime("%H:%M")
+        slot_end_str = slot_end.strftime("%H:%M")
+
+        conflict = False
+        for busy in all_busy:
+            if busy["start"] < slot_end_str and busy["end"] > slot_start_str:
+                conflict = True
+                break
+
+        if not conflict:
+            available.append({"start": slot_start_str, "end": slot_end_str})
+
+        current += timedelta(minutes=30)
+
+    def slot_to_iso(t_str: str) -> str:
+        h, m = t_str.split(":")
+        return f"{parsed_date.strftime('%Y%m%d')}T{h.zfill(2)}{m.zfill(2)}00+0530"
+
+    # If preferred_time specified, try to book that slot
+    if preferred_time:
+        match = _re.match(r"(\d{1,2})(?::(\d{2}))?", preferred_time.strip())
+        if match:
+            pref_h = int(match.group(1))
+            pref_m = int(match.group(2) or 0)
+            slot_start_str = f"{pref_h:02d}:{pref_m:02d}"
+            slot_end_dt = parsed_date.replace(hour=pref_h, minute=pref_m) + timedelta(minutes=duration)
+            slot_end_str = slot_end_dt.strftime("%H:%M")
+
+            conflict = False
+            for busy in all_busy:
+                if busy["start"] < slot_end_str and busy["end"] > slot_start_str:
+                    conflict = True
+                    break
+
+            if not conflict:
+                cal_uid = await ZohoCalendar.get_default_calendar_uid(organizer_token)
+                if cal_uid:
+                    event_id = await ZohoCalendar.create_event(
+                        user_token=organizer_token,
+                        calendar_uid=cal_uid,
+                        title=title,
+                        description=description,
+                        start_dt=slot_to_iso(slot_start_str),
+                        end_dt=slot_to_iso(slot_end_str),
+                        timezone="Asia/Kolkata",
+                        attendees=[{"email": e} for e in attendee_emails],
+                    )
+                    if event_id:
+                        try:
+                            from ..core.notification_service import create_and_deliver
+                            for email in attendee_emails:
+                                asyncio.create_task(create_and_deliver(
+                                    user_id=email, org_id=org_id,
+                                    type="meeting_booked",
+                                    title=f"Meeting: {title}",
+                                    message=f"Booked {date_key} at {slot_start_str}",
+                                ))
+                        except Exception:
+                            pass
+                        return {
+                            "booked": True,
+                            "title": title,
+                            "start": slot_to_iso(slot_start_str),
+                            "end": slot_to_iso(slot_end_str),
+                            "attendees": attendee_emails,
+                            "slot": {"start": slot_start_str, "end": slot_end_str},
+                        }
+
+        return {
+            "booked": False,
+            "message": f"The time {preferred_time} is busy on {date_key}. Here are available slots:",
+            "available_slots": available,
+        }
+
+    # No preferred time — check availability
+    if not available:
+        return {
+            "booked": False,
+            "message": f"No available slots on {date_key} for a {duration}-minute meeting. Try another date.",
+            "available_slots": [],
+        }
+
+    if len(available) == 1:
+        slot = available[0]
+        cal_uid = await ZohoCalendar.get_default_calendar_uid(organizer_token)
+        if cal_uid:
+            event_id = await ZohoCalendar.create_event(
+                user_token=organizer_token,
+                calendar_uid=cal_uid,
+                title=title,
+                description=description,
+                start_dt=slot_to_iso(slot["start"]),
+                end_dt=slot_to_iso(slot["end"]),
+                timezone="Asia/Kolkata",
+                attendees=[{"email": e} for e in attendee_emails],
+            )
+            if event_id:
+                try:
+                    from ..core.notification_service import create_and_deliver
+                    for email in attendee_emails:
+                        asyncio.create_task(create_and_deliver(
+                            user_id=email, org_id=org_id,
+                            type="meeting_booked",
+                            title=f"Meeting: {title}",
+                            message=f"Booked {date_key} at {slot['start']}",
+                        ))
+                except Exception:
+                    pass
+                return {
+                    "booked": True,
+                    "title": title,
+                    "start": slot_to_iso(slot["start"]),
+                    "end": slot_to_iso(slot["end"]),
+                    "attendees": attendee_emails,
+                    "slot": slot,
+                }
+
+    return {
+        "booked": False,
+        "message": f"Found {len(available)} available slots on {date_key}:",
+        "available_slots": available,
+    }
+
+
 async def _gather_org_snapshot(db, org_id: str) -> Dict[str, Any]:
     """Collect a small JSON snapshot of everything we know about the org."""
     if db is None or not org_id:
@@ -1220,6 +1445,30 @@ User: "assign the Q4 report to John"
 → If John is a known team member and Q4 report context is in conversation history → delegate
 → If no context → {"type":"question","question":{...}}
 
+## MEETING BOOKING
+
+When the user asks to book/schedule a meeting (e.g. "add meeting with @john next Tuesday", "schedule a call with @sarah", "book a meeting with team"), you must:
+
+1. Ask ONE clarifying question at a time via the "question" format:
+   - First ask: who should attend? (if not clear from @mentions)
+   - Second ask: what date? (e.g. "next Tuesday", "tomorrow", "June 23")
+   - Third ask: what time / duration? (e.g. "3pm for 1 hour", "morning")
+   - Fourth ask: what's the meeting title?
+
+2. Once ALL of the following are clear, output a meeting_booking response:
+   - `attendee_names` — list of full names or emails of attendees (resolve @mentions to names)
+   - `date` — the specific calendar date (e.g. "2026-06-23"). Convert relative dates to absolute.
+   - `duration_minutes` — numeric duration (15, 30, 60, 90, 120). Default 60 if unclear.
+   - `title` — meeting title (default "Meeting" if unclear)
+   - `preferred_time` — the specific time if they mentioned one (e.g. "15:00", "10:30", or leave empty and we'll find available slots)
+   - `description` — optional meeting agenda or context
+
+3. If they said "sometime" or didn't specify a time, leave preferred_time empty. The system will check availability and return options.
+
+## MEETING BOOKING RESPONSE FORMAT
+
+{"type":"meeting_booking","booking_params":{"attendee_names":["John Smith","Sarah Jones"],"date":"2026-06-23","duration_minutes":60,"title":"Sprint Review","preferred_time":"15:00","description":"Weekly sprint sync"},"answer":"I found availability at 3 PM on Tuesday. Let me book it for you!"}
+
 ## RESPONSE FORMATS
 
 For answers: {"type":"answer","answer":"your answer here (max 8 lines)","follow_up":"optional 1-line follow-up"}
@@ -1238,12 +1487,27 @@ class AskRequest(BaseModel):
     conversation_history: Optional[List[Dict[str, str]]] = None
 
 
+class BookingSlot(BaseModel):
+    start: str
+    end: str
+
+class BookingParams(BaseModel):
+    attendee_emails: List[str] = []
+    date: Optional[str] = None
+    duration_minutes: int = 60
+    title: Optional[str] = None
+    description: Optional[str] = None
+    preferred_time: Optional[str] = None
+    available_slots: Optional[List[BookingSlot]] = None
+    booking_result: Optional[Dict[str, Any]] = None
+
 class AskResponse(BaseModel):
-    type: str  # "question" | "answer"
+    type: str  # "question" | "answer" | "meeting_booking"
     question: Optional[Dict[str, Any]] = None
     answer: Optional[str] = None
     follow_up: Optional[str] = None
     session_id: Optional[str] = None
+    booking_params: Optional[BookingParams] = None
 
 
 @router.post("/ask", response_model=AskResponse)
@@ -1386,6 +1650,75 @@ async def smart_ask(request: AskRequest):
                 return AskResponse(
                     type="answer",
                     answer=f"I couldn't create that task right now. The system said: {e}. Want to try again?",
+                    session_id=request.session_id,
+                )
+
+        if parsed_type == "meeting_booking":
+            bp = parsed.get("booking_params") or {}
+            # Resolve @mentions from the original message
+            mention_emails = resolve_mentions(text, db, org_id) if db and org_id else []
+            if mention_emails:
+                if "attendee_names" not in bp or not bp["attendee_names"]:
+                    # Map emails back to names
+                    members = list(db.org_chart_members.find({"organization_id": org_id, "email": {"$in": mention_emails}}))
+                    bp["attendee_names"] = [m.get("full_name", m["email"]) for m in members]
+
+            try:
+                booking_result = await handle_meeting_booking(bp, db, org_id, ctx.user_email or user_id)
+                if booking_result.get("error"):
+                    return AskResponse(
+                        type="answer",
+                        answer=f"I couldn't book the meeting: {booking_result['error']}",
+                        session_id=request.session_id,
+                    )
+
+                bp["attendee_emails"] = booking_result.get("attendees", [])
+                bp["available_slots"] = booking_result.get("available_slots")
+                bp["booking_result"] = booking_result
+
+                if booking_result.get("booked"):
+                    slot = booking_result.get("slot", {})
+                    time_str = slot.get("start", "")[9:14] if slot.get("start") else ""
+                    answer_text = parsed.get("answer") or (
+                        f"✅ Meeting **\"{booking_result['title']}\"** booked "
+                        f"on {bp.get('date', '')} at {time_str} "
+                        f"with {len(booking_result.get('attendees', []))} attendee(s). "
+                        "Everyone will get a calendar invite."
+                    )
+                    return AskResponse(
+                        type="answer",
+                        answer=answer_text,
+                        booking_params=BookingParams(**bp) if bp else None,
+                        session_id=request.session_id,
+                    )
+
+                # Not booked — return available slots
+                slots = booking_result.get("available_slots", [])
+                if not slots:
+                    answer_text = booking_result.get("message", "No available slots on that date.")
+                else:
+                    slot_lines = []
+                    for slot in slots[:5]:
+                        s = slot.get("start", "")
+                        e = slot.get("end", "")
+                        s_t = f"{s[8:10]}:{s[10:12]}" if len(s) >= 12 else s
+                        e_t = f"{e[8:10]}:{e[10:12]}" if len(e) >= 12 else e
+                        slot_lines.append(f"- {s_t} – {e_t}")
+                    answer_text = booking_result.get("message", f"Available slots:") + "\n" + "\n".join(slot_lines[:5])
+                    if len(slots) > 5:
+                        answer_text += f"\n... and {len(slots) - 5} more"
+
+                return AskResponse(
+                    type="meeting_booking",
+                    answer=answer_text,
+                    booking_params=BookingParams(**bp) if bp else None,
+                    session_id=request.session_id,
+                )
+            except Exception as e:
+                logger.warning(f"meeting_booking failed: {e}")
+                return AskResponse(
+                    type="answer",
+                    answer=f"I tried to check availability but something went wrong: {e}. Maybe try again?",
                     session_id=request.session_id,
                 )
 

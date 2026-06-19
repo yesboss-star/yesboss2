@@ -42,8 +42,11 @@ from .api.market_trends import router as market_trends_router
 from .api.prompt import router as prompt_router
 from .api.assistant import router as assistant_router
 from .api.notifications import router as notifications_router
+from .api.meetings import router as meetings_router
 from .api.notification_preferences import router as notification_preferences_router
 from .api.push_subscriptions import router as push_subscriptions_router
+from .api.zoho_auth import router as zoho_auth_router
+from .api.zoho_calendar import router as zoho_calendar_router
 from .core import settings
 from .core.database import connect_mongodb, close_mongodb
 from .core.qdrant import connect_qdrant, close_qdrant
@@ -182,5 +185,8 @@ app.include_router(prompt_router, prefix="/api/v1/prompt", tags=["Prompt Engine"
 app.include_router(assistant_router, prefix="/api/v1/assistant", tags=["AI Assistant"])
 app.include_router(notifications_router, prefix="/api/v1/notifications", tags=["Notifications"])
 app.include_router(notification_preferences_router, prefix="/api/v1/notification-preferences", tags=["Notification Preferences"])
+app.include_router(meetings_router, prefix="/api/v1/meetings", tags=["Meetings"])
 app.include_router(push_subscriptions_router, prefix="/api/v1/push", tags=["Push Notifications"])
+app.include_router(zoho_auth_router, prefix="/api/v1/zoho", tags=["Zoho Auth"])
+app.include_router(zoho_calendar_router, prefix="/api/v1/zoho/calendar", tags=["Zoho Calendar"])
 app.include_router(websocket_router, tags=["WebSocket"])

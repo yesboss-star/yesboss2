@@ -35,6 +35,18 @@ export interface Goal {
     in_progress: number;
     pending: number;
   };
+  strategies?: Strategy[];
+  selected_strategy?: { index: number; name: string };
+  strategy_status?: "generated" | "tasks_created" | "pending";
+}
+
+export interface Strategy {
+  name: string;
+  description: string;
+  estimated_timeline: string;
+  key_risks: string[];
+  expected_impact: string;
+  resources_needed: string[];
 }
 
 export interface TaskSuggestion {
@@ -75,6 +87,8 @@ interface GoalState {
   updateGoalBreakdown: (goalId: string, data: Partial<Goal>) => Promise<Goal>;
   goalChat: (goalId: string, message: string) => Promise<{ response: string; probing_questions: string[]; structured_update: Record<string, string>; task_suggestions: TaskSuggestion[]; suggestion_chips: { label: string; value: string }[]; question_options: { value: string; label: string }[]; goal: Goal }>;
   createTasksFromSuggestions: (goalId: string, tasks: TaskSuggestion[]) => Promise<Task[]>;
+  generateStrategies: (goalId: string) => Promise<Strategy[]>;
+  selectStrategy: (goalId: string, strategyIndex: number, organizationId?: string) => Promise<{ tasks: Task[]; strategy: Strategy }>;
 }
 
 export const useGoalStore = create<GoalState>()(
@@ -344,6 +358,56 @@ export const useGoalStore = create<GoalState>()(
             loading: false,
           }));
           return newTasks;
+        } catch (error: any) {
+          set({ error: error.message, loading: false });
+          throw error;
+        }
+      },
+
+      generateStrategies: async (goalId) => {
+        set({ loading: true, error: null });
+        try {
+          const response = await fetch(`${API_URL}/goals/${goalId}/generate-strategies`, {
+            method: "POST",
+          });
+          if (!response.ok) throw new Error("Failed to generate strategies");
+          const result = await response.json();
+          const strategies: Strategy[] = result.strategies || [];
+          set((state) => ({
+            goals: state.goals.map((g) =>
+              g.id === goalId ? { ...g, strategies, strategy_status: "generated" as const } : g
+            ),
+            currentGoal: state.currentGoal?.id === goalId
+              ? { ...state.currentGoal, strategies, strategy_status: "generated" as const }
+              : state.currentGoal,
+            loading: false,
+          }));
+          return strategies;
+        } catch (error: any) {
+          set({ error: error.message, loading: false });
+          throw error;
+        }
+      },
+
+      selectStrategy: async (goalId, strategyIndex, organizationId) => {
+        set({ loading: true, error: null });
+        try {
+          const response = await fetch(`${API_URL}/goals/${goalId}/select-strategy`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ strategy_index: strategyIndex, organization_id: organizationId }),
+          });
+          if (!response.ok) throw new Error("Failed to select strategy");
+          const result = await response.json();
+          const newTasks = (result.tasks || []).map((t: any) => ({ ...t, id: t._id || t.id }));
+          set((state) => ({
+            tasks: [...newTasks, ...state.tasks],
+            currentGoal: state.currentGoal?.id === goalId
+              ? { ...state.currentGoal, selected_strategy: { index: strategyIndex, name: result.strategy?.name || "" }, strategy_status: "tasks_created" as const }
+              : state.currentGoal,
+            loading: false,
+          }));
+          return { tasks: newTasks, strategy: result.strategy };
         } catch (error: any) {
           set({ error: error.message, loading: false });
           throw error;

@@ -3,12 +3,30 @@ import { persist } from "zustand/middleware";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
+export interface BookingSlot {
+  start: string;
+  end: string;
+}
+
+export interface BookingParams {
+  attendee_emails?: string[];
+  date?: string;
+  duration_minutes?: number;
+  title?: string;
+  description?: string;
+  preferred_time?: string;
+  available_slots?: BookingSlot[];
+  booking_result?: Record<string, any>;
+}
+
 export interface SessionMessage {
   role: "user" | "assistant";
   content: string;
   question_data?: ClarifyingQuestion | null;
   is_question?: boolean;
   is_answer?: boolean;
+  is_booking?: boolean;
+  booking_params?: BookingParams;
   is_loading?: boolean;
   timestamp: number;
 }

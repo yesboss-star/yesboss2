@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, Tabs, TabsList, TabsTrigger, TabsContent, Badge, Button } from "@/components/ui";
-import { BarChart3, Download, FileText, TrendingUp, Users, DollarSign, Loader2, RefreshCw, ArrowLeft } from "lucide-react";
+import { BarChart3, Download, FileText, TrendingUp, Users, Loader2, RefreshCw, ArrowLeft, Activity, User } from "lucide-react";
+import OrgHealthWidget from "@/components/owners/OrgHealthWidget";
+import EmployeeReportCard from "@/components/owners/EmployeeReportCard";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -18,11 +20,35 @@ interface ReportSummary {
   in_progress_tasks: number;
 }
 
+interface EmployeeReportData {
+  employee_email: string;
+  employee_name: string;
+  department: string;
+  period: string;
+  generated_at: string;
+  metrics: {
+    total_tasks: number;
+    completed_tasks: number;
+    pending_tasks: number;
+    in_progress_tasks: number;
+    overdue_tasks: number;
+    completion_rate: number;
+    avg_completion_hours: number;
+    goals_touched: number;
+  };
+  ai_feedback: string;
+}
+
 export default function ReportsPage() {
   const router = useRouter();
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [orgId, setOrgId] = useState<string>("");
+
+  const [employeeReports, setEmployeeReports] = useState<EmployeeReportData[]>([]);
+  const [empReportsLoading, setEmpReportsLoading] = useState(false);
+  const [genSingleLoading, setGenSingleLoading] = useState(false);
 
   const fetchSummary = async () => {
     setLoading(true);
@@ -55,6 +81,14 @@ export default function ReportsPage() {
 
   useEffect(() => {
     fetchSummary();
+    fetch(`${API_URL}/organizations/me`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.organization?.id) setOrgId(data.organization.id);
+        else if (data.id) setOrgId(data.id);
+        else if (data._id) setOrgId(data._id);
+      })
+      .catch(() => {});
   }, []);
 
   const handleGenerate = async () => {
@@ -67,6 +101,46 @@ export default function ReportsPage() {
       });
     } catch {}
     setGenerating(false);
+  };
+
+  const handleGenerateEmployeeReports = async () => {
+    setEmpReportsLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/reports/generate/all-employees`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ period: "weekly", organization_id: orgId || undefined }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setEmployeeReports(data.reports || []);
+      }
+    } catch {} finally {
+      setEmpReportsLoading(false);
+    }
+  };
+
+  const handleGenerateMyReport = async () => {
+    setGenSingleLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/reports/generate/employee`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ period: "weekly", organization_id: orgId || undefined }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.report) {
+          setEmployeeReports((prev) => {
+            const exists = prev.find((r) => r.employee_email === data.report.employee_email);
+            if (exists) return prev.map((r) => r.employee_email === data.report.employee_email ? data.report : r);
+            return [data.report, ...prev];
+          });
+        }
+      }
+    } catch {} finally {
+      setGenSingleLoading(false);
+    }
   };
 
   const metrics = summary ? [
@@ -135,6 +209,8 @@ export default function ReportsPage() {
                 <TabsTrigger value="overview">Overview</TabsTrigger>
                 <TabsTrigger value="goals">Goals Breakdown</TabsTrigger>
                 <TabsTrigger value="tasks">Tasks Breakdown</TabsTrigger>
+                <TabsTrigger value="employees">Employee Reports</TabsTrigger>
+                <TabsTrigger value="health">Org Health</TabsTrigger>
               </TabsList>
 
               <TabsContent value="overview">
@@ -232,6 +308,60 @@ export default function ReportsPage() {
                     )}
                   </CardContent>
                 </Card>
+              </TabsContent>
+
+              <TabsContent value="employees">
+                <div className="space-y-4">
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <User className="w-5 h-5 text-primary" />
+                          <CardTitle>Employee Performance Reports</CardTitle>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            onClick={handleGenerateMyReport}
+                            disabled={genSingleLoading}
+                            variant="outline"
+                            size="sm"
+                            className="cursor-pointer"
+                          >
+                            {genSingleLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <User className="w-4 h-4" />}
+                            {genSingleLoading ? "Generating..." : "My Report"}
+                          </Button>
+                          <Button
+                            onClick={handleGenerateEmployeeReports}
+                            disabled={empReportsLoading}
+                            size="sm"
+                            className="cursor-pointer"
+                          >
+                            {empReportsLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Users className="w-4 h-4" />}
+                            {empReportsLoading ? "Generating..." : "All Employees"}
+                          </Button>
+                        </div>
+                      </div>
+                    </CardHeader>
+                  </Card>
+
+                  {employeeReports.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-12 text-center">
+                      <User className="w-10 h-10 text-text-muted/40 mb-3" />
+                      <p className="text-sm text-text-muted">No employee reports generated yet</p>
+                      <p className="text-xs text-text-muted/60 mt-1">Generate a report for yourself or all employees</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {employeeReports.map((r, i) => (
+                        <EmployeeReportCard key={r.employee_email + i} report={r} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+
+              <TabsContent value="health">
+                <OrgHealthWidget orgId={orgId} />
               </TabsContent>
             </Tabs>
           </>

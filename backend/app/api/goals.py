@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import re
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, List, Union
@@ -10,6 +11,24 @@ from ..api.websocket import manager as ws_manager
 from bson import ObjectId
 
 router = APIRouter()
+
+
+def resolve_mentions(text: str, db, org_id: str) -> List[str]:
+    names = re.findall(r'@(\w[\w\s.-]+?)(?:\s|$|[,;:.!?])', text + " ")
+    resolved = []
+    seen = set()
+    for name in names:
+        name = name.strip()
+        if not name or name.lower() in seen:
+            continue
+        seen.add(name.lower())
+        member = db.org_chart_members.find_one({
+            "organization_id": org_id,
+            "full_name": {"$regex": f"^{re.escape(name)}$", "$options": "i"},
+        })
+        if member:
+            resolved.append(member.get("email", "").lower())
+    return list(set(resolved))
 
 
 async def create_notification(user_id: str, org_id: str, type: str, title: str, message: str, link: str = None, actor_id: str = None, actor_name: str = None, metadata: dict = None, email: str = None):
@@ -75,6 +94,11 @@ class GoalSuggestionsRequest(BaseModel):
     industry: str
     micro_vertical: Optional[str] = None
     count: int = 5
+
+
+class SelectStrategyRequest(BaseModel):
+    strategy_index: int
+    organization_id: Optional[str] = None
 
 
 class DepartmentAnalysisRequest(BaseModel):
@@ -462,6 +486,204 @@ async def generate_tasks_from_goal(request: TaskGenerate, current_user = Depends
                 ))
     
     return {"tasks": created_tasks}
+
+
+@router.post("/{goal_id}/generate-strategies")
+async def generate_strategies(
+    goal_id: str,
+    current_user = Depends(get_current_user_optional)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    goal = db.goals.find_one({"_id": ObjectId(goal_id)})
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+
+    org_id = goal.get("organization_id", "")
+    org = db.organizations.find_one({"_id": ObjectId(org_id)}) if ObjectId.is_valid(org_id) else db.organizations.find_one({"owner_id": org_id})
+    industry = org.get("industry", "") if org else ""
+
+    from ..core.ai_client import get_ai_response
+    import json
+
+    market_context = ""
+    try:
+        trends = list(db.market_trends.find({"organization_id": org_id}).sort("published_at", -1).limit(5))
+        if trends:
+            market_lines = []
+            for t in trends:
+                title = t.get("title", "")
+                impact = t.get("growth_impact", "")
+                if title:
+                    market_lines.append(f"- {title}" + (f" ({impact})" if impact else ""))
+            market_context = "\nRelevant market trends:\n" + "\n".join(market_lines)
+        market_impact = db.market_impacts.find_one({"organization_id": org_id})
+        if market_impact and market_impact.get("impacts"):
+            imp_lines = []
+            for imp in market_impact["impacts"][:3]:
+                imp_lines.append(f"- {imp.get('title')} ({imp.get('impact_level')} impact): {imp.get('investment_recommendation', '')}")
+            if imp_lines:
+                market_context += "\n\nMarket impact assessment:\n" + "\n".join(imp_lines)
+    except Exception:
+        pass
+
+    prompt = (
+        f"Generate 2-3 distinct strategic approaches for this business goal.\n\n"
+        f"Goal: {goal.get('title')}\n"
+        f"Description: {goal.get('description', '')}\n"
+        f"Department: {goal.get('department', '')}\n"
+        f"Priority: {goal.get('priority')}\n"
+        f"Timeline: {goal.get('timeline', 'Not specified')}\n"
+        f"Industry: {industry}\n"
+        f"{market_context}\n\n"
+        f"For each strategy provide: name (short), description (1-2 sentences), "
+        f"estimated_timeline (e.g. '2-3 months'), key_risks (3-5 bullet points), "
+        f"expected_impact (1 sentence), resources_needed (3-5 items), "
+        f"market_aligned (boolean, true if this strategy aligns with any market trend listed above).\n\n"
+        f"Return as a JSON array of objects. Only return valid JSON, no markdown."
+    )
+
+    try:
+        response = await get_ai_response(prompt, temperature=0.5, max_tokens=3000)
+        response = response.strip()
+        if response.startswith("```"):
+            response = response.split("\n", 1)[-1]
+            response = response.rsplit("```", 1)[0]
+        strategies = json.loads(response)
+        if isinstance(strategies, dict) and "strategies" in strategies:
+            strategies = strategies["strategies"]
+        if not isinstance(strategies, list):
+            strategies = [strategies]
+    except Exception as e:
+        logger = logging.getLogger("yesboss.goals")
+        logger.warning(f"Strategy generation failed: {e}")
+        strategies = []
+
+    db.goals.update_one(
+        {"_id": ObjectId(goal_id)},
+        {"$set": {
+            "strategies": strategies,
+            "strategy_status": "generated",
+            "updated_at": datetime.utcnow(),
+        }}
+    )
+
+    return {"strategies": strategies}
+
+
+@router.post("/{goal_id}/select-strategy")
+async def select_strategy(
+    goal_id: str,
+    request: SelectStrategyRequest,
+    current_user = Depends(get_current_user_optional)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    goal = db.goals.find_one({"_id": ObjectId(goal_id)})
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+
+    strategies = goal.get("strategies", [])
+    if not strategies or request.strategy_index >= len(strategies):
+        raise HTTPException(status_code=400, detail="Invalid strategy index")
+
+    selected = strategies[request.strategy_index]
+
+    from ..core.ai_client import get_ai_response
+    import json
+
+    prompt = (
+        f"Convert this selected strategy into actionable tasks.\n\n"
+        f"Goal: {goal.get('title')}\n"
+        f"Strategy: {selected.get('name')}\n"
+        f"Description: {selected.get('description')}\n"
+        f"Estimated timeline: {selected.get('estimated_timeline', '')}\n\n"
+        f"Generate 3-7 specific tasks. For each task provide: "
+        f"title, description (1 sentence), priority (low/medium/high/urgent), "
+        f"suggested_department.\n\n"
+        f"Return as a JSON array of objects. Only return valid JSON, no markdown."
+    )
+
+    try:
+        response = await get_ai_response(prompt, temperature=0.4, max_tokens=3000)
+        response = response.strip()
+        if response.startswith("```"):
+            response = response.split("\n", 1)[-1]
+            response = response.rsplit("```", 1)[0]
+        tasks_data = json.loads(response)
+        if isinstance(tasks_data, dict) and "tasks" in tasks_data:
+            tasks_data = tasks_data["tasks"]
+        if not isinstance(tasks_data, list):
+            tasks_data = [tasks_data]
+    except Exception as e:
+        logger = logging.getLogger("yesboss.goals")
+        logger.warning(f"Strategy task generation failed: {e}")
+        tasks_data = [
+            {"title": f"Task for {selected.get('name', 'strategy')}", "description": "AI task generation failed", "priority": "medium", "suggested_department": goal.get("department", "")}
+        ]
+
+    org_id = goal.get("organization_id", "")
+    created_tasks = []
+    for i, td in enumerate(tasks_data[:10]):
+        combined = f"{td.get('title', '')} {td.get('description', '')}"
+        mention_emails = resolve_mentions(combined, db, org_id)
+        task_doc = {
+            "title": td.get("title", "Untitled Task"),
+            "description": td.get("description", ""),
+            "priority": td.get("priority", "medium"),
+            "status": "pending",
+            "goal_id": goal_id,
+            "organization_id": org_id,
+            "department": td.get("suggested_department", goal.get("department", "")),
+            "assignee_id": mention_emails,
+            "assignee_email": mention_emails[0] if mention_emails else None,
+            "reviewers": [],
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+            "escalation_level": 0,
+            "owner_escalated": False,
+            "owner_escalated_at": None,
+        }
+        if td.get("due_date"):
+            task_doc["due_date"] = td["due_date"]
+        result = db.tasks.insert_one(task_doc)
+        task_doc["_id"] = str(result.inserted_id)
+        created_tasks.append(task_doc)
+
+        if org_id:
+            asyncio.create_task(ws_manager.broadcast_to_organization(
+                {"type": "task_created", "data": task_doc},
+                org_id
+            ))
+            from ..api.tasks import sync_task_to_zoho
+            asyncio.create_task(sync_task_to_zoho(db, task_doc, org_id))
+
+    db.goals.update_one(
+        {"_id": ObjectId(goal_id)},
+        {"$set": {
+            "selected_strategy": {"index": request.strategy_index, "name": selected.get("name")},
+            "strategy_status": "tasks_created",
+            "updated_at": datetime.utcnow(),
+        }}
+    )
+
+    if org_id:
+        owner_id = goal.get("created_by") or goal.get("assignee_id", [None])[0]
+        if owner_id:
+            asyncio.create_task(create_notification(
+                user_id=owner_id,
+                org_id=org_id,
+                type="strategy_tasks_created",
+                title=f"Tasks Created: {selected.get('name')}",
+                message=f"{len(created_tasks)} tasks created from the '{selected.get('name')}' strategy.",
+                link=f"/goals/{goal_id}",
+            ))
+
+    return {"tasks": created_tasks, "strategy": selected}
 
 
 @router.post("/create-tasks-from-suggestions")

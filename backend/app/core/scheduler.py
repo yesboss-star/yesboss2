@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger("yesboss.scheduler")
 
-CHECK_INTERVAL = 3600
+CHECK_INTERVAL = 300  # 5 min base — Zoho syncs use this; other jobs use counters
 
 
 async def find_manager_email(db, assignee_id: str) -> str | None:
@@ -297,18 +297,229 @@ async def send_digests():
         logger.error(f"Digest send failed: {e}")
 
 
+async def send_auto_reports():
+    try:
+        from ..core.database import get_database
+        from ..core.report_generator import generate_employee_report, generate_org_health
+        from ..core.notification_service import create_and_deliver
+
+        db = get_database()
+        if db is None:
+            return
+
+        now = datetime.utcnow()
+        is_monday = now.weekday() == 0
+        is_first_of_month = now.day == 1
+        hour = now.hour
+
+        if not is_monday and not is_first_of_month:
+            return
+        if hour != 9:
+            return
+
+        orgs = list(db.organizations.find({}))
+        for org in orgs:
+            org_id = str(org["_id"])
+            owner_id = org.get("owner_id")
+            if not owner_id:
+                continue
+
+            try:
+                if is_monday:
+                    members = list(db.org_chart_members.find({"organization_id": org_id}))
+                    for m in members:
+                        email = m.get("email", "")
+                        if not email:
+                            continue
+                        report = await generate_employee_report(db, org_id, email, "weekly")
+                        await create_and_deliver(
+                            user_id=email,
+                            org_id=org_id,
+                            type="report_weekly",
+                            title="Weekly Performance Report",
+                            message=f"Your weekly report is ready — {report['metrics']['completion_rate']}% completion rate.",
+                            link="/dashboard/reports",
+                            email=email,
+                        )
+                    logger.info(f"Weekly reports sent for org {org_id} ({len(members)} employees)")
+
+                if is_first_of_month:
+                    health = await generate_org_health(db, org_id)
+                    await create_and_deliver(
+                        user_id=owner_id,
+                        org_id=org_id,
+                        type="report_monthly",
+                        title=f"Monthly Org Health: {health['health_label']}",
+                        message=f"Organization health score: {health['health_score']}/100 ({health['health_label']}). {len(health.get('departments', {}))} departments analyzed.",
+                        link="/dashboard/reports",
+                    )
+                    logger.info(f"Monthly health report sent for org {org_id}")
+            except Exception as e:
+                logger.error(f"Auto-report failed for org {org_id}: {e}")
+    except Exception as e:
+        logger.error(f"Auto-report send failed: {e}")
+
+
+async def sync_zoho_tasks():
+    try:
+        from ..core.database import get_database
+        from ..core.zoho import ZohoMailTasks, ZohoOAuth
+        from ..api.tasks import sync_task_to_zoho
+        from datetime import datetime
+
+        db = get_database()
+        if db is None:
+            return
+        zmt = ZohoMailTasks(db)
+        zoho = ZohoOAuth(db)
+        now_iso = datetime.utcnow().isoformat()
+
+        users = list(db.zoho_tokens.find({"scope": {"$regex": "ZohoMail"}}))
+        for token_doc in users:
+            user_id = token_doc.get("user_id", "")
+            org_id = token_doc.get("org_id", "")
+            if not user_id:
+                continue
+            token = await zoho.get_valid_token(user_id)
+            if not token:
+                continue
+            last_sync = token_doc.get("last_task_sync_at", "")
+            if not last_sync:
+                last_sync = "2000-01-01T00:00:00+05:30"
+
+            zoho_tasks = await zmt.list_personal_tasks(token, since=last_sync)
+            for zt in zoho_tasks:
+                zoho_id = zt.get("id")
+                existing = db.tasks.find_one({"zoho_personal_task_id": zoho_id})
+                if existing:
+                    updates = {}
+                    zoho_status = zt.get("status", "")
+                    mapped = ZohoMailTasks.map_zoho_status(zoho_status)
+                    if mapped != existing.get("status"):
+                        updates["status"] = mapped
+                    new_title = zt.get("title", "")
+                    if new_title and new_title != existing.get("title"):
+                        updates["title"] = new_title
+                    if updates:
+                        updates["updated_at"] = datetime.utcnow()
+                        db.tasks.update_one({"_id": existing["_id"]}, {"$set": updates})
+                else:
+                    new_task = {
+                        "title": zt.get("title", "Untitled"),
+                        "description": zt.get("description", ""),
+                        "priority": zt.get("priority", "normal").lower().replace("high", "high").replace("low", "low"),
+                        "status": ZohoMailTasks.map_zoho_status(zt.get("status", "")),
+                        "assignee_id": [user_id],
+                        "assignee_email": user_id,
+                        "organization_id": org_id,
+                        "due_date": ZohoMailTasks.parse_zoho_date(zt.get("dueDate", "")),
+                        "zoho_personal_task_id": zoho_id,
+                        "zoho_sync_status": "synced",
+                        "zoho_last_synced_at": now_iso,
+                        "source": "zoho_sync",
+                        "created_at": datetime.utcnow(),
+                        "updated_at": datetime.utcnow(),
+                        "escalation_level": 0,
+                        "owner_escalated": False,
+                        "owner_escalated_at": None,
+                        "reviewers": [],
+                        "dependencies": [],
+                    }
+                    result = db.tasks.insert_one(new_task)
+                    new_task["_id"] = str(result.inserted_id)
+                    from ..core.notification_service import create_and_deliver
+                    await create_and_deliver(
+                        user_id=user_id, org_id=org_id, type="task_assigned",
+                        title="New Task from Zoho Sync",
+                        message=f"Task '{new_task['title']}' synced from your Zoho Mail",
+                        link=f"/tasks/{new_task['_id']}",
+                    )
+
+            db.zoho_tokens.update_one(
+                {"user_id": user_id},
+                {"$set": {"last_task_sync_at": now_iso}},
+            )
+    except Exception as e:
+        logger.warning(f"Zoho task sync error: {e}")
+
+
+async def sync_zoho_calendar():
+    try:
+        from ..core.database import get_database
+        from ..core.zoho import ZohoCalendar, ZohoOAuth
+        from datetime import datetime, timedelta
+
+        db = get_database()
+        if db is None:
+            return
+        zoho = ZohoOAuth(db)
+
+        users = list(db.zoho_tokens.find({"scope": {"$regex": "ZohoCalendar"}}))
+        for token_doc in users:
+            user_id = token_doc.get("user_id", "")
+            org_id = token_doc.get("org_id", "")
+            token = await zoho.get_valid_token(user_id)
+            if not token:
+                continue
+
+            cal_uid = await ZohoCalendar.get_default_calendar_uid(token)
+            if not cal_uid:
+                continue
+
+            now = datetime.utcnow()
+            range_start = now.strftime("%Y%m%d")
+            range_end = (now + timedelta(days=30)).strftime("%Y%m%d")
+
+            events = await ZohoCalendar.get_events(token, cal_uid, range_start, range_end)
+            for ev in events:
+                zoho_id = ev.get("uid")
+                if not zoho_id:
+                    continue
+                dt = ev.get("dateandtime", {})
+                doc = {
+                    "zoho_event_id": zoho_id,
+                    "calendar_uid": cal_uid,
+                    "organization_id": org_id,
+                    "user_email": user_id,
+                    "title": ev.get("title", ""),
+                    "description": ev.get("description", ""),
+                    "start": dt.get("start", ""),
+                    "end": dt.get("end", ""),
+                    "attendees": [a.get("email") for a in ev.get("attendees", []) if a.get("email")],
+                    "location": ev.get("location", ""),
+                    "raw_data": ev,
+                    "synced_at": datetime.utcnow().isoformat(),
+                }
+                existing = db.calendar_events.find_one({"zoho_event_id": zoho_id})
+                if existing:
+                    db.calendar_events.update_one({"_id": existing["_id"]}, {"$set": doc})
+                else:
+                    db.calendar_events.insert_one(doc)
+    except Exception as e:
+        logger.warning(f"Zoho calendar sync error: {e}")
+
+
 async def scheduler_loop():
     logger.info("Scheduler started")
     deadline_counter = 0
+    cal_sync_counter = 0
     while True:
         try:
-            if deadline_counter % 24 == 0:
+            if deadline_counter % 12 == 0:  # every ~60 min
                 await check_deadline_reminders()
-            if deadline_counter % 24 == 0:
                 hour = datetime.utcnow().hour
                 if hour == 8:
                     await send_digests()
+                if hour == 9:
+                    await send_auto_reports()
+
+            await sync_zoho_tasks()
+
+            if cal_sync_counter % 3 == 0:  # every ~15 min (stub until G3)
+                await sync_zoho_calendar()
+
             deadline_counter += 1
+            cal_sync_counter += 1
         except Exception as e:
             logger.error(f"Scheduler cycle error: {e}")
         await asyncio.sleep(CHECK_INTERVAL)

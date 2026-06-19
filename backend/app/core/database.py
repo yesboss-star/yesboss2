@@ -72,7 +72,7 @@ def connect_mongodb():
 
 def _ensure_collections(db: Database):
     collections = db.list_collection_names()
-    required = ["users", "organizations", "employees", "goals", "tasks", "workflows", "task_outcomes", "bottlenecks", "learning_patterns", "documents", "conversations", "uploads", "org_chart_members", "reports", "user_patterns", "notifications", "notification_preferences", "push_subscriptions", "team_updates"]
+    required = ["users", "organizations", "employees", "goals", "tasks", "workflows", "task_outcomes", "bottlenecks", "learning_patterns", "documents", "conversations", "uploads", "org_chart_members", "reports", "user_patterns", "notifications", "notification_preferences", "push_subscriptions", "team_updates", "meetings", "zoho_tokens", "calendar_events"]
     for col in required:
         if col not in collections:
             db.create_collection(col)
@@ -95,6 +95,10 @@ def _ensure_indexes(db: Database):
         db.tasks.create_index("assignee_email")
         db.tasks.create_index("status")
         db.tasks.create_index([("organization_id", 1), ("status", 1)])
+        db.tasks.create_index("due_date")
+        db.tasks.create_index([("organization_id", 1), ("due_date", 1)])
+        db.tasks.create_index("escalation_level")
+        db.tasks.create_index([("organization_id", 1), ("escalation_level", 1)])
         
         db.goals.create_index("organization_id")
         db.goals.create_index("department")
@@ -110,7 +114,28 @@ def _ensure_indexes(db: Database):
         db.org_chart_members.create_index("organization_id")
         db.org_chart_members.create_index([("organization_id", 1), ("department", 1)])
 
+        db.meetings.create_index("organization_id")
+        db.meetings.create_index([("organization_id", 1), ("created_at", -1)])
+
+        db.market_trends.create_index("organization_id")
+        db.market_trends.create_index([("organization_id", 1), ("published_at", -1)])
+
+        db.market_impacts.create_index("organization_id")
+
+        db.task_outcomes.create_index("organization_id")
+        db.task_outcomes.create_index([("organization_id", 1), ("created_at", -1)])
+
+        db.bottlenecks.create_index("organization_id")
+        db.bottlenecks.create_index("resolution_status")
+
         db.files.create_index("organization_id")
+
+        db.zoho_tokens.create_index("user_id", unique=True)
+        db.zoho_tokens.create_index("org_id")
+
+        db.calendar_events.create_index("zoho_event_id", unique=True, sparse=True)
+        db.calendar_events.create_index("organization_id")
+        db.calendar_events.create_index([("organization_id", 1), ("start", 1)])
 
         logger.info("Database indexes created")
     except Exception as e:

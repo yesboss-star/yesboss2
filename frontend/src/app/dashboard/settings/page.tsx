@@ -4,7 +4,8 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, Tabs, TabsList, TabsTrigger, TabsContent, Input, Label, Button } from "@/components/ui";
-import { Bell, Shield, User, Palette, Save, ArrowLeft, Volume2, Mail, Smartphone } from "lucide-react";
+import { Bell, Shield, User, Palette, Save, ArrowLeft, Volume2, Mail, Smartphone, Plug } from "lucide-react";
+import ZohoConnectButton from "@/components/owners/ZohoConnectButton";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -91,6 +92,7 @@ export default function SettingsPage() {
             <TabsTrigger value="profile"><User className="w-4 h-4 mr-2" /> Profile</TabsTrigger>
             <TabsTrigger value="security"><Shield className="w-4 h-4 mr-2" /> Security</TabsTrigger>
             <TabsTrigger value="appearance"><Palette className="w-4 h-4 mr-2" /> Appearance</TabsTrigger>
+            <TabsTrigger value="integrations"><Plug className="w-4 h-4 mr-2" /> Integrations</TabsTrigger>
           </TabsList>
 
           <TabsContent value="notifications">
@@ -210,6 +212,46 @@ export default function SettingsPage() {
                     <input type="checkbox" defaultChecked className="sr-only peer" />
                     <div className="w-9 h-5 bg-border rounded-full peer peer-checked:bg-primary transition-colors" />
                   </label>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="integrations">
+            <Card>
+              <CardHeader>
+                <CardTitle><Plug className="w-4 h-4 inline mr-2" /> Zoho Integration</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">Zoho Mail & Calendar</p>
+                    <p className="text-xs text-text-muted mt-1">
+                      Connect your Zoho account to sync tasks bidirectionally and access your calendar.
+                    </p>
+                  </div>
+                  <ZohoConnectButton />
+                </div>
+                <div className="p-3 rounded-xl bg-surface border border-border/50">
+                  <h4 className="text-xs font-medium text-text-muted mb-2">What gets connected?</h4>
+                  <ul className="space-y-1 text-xs text-text-muted">
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary mt-0.5">&bull;</span>
+                      Tasks created in yesboss appear in your Zoho Mail To-Do
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary mt-0.5">&bull;</span>
+                      Completing a task in Zoho Mail syncs the status back
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary mt-0.5">&bull;</span>
+                      Calendar events synced for meeting creation
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary mt-0.5">&bull;</span>
+                      Book meetings with free/busy availability check
+                    </li>
+                  </ul>
                 </div>
               </CardContent>
             </Card>

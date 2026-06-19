@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime
 from typing import Optional
 from ..core.database import get_database
@@ -8,6 +9,20 @@ from ..api.websocket import manager as ws_manager
 from ..core.email_service import send_notification_email, is_email_configured
 
 logger = logging.getLogger("yesboss.notification_service")
+
+_email_rate_limit = {}  # org_id -> list of timestamps
+
+def _check_email_rate_limit(org_id: str, max_per_hour: int = 50) -> bool:
+    now = time.time()
+    window = 3600
+    if org_id not in _email_rate_limit:
+        _email_rate_limit[org_id] = []
+    _email_rate_limit[org_id] = [ts for ts in _email_rate_limit[org_id] if now - ts < window]
+    if len(_email_rate_limit[org_id]) >= max_per_hour:
+        logger.warning(f"Email rate limit hit for org {org_id}: {len(_email_rate_limit[org_id])} in last hour")
+        return False
+    _email_rate_limit[org_id].append(now)
+    return True
 
 
 def get_user_email(user_id: str) -> Optional[str]:
@@ -94,7 +109,7 @@ async def create_and_deliver(
 
     if is_channel_enabled(prefs, "email", type) and is_email_configured():
         user_email = email or get_user_email(user_id)
-        if user_email:
+        if user_email and _check_email_rate_limit(org_id):
             asyncio.create_task(asyncio.to_thread(
                 send_notification_email, user_email, title, message, link
             ))
