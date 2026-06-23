@@ -167,8 +167,18 @@ async def check_freebusy(
     end_str = start_dt.strftime("%Y%m%dT235959")
 
     all_busy = []
+    unchecked = []
     for email in email_list:
-        blocks = await ZohoCalendar.check_freebusy(token, email, start_str, end_str)
+        att_token = await zoho.get_valid_token(email)
+        if not att_token:
+            att_token_doc = db.zoho_tokens.find_one({"$or": [{"zoho_mail_id": email}, {"email": email}, {"user_id": email}]})
+            if att_token_doc:
+                att_token = await zoho.get_valid_token(att_token_doc.get("user_id"))
+        if not att_token:
+            unchecked.append(email)
+            logger.warning("freebusy: no token found for attendee %s — cannot verify calendar", email)
+            continue
+        blocks = await ZohoCalendar.check_freebusy(att_token, email, start_str, end_str)
         logger.info("freebusy: email=%s returned %s blocks", email, len(blocks))
         for b in blocks:
             fb_start = b.get("startTime", "")
@@ -195,6 +205,7 @@ async def check_freebusy(
         "busy": all_busy,
         "conflict": conflict,
         "date": date,
+        "unchecked": unchecked,
     }
 
 

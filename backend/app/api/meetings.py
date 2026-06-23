@@ -8,6 +8,7 @@ from typing import Optional, List
 from ..core.database import get_database
 from ..dependencies.auth import get_current_user_optional
 from ..api.websocket import manager as ws_manager
+from ..core.zoho import ZohoMailTasks, ZohoOAuth
 from bson import ObjectId
 
 logger = logging.getLogger("yesboss.meetings")
@@ -54,12 +55,119 @@ def _resolve_assignee(db, org_id: str, name: str):
                 "organization_id": org_id,
                 "full_name": {"$regex": f"^{first} .*{last}$", "$options": "i"},
             })
-        if not emp:
-            emp = db.org_chart_members.find_one({
-                "organization_id": org_id,
-                "full_name": {"$regex": re.escape(name_parts[0]), "$options": "i"},
-            })
+    if not emp:
+        # Substring match on full_name or email (catch-all for first-name-only, partial matches)
+        emp = db.org_chart_members.find_one({
+            "organization_id": org_id,
+            "$or": [
+                {"full_name": {"$regex": re.escape(name), "$options": "i"}},
+                {"email": {"$regex": re.escape(name), "$options": "i"}},
+            ]
+        })
+    if emp:
+        logger.info("_resolve_assignee: '%s' → %s <%s>", name, emp.get("full_name"), emp.get("email"))
+    else:
+        logger.warning("_resolve_assignee: '%s' → no match in org_chart_members", name)
     return emp
+
+
+def _resolve_multi_assignee(db, org_id: str, text: str) -> list:
+    """Parse compound assignee strings like 'Krisha & Prince' or 'Krisha, Prince' into a list of emails."""
+    text = text.strip()
+    if not text:
+        return []
+    parts = re.split(r'\s*[&,]\s*|\s+and\s+', text)
+    emails = []
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        emp = _resolve_assignee(db, org_id, part)
+        if emp:
+            emails.append(emp.get("email", "").lower())
+    return emails
+
+
+def _build_section_map(text: str) -> dict:
+    """Parse meeting notes into a section map: name → list of task lines under that name."""
+    sections = {}
+    current_names = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        # Pattern: "Name • task"
+        name_match = re.match(r'^([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\s+[•\*]\s+(.+)', line)
+        if name_match:
+            name = name_match.group(1)
+            task_text = name_match.group(2)
+            current_names = [name]
+            for cn in current_names:
+                sections.setdefault(cn, []).append(task_text)
+        # Pattern: "• subtask" (continuation of previous name's section)
+        elif re.match(r'^[•\*]\s+', line):
+            task_text = re.sub(r'^[•\*]\s+', '', line)
+            for cn in current_names:
+                sections.setdefault(cn, []).append(task_text)
+        # Pattern: "NAME -" or "NAME & NAME -" (section header)
+        else:
+            header_match = re.match(r'^([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?(?:\s*[&,]\s*[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)?)\s*[–\-]', line)
+            if header_match:
+                current_names = [n.strip() for n in re.split(r'\s*[&,]\s*|\s+and\s+', header_match.group(1))]
+            else:
+                # Pattern: "Name Task text" (name prefix without bullet, like "Rishi Set GTM w/ @prince")
+                name_prefix = re.match(r'^([A-Z][a-zA-Z]+)\s+(.+)', line)
+                if name_prefix and len(name_prefix.group(1)) >= 2 and len(name_prefix.group(2)) > 5:
+                    current_names = [name_prefix.group(1)]
+                    sections.setdefault(current_names[0], []).append(name_prefix.group(2))
+    return sections
+
+
+def _match_task_to_section(task_title: str, section_map: dict) -> list:
+    """Try to find which name(s) a task belongs to based on section task text overlap."""
+    title_lower = task_title.lower()
+    matches = []
+    for name, tasks in section_map.items():
+        for t in tasks:
+            t_lower = t.lower()
+            title_words = [w for w in title_lower.split() if len(w) > 2]
+            if title_words:
+                overlap = sum(1 for w in title_words if w in t_lower)
+                if overlap >= max(1, len(title_words) // 2):
+                    matches.append(name)
+                    break
+            elif len(t_lower) > 3 and (t_lower in title_lower or title_lower in t_lower):
+                matches.append(name)
+                break
+    return matches
+
+
+def _extract_names_from_text(text: str) -> list:
+    """Extract person names from meeting notes text using common MoM patterns."""
+    names = []
+    # Pattern 1: "Name • task" (name before bullet)
+    matches = re.findall(r'^([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\s+[•\*]\s', text, re.MULTILINE)
+    names.extend(matches)
+    # Pattern 2: "• Name – task" or "* Name – task" (name after bullet, before dash)
+    matches = re.findall(r'^[•\*]\s*([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\s*[–\-]', text, re.MULTILINE)
+    names.extend(matches)
+    # Pattern 3: "Name:" or "Name – role" or "Name - role" (role assignments)
+    matches = re.findall(r'^([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\s*:\s', text, re.MULTILINE)
+    names.extend(matches)
+    # Pattern 4: "NAME & NAME -" (section headers for shared tasks)
+    matches = re.findall(r'^([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?(?:\s*[&,]\s*[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)?)\s*[–\-]', text, re.MULTILINE)
+    names.extend(matches)
+    # Pattern 5: @mentions
+    matches = re.findall(r'@(\w[\w\s.-]+?)(?:\s|$|[,;:.!?])', text + " ")
+    names.extend(matches)
+    seen = set()
+    result = []
+    for n in names:
+        n = n.strip()
+        if n and n.lower() not in seen:
+            seen.add(n.lower())
+            result.append(n)
+    return result
 
 TASK_SYSTEM_PROMPT = (
     "You are an AI assistant that extracts actionable tasks from meeting notes. "
@@ -67,10 +175,16 @@ TASK_SYSTEM_PROMPT = (
     "For each task, return a JSON object with these fields:\n"
     "- title: short task name (required)\n"
     "- description: detailed description of what needs to be done\n"
-    "- suggested_assignee: the EXACT full name of the person responsible, as written in the meeting notes. Choose from the participants list if possible. Extract this from the meeting notes text — do not make up a name. If unclear, use the empty string.\n"
+    "- suggested_assignee: the EXACT name(s) of the person(s) responsible, as written in the meeting notes. "
+    "If multiple people are assigned (e.g. 'Krisha & Prince' or 'Krisha, Prince' or 'Krisha and Prince'), "
+    "include ALL names separated by ' & '. Extract from the meeting notes text — do not make up names. "
+    "If unclear, use the empty string.\n"
     "- suggested_priority: one of high, medium, low\n"
     "- suggested_deadline: when it should be done (relative date like '2026-06-20' or empty string)\n\n"
-    "IMPORTANT: suggested_assignee must be the exact name mentioned in the notes (e.g. 'Arijit Das'), preferably matching someone from the participants list. Do not use email addresses. Leave empty if no person is clearly responsible.\n\n"
+    "IMPORTANT: Meeting notes often use sections with headers like 'Person: role' or 'Person • task'. "
+    "Use these headers to determine who each task belongs to. Also watch for sections like "
+    "'PERSON1 & PERSON2 -' where all tasks under that section belong to both people. "
+    "Do not use email addresses. Leave empty if no person is clearly responsible.\n\n"
     "Return ONLY a valid JSON array of task objects. No markdown, no code blocks, no extra text."
 )
 
@@ -81,6 +195,92 @@ async def get_user_org_id(user) -> Optional[str]:
     return None
 
 
+async def _resolve_token_for_email(db, email: str, org_id: Optional[str] = None) -> Optional[str]:
+    """Find a valid Zoho access token for a user by their email address."""
+    zoauth = ZohoOAuth(db)
+    # Strategy 1: direct user_id lookup (tokens stored with user_id = Firebase uid)
+    token = await zoauth.get_valid_token(email)
+    if token:
+        return token
+    # Strategy 2: users collection maps email → Firebase uid
+    user_doc = db.users.find_one({"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}})
+    if user_doc and user_doc.get("uid"):
+        token = await zoauth.get_valid_token(user_doc["uid"])
+        if token:
+            return token
+    # Strategy 3: search zoho_tokens by stored fields
+    att_doc = db.zoho_tokens.find_one({
+        "$or": [
+            {"zoho_mail_id": {"$regex": re.escape(email), "$options": "i"}},
+            {"email": {"$regex": re.escape(email), "$options": "i"}},
+            {"user_id": email},
+        ]
+    })
+    if att_doc and att_doc.get("user_id"):
+        token = await zoauth.get_valid_token(att_doc["user_id"])
+        if token:
+            return token
+    # Strategy 4: org_chart_members → try matching zoho_mail_id substring
+    member = None
+    if org_id:
+        member = db.org_chart_members.find_one({
+            "organization_id": org_id,
+            "email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+        })
+    if member:
+        name_parts = (member.get("full_name") or "").split()
+        if name_parts:
+            att_doc = db.zoho_tokens.find_one({
+                "zoho_mail_id": {"$regex": re.escape(name_parts[0]), "$options": "i"},
+            })
+            if att_doc and att_doc.get("user_id"):
+                token = await zoauth.get_valid_token(att_doc["user_id"])
+                if token:
+                    return token
+    logger.warning("_resolve_token_for_email: no token found for %s", email)
+    return None
+
+
+async def _push_to_zoho_todo(db, org_id: str, task_doc: dict, assignee_emails: list):
+    try:
+        mail_tasks = ZohoMailTasks(db)
+        owner_token = await ZohoOAuth(db).get_valid_token(task_doc.get("created_by"))
+        if not owner_token:
+            org = db.organizations.find_one({"_id": ObjectId(org_id)})
+            if org and org.get("owner_id"):
+                owner_token = await ZohoOAuth(db).get_valid_token(org["owner_id"])
+
+        zgid = None
+        if owner_token:
+            org_name = ""
+            org_doc = db.organizations.find_one({"_id": ObjectId(org_id)})
+            if org_doc:
+                org_name = org_doc.get("name", "")
+            zgid = await mail_tasks.ensure_group(org_name, owner_token)
+
+        zoho_ids = []
+        for email in assignee_emails:
+            att_token = await _resolve_token_for_email(db, email, org_id)
+            if att_token:
+                zoho_task_id = await mail_tasks.create_personal_task(att_token, task_doc)
+                if zoho_task_id:
+                    zoho_ids.append(zoho_task_id)
+                    logger.info("Pushed task '%s' to Zoho ToDo for %s (id=%s)", task_doc.get("title"), email, zoho_task_id)
+                    if zgid:
+                        group_task_id = await mail_tasks.create_group_task(owner_token, zgid, task_doc)
+                        if group_task_id:
+                            logger.info("Pushed task to Zoho group for %s (id=%s)", email, group_task_id)
+                else:
+                    logger.warning("Failed to push task to Zoho ToDo for %s", email)
+            else:
+                logger.warning("No Zoho token for %s — skipping Zoho ToDo push", email)
+
+        if zoho_ids:
+            db.tasks.update_one({"_id": ObjectId(task_doc["_id"])}, {"$set": {"zoho_task_ids": zoho_ids}})
+    except Exception as e:
+        logger.error("Failed to push task to Zoho ToDo: %s", e, exc_info=True)
+
+
 async def create_task_from_meeting(
     db,
     org_id: str,
@@ -89,40 +289,38 @@ async def create_task_from_meeting(
     meeting_title: str,
     participant_list: Optional[list] = None,
 ):
-    assignee_ids = []
-    combined_text = f"{task_data.get('suggested_assignee', '')} {task_data.get('description', '')} {task_data.get('title', '')}"
-    mentioned = resolve_mentions(combined_text, db, org_id)
-    if mentioned:
-        assignee_ids = mentioned
-    elif task_data.get("suggested_assignee"):
-        suggested = task_data["suggested_assignee"].strip()
-        emp = _resolve_assignee(db, org_id, suggested)
-        if emp:
-            assignee_ids = [emp.get("email", "").lower()]
+    assignee_emails = []
+    suggested = (task_data.get("suggested_assignee") or "").strip()
 
-    if not assignee_ids and participant_list:
-        for p in participant_list:
-            p = p.strip()
-            if not p:
-                continue
-            if "@" in p:
-                emp = db.org_chart_members.find_one({
-                    "organization_id": org_id,
-                    "email": {"$regex": f"^{re.escape(p)}$", "$options": "i"},
-                })
-            else:
-                emp = _resolve_assignee(db, org_id, p)
+    logger.info("create_task_from_meeting: task='%s' suggested='%s' participants=%s",
+                 task_data.get("title"), suggested, participant_list)
+
+    if suggested:
+        assignee_emails = _resolve_multi_assignee(db, org_id, suggested)
+        logger.info("Resolved suggested_assignee '%s' -> emails=%s", suggested, assignee_emails)
+
+    if not assignee_emails and participant_list:
+        title_lower = (task_data.get("title", "") + " " + task_data.get("description", "")).lower()
+        for email in participant_list:
+            emp = db.org_chart_members.find_one({
+                "organization_id": org_id,
+                "email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+            })
             if emp:
-                assignee_ids = [emp.get("email", "").lower()]
-                break
+                name = (emp.get("full_name") or "").lower()
+                if name and name.split()[0] in title_lower:
+                    assignee_emails = [email]
+                    logger.info("Participant fallback: email=%s name='%s' in title '%s'", email, name, title_lower)
+                    break
 
     task_doc = {
         "title": task_data.get("title", "Untitled Task"),
         "description": task_data.get("description", ""),
         "priority": task_data.get("suggested_priority", "medium"),
         "status": "pending",
-        "assignee_id": assignee_ids,
-        "assignee_email": task_data.get("suggested_assignee", ""),
+        "assignee_id": assignee_emails,
+        "assignee_email": assignee_emails[0] if assignee_emails else "",
+        "assignee_name": suggested,
         "department": None,
         "due_date": task_data.get("suggested_deadline"),
         "dependencies": [],
@@ -136,6 +334,7 @@ async def create_task_from_meeting(
         "owner_escalated_at": None,
         "source": "meeting",
         "source_meeting_title": meeting_title,
+        "zoho_task_ids": [],
     }
     result = db.tasks.insert_one(task_doc)
     task_doc["_id"] = str(result.inserted_id)
@@ -144,10 +343,10 @@ async def create_task_from_meeting(
         {"type": "task_created", "data": task_doc}, org_id
     ))
 
-    for aid in assignee_ids:
+    for email in assignee_emails:
         from ..core.notification_service import create_and_deliver
         asyncio.create_task(create_and_deliver(
-            user_id=aid,
+            user_id=email,
             org_id=org_id,
             type="task_assigned",
             title="New Task from Meeting",
@@ -155,6 +354,8 @@ async def create_task_from_meeting(
             link=f"/tasks/{result.inserted_id}",
             actor_id=user_id,
         ))
+
+    asyncio.create_task(_push_to_zoho_todo(db, org_id, task_doc, assignee_emails))
 
     return task_doc
 
@@ -219,6 +420,16 @@ async def process_meeting(
             raise HTTPException(status_code=400, detail="Could not extract text from file. Supported formats: txt, md, pdf, docx.")
         participant_list = [p.strip() for p in (participants or "").split(",") if p.strip()] if participants else []
 
+    extracted_names = _extract_names_from_text(raw_text)
+    logger.info("Extracted names from text: %s", extracted_names)
+    for name in extracted_names:
+        emp = _resolve_assignee(db, org_id, name)
+        if emp:
+            email = emp.get("email", "").lower()
+            if email and email not in participant_list:
+                participant_list.append(email)
+                logger.info("Added %s to participant list from extracted name '%s'", email, name)
+
     ai_prompt = (
         f"Meeting Title: {meeting_title}\n"
         f"Participants: {', '.join(participant_list) if participant_list else 'N/A'}\n\n"
@@ -260,9 +471,24 @@ async def process_meeting(
         else:
             tasks_data = []
 
+    logger.info("AI returned %d tasks: %s", len(tasks_data), json.dumps([{
+        "title": t.get("title", ""),
+        "suggested_assignee": t.get("suggested_assignee", ""),
+        "priority": t.get("suggested_priority", ""),
+    } for t in tasks_data if isinstance(t, dict) and t.get("title")], indent=2))
+
     created_tasks = []
+    section_map = _build_section_map(raw_text)
+    logger.info("Section map: %s", json.dumps({k: v for k, v in section_map.items()}, indent=2))
     for td in tasks_data:
         if isinstance(td, dict) and td.get("title"):
+            if not td.get("suggested_assignee", "").strip():
+                matched = _match_task_to_section(td.get("title", ""), section_map)
+                if matched:
+                    td["suggested_assignee"] = " & ".join(matched)
+                    logger.info("Section fallback: task '%s' matched to '%s'", td.get("title"), td["suggested_assignee"])
+                else:
+                    logger.info("Section fallback: no match for task '%s'", td.get("title"))
             task = await create_task_from_meeting(db, org_id, user_id, td, meeting_title, participant_list)
             created_tasks.append(task)
 
@@ -301,7 +527,14 @@ async def process_meeting(
         "meeting_id": meeting_id,
         "meeting_title": meeting_title,
         "tasks_created": [
-            {"id": t["_id"], "title": t["title"], "priority": t["priority"]}
+            {
+                "id": t["_id"],
+                "title": t["title"],
+                "priority": t["priority"],
+                "assignee_id": t.get("assignee_id", []),
+                "assignee_email": t.get("assignee_email", ""),
+                "assignee_name": t.get("assignee_name", ""),
+            }
             for t in created_tasks
         ],
         "task_count": len(created_tasks),

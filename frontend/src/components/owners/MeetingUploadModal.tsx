@@ -247,6 +247,16 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{t.title}</p>
                       <p className="text-xs text-text-muted capitalize">Priority: {t.priority}</p>
+                      {t.assignee_name && (
+                        <p className="text-xs text-text-muted mt-0.5 truncate">
+                          Assignee: {t.assignee_name}
+                        </p>
+                      )}
+                      {!t.assignee_name && t.assignee_email && (
+                        <p className="text-xs text-text-muted mt-0.5 truncate">
+                          Assignee: {t.assignee_email}
+                        </p>
+                      )}
                     </div>
                   </div>
                 ))}

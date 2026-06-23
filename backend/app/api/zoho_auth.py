@@ -77,8 +77,15 @@ async def zoho_callback(
 
         user_id = state or ""
         org_id = ""
+        user_email = ""
 
         if user_id and db is not None:
+            try:
+                user_doc = db.users.find_one({"uid": user_id})
+                if user_doc:
+                    user_email = user_doc.get("email", "")
+            except Exception:
+                pass
             try:
                 org = db.organizations.find_one({"owner_id": user_id})
                 if org:
@@ -86,7 +93,7 @@ async def zoho_callback(
             except Exception:
                 pass
 
-        saved = await zoho.save_token(user_id, org_id, token_data, zoho_mail_id, email=zoho_mail_id)
+        saved = await zoho.save_token(user_id, org_id, token_data, zoho_mail_id, email=user_email or zoho_mail_id)
         logger.info("Callback saved token — user_id=%s, org_id=%s, zoho_mail_id=%s, success=%s",
                      user_id, org_id, zoho_mail_id, saved)
 
