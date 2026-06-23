@@ -99,11 +99,12 @@ function PersonMultiSelectInline({ values, nameVals, members, filterDept, onChan
   );
 }
 
-export default function TaskView() {
+export default function TaskView({ goals: propGoals }: { goals?: any[] }) {
   const router = useRouter();
   const { organization } = useOrganizationStore();
   const { user } = useAuth();
-  const { goals, fetchGoals, updateGoal, deleteGoal } = useGoalStore();
+  const { goals: storeGoals, fetchGoals, updateGoal, deleteGoal } = useGoalStore();
+  const goals = propGoals ?? storeGoals;
   const { tasks, fetchTasks, updateTask } = useTaskStore();
   const { members, fetchOrgMembers } = useOrgChartStore();
   const orgId = organization?.id;

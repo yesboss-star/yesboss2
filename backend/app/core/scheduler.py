@@ -499,6 +499,54 @@ async def sync_zoho_calendar():
         logger.warning(f"Zoho calendar sync error: {e}")
 
 
+async def check_owner_check_ins():
+    try:
+        from ..core.database import get_database
+        from ..core.check_in_service import check_org_due_for_check_in, generate_check_in, send_check_in_notification, store_check_in
+
+        db = get_database()
+        if db is None:
+            return
+
+        orgs = list(db.organizations.find({}))
+        checked = 0
+        for org in orgs:
+            org_id = str(org["_id"])
+            due = await check_org_due_for_check_in(db, org)
+            if not due:
+                continue
+            owner_ids = set()
+            if org.get("owner_id"):
+                owner_ids.add(org["owner_id"])
+            for co in (org.get("co_owners") or []):
+                owner_ids.add(co)
+            for owner_id in owner_ids:
+                if not owner_id:
+                    continue
+                check_in_data = await generate_check_in(db, org_id, owner_id)
+                if not check_in_data.get("should_send"):
+                    continue
+                await store_check_in(db, check_in_data)
+                await send_check_in_notification(db, check_in_data)
+                checked += 1
+
+        if checked:
+            logger.info(f"Check-in reminders sent to {checked} owner(s)")
+    except Exception as e:
+        logger.error(f"Check-in check failed: {e}")
+
+
+async def aggregate_cross_company_patterns():
+    try:
+        from ..core.learning import learning
+        logger.info("Running cross-company pattern aggregation...")
+        result = learning.aggregate_industry_patterns()
+        if result.get("success"):
+            logger.info(f"Aggregated {result.get('aggregated', 0)} industry/vertical patterns")
+    except Exception as e:
+        logger.error(f"Pattern aggregation failed: {e}")
+
+
 async def scheduler_loop():
     logger.info("Scheduler started")
     deadline_counter = 0
@@ -512,6 +560,9 @@ async def scheduler_loop():
                     await send_digests()
                 if hour == 9:
                     await send_auto_reports()
+                if hour == 3:
+                    await aggregate_cross_company_patterns()
+                await check_owner_check_ins()
 
             await sync_zoho_tasks()
 

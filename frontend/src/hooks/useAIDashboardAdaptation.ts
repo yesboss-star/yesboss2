@@ -115,7 +115,7 @@ export function useAIDashboardAdaptation() {
 
   const getAISummary = useCallback(async (): Promise<string> => {
     try {
-      const response = await fetch(`${API_URL}/executive-chat/chat`, {
+      const response = await fetch(`${API_URL}/strategy-chat/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

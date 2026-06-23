@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import urllib.parse
 import os
@@ -13,7 +14,7 @@ from ..core.file_processor import ALLOWED_EXTENSIONS
 from bson import ObjectId
 
 router = APIRouter()
-logger = logging.getLogger("yesboss.executive_chat")
+logger = logging.getLogger("yesboss.strategy_chat")
 
 
 def get_user_org_id(user) -> Optional[str]:
@@ -94,7 +95,7 @@ async def scrape_website_text(url: str) -> str:
 
 
 @router.post("/chat")
-async def executive_chat(request: ChatRequest, current_user = Depends(get_current_user_optional)):
+async def strategy_chat(request: ChatRequest, current_user = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -113,13 +114,36 @@ async def executive_chat(request: ChatRequest, current_user = Depends(get_curren
         agent_type="business_analyst",
     )
 
+    # Append cross-company industry recommendations if available
+    try:
+        org = db.organizations.find_one({"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id})
+        if org:
+            from ..core.learning import learning
+            ind = org.get("industry", "")
+            mv = org.get("micro_vertical", "")
+            if ind:
+                recs = learning.get_industry_recommendations(ind, mv)
+                if recs.get("recommendations"):
+                    rec_lines = []
+                    for r in recs["recommendations"]:
+                        rec_lines.append(f"- {r['title']}")
+                    context_block += (
+                        f"\n\n===== CROSS-COMPANY BENCHMARKS =====\n"
+                        f"Industry: {ind}" + (f" / {mv}" if mv else "") + "\n"
+                        + "\n".join(rec_lines) + "\n"
+                        + f"(Based on {recs.get('total_outcomes_analyzed', 0)} anonymized goal outcomes across similar companies)\n"
+                        + "========================================\n"
+                    )
+    except Exception as e:
+        logger.warning(f"Could not load industry recommendations: {e}")
+
     conversation_history = []
     if request.history:
         for msg in request.history[-6:]:
             conversation_history.append({"role": msg.role, "content": msg.content})
 
     system_prompt = (
-        "You are an AI Business Analyst on the user's executive dashboard. You behave like ChatGPT: "
+        "You are an AI Business Analyst on the user's strategy dashboard. You behave like ChatGPT: "
         "concise, direct, conversational, and useful.\n\n"
         "PRIME DIRECTIVE — DATA HONESTY:\n"
         "- First, read the CONTEXT block. Use ONLY the data actually present there (goals, tasks, team, documents, organization, etc.).\n"
@@ -758,3 +782,326 @@ async def save_chat_message(
     message_doc["_id"] = str(result.inserted_id)
 
     return {"message": message_doc}
+
+
+# ---------------------------------------------------------------------------
+# Unified Smart Ask — combines strategy context + intent classification + delegation
+# ---------------------------------------------------------------------------
+
+class AskRequest(BaseModel):
+    message: str
+    organization_id: Optional[str] = None
+    session_id: Optional[str] = None
+    conversation_history: Optional[List[Dict[str, Any]]] = None
+
+
+class AskResponse(BaseModel):
+    type: str  # "answer" | "question" | "delegate" | "meeting"
+    response: Optional[str] = None
+    question: Optional[Dict[str, Any]] = None
+    delegate: Optional[Dict[str, Any]] = None
+    meeting: Optional[Dict[str, Any]] = None
+    session_id: Optional[str] = None
+
+
+@router.post("/ask", response_model=AskResponse)
+async def unified_ask(request: AskRequest, current_user = Depends(get_current_user_optional)):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    org_id = request.organization_id or get_user_org_id(current_user)
+    if not org_id:
+        raise HTTPException(status_code=400, detail="Organization ID required")
+
+    user_id = getattr(current_user, 'id', None) if current_user else None
+
+    try:
+        from ..api.assistant import smart_ask as _assistant_ask
+        from ..api.assistant import AskRequest as AssistantAskReq, ChatContext
+
+        ctx = ChatContext(organization_id=org_id)
+        if user_id:
+            ctx.user_email = user_id
+
+        assistant_req = AssistantAskReq(
+            message=request.message,
+            context=ctx,
+            conversation_history=request.conversation_history,
+        )
+
+        result = await _assistant_ask(assistant_req)
+
+        if isinstance(result, dict):
+            resp_type = result.get("type", "answer")
+            return AskResponse(
+                type=resp_type,
+                response=result.get("response"),
+                question=result.get("question"),
+                delegate=result.get("delegate"),
+                meeting=result.get("meeting"),
+                session_id=request.session_id,
+            )
+
+        return AskResponse(type="answer", response=str(result), session_id=request.session_id)
+
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.warning(f"Assistant ask fallback: {e}")
+
+    # Fallback: use strategy chat's own AI
+    from ..core.prompt_engine import MasterPromptEngine
+    engine = MasterPromptEngine(db)
+    context_block = await engine.build_prompt(org_id=org_id, user_id=user_id, agent_type="business_analyst")
+
+    system_prompt = (
+        "You are an AI Business Analyst. Answer concisely using ONLY the context below. "
+        "If the context lacks the data, say what's missing and ask for one specific upload.\n\n"
+        f"{context_block}"
+    )
+
+    raw = await get_ai_response(
+        prompt=request.message,
+        system_prompt=system_prompt,
+        temperature=0.5,
+        max_tokens=1500,
+    )
+
+    return AskResponse(type="answer", response=raw, session_id=request.session_id)
+
+
+class PersonSearchRequest(BaseModel):
+    query: str
+    organization_id: Optional[str] = None
+
+
+@router.post("/people/search")
+async def search_people(request: PersonSearchRequest, current_user = Depends(get_current_user_optional)):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    org_id = request.organization_id or get_user_org_id(current_user)
+    if not org_id:
+        raise HTTPException(status_code=400, detail="Organization ID required")
+
+    q = request.query.lower().strip()
+    members = list(db.org_chart_members.find({
+        "organization_id": org_id,
+        "$or": [
+            {"name": {"$regex": q, "$options": "i"}},
+            {"email": {"$regex": q, "$options": "i"}},
+            {"role": {"$regex": q, "$options": "i"}},
+            {"department": {"$regex": q, "$options": "i"}},
+        ]
+    }).limit(10))
+
+    results = []
+    for m in members:
+        results.append({
+            "id": str(m["_id"]),
+            "name": m.get("name", ""),
+            "email": m.get("email", ""),
+            "role": m.get("role", ""),
+            "department": m.get("department", ""),
+        })
+
+    return {"people": results}
+
+
+class DelegateRequest(BaseModel):
+    goal_title: str
+    goal_description: Optional[str] = None
+    assignee_email: str
+    priority: str = "medium"
+    due_date: Optional[str] = None
+    department: Optional[str] = None
+    organization_id: Optional[str] = None
+
+
+@router.post("/delegate")
+async def delegate_task(request: DelegateRequest, current_user = Depends(get_current_user_optional)):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    org_id = request.organization_id or get_user_org_id(current_user)
+    if not org_id:
+        raise HTTPException(status_code=400, detail="Organization ID required")
+
+    user_id = getattr(current_user, 'id', None) if current_user else None
+
+    goal_doc = {
+        "title": request.goal_title,
+        "description": request.goal_description or "",
+        "priority": request.priority,
+        "status": "active",
+        "assignee_email": request.assignee_email,
+        "assignee_id": [request.assignee_email],
+        "assignee_name": [request.assignee_email],
+        "department": request.department or "",
+        "organization_id": org_id,
+        "created_by": user_id,
+        "goal_type": "short_term",
+        "duration": "one_time",
+        "due_date": request.due_date,
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow(),
+    }
+
+    if request.due_date:
+        goal_doc["due_date"] = request.due_date
+
+    goal_result = db.goals.insert_one(goal_doc)
+    goal_doc["_id"] = str(goal_result.inserted_id)
+
+    task_doc = {
+        "title": f"Execute: {request.goal_title}",
+        "description": request.goal_description or "",
+        "priority": request.priority,
+        "status": "pending",
+        "assignee_email": request.assignee_email,
+        "assignee_id": [request.assignee_email],
+        "goal_id": str(goal_result.inserted_id),
+        "department": request.department or "",
+        "organization_id": org_id,
+        "created_by": user_id,
+        "due_date": request.due_date,
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow(),
+        "escalation_level": 0,
+        "owner_escalated": False,
+        "owner_escalated_at": None,
+    }
+
+    task_result = db.tasks.insert_one(task_doc)
+    task_doc["_id"] = str(task_result.inserted_id)
+
+    from ..core.notification_service import create_and_deliver as _notify
+    asyncio.create_task(_notify(
+        user_id=request.assignee_email,
+        org_id=org_id,
+        type="goal_assigned",
+        title="New Goal Assigned",
+        message=f"You've been assigned: {request.goal_title}",
+        link=f"/goals/{goal_result.inserted_id}",
+        email=request.assignee_email,
+    ))
+
+    from ..agents.frequency_agent import process_goal as _freq_goal
+    asyncio.create_task(_freq_goal(goal_doc, org_id))
+    from ..agents.frequency_agent import process_task as _freq_task
+    asyncio.create_task(_freq_task(task_doc, org_id))
+
+    return {
+        "goal": goal_doc,
+        "task": task_doc,
+        "assignee": request.assignee_email,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Session management
+# ---------------------------------------------------------------------------
+
+class SessionCreate(BaseModel):
+    title: Optional[str] = None
+    organization_id: Optional[str] = None
+
+
+class SessionUpdate(BaseModel):
+    title: Optional[str] = None
+    context: Optional[Dict[str, Any]] = None
+
+
+@router.post("/sessions")
+async def create_session(request: SessionCreate, current_user = Depends(get_current_user_optional)):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    org_id = request.organization_id or get_user_org_id(current_user)
+    if not org_id:
+        raise HTTPException(status_code=400, detail="Organization ID required")
+
+    user_id = getattr(current_user, 'id', None) if current_user else None
+
+    session_doc = {
+        "organization_id": org_id,
+        "user_id": user_id,
+        "title": request.title or f"Strategy Chat {datetime.utcnow().strftime('%b %d')}",
+        "messages": [],
+        "context": {},
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow(),
+    }
+
+    result = db.strategy_chat_sessions.insert_one(session_doc)
+    session_doc["_id"] = str(result.inserted_id)
+
+    return {"session": session_doc}
+
+
+@router.get("/sessions")
+async def list_sessions(organization_id: Optional[str] = None, current_user = Depends(get_current_user_optional)):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    org_id = organization_id or get_user_org_id(current_user)
+    if not org_id:
+        raise HTTPException(status_code=400, detail="Organization ID required")
+
+    sessions = list(db.strategy_chat_sessions.find(
+        {"organization_id": org_id}
+    ).sort("updated_at", -1).limit(50))
+
+    for s in sessions:
+        s["_id"] = str(s["_id"])
+
+    return {"sessions": sessions}
+
+
+@router.get("/sessions/{session_id}")
+async def get_session(session_id: str):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    session = db.strategy_chat_sessions.find_one({"_id": ObjectId(session_id)})
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session["_id"] = str(session["_id"])
+    return {"session": session}
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    db.strategy_chat_sessions.delete_one({"_id": ObjectId(session_id)})
+    return {"success": True}
+
+
+@router.post("/sessions/{session_id}/messages")
+async def save_session_message(session_id: str, message: Message, current_user = Depends(get_current_user_optional)):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    msg_doc = {
+        "role": message.role,
+        "content": message.content,
+        "timestamp": message.timestamp or datetime.utcnow().isoformat(),
+    }
+
+    db.strategy_chat_sessions.update_one(
+        {"_id": ObjectId(session_id)},
+        {"$push": {"messages": msg_doc}, "$set": {"updated_at": datetime.utcnow()}}
+    )
+
+    return {"message": msg_doc}

@@ -21,6 +21,23 @@ def get_user_org_id(user) -> Optional[str]:
         return user.user_metadata.get("organization_id")
     return None
 
+
+async def _is_org_owner(db, org_id: str, user_id: str) -> bool:
+    """Check if user_id is the primary owner or a co-owner of the org."""
+    from bson import ObjectId
+    org = db.organizations.find_one(
+        {"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id},
+        {"owner_id": 1, "co_owners": 1}
+    )
+    if not org:
+        return False
+    if org.get("owner_id") == user_id:
+        return True
+    if user_id in (org.get("co_owners") or []):
+        return True
+    return False
+
+
 class ReportRequest(BaseModel):
     period: str = "weekly"
     sections: Optional[List[str]] = None
@@ -286,7 +303,12 @@ async def list_reports(current_user = Depends(get_current_user)):
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
 
-    reports = list(db.reports.find({"organization_id": org_id}).sort("created_at", -1).limit(20))
+    query = {"organization_id": org_id}
+    if current_user and getattr(current_user, 'id', None):
+        if await _is_org_owner(db, org_id, current_user.id):
+            query["created_by"] = current_user.id
+    
+    reports = list(db.reports.find(query).sort("created_at", -1).limit(20))
     for r in reports:
         r["_id"] = str(r["_id"])
         if "content" in r and isinstance(r["content"], dict):

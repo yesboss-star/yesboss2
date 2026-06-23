@@ -57,7 +57,22 @@ async def zoho_callback(
             logger.error("Zoho exchange_code returned None — check client_id/secret match global console")
             raise HTTPException(status_code=502, detail="Failed to exchange authorization code. Verify the Client ID and Secret match what's on api-console.zoho.com")
 
+        logger.info("Zoho exchange_code succeeded — keys=%s, has_access_token=%s",
+                     list(token_data.keys()), bool(token_data.get("access_token")))
+
         access_token = token_data.get("access_token", "")
+        if not access_token:
+            error_detail = token_data.get("error", "unknown_error")
+            error_desc = token_data.get("error_description", token_data)
+            logger.error("Zoho exchange_code returned error — error=%s, description=%s, full_response=%s",
+                         error_detail, error_desc, token_data)
+            raise HTTPException(
+                status_code=502,
+                detail=f"Zoho token exchange failed: {error_detail}. {error_desc}. "
+                       f"Verify your Zoho client app configuration (Client ID, Secret, Redirect URI) "
+                       f"matches what's in your backend .env file."
+            )
+
         zoho_mail_id = await zoho.get_zoho_mail_id(access_token)
 
         user_id = state or ""
@@ -71,8 +86,13 @@ async def zoho_callback(
             except Exception:
                 pass
 
-        saved = await zoho.save_token(user_id, org_id, token_data, zoho_mail_id)
-        logger.info("Callback saved token — user_id=%s, org_id=%s, zoho_mail_id=%s, success=%s", user_id, org_id, zoho_mail_id, saved)
+        saved = await zoho.save_token(user_id, org_id, token_data, zoho_mail_id, email=zoho_mail_id)
+        logger.info("Callback saved token — user_id=%s, org_id=%s, zoho_mail_id=%s, success=%s",
+                     user_id, org_id, zoho_mail_id, saved)
+
+        if not saved:
+            logger.error("Failed to save Zoho token for user_id=%s — will not redirect to success page", user_id)
+            raise HTTPException(status_code=502, detail="Failed to save Zoho token. Please try again.")
 
         from ..core.config import settings
         frontend_url = settings.__dict__.get("FRONTEND_URL", "http://localhost:3000")
@@ -105,7 +125,11 @@ async def get_zoho_status(
         logger.warning("Status — no token found for user_id=%s", user_id)
         return {"connected": False}
 
-    logger.info("Status — token found for user_id=%s, zoho_mail_id=%s", user_id, token.get("zoho_mail_id", ""))
+    if not token.get("access_token"):
+        logger.warning("Status — token exists but has no access_token for user_id=%s", user_id)
+        return {"connected": False}
+
+    logger.info("Status — valid token for user_id=%s, zoho_mail_id=%s", user_id, token.get("zoho_mail_id", ""))
     return {
         "connected": True,
         "email": token.get("zoho_mail_id", "") or get_user_email(current_user),

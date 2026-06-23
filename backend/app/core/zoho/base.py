@@ -11,10 +11,11 @@ from ..config import settings
 logger = logging.getLogger("yesboss.zoho.oauth")
 
 SCOPE_MAIL_TASKS = "ZohoMail.tasks.ALL"
+SCOPE_CALENDAR_CALENDARS = "ZohoCalendar.calendar.ALL"
 SCOPE_CALENDAR_EVENTS = "ZohoCalendar.event.ALL"
 SCOPE_CALENDAR_FREEBUSY = "ZohoCalendar.freebusy.ALL"
 
-FULL_SCOPE = f"{SCOPE_MAIL_TASKS},{SCOPE_CALENDAR_EVENTS},{SCOPE_CALENDAR_FREEBUSY}"
+FULL_SCOPE = f"{SCOPE_MAIL_TASKS},{SCOPE_CALENDAR_CALENDARS},{SCOPE_CALENDAR_EVENTS},{SCOPE_CALENDAR_FREEBUSY}"
 
 # Use settings for accounts URL (defaults to India DC: accounts.zoho.in)
 # so OAuth tokens match the API data center (mail.zoho.in, calendar.zoho.in)
@@ -56,7 +57,11 @@ class ZohoOAuth:
                 if resp.status_code != 200:
                     logger.error("Zoho token request failed: %s %s", resp.status_code, resp.text)
                     return None
-                return resp.json()
+                result = resp.json()
+                if not isinstance(result, dict):
+                    logger.error("Zoho token response was not a dict: type=%s, body=%s", type(result).__name__, resp.text)
+                    return None
+                return result
         except Exception as e:
             logger.error("Zoho token request error: %s", e)
             return None
@@ -80,15 +85,21 @@ class ZohoOAuth:
 
     # ── Token storage helpers ───────────────────────────────────────
 
-    async def save_token(self, user_id: str, org_id: str, token_data: Dict[str, Any], zoho_mail_id: str = "") -> bool:
+    async def save_token(self, user_id: str, org_id: str, token_data: Dict[str, Any], zoho_mail_id: str = "", email: str = "") -> bool:
         if self.db is None:
             logger.warning("No database available for token storage")
+            return False
+        access_token = token_data.get("access_token", "")
+        if not access_token:
+            logger.warning("save_token: token_data has no access_token for user_id=%s — keys=%s",
+                           user_id, list(token_data.keys()))
             return False
         expires_in = token_data.get("expires_in", 3600)
         doc = {
             "user_id": user_id,
             "org_id": org_id,
-            "access_token": token_data.get("access_token", ""),
+            "email": email,
+            "access_token": access_token,
             "refresh_token": token_data.get("refresh_token", ""),
             "expires_at": (datetime.utcnow() + timedelta(seconds=expires_in)).isoformat(),
             "zoho_mail_id": zoho_mail_id,
@@ -183,17 +194,39 @@ class ZohoOAuth:
             return []
 
     async def get_zoho_mail_id(self, access_token: str) -> str:
+        url = f"{settings.ZOHO_MAIL_API_URL}/accounts"
         try:
             async with httpx.AsyncClient(timeout=15) as client:
                 resp = await client.get(
-                    f"{settings.ZOHO_MAIL_API_URL}/accounts",
+                    url,
                     headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
                 )
+                logger.info("get_zoho_mail_id: status=%s for %s", resp.status_code, url)
                 if resp.status_code == 200:
                     data = resp.json()
-                    accounts = data.get("data", {}).get("accounts", [])
+                    logger.info("get_zoho_mail_id: response keys=%s", list(data.keys()) if isinstance(data, dict) else "not dict")
+                    # Try v1 format: data.accounts[].mailboxId
+                    accounts = data.get("data", {}).get("accounts", []) if isinstance(data.get("data"), dict) else []
                     if accounts:
-                        return accounts[0].get("mailboxId", "")
+                        mailbox = accounts[0].get("mailboxId", "")
+                        if mailbox:
+                            logger.info("get_zoho_mail_id: found mailboxId=%s", mailbox)
+                            return mailbox
+                    # Try flat format: accounts[].mailboxId
+                    accounts2 = data.get("accounts", [])
+                    if accounts2:
+                        mailbox = accounts2[0].get("mailboxId", "")
+                        if mailbox:
+                            logger.info("get_zoho_mail_id: found mailboxId from flat=%s", mailbox)
+                            return mailbox
+                    # Try top-level mailboxId
+                    direct = data.get("mailboxId", "")
+                    if direct:
+                        logger.info("get_zoho_mail_id: found top-level mailboxId=%s", direct)
+                        return direct
+                    logger.warning("get_zoho_mail_id: no mailboxId found in response: %s", str(data)[:500])
+                else:
+                    logger.warning("get_zoho_mail_id: non-200 response: %s %s", resp.status_code, resp.text)
         except Exception as e:
-            logger.warning("Failed to fetch Zoho mail ID: %s", e)
+            logger.warning("get_zoho_mail_id: error: %s", e)
         return ""

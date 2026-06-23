@@ -6,6 +6,8 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, Tabs, TabsList, TabsTrigger, TabsContent, Input, Label, Button } from "@/components/ui";
 import { Bell, Shield, User, Palette, Save, ArrowLeft, Volume2, Mail, Smartphone, Plug } from "lucide-react";
 import ZohoConnectButton from "@/components/owners/ZohoConnectButton";
+import { useZohoStore } from "@/stores/zohoStore";
+import { useUIStore } from "@/stores/uiStore";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -47,6 +49,25 @@ export default function SettingsPage() {
       .then((data) => { if (data.preferences) setPrefs(data.preferences); })
       .catch(() => {})
       .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("zoho") === "connected") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("zoho");
+      window.history.replaceState({}, "", url.toString());
+      useZohoStore.getState().checkStatus();
+      if (window.opener && window.opener !== window) {
+        window.close();
+      } else {
+        useUIStore.getState().addNotification({
+          type: "success",
+          title: "Zoho Connected",
+          message: "Your Zoho account has been connected successfully.",
+        });
+      }
+    }
   }, []);
 
   const updatePrefs = async (updates: any) => {

@@ -1,5 +1,6 @@
 import logging
-from datetime import datetime
+import hashlib
+from datetime import datetime, timedelta
 from typing import Optional
 from ..core.database import get_database
 from ..core.qdrant import get_qdrant_client
@@ -235,7 +236,242 @@ class ContinuousLearning:
             logger.error(f"Error getting bottlenecks: {e}")
             return []
 
-    def get_patterns(self, organization_id: str, pattern_type: Optional[str] = None) -> list:
+    def record_goal_outcome(self, organization_id: str, outcome_data: dict) -> dict:
+        """Record a goal outcome for cross-company learning."""
+        try:
+            db = self._get_db()
+            if db is None:
+                return {"success": False, "error": "Database not available"}
+
+            org_ref = hashlib.sha256(organization_id.encode()).hexdigest()[:16]
+            actual_duration = outcome_data.get("actual_duration_days")
+            if actual_duration is None and outcome_data.get("created_at") and outcome_data.get("completed_at"):
+                try:
+                    from datetime import datetime
+                    c = datetime.fromisoformat(str(outcome_data["created_at"]).replace("Z", "+00:00"))
+                    e = datetime.fromisoformat(str(outcome_data["completed_at"]).replace("Z", "+00:00"))
+                    actual_duration = (e - c).days
+                except Exception:
+                    pass
+
+            outcome_doc = {
+                "org_ref": org_ref,
+                "industry": outcome_data.get("industry", ""),
+                "micro_vertical": outcome_data.get("micro_vertical", ""),
+                "goal_id": outcome_data.get("goal_id"),
+                "goal_type": outcome_data.get("goal_type"),
+                "duration": outcome_data.get("duration"),
+                "department": outcome_data.get("department"),
+                "priority": outcome_data.get("priority"),
+                "status": outcome_data.get("status"),
+                "completion_reviewed": outcome_data.get("completion_reviewed", False),
+                "actual_duration_days": actual_duration,
+                "estimated_duration_days": outcome_data.get("estimated_duration_days"),
+                "was_delayed": outcome_data.get("was_delayed", False),
+                "delay_reason": outcome_data.get("delay_reason"),
+                "created_at": datetime.utcnow(),
+                "completed_at": outcome_data.get("completed_at"),
+            }
+
+            result = db.goal_outcomes.insert_one(outcome_doc)
+            logger.info(f"Recorded goal outcome for {outcome_data.get('goal_id')}")
+
+            return {"success": True, "outcome_id": str(result.inserted_id)}
+        except Exception as e:
+            logger.error(f"Error recording goal outcome: {e}")
+            return {"success": False, "error": str(e)}
+
+    def record_employee_frequency(self, organization_id: str, freq_data: dict) -> dict:
+        db = self._get_db()
+        if db is None:
+            return {"success": False, "error": "Database not available"}
+        try:
+            org_ref = hashlib.sha256(organization_id.encode()).hexdigest()[:16]
+
+            employee_role = freq_data.get("employee_role", "unknown")
+            work_type = freq_data.get("work_type", "task")
+            work_category = freq_data.get("work_category", "general")
+            complexity = freq_data.get("complexity_level", "intermediate")
+
+            doc = {
+                "org_ref": org_ref,
+                "employee_role": employee_role,
+                "industry": freq_data.get("industry", ""),
+                "micro_vertical": freq_data.get("micro_vertical", ""),
+                "work_type": work_type,
+                "work_category": work_category,
+                "frequency_per_week": freq_data.get("frequency_per_week", 1.0),
+                "avg_completion_hours": freq_data.get("estimated_hours", 4),
+                "typical_delay_hours": freq_data.get("typical_delay_hours", 0),
+                "level": complexity,
+                "samples": [freq_data.get("title", "")[:100]],
+                "last_updated": datetime.utcnow(),
+            }
+
+            existing = db.employee_frequencies.find_one({
+                "org_ref": org_ref,
+                "employee_role": employee_role,
+                "work_type": work_type,
+                "work_category": work_category,
+            })
+
+            if existing:
+                samples = existing.get("samples", [])
+                snippet = freq_data.get("title", "")[:100]
+                if snippet and snippet not in samples:
+                    samples.append(snippet)
+                    if len(samples) > 20:
+                        samples = samples[-20:]
+
+                total = existing.get("_total_samples", 1) or 1
+                new_total = total + 1
+                alpha = 1.0 / new_total
+
+                db.employee_frequencies.update_one(
+                    {"_id": existing["_id"]},
+                    {"$set": {
+                        "avg_completion_hours": existing.get("avg_completion_hours", 4) * (1 - alpha) + (freq_data.get("estimated_hours", 4) * alpha),
+                        "frequency_per_week": existing.get("frequency_per_week", 1) + 0.5,
+                        "level": complexity,
+                        "samples": samples,
+                        "last_updated": datetime.utcnow(),
+                        "_total_samples": new_total,
+                    }}
+                )
+            else:
+                doc["_total_samples"] = 1
+                db.employee_frequencies.insert_one(doc)
+
+            return {"success": True}
+        except Exception as e:
+            logger.error(f"Error recording employee frequency: {e}")
+            return {"success": False, "error": str(e)}
+
+    def aggregate_industry_patterns(self, industry: str = None, micro_vertical: str = None) -> dict:
+        """Aggregate goal_outcomes across orgs into industry_intelligence."""
+        db = self._get_db()
+        if db is None:
+            return {"success": False, "error": "Database not available"}
+        try:
+            match = {}
+            if industry:
+                match["industry"] = industry
+            if micro_vertical:
+                match["micro_vertical"] = micro_vertical
+
+            pipeline = [
+                {"$match": match},
+                {"$group": {
+                    "_id": {"industry": "$industry", "micro_vertical": "$micro_vertical"},
+                    "total_outcomes": {"$sum": 1},
+                    "completed_count": {"$sum": {"$cond": [{"$eq": ["$status", "completed"]}, 1, 0]}},
+                    "avg_duration_days": {"$avg": "$actual_duration_days"},
+                    "delayed_count": {"$sum": {"$cond": [{"$eq": ["$was_delayed", True]}, 1, 0]}},
+                    "goal_types": {"$addToSet": "$goal_type"},
+                    "departments": {"$addToSet": "$department"},
+                    "priorities": {"$addToSet": "$priority"},
+                }}
+            ]
+
+            results = list(db.goal_outcomes.aggregate(pipeline))
+            for r in results:
+                key = r["_id"]
+                ind = key["industry"]
+                mv = key.get("micro_vertical", "")
+
+                delay_reasons = list(db.goal_outcomes.aggregate([
+                    {"$match": {"industry": ind, "micro_vertical": mv, "was_delayed": True}},
+                    {"$group": {"_id": "$delay_reason", "count": {"$sum": 1}}},
+                    {"$sort": {"count": -1}},
+                    {"$limit": 5},
+                ]))
+
+                delays_by_type = list(db.goal_outcomes.aggregate([
+                    {"$match": {"industry": ind, "micro_vertical": mv}},
+                    {"$group": {"_id": "$goal_type", "avg_days": {"$avg": "$actual_duration_days"}, "count": {"$sum": 1}}},
+                ]))
+
+                intelligence_doc = {
+                    "industry": ind,
+                    "micro_vertical": mv,
+                    "total_outcomes": r["total_outcomes"],
+                    "completion_rate": round(r["completed_count"] / r["total_outcomes"] * 100, 1) if r["total_outcomes"] else 0,
+                    "avg_duration_days": round(r["avg_duration_days"], 1) if r["avg_duration_days"] else None,
+                    "delay_rate": round(r["delayed_count"] / r["total_outcomes"] * 100, 1) if r["total_outcomes"] else 0,
+                    "common_delay_reasons": [{"reason": d["_id"] or "unknown", "count": d["count"]} for d in delay_reasons],
+                    "goal_type_benchmarks": {d["_id"]: {"avg_duration_days": round(d["avg_days"], 1) if d["avg_days"] else None, "count": d["count"]} for d in delays_by_type},
+                    "goal_types_seen": r["goal_types"],
+                    "departments_seen": r["departments"],
+                    "last_updated": datetime.utcnow(),
+                }
+
+                db.industry_intelligence.update_one(
+                    {"industry": ind, "micro_vertical": mv},
+                    {"$set": intelligence_doc},
+                    upsert=True,
+                )
+
+            count = len(results)
+            logger.info(f"Aggregated patterns for {count} industry/vertical pairs")
+            return {"success": True, "aggregated": count}
+        except Exception as e:
+            logger.error(f"Error aggregating industry patterns: {e}")
+            return {"success": False, "error": str(e)}
+
+    def get_industry_recommendations(self, industry: str, micro_vertical: str = None) -> dict:
+        """Get cross-company recommendations for an industry/vertical."""
+        db = self._get_db()
+        if db is None:
+            return {"recommendations": []}
+        try:
+            query = {"industry": industry}
+            if micro_vertical:
+                query["micro_vertical"] = micro_vertical
+
+            intelligence = db.industry_intelligence.find_one(query)
+            if not intelligence:
+                return {"recommendations": [], "message": "Not enough data yet"}
+
+            recommendations = []
+
+            if intelligence.get("avg_duration_days"):
+                for gt, bench in (intelligence.get("goal_type_benchmarks") or {}).items():
+                    if bench.get("avg_duration_days"):
+                        recommendations.append({
+                            "type": "benchmark",
+                            "category": f"goal_type_{gt}",
+                            "title": f"Average {gt.replace('_', ' ')} takes {bench['avg_duration_days']} days",
+                            "avg_duration_days": bench["avg_duration_days"],
+                            "sample_size": bench["count"],
+                        })
+
+            if intelligence.get("delay_rate", 0) > 20:
+                top_reasons = intelligence.get("common_delay_reasons", [])
+                if top_reasons:
+                    recommendations.append({
+                        "type": "delay_pattern",
+                        "title": f"{intelligence['delay_rate']}% of goals face delays",
+                        "common_reasons": [r["reason"] for r in top_reasons[:3]],
+                        "delay_rate": intelligence["delay_rate"],
+                    })
+
+            completion_rate = intelligence.get("completion_rate", 0)
+            if completion_rate:
+                recommendations.append({
+                    "type": "completion_rate",
+                    "title": f"{completion_rate}% goal completion rate in {industry}",
+                    "completion_rate": completion_rate,
+                })
+
+            return {
+                "recommendations": recommendations,
+                "industry": industry,
+                "micro_vertical": micro_vertical or "",
+                "total_outcomes_analyzed": intelligence.get("total_outcomes", 0),
+            }
+        except Exception as e:
+            logger.error(f"Error getting industry recommendations: {e}")
+            return {"recommendations": [], "error": str(e)}
         db = self._get_db()
         if db is None:
             return []

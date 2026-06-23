@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
@@ -21,6 +22,7 @@ class OrganizationCreate(BaseModel):
     co_owners: Optional[list] = []
     social_links: Optional[dict] = None
     persona_answers: Optional[list] = None
+    check_in_frequency_days: Optional[int] = 7
 
 class OrganizationUpdate(BaseModel):
     name: Optional[str] = None
@@ -33,6 +35,7 @@ class OrganizationUpdate(BaseModel):
     size: Optional[str] = None
     social_links: Optional[dict] = None
     persona_answers: Optional[list] = None
+    check_in_frequency_days: Optional[int] = None
 
 @router.post("")
 async def create_organization(request: OrganizationCreate, current_user: Optional[dict] = Depends(get_current_user_optional)):
@@ -53,12 +56,47 @@ async def create_organization(request: OrganizationCreate, current_user: Optiona
         "co_owners": request.co_owners or [],
         "social_links": request.social_links or {},
         "persona_answers": request.persona_answers or [],
+        "check_in_frequency_days": request.check_in_frequency_days or 7,
+        "last_check_in": None,
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
     }
     
     result = db.organizations.insert_one(org_doc)
     org_doc["_id"] = str(result.inserted_id)
+
+    # Fire-and-forget: generate default goals for the new org
+    async def _gen_defaults():
+        try:
+            from ..agents.default_goals_agent import generate_default_goals as _gen
+            industry = request.industry or "General"
+            micro_vertical = request.micro_vertical or ""
+            owner_id = request.owner_id
+            goals = await _gen(industry, micro_vertical, count=5)
+            for g in goals:
+                goal_doc = {
+                    "title": g["title"],
+                    "description": g.get("description", ""),
+                    "priority": g.get("priority", "medium"),
+                    "timeline": g.get("suggested_timeline"),
+                    "department": g.get("department"),
+                    "organization_id": org_doc["_id"],
+                    "created_by": owner_id,
+                    "status": "active",
+                    "goal_type": g.get("goal_type", "short_term"),
+                    "duration": g.get("duration", "one_time"),
+                    "is_default": True,
+                    "industry": industry,
+                    "micro_vertical": micro_vertical,
+                    "created_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow(),
+                }
+                db.goals.insert_one(goal_doc)
+        except Exception as e:
+            logger = __import__("logging").getLogger("yesboss.orgs")
+            logger.warning(f"Failed to generate default goals: {e}")
+
+    asyncio.create_task(_gen_defaults())
     
     return {"organization": org_doc}
 
@@ -160,6 +198,69 @@ async def add_owner(org_id: str, request: AddOwnerRequest):
     org = db.organizations.find_one({"_id": ObjectId(org_id)})
     org["_id"] = str(org["_id"])
     return {"organization": org}
+
+class GenerateDefaultGoalsRequest(BaseModel):
+    industry: Optional[str] = None
+    micro_vertical: Optional[str] = None
+    count: int = 5
+    owner_id: Optional[str] = None
+    provider: Optional[str] = None
+
+
+@router.post("/{org_id}/generate-default-goals")
+async def generate_default_goals(
+    org_id: str,
+    request: GenerateDefaultGoalsRequest,
+    current_user = Depends(get_current_user_optional)
+):
+    from bson import ObjectId
+    from ..agents.default_goals_agent import generate_default_goals as _gen_goals
+
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    org = db.organizations.find_one({"_id": ObjectId(org_id)})
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    industry = request.industry or org.get("industry", "General")
+    micro_vertical = request.micro_vertical or org.get("micro_vertical", "")
+    owner_id = request.owner_id or org.get("owner_id")
+    user_id = getattr(current_user, 'id', None) if current_user else owner_id
+
+    goals = await _gen_goals(
+        industry=industry,
+        micro_vertical=micro_vertical,
+        count=request.count,
+        provider=request.provider,
+    )
+
+    inserted = []
+    for g in goals:
+        goal_doc = {
+            "title": g["title"],
+            "description": g.get("description", ""),
+            "priority": g.get("priority", "medium"),
+            "timeline": g.get("suggested_timeline"),
+            "department": g.get("department"),
+            "organization_id": org_id,
+            "created_by": user_id,
+            "status": "active",
+            "goal_type": g.get("goal_type", "short_term"),
+            "duration": g.get("duration", "one_time"),
+            "is_default": True,
+            "industry": industry,
+            "micro_vertical": micro_vertical,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+        }
+        result = db.goals.insert_one(goal_doc)
+        goal_doc["_id"] = str(result.inserted_id)
+        inserted.append(goal_doc)
+
+    return {"goals": inserted, "count": len(inserted)}
+
 
 @router.get("/{org_id}/employees")
 async def get_organization_employees(org_id: str):

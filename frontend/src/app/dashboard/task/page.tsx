@@ -89,6 +89,16 @@ export default function TaskPage() {
     });
   }, [tasks, role, taskView, userEmail, directReportEmails]);
 
+  const visibleGoalIds = useMemo(() => {
+    const ids = new Set(visibleTasks.map((t) => t.goal_id).filter(Boolean));
+    return ids;
+  }, [visibleTasks]);
+
+  const visibleGoals = useMemo(() => {
+    if (role === "owner") return goals;
+    return goals.filter((g) => visibleGoalIds.has((g as any).id || (g as any)._id));
+  }, [goals, role, visibleGoalIds]);
+
   const filteredTasks = visibleTasks.filter((task) => {
     if (filterStatus !== "all" && task.status !== filterStatus) return false;
     if (searchQuery && !task.title.toLowerCase().includes(searchQuery.toLowerCase())) return false;
@@ -276,7 +286,7 @@ export default function TaskPage() {
 
         <div className="border-t border-border pt-6">
           <h2 className="text-lg font-semibold mb-4">Task Cascade</h2>
-          <TaskView />
+          <TaskView goals={visibleGoals} />
         </div>
 
         {viewMode === "list" ? (

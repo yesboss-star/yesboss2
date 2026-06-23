@@ -1,17 +1,20 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUIStore } from "@/stores/uiStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { useGoalStore } from "@/stores/goalStore";
-import { Loader2, Sparkles, TrendingUp, Users, CheckSquare, Flag, Calendar, Clock, CheckCircle, AlertCircle, Lightbulb, BarChart3, Target, Activity, FileText, Zap } from "lucide-react";
+import { Loader2, Sparkles, TrendingUp, Users, CheckSquare, Flag, Calendar, Clock, CheckCircle, AlertCircle, Lightbulb, BarChart3, Target, Activity, FileText, Zap, Upload, Trash2 } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Badge, Button } from "@/components/ui";
 import GoalModal from "@/components/GoalModal";
 import DashboardView from "@/components/owners/DashboardView";
+import ZohoCalendarBooking from "@/components/owners/ZohoCalendarBooking";
+import MeetingUploadModal from "@/components/owners/MeetingUploadModal";
 import AISummaryChat from "@/components/AISummaryChat";
+import { getAuthHeaders } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -64,20 +67,13 @@ export default function DashboardPage() {
   const [tasksLoading, setTasksLoading] = useState(false);
   const [kpiData, setKpiData] = useState<Record<string, KPIItem>>({});
   const [kpiLoading, setKpiLoading] = useState(false);
-  const [showAIChat, setShowAIChat] = useState(false);
-  const aiChatRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!aiChatRef.current || showAIChat) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting) setShowAIChat(true); },
-      { threshold: 0.1 }
-    );
-    observer.observe(aiChatRef.current);
-    return () => observer.disconnect();
-  }, [showAIChat]);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showBooking, setShowBooking] = useState(false);
+  const [meetingHistory, setMeetingHistory] = useState<any[]>([]);
+  const [meetingsLoading, setMeetingsLoading] = useState(false);
 
-
+  
   const getKpiIcon = (iconName: string) => {
     const icons: Record<string, React.ElementType> = { Target, CheckSquare, Users, Activity, FileText, Flag, Zap, BarChart3, TrendingUp };
     return icons[iconName] || BarChart3;
@@ -140,11 +136,55 @@ export default function DashboardPage() {
     }
   }, [organization?.id, fetchGoals]);
 
+  const fetchMeetingHistory = async () => {
+    if (!organization?.id) return;
+    setMeetingsLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/meetings/history?organization_id=${organization.id}`, {
+        credentials: "include",
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMeetingHistory(data.meetings || []);
+      }
+    } catch {
+    } finally {
+      setMeetingsLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (role === "employee" && organization?.id) {
       fetchEmployeeData();
     }
   }, [role, organization?.id, user?.email]);
+
+  const handleDeleteMeeting = async (meetingId: string) => {
+    try {
+      const orgId = organization?.id;
+      if (!orgId) return;
+      const res = await fetch(`${API_URL}/meetings/${meetingId}?organization_id=${orgId}`, {
+        method: "DELETE",
+        credentials: "include",
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        setMeetingHistory((prev) => prev.filter((m) => m.id !== meetingId));
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        console.error("Delete failed:", res.status, errData);
+      }
+    } catch (e) {
+      console.error("Delete error:", e);
+    }
+  };
+
+  useEffect(() => {
+    if (organization?.id && role === "employee") {
+      fetchMeetingHistory();
+    }
+  }, [organization?.id, role]);
 
   if (loading) {
     return (
@@ -377,6 +417,65 @@ export default function DashboardPage() {
           </Card>
         )}
 
+        {role === "employee" && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Upload className="w-5 h-5 text-primary" />
+                  <CardTitle>Meeting Notes</CardTitle>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="primary" onClick={() => setShowUploadModal(true)} className="cursor-pointer">
+                    <Upload className="w-4 h-4" />
+                    Upload Meeting
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setShowBooking(true)} className="cursor-pointer">
+                    <Calendar className="w-4 h-4" />
+                    Book Meeting
+                  </Button>
+                </div>
+              </div>
+              <CardDescription>Upload meeting notes to auto-create tasks via AI</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {meetingsLoading ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                </div>
+              ) : meetingHistory.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-6 text-center">
+                  <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-3">
+                    <Upload className="w-6 h-6 text-primary/60" />
+                  </div>
+                  <p className="text-sm text-text-muted">No meetings uploaded yet</p>
+                  <p className="text-xs text-text-muted/60 mt-1">Upload meeting notes to extract tasks automatically</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {meetingHistory.slice(0, 5).map((m: any) => (
+                    <div key={m.id} className="flex items-center gap-3 p-3 rounded-xl bg-surface border border-border/50">
+                      <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                        <FileText className="w-4 h-4 text-primary" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{m.title}</p>
+                        <p className="text-xs text-text-muted">
+                          {m.task_count || 0} tasks · {m.created_at ? new Date(m.created_at).toLocaleDateString() : ""}
+                        </p>
+                      </div>
+                      <Badge variant="outline" className="text-xs flex-shrink-0">{m.task_count || 0}</Badge>
+                      <button onClick={() => handleDeleteMeeting(m.id)} className="p-1.5 rounded-lg hover:bg-rose-500/10 text-text-muted hover:text-rose-400 transition-colors cursor-pointer flex-shrink-0">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2">
@@ -407,12 +506,8 @@ export default function DashboardPage() {
         </Card>
 
         {role === "employee" && (
-          <div ref={aiChatRef} className="h-[600px]">
-            {showAIChat ? <AISummaryChat /> : (
-              <div className="w-full h-full rounded-xl glass flex items-center justify-center">
-                <p className="text-text-muted text-sm">Scroll to load AI Assistant</p>
-              </div>
-            )}
+          <div className="h-[600px]">
+            <AISummaryChat />
           </div>
         )}
 
@@ -448,6 +543,18 @@ export default function DashboardPage() {
       )}
 
       <GoalModal isOpen={showGoalModal} onClose={() => setShowGoalModal(false)} />
+      <MeetingUploadModal
+        open={showUploadModal}
+        onOpenChange={setShowUploadModal}
+        onSuccess={() => fetchMeetingHistory()}
+      />
+      {showBooking && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowBooking(false)}>
+          <div className="w-full max-w-lg mx-4" onClick={(e) => e.stopPropagation()}>
+            <ZohoCalendarBooking onClose={() => setShowBooking(false)} />
+          </div>
+        </div>
+      )}
     </DashboardLayout>
   );
 }

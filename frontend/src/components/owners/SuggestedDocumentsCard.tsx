@@ -44,7 +44,7 @@ export function SuggestedDocumentsCard({ orgMeta, title = "Documents that drive 
 
   const loadData = useCallback(() => {
     if (!orgId || !orgMeta.organizationName) return;
-    fetch(`${API_URL}/executive-chat/files?organization_id=${orgId}`)
+    fetch(`${API_URL}/strategy-chat/files?organization_id=${orgId}`)
       .then((r) => r.json())
       .then((data) => {
         const files = Array.isArray(data?.files) ? data.files : [];

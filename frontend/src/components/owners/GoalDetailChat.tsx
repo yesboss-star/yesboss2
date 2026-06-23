@@ -170,7 +170,7 @@ export default function GoalDetailChat({
       const formData = new FormData();
       formData.append("file", file);
       formData.append("organization_id", organizationId);
-      const res = await fetch(`${API_URL}/executive-chat/upload-and-analyze`, {
+      const res = await fetch(`${API_URL}/strategy-chat/upload-and-analyze`, {
         method: "POST",
         body: formData,
       });

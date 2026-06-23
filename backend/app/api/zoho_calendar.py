@@ -20,6 +20,12 @@ def get_user_id(user) -> Optional[str]:
     return getattr(user, "id", None) or getattr(user, "email", None)
 
 
+def get_user_email(user) -> str:
+    if user is None:
+        return ""
+    return getattr(user, "email", "")
+
+
 class BookEventRequest(BaseModel):
     attendees: List[dict]
     title: str
@@ -163,6 +169,7 @@ async def check_freebusy(
     all_busy = []
     for email in email_list:
         blocks = await ZohoCalendar.check_freebusy(token, email, start_str, end_str)
+        logger.info("freebusy: email=%s returned %s blocks", email, len(blocks))
         for b in blocks:
             fb_start = b.get("startTime", "")
             fb_end = b.get("endTime", "")
@@ -251,7 +258,10 @@ async def book_event(
     for att in request.attendees:
         email = att.get("email", "")
         if email:
-            att_token_doc = db.zoho_tokens.find_one({"zoho_mail_id": email})
+            if email == get_user_email(current_user):
+                attendee_results.append({"email": email, "event_id": event_id, "status": "booked"})
+                continue
+            att_token_doc = db.zoho_tokens.find_one({"$or": [{"zoho_mail_id": email}, {"email": email}, {"user_id": email}]})
             if att_token_doc:
                 att_user_id = att_token_doc.get("user_id")
                 att_token = await zoho.get_valid_token(att_user_id)

@@ -33,7 +33,7 @@ from .api.social import router as social_router
 from .api.goals import router as goals_router
 from .api.tasks import router as tasks_router
 from .api.dashboard import router as dashboard_router
-from .api.executive_chat import router as executive_chat_router
+from .api.strategy_chat import router as strategy_chat_router
 from .api.learning import router as learning_router
 from .api.websocket import router as websocket_router
 from .api.org_chart import router as org_chart_router
@@ -42,6 +42,7 @@ from .api.market_trends import router as market_trends_router
 from .api.prompt import router as prompt_router
 from .api.assistant import router as assistant_router
 from .api.notifications import router as notifications_router
+from .api.check_ins import router as check_ins_router
 from .api.meetings import router as meetings_router
 from .api.notification_preferences import router as notification_preferences_router
 from .api.push_subscriptions import router as push_subscriptions_router
@@ -176,7 +177,7 @@ app.include_router(social_router, prefix="/api/v1/social", tags=["Social Detecti
 app.include_router(goals_router, prefix="/api/v1/goals", tags=["Goals"])
 app.include_router(tasks_router, prefix="/api/v1/tasks", tags=["Tasks"])
 app.include_router(dashboard_router, prefix="/api/v1/dashboard", tags=["Dashboard"])
-app.include_router(executive_chat_router, prefix="/api/v1/executive-chat", tags=["Executive Chat"])
+app.include_router(strategy_chat_router, prefix="/api/v1/strategy-chat", tags=["Strategy Chat"])
 app.include_router(learning_router, prefix="/api/v1/learning", tags=["Continuous Learning"])
 app.include_router(org_chart_router, prefix="/api/v1/org-chart", tags=["Org Chart"])
 app.include_router(reports_router, prefix="/api/v1/reports", tags=["Reports"])
@@ -189,4 +190,5 @@ app.include_router(meetings_router, prefix="/api/v1/meetings", tags=["Meetings"]
 app.include_router(push_subscriptions_router, prefix="/api/v1/push", tags=["Push Notifications"])
 app.include_router(zoho_auth_router, prefix="/api/v1/zoho", tags=["Zoho Auth"])
 app.include_router(zoho_calendar_router, prefix="/api/v1/zoho/calendar", tags=["Zoho Calendar"])
+app.include_router(check_ins_router, prefix="/api/v1/organizations", tags=["Check-Ins"])
 app.include_router(websocket_router, tags=["WebSocket"])

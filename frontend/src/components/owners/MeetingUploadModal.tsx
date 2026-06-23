@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { useZohoStore } from "@/stores/zohoStore";
 import {
@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
-import { FileText, Upload, Loader2, CheckCircle, AlertCircle, X, Calendar, Clock, User } from "lucide-react";
+import { FileText, Upload, Loader2, CheckCircle, AlertCircle, X, Calendar, Clock, User, Search } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -18,17 +18,39 @@ interface MeetingUploadModalProps {
   onSuccess?: () => void;
 }
 
+interface OrgMember {
+  _id: string;
+  full_name: string;
+  email: string;
+  role?: string;
+  department?: string;
+}
+
 export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: MeetingUploadModalProps) {
   const { organization } = useOrganizationStore();
   const { connected } = useZohoStore();
   const [tab, setTab] = useState<"file" | "calendar">("file");
   const [title, setTitle] = useState("");
-  const [participants, setParticipants] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<{ meeting_id: string; tasks_created: any[]; task_count: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Title autocomplete
+  const [titleSuggestions, setTitleSuggestions] = useState<string[]>([]);
+  const [showTitleDropdown, setShowTitleDropdown] = useState(false);
+  const titleDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const titleRef = useRef<HTMLDivElement>(null);
+
+  // Participant multi-select
+  const [selectedParticipants, setSelectedParticipants] = useState<OrgMember[]>([]);
+  const [participantQuery, setParticipantQuery] = useState("");
+  const [participantSuggestions, setParticipantSuggestions] = useState<OrgMember[]>([]);
+  const [showParticipantDropdown, setShowParticipantDropdown] = useState(false);
+  const [searchingParticipants, setSearchingParticipants] = useState(false);
+  const participantDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const participantInputRef = useRef<HTMLDivElement>(null);
 
   // Calendar tab state
   const [calendarEvents, setCalendarEvents] = useState<any[]>([]);
@@ -41,6 +63,19 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
     }
   }, [connected, tab]);
 
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (titleRef.current && !titleRef.current.contains(e.target as Node)) {
+        setShowTitleDropdown(false);
+      }
+      if (participantInputRef.current && !participantInputRef.current.contains(e.target as Node)) {
+        setShowParticipantDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   const fetchCalendarEvents = async () => {
     setCalLoading(true);
     try {
@@ -52,6 +87,67 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
     } catch {} finally {
       setCalLoading(false);
     }
+  };
+
+  const fetchTitleSuggestions = useCallback(async (q: string) => {
+    if (!organization?.id || q.length < 1) {
+      setTitleSuggestions([]);
+      setShowTitleDropdown(false);
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/meetings/titles?q=${encodeURIComponent(q)}&organization_id=${organization.id}`, { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        setTitleSuggestions(data.titles || []);
+        setShowTitleDropdown(data.titles?.length > 0);
+      }
+    } catch {}
+  }, [organization?.id]);
+
+  const fetchParticipantSuggestions = useCallback(async (q: string) => {
+    if (!organization?.id || q.length < 1) {
+      setParticipantSuggestions([]);
+      setShowParticipantDropdown(false);
+      return;
+    }
+    setSearchingParticipants(true);
+    try {
+      const res = await fetch(`${API_URL}/org-chart/members/search?q=${encodeURIComponent(q)}&organization_id=${organization.id}`, { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        const alreadySelected = new Set(selectedParticipants.map((p) => p.email.toLowerCase()));
+        const filtered = (data.members || []).filter((m: OrgMember) => !alreadySelected.has(m.email.toLowerCase()));
+        setParticipantSuggestions(filtered);
+        setShowParticipantDropdown(filtered.length > 0);
+      }
+    } catch {} finally {
+      setSearchingParticipants(false);
+    }
+  }, [organization?.id, selectedParticipants]);
+
+  const onTitleChange = (val: string) => {
+    setTitle(val);
+    clearTimeout(titleDebounceRef.current);
+    titleDebounceRef.current = setTimeout(() => fetchTitleSuggestions(val), 200);
+  };
+
+  const onParticipantQueryChange = (val: string) => {
+    setParticipantQuery(val);
+    clearTimeout(participantDebounceRef.current);
+    participantDebounceRef.current = setTimeout(() => fetchParticipantSuggestions(val), 200);
+  };
+
+  const addParticipant = (member: OrgMember) => {
+    if (selectedParticipants.find((p) => p.email === member.email)) return;
+    setSelectedParticipants([...selectedParticipants, member]);
+    setParticipantQuery("");
+    setParticipantSuggestions([]);
+    setShowParticipantDropdown(false);
+  };
+
+  const removeParticipant = (email: string) => {
+    setSelectedParticipants(selectedParticipants.filter((p) => p.email !== email));
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -78,8 +174,9 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
       const formData = new FormData();
       formData.append("meeting_title", title.trim());
       formData.append("organization_id", organization.id);
-      if (participants.trim()) {
-        formData.append("participants", participants.trim());
+      const participantEmails = selectedParticipants.map((p) => p.email).join(",");
+      if (participantEmails) {
+        formData.append("participants", participantEmails);
       }
 
       if (tab === "calendar" && selectedEventId) {
@@ -111,12 +208,15 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
   const handleClose = () => {
     if (loading) return;
     setTitle("");
-    setParticipants("");
     setFile(null);
     setError("");
     setResult(null);
     setSelectedEventId("");
     setTab("file");
+    setTitleSuggestions([]);
+    setShowTitleDropdown(false);
+    setSelectedParticipants([]);
+    setParticipantQuery("");
     onOpenChange(false);
   };
 
@@ -137,7 +237,7 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
               </div>
             </div>
             {result.tasks_created.length > 0 && (
-              <div className="space-y-2">
+              <div className="space-y-2 max-h-60 overflow-y-auto">
                 <p className="text-sm font-medium">Created Tasks:</p>
                 {result.tasks_created.map((t: any, i: number) => (
                   <div key={t.id || i} className="flex items-center gap-3 p-3 rounded-xl bg-surface border border-border/50">
@@ -155,21 +255,83 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
           </div>
         ) : (
           <div className="space-y-4">
-            <Input
-              placeholder="Meeting title (required)"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              icon={<FileText className="w-4 h-4" />}
-              disabled={loading}
-            />
-            <Input
-              placeholder="Participants (optional, comma-separated)"
-              value={participants}
-              onChange={(e) => setParticipants(e.target.value)}
-              icon={<User className="w-4 h-4" />}
-              disabled={loading}
-            />
+            {/* Meeting Title with Autocomplete */}
+            <div ref={titleRef} className="relative">
+              <Input
+                placeholder="Meeting title (required)"
+                value={title}
+                onChange={(e) => onTitleChange(e.target.value)}
+                icon={<FileText className="w-4 h-4" />}
+                disabled={loading}
+                onFocus={() => { if (titleSuggestions.length > 0) setShowTitleDropdown(true); }}
+              />
+              {showTitleDropdown && (
+                <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-surface border border-border/50 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                  {titleSuggestions.map((t, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => { setTitle(t); setShowTitleDropdown(false); }}
+                      className="w-full text-left px-4 py-2.5 text-sm hover:bg-primary/10 transition-colors cursor-pointer border-b border-border/20 last:border-0"
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
+            {/* Participants Multi-Select from Org Chart */}
+            <div ref={participantInputRef} className="relative">
+              <div className="flex flex-wrap gap-1.5 p-2 rounded-xl bg-surface border border-border/50 min-h-[42px]">
+                {selectedParticipants.map((p) => (
+                  <span key={p.email} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary/10 text-xs font-medium text-primary">
+                    <User className="w-3 h-3" />
+                    {p.full_name}
+                    <button type="button" onClick={() => removeParticipant(p.email)} className="hover:text-rose-400 transition-colors cursor-pointer">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+                <input
+                  className="flex-1 min-w-[120px] bg-transparent border-none outline-none text-sm px-1 py-0.5"
+                  placeholder={selectedParticipants.length === 0 ? "Search participants from org chart..." : "Add more..."}
+                  value={participantQuery}
+                  onChange={(e) => onParticipantQueryChange(e.target.value)}
+                  onFocus={() => { if (participantSuggestions.length > 0) setShowParticipantDropdown(true); }}
+                  disabled={loading}
+                />
+                {searchingParticipants && <Loader2 className="w-4 h-4 animate-spin text-text-muted self-center" />}
+              </div>
+              {showParticipantDropdown && (
+                <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-surface border border-border/50 rounded-xl shadow-lg max-h-56 overflow-y-auto">
+                  {participantSuggestions.length === 0 ? (
+                    <div className="px-4 py-3 text-sm text-text-muted">No matches found</div>
+                  ) : (
+                    participantSuggestions.map((m) => (
+                      <button
+                        key={m._id}
+                        type="button"
+                        onClick={() => addParticipant(m)}
+                        className="w-full text-left px-4 py-2.5 hover:bg-primary/10 transition-colors cursor-pointer border-b border-border/20 last:border-0"
+                      >
+                        <div className="flex items-center gap-2">
+                          <User className="w-4 h-4 text-text-muted flex-shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">{m.full_name}</p>
+                            <p className="text-xs text-text-muted truncate">
+                              {[m.role, m.department].filter(Boolean).join(" · ") || m.email}
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* File / Calendar Tab */}
             <div className="flex gap-1 p-1 rounded-lg bg-surface border border-border/50">
               <button
                 onClick={() => setTab("file")}

@@ -80,7 +80,7 @@ async def list_notifications(
     user_id = getattr(current_user, 'id', None) or str(current_user) if current_user else None
 
     if not user_id and not org_id:
-        raise HTTPException(status_code=400, detail="User or organization ID required")
+        return {"notifications": [], "total": 0}
 
     query = {}
     if user_id:

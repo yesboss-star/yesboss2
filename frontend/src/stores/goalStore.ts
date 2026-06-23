@@ -38,6 +38,19 @@ export interface Goal {
   strategies?: Strategy[];
   selected_strategy?: { index: number; name: string };
   strategy_status?: "generated" | "tasks_created" | "pending";
+  goal_type?: "short_term" | "long_term";
+  duration?: "one_time" | "continuous";
+  end_date?: string;
+  parent_goal_id?: string;
+  parent_goal?: { id: string; title: string };
+  sub_goal_ids?: string[];
+  sub_goals?: Array<{ id: string; title: string; status?: string; goal_type?: string }>;
+  is_default?: boolean;
+  industry?: string;
+  micro_vertical?: string;
+  review_feedback?: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
 }
 
 export interface Strategy {
@@ -79,7 +92,7 @@ interface GoalState {
   updateGoalFromWs: (goal: any) => void;
   addGoalFromWs: (goal: any) => void;
   fetchGoals: (orgId: string) => Promise<void>;
-  createGoal: (data: { title: string; description: string; priority: string; timeline?: string; due_date?: string; department?: string; assignee_name?: string[]; reviewer_name?: string[]; assignee_id?: string[]; reviewer_id?: string[]; organization_id: string }) => Promise<Goal>;
+  createGoal: (data: { title: string; description: string; priority: string; timeline?: string; due_date?: string; department?: string; assignee_name?: string[]; reviewer_name?: string[]; assignee_id?: string[]; reviewer_id?: string[]; organization_id: string; goal_type?: string; duration?: string; end_date?: string; parent_goal_id?: string; industry?: string; micro_vertical?: string }) => Promise<Goal>;
   updateGoal: (goalId: string, data: Partial<Goal>) => Promise<void>;
   deleteGoal: (goalId: string) => Promise<void>;
   generateTasks: (goalId: string, count?: number) => Promise<Task[]>;
@@ -124,7 +137,9 @@ export const useGoalStore = create<GoalState>()(
       fetchGoals: async (orgId) => {
         set({ loading: true, error: null });
         try {
-          const response = await fetch(`${API_URL}/goals?organization_id=${orgId}&limit=20`);
+          const response = await fetch(`${API_URL}/goals?organization_id=${orgId}&limit=20`, {
+            headers: { ...getAuthHeaders() },
+          });
           if (!response.ok) throw new Error("Failed to fetch goals");
           const result = await response.json();
           const goals = (result.goals || []).map((g: any) => {
@@ -209,6 +224,7 @@ export const useGoalStore = create<GoalState>()(
         try {
           const response = await fetch(`${API_URL}/goals/${goalId}`, {
             method: "DELETE",
+            headers: { ...getAuthHeaders() },
           });
           if (!response.ok) throw new Error("Failed to delete goal");
           set((state) => ({
@@ -245,7 +261,9 @@ export const useGoalStore = create<GoalState>()(
       fetchGoalWithTasks: async (goalId) => {
         set({ loading: true, error: null });
         try {
-          const response = await fetch(`${API_URL}/goals/${goalId}`);
+          const response = await fetch(`${API_URL}/goals/${goalId}`, {
+            headers: { ...getAuthHeaders() },
+          });
           if (!response.ok) throw new Error("Failed to fetch goal");
           const result = await response.json();
           const normalizeField = (v: any) => Array.isArray(v) ? v : (v ? [v] : []);

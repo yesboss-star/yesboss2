@@ -68,9 +68,9 @@
     },
     {
       "value": "IT Services & Consulting",
-      "uses": 1,
+      "uses": 3,
       "created_at": 1780634625,
-      "last_used": 1780634625
+      "last_used": 1781948208
     },
     {
       "value": "Computer and Related Activities",
@@ -218,9 +218,9 @@
     },
     {
       "value": "Enterprise Software Implementation",
-      "uses": 1,
+      "uses": 3,
       "created_at": 1780635953,
-      "last_used": 1780635953,
+      "last_used": 1781948266,
       "industry": "IT Services & Consulting"
     },
     {
@@ -239,9 +239,9 @@
     },
     {
       "value": "Business Intelligence Analytics",
-      "uses": 1,
+      "uses": 2,
       "created_at": 1780636080,
-      "last_used": 1780636080,
+      "last_used": 1781937450,
       "industry": "IT Services & Consulting"
     },
     {
@@ -260,9 +260,9 @@
     },
     {
       "value": "Enterprise IT Consulting",
-      "uses": 1,
+      "uses": 2,
       "created_at": 1780636245,
-      "last_used": 1780636245,
+      "last_used": 1781948291,
       "industry": "IT Services & Consulting"
     },
     {
@@ -278,6 +278,20 @@
       "created_at": 1781279182,
       "last_used": 1781279182,
       "industry": "E-commerce & Online Retail"
+    },
+    {
+      "value": "ERP Implementation",
+      "uses": 1,
+      "created_at": 1781937383,
+      "last_used": 1781937383,
+      "industry": "IT Services & Consulting"
+    },
+    {
+      "value": "Custom Software Development",
+      "uses": 1,
+      "created_at": 1781937423,
+      "last_used": 1781937423,
+      "industry": "IT Services & Consulting"
     }
   ],
   "company_names": []

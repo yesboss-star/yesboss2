@@ -70,7 +70,7 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
   const loadFiles = useCallback(() => {
     if (!organization?.id) return;
     setLoading(true);
-    fetch(`${API_URL}/executive-chat/files?organization_id=${organization.id}`)
+    fetch(`${API_URL}/strategy-chat/files?organization_id=${organization.id}`)
       .then((r) => r.json())
       .then((data) => {
         setFiles(data.files || []);
@@ -84,7 +84,7 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
     setDeleting(fileId);
     try {
       const res = await fetch(
-        `${API_URL}/executive-chat/files/${fileId}?organization_id=${organization?.id}`,
+        `${API_URL}/strategy-chat/files/${fileId}?organization_id=${organization?.id}`,
         { method: "DELETE" }
       );
       if (res.ok) {
@@ -125,7 +125,7 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
             const formData = new FormData();
             formData.append("file", file);
             formData.append("organization_id", organization.id);
-            const res = await fetch(`${API_URL}/executive-chat/upload-and-analyze`, {
+            const res = await fetch(`${API_URL}/strategy-chat/upload-and-analyze`, {
               method: "POST",
               body: formData,
             });
@@ -201,7 +201,7 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
     setRenaming(true);
     try {
       const res = await fetch(
-        `${API_URL}/executive-chat/files/${fileId}?organization_id=${organization?.id}`,
+        `${API_URL}/strategy-chat/files/${fileId}?organization_id=${organization?.id}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -383,7 +383,7 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
                 className="flex items-center gap-4 p-4 rounded-xl bg-surface hover:bg-surface-light transition-all border border-border/50 group"
               >
                 <div
-                  onClick={() => window.open(`${API_URL}/executive-chat/files/${file.id}/download`, "_blank")}
+                  onClick={() => window.open(`${API_URL}/strategy-chat/files/${file.id}/download`, "_blank")}
                   className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0 cursor-pointer"
                 >
                   <FileText className="w-5 h-5 text-primary" />
@@ -429,7 +429,7 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
                   ) : (
                     <div className="flex items-center gap-2">
                       <p
-                        onClick={() => window.open(`${API_URL}/executive-chat/files/${file.id}/download`, "_blank")}
+                        onClick={() => window.open(`${API_URL}/strategy-chat/files/${file.id}/download`, "_blank")}
                         className="font-medium truncate cursor-pointer hover:text-primary transition-colors"
                       >
                         {file.filename}
@@ -464,7 +464,7 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <button
-                    onClick={() => window.open(`${API_URL}/executive-chat/files/${file.id}/download`, "_blank")}
+                    onClick={() => window.open(`${API_URL}/strategy-chat/files/${file.id}/download`, "_blank")}
                     className="p-2 rounded-lg hover:bg-surface-light text-text-muted hover:text-foreground transition-colors cursor-pointer"
                     title="Download / open"
                   >

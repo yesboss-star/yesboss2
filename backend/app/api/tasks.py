@@ -18,6 +18,22 @@ def get_user_org_id(user) -> Optional[str]:
     return None
 
 
+async def _is_org_owner(db, org_id: str, user_id: str) -> bool:
+    """Check if user_id is the primary owner or a co-owner of the org."""
+    from bson import ObjectId
+    org = db.organizations.find_one(
+        {"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id},
+        {"owner_id": 1, "co_owners": 1}
+    )
+    if not org:
+        return False
+    if org.get("owner_id") == user_id:
+        return True
+    if user_id in (org.get("co_owners") or []):
+        return True
+    return False
+
+
 async def create_notification(user_id: str, org_id: str, type: str, title: str, message: str, link: str = None, actor_id: str = None, actor_name: str = None, metadata: dict = None, email: str = None):
     from ..core.notification_service import create_and_deliver
     await create_and_deliver(user_id, org_id, type, title, message, link, actor_id, actor_name, metadata, email=email)
@@ -216,6 +232,9 @@ async def create_task(task: TaskCreate, organization_id: Optional[str] = None, c
             email=task.assignee_email,
         ))
     
+    from ..agents.frequency_agent import process_task as _freq_task
+    asyncio.create_task(_freq_task(task_doc, org_id))
+    
     return {"task": task_doc}
 
 
@@ -256,6 +275,10 @@ async def list_tasks(
         query["department"] = department
     if escalation_level is not None:
         query["escalation_level"] = escalation_level
+    
+    if current_user and getattr(current_user, 'id', None):
+        if await _is_org_owner(db, org_id, current_user.id):
+            query["created_by"] = current_user.id
     
     tasks = list(db.tasks.find(query).sort("created_at", -1))
     
@@ -347,6 +370,9 @@ async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get
                     link=f"/tasks/{task_id}",
                     email=task_obj.get("assignee_email"),
                 ))
+    
+    from ..agents.frequency_agent import process_task as _freq_task
+    asyncio.create_task(_freq_task(task_obj, org_id))
     
     return {"task": task_obj}
 
@@ -458,6 +484,9 @@ async def approve_task(task_id: str, current_user = Depends(get_current_user_opt
                 email=task_obj.get("assignee_email"),
             ))
     
+    from ..agents.frequency_agent import process_task as _freq_task
+    asyncio.create_task(_freq_task(task_obj, org_id))
+    
     return {"task": task_obj}
 
 
@@ -502,5 +531,8 @@ async def complete_task(task_id: str, current_user = Depends(get_current_user_op
                 message=f"Task '{task_obj.get('title')}' has been marked complete",
                 link=f"/tasks/{task_id}",
             ))
+    
+    from ..agents.frequency_agent import process_task as _freq_task
+    asyncio.create_task(_freq_task(task_obj, org_id))
     
     return {"task": task_obj}

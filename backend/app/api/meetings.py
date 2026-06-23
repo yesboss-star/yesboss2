@@ -32,15 +32,45 @@ def resolve_mentions(text: str, db, org_id: str) -> List[str]:
             resolved.append(member.get("email", "").lower())
     return list(set(resolved))
 
+
+def _resolve_assignee(db, org_id: str, name: str):
+    """Try to match a name against org chart members with progressive loosening."""
+    name = name.strip()
+    if not name:
+        return None
+    emp = db.org_chart_members.find_one({
+        "organization_id": org_id,
+        "$or": [
+            {"email": {"$regex": f"^{re.escape(name)}$", "$options": "i"}},
+            {"full_name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}},
+        ]
+    })
+    if not emp:
+        name_parts = name.split()
+        if len(name_parts) >= 2:
+            first = re.escape(name_parts[0])
+            last = re.escape(name_parts[-1])
+            emp = db.org_chart_members.find_one({
+                "organization_id": org_id,
+                "full_name": {"$regex": f"^{first} .*{last}$", "$options": "i"},
+            })
+        if not emp:
+            emp = db.org_chart_members.find_one({
+                "organization_id": org_id,
+                "full_name": {"$regex": re.escape(name_parts[0]), "$options": "i"},
+            })
+    return emp
+
 TASK_SYSTEM_PROMPT = (
     "You are an AI assistant that extracts actionable tasks from meeting notes. "
-    "Given the meeting notes below, identify all actionable tasks. "
+    "Given the meeting title, participants, and notes below, identify all actionable tasks. "
     "For each task, return a JSON object with these fields:\n"
     "- title: short task name (required)\n"
     "- description: detailed description of what needs to be done\n"
-    "- suggested_assignee: who might be responsible (from the meeting context, or empty string)\n"
+    "- suggested_assignee: the EXACT full name of the person responsible, as written in the meeting notes. Choose from the participants list if possible. Extract this from the meeting notes text — do not make up a name. If unclear, use the empty string.\n"
     "- suggested_priority: one of high, medium, low\n"
     "- suggested_deadline: when it should be done (relative date like '2026-06-20' or empty string)\n\n"
+    "IMPORTANT: suggested_assignee must be the exact name mentioned in the notes (e.g. 'Arijit Das'), preferably matching someone from the participants list. Do not use email addresses. Leave empty if no person is clearly responsible.\n\n"
     "Return ONLY a valid JSON array of task objects. No markdown, no code blocks, no extra text."
 )
 
@@ -57,6 +87,7 @@ async def create_task_from_meeting(
     user_id: str,
     task_data: dict,
     meeting_title: str,
+    participant_list: Optional[list] = None,
 ):
     assignee_ids = []
     combined_text = f"{task_data.get('suggested_assignee', '')} {task_data.get('description', '')} {task_data.get('title', '')}"
@@ -64,16 +95,26 @@ async def create_task_from_meeting(
     if mentioned:
         assignee_ids = mentioned
     elif task_data.get("suggested_assignee"):
-        suggested = task_data["suggested_assignee"]
-        emp = db.org_chart_members.find_one({
-            "organization_id": org_id,
-            "$or": [
-                {"email": {"$regex": suggested, "$options": "i"}},
-                {"full_name": {"$regex": suggested, "$options": "i"}},
-            ]
-        })
+        suggested = task_data["suggested_assignee"].strip()
+        emp = _resolve_assignee(db, org_id, suggested)
         if emp:
             assignee_ids = [emp.get("email", "").lower()]
+
+    if not assignee_ids and participant_list:
+        for p in participant_list:
+            p = p.strip()
+            if not p:
+                continue
+            if "@" in p:
+                emp = db.org_chart_members.find_one({
+                    "organization_id": org_id,
+                    "email": {"$regex": f"^{re.escape(p)}$", "$options": "i"},
+                })
+            else:
+                emp = _resolve_assignee(db, org_id, p)
+            if emp:
+                assignee_ids = [emp.get("email", "").lower()]
+                break
 
     task_doc = {
         "title": task_data.get("title", "Untitled Task"),
@@ -222,7 +263,7 @@ async def process_meeting(
     created_tasks = []
     for td in tasks_data:
         if isinstance(td, dict) and td.get("title"):
-            task = await create_task_from_meeting(db, org_id, user_id, td, meeting_title)
+            task = await create_task_from_meeting(db, org_id, user_id, td, meeting_title, participant_list)
             created_tasks.append(task)
 
     from ..core.notification_service import create_and_deliver
@@ -266,6 +307,68 @@ async def process_meeting(
         "task_count": len(created_tasks),
         "raw_text": raw_text[:2000],
     }
+
+
+@router.get("/titles")
+async def list_meeting_titles(
+    q: Optional[str] = Query(""),
+    organization_id: Optional[str] = Query(None),
+    limit: int = Query(10, ge=1, le=50),
+    current_user=Depends(get_current_user_optional),
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    org_id = organization_id or await get_user_org_id(current_user)
+    if not org_id:
+        raise HTTPException(status_code=400, detail="Organization ID required")
+
+    user_id = getattr(current_user, 'id', None) or str(current_user) if current_user else None
+
+    query_filter = {"organization_id": org_id, "created_by": user_id}
+    if q:
+        query_filter["title"] = {"$regex": re.escape(q), "$options": "i"}
+
+    titles = list(
+        db.meetings.find(query_filter, {"title": 1})
+        .sort("created_at", -1)
+        .limit(limit)
+    )
+    return {"titles": [t["title"] for t in titles if t.get("title")]}
+
+
+@router.delete("/{meeting_id}")
+async def delete_meeting(
+    meeting_id: str,
+    organization_id: Optional[str] = Query(None),
+    current_user=Depends(get_current_user_optional),
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    org_id = organization_id or await get_user_org_id(current_user)
+    if not org_id:
+        raise HTTPException(status_code=400, detail="Organization ID required")
+
+    logger.info(f"DELETE meeting: meeting_id={meeting_id}, org_id={org_id}")
+    try:
+        oid = ObjectId(meeting_id)
+    except Exception as e:
+        logger.error(f"Invalid meeting_id '{meeting_id}': {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid meeting ID: {e}")
+
+    existing = db.meetings.find_one({"_id": oid, "organization_id": org_id})
+    if not existing:
+        logger.warning(f"Meeting not found with _id={meeting_id}, org_id={org_id}. Exists without org filter: {db.meetings.find_one({'_id': oid}) is not None}")
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    result = db.meetings.delete_one({"_id": oid, "organization_id": org_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    return {"deleted": True}
 
 
 @router.get("/history")

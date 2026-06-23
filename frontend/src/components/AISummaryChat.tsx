@@ -697,7 +697,7 @@ export default function AISummaryChat() {
     if (text?.trim()) formData.append("text_context", text.trim());
 
     try {
-      const response = await fetch(`${API_URL}/executive-chat/upload-and-analyze`, {
+      const response = await fetch(`${API_URL}/strategy-chat/upload-and-analyze`, {
         method: "POST",
         body: formData,
       });

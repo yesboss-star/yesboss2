@@ -432,7 +432,7 @@ export default function KPISuggestionsCard() {
             triggerSource: trigger?.source,
           });
 
-          const res = await fetch(`${API_URL}/executive-chat/chat`, {
+          const res = await fetch(`${API_URL}/strategy-chat/chat`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { useGoalStore, type Strategy } from "@/stores/goalStore";
@@ -30,6 +30,7 @@ import {
   PieChart as RePieChart, Pie, Cell, LineChart as ReLineChart, Line,
   AreaChart, Area, Legend
 } from "recharts";
+import { getAuthHeaders } from "@/lib/utils";
 import GoalDetailChat from "@/components/owners/GoalDetailChat";
 import KPISuggestionsCard from "@/components/owners/KPISuggestionsCard";
 import AISummaryChat from "@/components/AISummaryChat";
@@ -37,6 +38,7 @@ import MeetingUploadModal from "@/components/owners/MeetingUploadModal";
 import ZohoCalendarBooking from "@/components/owners/ZohoCalendarBooking";
 import OrgHealthWidget from "@/components/owners/OrgHealthWidget";
 import MarketImpactCard from "@/components/owners/MarketImpactCard";
+import CheckInModal from "@/components/owners/CheckInModal";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -52,7 +54,97 @@ function EmptyStateTemplate({ title, hint }: { title: string; hint: string }) {
   );
 }
 
+function ReviewActions({ goalId, goalTitle, onReviewComplete }: { goalId: string; goalTitle: string; onReviewComplete: () => void }) {
+  const [feedback, setFeedback] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleReview = async (action: "approve" | "reject") => {
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${API_URL}/goals/${goalId}/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({ action, feedback: action === "reject" ? feedback : undefined }),
+      });
+      if (!res.ok) throw new Error("Review failed");
+      onReviewComplete();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="p-4 rounded-xl bg-amber-500/5 border border-amber-500/20 space-y-3">
+      <p className="text-sm font-medium flex items-center gap-2">
+        <Clock className="w-4 h-4 text-amber-400" />
+        <span>Review Required — <span className="text-amber-400">"{goalTitle}"</span> is marked as complete</span>
+      </p>
+      <div className="flex gap-2">
+        <button
+          onClick={() => handleReview("approve")}
+          disabled={submitting}
+          className="flex-1 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium transition-all cursor-pointer disabled:opacity-50"
+        >
+          {submitting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "✓ Approve"}
+        </button>
+        <button
+          onClick={() => handleReview("reject")}
+          disabled={submitting || !feedback.trim()}
+          className="flex-1 py-2 rounded-lg bg-rose-500 hover:bg-rose-600 text-white text-sm font-medium transition-all cursor-pointer disabled:opacity-50"
+        >
+          {submitting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "✗ Send Back"}
+        </button>
+      </div>
+      <textarea
+        value={feedback}
+        onChange={(e) => setFeedback(e.target.value)}
+        placeholder="Optional feedback — why are you sending this back?"
+        rows={2}
+        className="w-full px-3 py-2 rounded-lg bg-surface border border-border focus:border-primary focus:outline-none text-sm resize-none"
+      />
+    </div>
+  );
+}
+
+function RequestReviewButton({ goalId, goalTitle, onReviewRequested }: { goalId: string; goalTitle: string; onReviewRequested: () => void }) {
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleRequestReview = async () => {
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${API_URL}/goals/${goalId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({ status: "pending_review" }),
+      });
+      if (!res.ok) throw new Error("Failed to request review");
+      onReviewRequested();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+      <button
+        onClick={handleRequestReview}
+        disabled={submitting}
+        className="w-full py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
+      >
+        {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+        {submitting ? "Submitting..." : "Mark as Complete — Request Review"}
+      </button>
+      <p className="text-xs text-text-muted mt-2 text-center">The owner will review and approve your completion</p>
+    </div>
+  );
+}
+
 function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; onClose: () => void; orgId?: string }) {
+  const { user } = useAuth();
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [goalData, setGoalData] = useState(goal);
@@ -193,7 +285,27 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
                 <Badge variant={goal.status === "completed" ? "success" : goal.status === "active" ? "info" : "warning"}>
                   {goal.status}
                 </Badge>
+                {goal.is_default && (
+                  <span className="text-xs px-2.5 py-1 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center gap-1">
+                    <Sparkles className="w-3 h-3" /> Default
+                  </span>
+                )}
+                {goal.status === "pending_review" && (
+                  <span className="text-xs px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1 animate-pulse">
+                    <Clock className="w-3 h-3" /> Waiting for Review
+                  </span>
+                )}
               </div>
+
+              {/* Approve/Reject — shown when goal is pending_review and current user is the owner */}
+              {goal.status === "pending_review" && user?.uid === goal.created_by && (
+                <ReviewActions goalId={goal.id || goal._id} goalTitle={goal.title} onReviewComplete={() => loadTasks()} />
+              )}
+
+              {/* Request Review — shown when goal is active and current user is NOT the owner (assignee side) */}
+              {goal.status === "active" && user?.uid !== goal.created_by && (
+                <RequestReviewButton goalId={goal.id || goal._id} goalTitle={goal.title} onReviewRequested={() => loadTasks()} />
+              )}
 
               {/* Description */}
               {goal.description && (
@@ -788,10 +900,15 @@ function DepartmentGoalRow({
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium truncate group-hover:text-primary transition-colors">{goal.title}</p>
-          <div className="flex items-center gap-3 text-[11px] text-text-muted mt-0.5">
+          <div className="flex items-center gap-2 text-[11px] text-text-muted mt-0.5">
             <span className="flex items-center gap-1">
               <Activity className="w-3 h-3" /> {taskCounts.completed || 0}/{taskCounts.total || 0} tasks
             </span>
+            {goal.is_default && (
+              <span className="flex items-center gap-0.5 text-purple-400">
+                <Sparkles className="w-2.5 h-2.5" /> Default
+              </span>
+            )}
           </div>
         </div>
         <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium border flex-shrink-0 ${getPriorityColor(goal.priority)}`}>
@@ -1765,10 +1882,18 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
     if (orgId) fetchEscalations();
   }, [orgId, fetchEscalations]);
 
+  const searchParams = useSearchParams();
   const [showMeetingModal, setShowMeetingModal] = useState(false);
   const [showBookingModal, setShowBookingModal] = useState(false);
+  const [showCheckInModal, setShowCheckInModal] = useState(false);
   const [meetingHistory, setMeetingHistory] = useState<any[]>([]);
   const [meetingHistoryLoading, setMeetingHistoryLoading] = useState(false);
+
+  useEffect(() => {
+    if (searchParams?.get("checkin") === "true" && orgId) {
+      setShowCheckInModal(true);
+    }
+  }, [searchParams, orgId]);
 
   const fetchMeetingHistory = useCallback(async () => {
     if (!orgId) return;
@@ -1891,6 +2016,13 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowCheckInModal(true)}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-all cursor-pointer"
+          >
+            <Clock className="w-3.5 h-3.5" />
+            Check-In
+          </button>
           <span className="text-[10px] font-medium px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">
             {getStageLabel(adaptation.stage)}
           </span>
@@ -2087,6 +2219,12 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
         open={showMeetingModal}
         onOpenChange={setShowMeetingModal}
         onSuccess={() => fetchMeetingHistory()}
+      />
+
+      <CheckInModal
+        open={showCheckInModal}
+        onOpenChange={setShowCheckInModal}
+        orgId={orgId}
       />
 
       {showBookingModal && (

@@ -276,13 +276,18 @@ export default function SignupPage() {
     }
     setLoading(true);
     setError("");
+    setOtpError("");
     try {
+      let firebaseUid = "";
       if (contactKind === "email") {
-        await createUserWithEmailAndPassword(auth, formData.contact.trim(), formData.password);
+        const credential = await createUserWithEmailAndPassword(auth, formData.contact.trim(), formData.password);
+        firebaseUid = credential.user.uid;
+      } else {
+        firebaseUid = auth.currentUser?.uid || "";
       }
-      // For phone, Firebase auth was completed during signInWithPhoneNumber above
 
       const userData = {
+        uid: firebaseUid,
         email: contactKind === "email" ? formData.contact.trim() : `${selectedCountry.code}${formData.contact.replace(/\D/g, "")}@phone.yesboss.app`,
         full_name: formData.fullName,
         phone: contactKind === "phone" ? `${selectedCountry.code}${formData.contact.replace(/\D/g, "")}` : "",
@@ -291,13 +296,15 @@ export default function SignupPage() {
         email_verified: contactKind === "email",
       };
 
-      try {
-        await fetch(`${API_URL}/auth/sync-user`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(userData),
-        });
-      } catch {}
+      const syncRes = await fetch(`${API_URL}/auth/sync-user`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(userData),
+      });
+      if (!syncRes.ok) {
+        const syncData = await syncRes.json().catch(() => ({}));
+        throw new Error(syncData.detail || syncData.message || "Failed to sync account");
+      }
 
       localStorage.setItem("yesboss_user", JSON.stringify(userData));
       localStorage.setItem("yesboss_role", role);
@@ -312,11 +319,11 @@ export default function SignupPage() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       if (err?.code === "auth/email-already-in-use") {
-        setError("Email already registered. Try logging in.");
+        setOtpError("Email already registered. Try logging in.");
       } else if (err?.code === "auth/weak-password") {
-        setError("Password too weak");
+        setOtpError("Password too weak");
       } else {
-        setError(err?.message || "Signup failed");
+        setOtpError(err?.message || "Signup failed");
       }
     } finally {
       setLoading(false);

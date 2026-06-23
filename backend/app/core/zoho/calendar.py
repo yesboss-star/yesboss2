@@ -10,14 +10,26 @@ logger = logging.getLogger("yesboss.zoho.calendar")
 class ZohoCalendar:
     @staticmethod
     async def list_calendars(user_token: str) -> List[Dict]:
+        url = f"{settings.ZOHO_CALENDAR_API_URL}/calendars"
         try:
             async with httpx.AsyncClient(timeout=15) as client:
                 resp = await client.get(
-                    f"{settings.ZOHO_CALENDAR_API_URL}/calendars",
+                    url,
                     headers={"Authorization": f"Zoho-oauthtoken {user_token}"},
                 )
+                logger.info("List calendars response: status=%s for url=%s", resp.status_code, url)
                 if resp.status_code == 200:
-                    return resp.json().get("calendars", [])
+                    data = resp.json()
+                    logger.info("Calendar API response keys: %s", list(data.keys()) if isinstance(data, dict) else type(data).__name__)
+                    if isinstance(data, list):
+                        logger.info("Calendar API returned a list — using directly")
+                        return data
+                    calendars = data.get("calendars") or data.get("data") or []
+                    if not calendars:
+                        logger.warning("No calendars found in response: %s", str(data)[:500])
+                    return calendars
+                else:
+                    logger.warning("List calendars failed: %s %s", resp.status_code, resp.text)
         except Exception as e:
             logger.warning("List calendars error: %s", e)
         return []
@@ -25,11 +37,17 @@ class ZohoCalendar:
     @staticmethod
     async def get_default_calendar_uid(user_token: str) -> Optional[str]:
         calendars = await ZohoCalendar.list_calendars(user_token)
+        logger.info("get_default_calendar_uid: found %s calendars", len(calendars))
         for cal in calendars:
             if cal.get("isdefault") or cal.get("type") == 0:
-                return cal.get("uid")
+                uid = cal.get("uid") or cal.get("calendar_id") or cal.get("id")
+                logger.info("Found default calendar: uid=%s", uid)
+                return uid
         if calendars:
-            return calendars[0].get("uid")
+            uid = calendars[0].get("uid") or calendars[0].get("calendar_id") or calendars[0].get("id")
+            logger.info("Using first calendar: uid=%s", uid)
+            return uid
+        logger.warning("No calendars found at all")
         return None
 
     @staticmethod
@@ -56,16 +74,25 @@ class ZohoCalendar:
     async def check_freebusy(
         user_token: str, email: str, start: str, end: str
     ) -> List[Dict]:
+        url = f"{settings.ZOHO_CALENDAR_API_URL}/calendars/freebusy"
         try:
             async with httpx.AsyncClient(timeout=15) as client:
                 resp = await client.get(
-                    f"{settings.ZOHO_CALENDAR_API_URL}/calendars/freebusy",
+                    url,
                     params={"uemail": email, "sdate": start, "edate": end},
                     headers={"Authorization": f"Zoho-oauthtoken {user_token}"},
                 )
+                logger.info("freebusy: status=%s for email=%s", resp.status_code, email)
                 if resp.status_code == 200:
                     data = resp.json()
-                    return data.get("freebusy", [])
+                    logger.info("freebusy: response keys=%s", list(data.keys()) if isinstance(data, dict) else type(data).__name__)
+                    # Try different response formats
+                    fb = data.get("freebusy") or data.get("data") or data.get("result") or []
+                    if isinstance(fb, list):
+                        return fb
+                    logger.warning("freebusy: unexpected format: %s", str(data)[:500])
+                else:
+                    logger.warning("freebusy: non-200: %s %s", resp.status_code, resp.text)
         except Exception as e:
             logger.warning("Free/busy error: %s", e)
         return []

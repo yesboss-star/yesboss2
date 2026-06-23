@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useGoalStore } from "@/stores/goalStore";
 import { useOrgChartStore } from "@/stores/orgChartStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
-import { X, Loader2, Sparkles, Calendar, Users, Flag, CheckCircle2, ChevronDown, Check } from "lucide-react";
+import { X, Loader2, Sparkles, Calendar, Users, Flag, CheckCircle2, ChevronDown, Check, GitBranch, Clock } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 const DEPARTMENTS = ["Engineering", "Marketing", "Sales", "Operations", "Finance", "Human Resources", "Product", "Design", "Customer Support", "R&D", "Supply Chain", "Legal"];
@@ -128,11 +128,37 @@ export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
     assignee_name: [] as string[],
     reviewer_id: [] as string[],
     reviewer_name: [] as string[],
+    goal_type: "short_term" as "short_term" | "long_term",
+    duration: "one_time" as "one_time" | "continuous",
+    end_date: "",
+    parent_goal_id: "",
+    parent_goal_title: "",
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
   const [detectedDept, setDetectedDept] = useState<string | null>(null);
+  const [existingGoals, setExistingGoals] = useState<Array<{ id: string; title: string; goal_type?: string }>>([]);
+  const [parentSearchOpen, setParentSearchOpen] = useState(false);
+  const [parentQuery, setParentQuery] = useState("");
+  const parentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (parentRef.current && !parentRef.current.contains(e.target as Node)) setParentSearchOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  useEffect(() => {
+    if (isOpen && organization?.id) {
+      fetch(`${API_URL}/goals?organization_id=${organization.id}&limit=50`)
+        .then((r) => r.json())
+        .then((data) => setExistingGoals((data.goals || []).map((g: any) => ({ id: g._id || g.id, title: g.title, goal_type: g.goal_type }))))
+        .catch(() => {});
+    }
+  }, [isOpen, organization?.id]);
 
   useEffect(() => {
     if (isOpen && organization?.id) {
@@ -201,6 +227,10 @@ export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
         reviewer_id: formData.reviewer_id.length > 0 ? formData.reviewer_id : undefined,
         reviewer_name: formData.reviewer_name.length > 0 ? formData.reviewer_name : undefined,
         organization_id: organization.id,
+        goal_type: formData.goal_type,
+        duration: formData.duration,
+        end_date: formData.end_date || undefined,
+        parent_goal_id: formData.parent_goal_id || undefined,
       });
 
       setFormData({
@@ -208,6 +238,8 @@ export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
         due_date: "",
         department: "", assignee_id: [], assignee_name: [],
         reviewer_id: [], reviewer_name: [],
+        goal_type: "short_term", duration: "one_time", end_date: "",
+        parent_goal_id: "", parent_goal_title: "",
       });
       setDetectedDept(null);
       onClose();
@@ -286,6 +318,76 @@ export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
               <label className="block text-sm font-medium mb-2"><Calendar className="w-4 h-4 inline mr-1" />Deadline</label>
               <input type="date" value={formData.due_date} onChange={(e) => setFormData({ ...formData, due_date: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm" />
             </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-2"><GitBranch className="w-4 h-4 inline mr-1" />Goal Type</label>
+              <select value={formData.goal_type} onChange={(e) => setFormData({ ...formData, goal_type: e.target.value as "short_term" | "long_term" })} className="w-full px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm appearance-none cursor-pointer">
+                <option value="short_term">Short Term</option>
+                <option value="long_term">Long Term</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2"><Clock className="w-4 h-4 inline mr-1" />Duration</label>
+              <select value={formData.duration} onChange={(e) => setFormData({ ...formData, duration: e.target.value as "one_time" | "continuous" })} className="w-full px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm appearance-none cursor-pointer">
+                <option value="one_time">One Time</option>
+                <option value="continuous">Continuous</option>
+              </select>
+            </div>
+          </div>
+
+          {formData.duration === "continuous" && (
+            <div>
+              <label className="block text-sm font-medium mb-2"><Calendar className="w-4 h-4 inline mr-1" />End Date (optional for continuous)</label>
+              <input type="date" value={formData.end_date} onChange={(e) => setFormData({ ...formData, end_date: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm" />
+            </div>
+          )}
+
+          <div ref={parentRef} className="relative">
+            <label className="block text-sm font-medium mb-2"><GitBranch className="w-4 h-4 inline mr-1" />Parent Goal (optional — makes this a sub-goal)</label>
+            {formData.parent_goal_id && (
+              <div className="flex items-center gap-2 mb-2 px-3 py-2 rounded-lg bg-primary/10 text-primary text-sm">
+                <span>Sub-goal of: {formData.parent_goal_title}</span>
+                <button type="button" onClick={() => setFormData({ ...formData, parent_goal_id: "", parent_goal_title: "" })} className="ml-auto cursor-pointer hover:text-primary-light">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+            {!formData.parent_goal_id && (
+              <div className="relative">
+                <input
+                  type="text"
+                  value={parentQuery}
+                  onChange={(e) => { setParentQuery(e.target.value); setParentSearchOpen(true); }}
+                  onFocus={() => setParentSearchOpen(true)}
+                  placeholder="Search existing goals..."
+                  className="w-full px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm"
+                />
+                {parentSearchOpen && (
+                  <div className="absolute z-50 mt-1 w-full bg-background border border-border rounded-xl shadow-2xl max-h-48 overflow-y-auto">
+                    {existingGoals
+                      .filter((g) => g.title.toLowerCase().includes(parentQuery.toLowerCase()) && g.id !== formData.parent_goal_id)
+                      .slice(0, 8)
+                      .map((g) => (
+                        <button
+                          key={g.id}
+                          type="button"
+                          onClick={() => { setFormData({ ...formData, parent_goal_id: g.id, parent_goal_title: g.title }); setParentSearchOpen(false); setParentQuery(""); }}
+                          className="w-full text-left px-4 py-2.5 text-sm hover:bg-surface flex items-center gap-2"
+                        >
+                          <GitBranch className="w-4 h-4 text-text-muted flex-shrink-0" />
+                          <span className="truncate">{g.title}</span>
+                          {g.goal_type && <span className="text-[10px] text-text-muted ml-auto capitalize">{g.goal_type.replace("_", " ")}</span>}
+                        </button>
+                      ))}
+                    {existingGoals.filter((g) => g.title.toLowerCase().includes(parentQuery.toLowerCase())).length === 0 && (
+                      <div className="p-3 text-xs text-text-muted">No goals found</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <PersonMultiSelect

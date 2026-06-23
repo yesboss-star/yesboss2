@@ -57,6 +57,13 @@ class GoalCreate(BaseModel):
     reviewer_id: Optional[Union[str, List[str]]] = None
     reviewer_name: Optional[Union[str, List[str]]] = None
     organization_id: Optional[str] = None
+    goal_type: Optional[str] = None          # "short_term" | "long_term"
+    duration: Optional[str] = None           # "one_time" | "continuous"
+    end_date: Optional[str] = None           # optional end for continuous goals
+    parent_goal_id: Optional[str] = None     # if sub-goal, points to parent
+    is_default: bool = False
+    industry: Optional[str] = None
+    micro_vertical: Optional[str] = None
 
 
 class GoalUpdate(BaseModel):
@@ -75,6 +82,16 @@ class GoalUpdate(BaseModel):
     kpis: Optional[str] = None
     timeline_detail: Optional[str] = None
     dependencies: Optional[str] = None
+    goal_type: Optional[str] = None
+    duration: Optional[str] = None
+    end_date: Optional[str] = None
+    parent_goal_id: Optional[str] = None
+    is_default: Optional[bool] = None
+    industry: Optional[str] = None
+    micro_vertical: Optional[str] = None
+    review_feedback: Optional[str] = None
+    reviewed_by: Optional[str] = None
+    reviewed_at: Optional[str] = None
 
 
 class GoalBreakdownUpdate(BaseModel):
@@ -122,6 +139,21 @@ def get_user_org_id(user) -> Optional[str]:
     return None
 
 
+async def _is_org_owner(db, org_id: str, user_id: str) -> bool:
+    """Check if user_id is the primary owner or a co-owner of the org."""
+    org = db.organizations.find_one(
+        {"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id},
+        {"owner_id": 1, "co_owners": 1}
+    )
+    if not org:
+        return False
+    if org.get("owner_id") == user_id:
+        return True
+    if user_id in (org.get("co_owners") or []):
+        return True
+    return False
+
+
 @router.post("")
 async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user_optional)):
     db = get_database()
@@ -152,6 +184,20 @@ async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user_
     reviewer_ids = _normalize_list(goal.reviewer_id) or []
     reviewer_names = _normalize_list(goal.reviewer_name) or []
     
+    # Auto-link parent goal if parent_goal_id is provided
+    parent_goal_id = goal.parent_goal_id or None
+    sub_goal_ids = []
+    if parent_goal_id:
+        parent = db.goals.find_one({"_id": ObjectId(parent_goal_id)})
+        if parent:
+            existing_subs = parent.get("sub_goal_ids") or []
+            if parent_goal_id not in existing_subs:
+                existing_subs.append(parent_goal_id)
+                db.goals.update_one(
+                    {"_id": ObjectId(parent_goal_id)},
+                    {"$set": {"sub_goal_ids": existing_subs}}
+                )
+    
     goal_doc = {
         "title": goal.title,
         "description": goal.description,
@@ -167,6 +213,14 @@ async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user_
         "organization_id": org_id,
         "created_by": user_id,
         "status": "active",
+        "goal_type": goal.goal_type or "short_term",
+        "duration": goal.duration or "one_time",
+        "end_date": goal.end_date,
+        "parent_goal_id": parent_goal_id,
+        "sub_goal_ids": sub_goal_ids,
+        "is_default": goal.is_default,
+        "industry": goal.industry or "",
+        "micro_vertical": goal.micro_vertical or "",
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
     }
@@ -202,6 +256,9 @@ async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user_
                 email=goal.assignee_email,
             ))
     
+    from ..agents.frequency_agent import process_goal as _freq_goal
+    asyncio.create_task(_freq_goal(goal_doc, org_id))
+    
     return {"goal": goal_doc}
 
 
@@ -210,6 +267,10 @@ async def list_goals(
     department: Optional[str] = None,
     priority: Optional[str] = None,
     status: Optional[str] = None,
+    goal_type: Optional[str] = None,
+    duration: Optional[str] = None,
+    parent_goal_id: Optional[str] = None,
+    is_default: Optional[bool] = None,
     organization_id: Optional[str] = None,
     current_user = Depends(get_current_user_optional)
 ):
@@ -228,6 +289,18 @@ async def list_goals(
         query["priority"] = priority
     if status:
         query["status"] = status
+    if goal_type:
+        query["goal_type"] = goal_type
+    if duration:
+        query["duration"] = duration
+    if parent_goal_id:
+        query["parent_goal_id"] = parent_goal_id
+    if is_default is not None:
+        query["is_default"] = is_default
+    
+    if current_user and getattr(current_user, 'id', None):
+        if await _is_org_owner(db, org_id, current_user.id):
+            query["created_by"] = current_user.id
     
     goals = list(db.goals.find(query).sort("created_at", -1))
 
@@ -276,6 +349,12 @@ async def get_goal(goal_id: str, current_user = Depends(get_current_user_optiona
     if not goal:
         raise HTTPException(status_code=404, detail="Goal not found")
     
+    if current_user and getattr(current_user, 'id', None):
+        org_id = goal.get("organization_id", "")
+        if await _is_org_owner(db, org_id, current_user.id):
+            if goal.get("created_by") != current_user.id:
+                raise HTTPException(status_code=403, detail="Access denied: this goal belongs to another owner")
+    
     goal["_id"] = str(goal["_id"])
     for f in ("assignee_id", "assignee_name", "reviewer_id", "reviewer_name"):
         raw = goal.get(f)
@@ -283,6 +362,23 @@ async def get_goal(goal_id: str, current_user = Depends(get_current_user_optiona
             goal[f] = [raw]
         elif raw is None:
             goal[f] = []
+    
+    # Attach parent goal breadcrumb for sub-goals
+    parent_goal = None
+    parent_id = goal.get("parent_goal_id")
+    if parent_id:
+        pg = db.goals.find_one({"_id": ObjectId(parent_id)}, {"title": 1})
+        if pg:
+            parent_goal = {"id": str(pg["_id"]), "title": pg.get("title")}
+    goal["parent_goal"] = parent_goal
+    
+    # Attach sub-goals list
+    sub_ids = goal.get("sub_goal_ids") or []
+    sub_goals = list(db.goals.find(
+        {"_id": {"$in": [ObjectId(sid) for sid in sub_ids if ObjectId.is_valid(sid)]}},
+        {"title": 1, "status": 1, "goal_type": 1}
+    ))
+    goal["sub_goals"] = [{"id": str(s["_id"]), "title": s.get("title"), "status": s.get("status"), "goal_type": s.get("goal_type")} for s in sub_goals]
     
     tasks = list(db.tasks.find({"goal_id": goal_id}))
     for task in tasks:
@@ -326,6 +422,20 @@ async def update_goal(goal_id: str, goal: GoalUpdate, current_user = Depends(get
         goal.get("organization_id", "")
     ))
 
+    # If goal was moved to pending_review, notify the owner who created it
+    if update_data.get("status") == "pending_review":
+        created_by = goal.get("created_by")
+        assignee_names = goal.get("assignee_name") or []
+        submitter = assignee_names[0] if assignee_names else "An assignee"
+        asyncio.create_task(create_notification(
+            user_id=created_by or "",
+            org_id=goal.get("organization_id", ""),
+            type="goal_pending_review",
+            title="Goal Ready for Review",
+            message=f"{submitter} marked goal '{goal.get('title')}' as complete. Review it now.",
+            link=f"/goals/{goal_id}",
+        ))
+
     assignee_ids = goal.get("assignee_id") or []
     if goal.get("status") and assignee_ids:
         for aid in assignee_ids:
@@ -351,6 +461,135 @@ async def update_goal(goal_id: str, goal: GoalUpdate, current_user = Depends(get
                     link=f"/goals/{goal_id}",
                 ))
     
+    from ..agents.frequency_agent import process_goal as _freq_goal
+    asyncio.create_task(_freq_goal(goal, goal.get("organization_id", "")))
+    
+    return {"goal": goal}
+
+
+class ReviewRequest(BaseModel):
+    action: str  # "approve" | "reject"
+    feedback: Optional[str] = None
+
+
+@router.post("/{goal_id}/review")
+async def review_goal(goal_id: str, request: ReviewRequest, current_user = Depends(get_current_user_optional)):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    goal = db.goals.find_one({"_id": ObjectId(goal_id)})
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+
+    org_id = goal.get("organization_id", "")
+    user_id = getattr(current_user, 'id', None) if current_user else None
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    if request.action not in ("approve", "reject"):
+        raise HTTPException(status_code=400, detail="Action must be 'approve' or 'reject'")
+
+    if goal.get("status") != "pending_review":
+        raise HTTPException(status_code=400, detail=f"Goal is in '{goal.get('status')}' state, not 'pending_review'")
+
+    if request.action == "approve":
+        update = {
+            "status": "completed",
+            "reviewed_by": user_id,
+            "reviewed_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow(),
+        }
+    else:
+        update = {
+            "status": "active",
+            "review_feedback": request.feedback,
+            "updated_at": datetime.utcnow(),
+        }
+
+    db.goals.update_one({"_id": ObjectId(goal_id)}, {"$set": update})
+
+    goal = db.goals.find_one({"_id": ObjectId(goal_id)})
+    goal["_id"] = str(goal["_id"])
+    for f in ("assignee_id", "assignee_name", "reviewer_id", "reviewer_name"):
+        raw = goal.get(f)
+        if isinstance(raw, str):
+            goal[f] = [raw]
+        elif raw is None:
+            goal[f] = []
+
+    # Notify assignees
+    assignee_ids = goal.get("assignee_id") or []
+    created_by = goal.get("created_by")
+    notified = set()
+
+    if request.action == "approve":
+        msg = f"Goal '{goal.get('title')}' has been approved and marked complete"
+        notif_type = "goal_approved"
+    else:
+        msg = f"Goal '{goal.get('title')}' was sent back with feedback: {request.feedback}" if request.feedback else f"Goal '{goal.get('title')}' was sent back for revisions"
+        notif_type = "goal_rejected"
+
+    for aid in assignee_ids:
+        if aid and aid not in notified:
+            notified.add(aid)
+            asyncio.create_task(create_notification(
+                user_id=aid, org_id=org_id, type=notif_type,
+                title=f"Goal {request.action.title()}d", message=msg,
+                link=f"/goals/{goal_id}", actor_id=user_id,
+            ))
+
+    if created_by and created_by not in notified:
+        asyncio.create_task(create_notification(
+            user_id=created_by, org_id=org_id, type=notif_type,
+            title=f"Goal {request.action.title()}d", message=msg,
+            link=f"/goals/{goal_id}",
+        ))
+
+    # On approval → record goal outcome for cross-company learning
+    if request.action == "approve":
+        try:
+            from ..core.learning import learning
+            from datetime import datetime
+            created = goal.get("created_at")
+            actual_days = None
+            if created:
+                if isinstance(created, datetime):
+                    actual_days = (datetime.utcnow() - created).days
+                elif isinstance(created, str):
+                    try:
+                        c = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                        actual_days = (datetime.utcnow() - c).days
+                    except Exception:
+                        pass
+            learning.record_goal_outcome(org_id, {
+                "goal_id": goal_id,
+                "goal_title": goal.get("title"),
+                "goal_type": goal.get("goal_type"),
+                "duration": goal.get("duration"),
+                "department": goal.get("department"),
+                "priority": goal.get("priority"),
+                "industry": goal.get("industry", ""),
+                "micro_vertical": goal.get("micro_vertical", ""),
+                "status": "completed",
+                "completion_reviewed": True,
+                "actual_duration_days": actual_days,
+                "estimated_duration_days": goal.get("estimated_duration_days"),
+                "was_delayed": actual_days > 30 if actual_days else False,
+                "completed_at": datetime.utcnow().isoformat(),
+                "created_at": created.isoformat() if isinstance(created, datetime) else created,
+            })
+        except Exception as e:
+            logger = __import__("logging").getLogger("yesboss.goals")
+            logger.warning(f"Failed to record goal outcome: {e}")
+
+    asyncio.create_task(ws_manager.broadcast_to_organization(
+        {"type": "goal_updated", "data": goal}, org_id
+    ))
+
+    from ..agents.frequency_agent import process_goal as _freq_goal
+    asyncio.create_task(_freq_goal(goal, org_id))
+
     return {"goal": goal}
 
 
@@ -393,6 +632,33 @@ async def delete_goal(goal_id: str, current_user = Depends(get_current_user_opti
     db.tasks.delete_many({"goal_id": goal_id})
     
     return {"success": True, "message": "Goal deleted"}
+
+
+class BulkDeleteDefaultGoalsRequest(BaseModel):
+    organization_id: str
+
+
+@router.post("/delete-defaults")
+async def bulk_delete_default_goals(request: BulkDeleteDefaultGoalsRequest, current_user = Depends(get_current_user_optional)):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    org_id = request.organization_id
+    user_id = getattr(current_user, 'id', None) if current_user else None
+
+    if user_id and await _is_org_owner(db, org_id, user_id):
+        query = {"organization_id": org_id, "is_default": True}
+    else:
+        query = {"organization_id": org_id, "is_default": True, "created_by": user_id} if user_id else {"organization_id": org_id, "is_default": True}
+
+    default_goals = list(db.goals.find(query, {"_id": 1}))
+    goal_ids = [str(g["_id"]) for g in default_goals]
+
+    db.goals.delete_many(query)
+    db.tasks.delete_many({"goal_id": {"$in": goal_ids}})
+
+    return {"success": True, "deleted_count": len(goal_ids)}
 
 
 @router.post("/suggestions")
@@ -473,7 +739,10 @@ async def generate_tasks_from_goal(request: TaskGenerate, current_user = Depends
         task_doc["_id"] = str(result.inserted_id)
         created_tasks.append(task_doc)
         
+        from ..agents.frequency_agent import process_task as _freq_task
         org_id = goal.get("organization_id")
+        asyncio.create_task(_freq_task(task_doc, org_id))
+        
         if org_id:
             asyncio.create_task(ws_manager.broadcast_to_organization(
                 {"type": "task_created", "data": task_doc},
@@ -654,6 +923,9 @@ async def select_strategy(
         task_doc["_id"] = str(result.inserted_id)
         created_tasks.append(task_doc)
 
+        from ..agents.frequency_agent import process_task as _freq_task
+        asyncio.create_task(_freq_task(task_doc, org_id))
+
         if org_id:
             asyncio.create_task(ws_manager.broadcast_to_organization(
                 {"type": "task_created", "data": task_doc},
@@ -723,6 +995,9 @@ async def create_tasks_from_suggestions(
         result = db.tasks.insert_one(task_doc)
         task_doc["_id"] = str(result.inserted_id)
         created_tasks.append(task_doc)
+
+        from ..agents.frequency_agent import process_task as _freq_task
+        asyncio.create_task(_freq_task(task_doc, org_id))
 
         if org_id:
             asyncio.create_task(ws_manager.broadcast_to_organization(

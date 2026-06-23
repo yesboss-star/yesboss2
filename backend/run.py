@@ -7,6 +7,6 @@ if __name__ == "__main__":
         "app.main:app",
         host=settings.HOST,
         port=settings.PORT,
-        reload=True,
+        reload=False,
         log_level="info",
     )
