@@ -2275,282 +2275,140 @@ INFO:     Application startup complete.
 2026-06-23 11:48:22 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
 2026-06-23 11:48:23 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
 2026-06-23 11:48:24 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
-s.zoho.calendar | Found default calendar: uid=d71add2764484e7aab21b6d1b9b54ca3
-2026-06-23 11:08:57 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:08:57 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:08:58 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:08:58 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:08:58 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/d71add2764484e7aab21b6d1b9b54ca3/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
-2026-06-23 11:08:58 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:08:59 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:08:59 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:00 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:00 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:00 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:01 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:01 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:02 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:02 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:02 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:03 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:03 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:04 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:04 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:04 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:05 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:05 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:05 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:06 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:06 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:07 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:07 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:07 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:08 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:08 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:09 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:09 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:09 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:10 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:10 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:11 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:11 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:11 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:12 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:12 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:13 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:13 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:13 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:14 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:14 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:15 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:15 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:15 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:16 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:16 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:17 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:17 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:17 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:18 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:18 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:19 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:19 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:19 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:20 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:20 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:21 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:21 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:21 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:22 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:22 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:23 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:23 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:23 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:24 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:24 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:25 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:25 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:26 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:26 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:26 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:27 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:27 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:28 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:28 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:28 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:29 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:29 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:30 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:30 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:30 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:31 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:31 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:32 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:32 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:32 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:33 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:33 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:34 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:34 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:34 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:35 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:35 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:35 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:36 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:36 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:37 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:37 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:37 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:38 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:38 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:38 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:39 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:39 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:40 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:40 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:40 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:41 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:41 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:09:42 | INFO     | watchfiles.main | 4 changes detected
-2026-06-23 11:09:42 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:42 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:43 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:43 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:43 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:44 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:44 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:45 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:45 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:45 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:46 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:46 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:47 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:47 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:48 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:48 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:48 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:49 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:49 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:50 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:50 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:50 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:51 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:51 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:52 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:52 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:52 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:53 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:53 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:54 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:54 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:54 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:55 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:55 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:56 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:56 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:56 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:57 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:57 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:58 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:58 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:58 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:59 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:09:59 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:00 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:00 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:01 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:01 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:01 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:02 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:02 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:03 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:03 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:03 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:04 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:04 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:05 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:05 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:05 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:06 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:06 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:07 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:07 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:07 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:08 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:08 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:09 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:09 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:09 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:10 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:10 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:11 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:11 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:11 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:10:12 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:12 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:13 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:13 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:10:13 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:14 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:14 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:14 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:15 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:15 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:16 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:16 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:16 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:17 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:17 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:17 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:18 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:18 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:19 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:19 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:19 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:20 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:20 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:21 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:21 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:21 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:22 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:22 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:23 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:23 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:24 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:24 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:24 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:25 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:25 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:26 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:26 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:26 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:27 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:27 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:28 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:28 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:28 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:29 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:29 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:30 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:30 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:30 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:31 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:31 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:32 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:32 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:32 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:33 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:33 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:34 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:34 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:34 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:35 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:35 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:36 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:36 | INFO     | watchfiles.main | 1 change detected
-2026-06-23 11:10:36 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:37 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:37 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:38 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:38 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:38 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:39 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:39 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:39 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:40 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:40 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:41 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:41 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:41 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:42 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:42 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:43 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:43 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:43 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:44 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:44 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:45 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:45 | INFO     | watchfiles.main | 2 changes detected
-2026-06-23 11:10:45 | INFO     | watchfiles.main | 2 changes detected
+2026-06-23 11:53:25 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 11:53:27 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 11:53:27 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 11:53:29 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 11:58:30 | INFO     | yesboss.scheduler | Deadline check done: 0 due tomorrow, 0 due in 3 days, 0 overdue, 0 escalated to owner, 0 at 7d alert
+2026-06-23 11:58:30 | INFO     | yesboss.scheduler | Check-in reminders sent to 1 owner(s)
+2026-06-23 11:58:30 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 11:58:31 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 11:58:32 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 11:58:34 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 11:58:34 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 11:58:36 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars "HTTP/1.1 200 "
+2026-06-23 11:58:36 | INFO     | yesboss.zoho.calendar | List calendars response: status=200 for url=https://calendar.zoho.com/api/v1/calendars
+2026-06-23 11:58:36 | INFO     | yesboss.zoho.calendar | Calendar API response keys: ['calendars']
+2026-06-23 11:58:36 | INFO     | yesboss.zoho.calendar | get_default_calendar_uid: found 1 calendars
+2026-06-23 11:58:36 | INFO     | yesboss.zoho.calendar | Found default calendar: uid=7fc5edf3083749c88e3c5135487fef4d
+2026-06-23 11:58:37 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/7fc5edf3083749c88e3c5135487fef4d/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
+2026-06-23 11:58:37 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 11:58:38 | ERROR    | yesboss.email | Failed to send email to user2@demo1.value-score.co.in: (535, b'Authentication Failed')
+2026-06-23 11:58:39 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars "HTTP/1.1 200 "
+2026-06-23 11:58:39 | INFO     | yesboss.zoho.calendar | List calendars response: status=200 for url=https://calendar.zoho.com/api/v1/calendars
+2026-06-23 11:58:39 | INFO     | yesboss.zoho.calendar | Calendar API response keys: ['calendars']
+2026-06-23 11:58:39 | INFO     | yesboss.zoho.calendar | get_default_calendar_uid: found 1 calendars
+2026-06-23 11:58:39 | INFO     | yesboss.zoho.calendar | Found default calendar: uid=d71add2764484e7aab21b6d1b9b54ca3
+2026-06-23 11:58:40 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/d71add2764484e7aab21b6d1b9b54ca3/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
+2026-06-23 12:03:41 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 12:03:43 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:03:44 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 12:03:46 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:08:48 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 12:08:49 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:08:50 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 12:08:51 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:13:52 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 12:13:53 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:13:54 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 12:13:56 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:13:56 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 12:13:57 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars "HTTP/1.1 200 "
+2026-06-23 12:13:58 | INFO     | yesboss.zoho.calendar | List calendars response: status=200 for url=https://calendar.zoho.com/api/v1/calendars
+2026-06-23 12:13:58 | INFO     | yesboss.zoho.calendar | Calendar API response keys: ['calendars']
+2026-06-23 12:13:58 | INFO     | yesboss.zoho.calendar | get_default_calendar_uid: found 1 calendars
+2026-06-23 12:13:58 | INFO     | yesboss.zoho.calendar | Found default calendar: uid=7fc5edf3083749c88e3c5135487fef4d
+2026-06-23 12:13:59 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/7fc5edf3083749c88e3c5135487fef4d/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
+2026-06-23 12:13:59 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 12:14:00 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars "HTTP/1.1 200 "
+2026-06-23 12:14:00 | INFO     | yesboss.zoho.calendar | List calendars response: status=200 for url=https://calendar.zoho.com/api/v1/calendars
+2026-06-23 12:14:00 | INFO     | yesboss.zoho.calendar | Calendar API response keys: ['calendars']
+2026-06-23 12:14:00 | INFO     | yesboss.zoho.calendar | get_default_calendar_uid: found 1 calendars
+2026-06-23 12:14:00 | INFO     | yesboss.zoho.calendar | Found default calendar: uid=d71add2764484e7aab21b6d1b9b54ca3
+2026-06-23 12:14:02 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/d71add2764484e7aab21b6d1b9b54ca3/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
+2026-06-23 12:19:02 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 12:19:04 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:19:05 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 12:19:06 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:24:07 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 12:24:08 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:24:09 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 12:24:10 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:29:11 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 12:29:12 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:29:13 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 12:29:15 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:29:15 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 12:29:17 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars "HTTP/1.1 200 "
+2026-06-23 12:29:17 | INFO     | yesboss.zoho.calendar | List calendars response: status=200 for url=https://calendar.zoho.com/api/v1/calendars
+2026-06-23 12:29:17 | INFO     | yesboss.zoho.calendar | Calendar API response keys: ['calendars']
+2026-06-23 12:29:17 | INFO     | yesboss.zoho.calendar | get_default_calendar_uid: found 1 calendars
+2026-06-23 12:29:17 | INFO     | yesboss.zoho.calendar | Found default calendar: uid=7fc5edf3083749c88e3c5135487fef4d
+2026-06-23 12:29:19 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/7fc5edf3083749c88e3c5135487fef4d/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
+2026-06-23 12:29:19 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 12:29:20 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars "HTTP/1.1 200 "
+2026-06-23 12:29:20 | INFO     | yesboss.zoho.calendar | List calendars response: status=200 for url=https://calendar.zoho.com/api/v1/calendars
+2026-06-23 12:29:20 | INFO     | yesboss.zoho.calendar | Calendar API response keys: ['calendars']
+2026-06-23 12:29:20 | INFO     | yesboss.zoho.calendar | get_default_calendar_uid: found 1 calendars
+2026-06-23 12:29:20 | INFO     | yesboss.zoho.calendar | Found default calendar: uid=d71add2764484e7aab21b6d1b9b54ca3
+2026-06-23 12:29:22 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/d71add2764484e7aab21b6d1b9b54ca3/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
+2026-06-23 12:34:22 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 12:34:24 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:34:24 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 12:34:26 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:39:27 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T08:08:41.847462, has_refresh=True
+2026-06-23 12:39:33 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:39:33 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T08:08:46.051785, has_refresh=True
+2026-06-23 12:39:35 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:44:36 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T08:08:41.847462, has_refresh=True
+2026-06-23 12:44:42 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:44:43 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T08:08:46.051785, has_refresh=True
+2026-06-23 12:44:44 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:44:45 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T08:08:41.847462, has_refresh=True
+2026-06-23 12:44:46 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars "HTTP/1.1 200 "
+2026-06-23 12:44:46 | INFO     | yesboss.zoho.calendar | List calendars response: status=200 for url=https://calendar.zoho.com/api/v1/calendars
+2026-06-23 12:44:46 | INFO     | yesboss.zoho.calendar | Calendar API response keys: ['calendars']
+2026-06-23 12:44:46 | INFO     | yesboss.zoho.calendar | get_default_calendar_uid: found 1 calendars
+2026-06-23 12:44:46 | INFO     | yesboss.zoho.calendar | Found default calendar: uid=7fc5edf3083749c88e3c5135487fef4d
+2026-06-23 12:44:48 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/7fc5edf3083749c88e3c5135487fef4d/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
+2026-06-23 12:44:48 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T08:08:46.051785, has_refresh=True
+2026-06-23 12:44:50 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars "HTTP/1.1 200 "
+2026-06-23 12:44:50 | INFO     | yesboss.zoho.calendar | List calendars response: status=200 for url=https://calendar.zoho.com/api/v1/calendars
+2026-06-23 12:44:50 | INFO     | yesboss.zoho.calendar | Calendar API response keys: ['calendars']
+2026-06-23 12:44:50 | INFO     | yesboss.zoho.calendar | get_default_calendar_uid: found 1 calendars
+2026-06-23 12:44:50 | INFO     | yesboss.zoho.calendar | Found default calendar: uid=d71add2764484e7aab21b6d1b9b54ca3
+2026-06-23 12:44:52 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/d71add2764484e7aab21b6d1b9b54ca3/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
+2026-06-23 12:49:52 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T08:08:41.847462, has_refresh=True
+2026-06-23 12:49:54 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:49:54 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T08:08:46.051785, has_refresh=True
+2026-06-23 12:49:56 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:54:56 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T08:08:41.847462, has_refresh=True
+2026-06-23 12:54:58 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:54:59 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T08:08:46.051785, has_refresh=True
+2026-06-23 12:55:00 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 13:00:01 | INFO     | yesboss.scheduler | Deadline check done: 0 due tomorrow, 0 due in 3 days, 0 overdue, 0 escalated to owner, 0 at 7d alert
+2026-06-23 13:00:01 | INFO     | yesboss.scheduler | Check-in reminders sent to 1 owner(s)
+2026-06-23 13:00:01 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T08:08:41.847462, has_refresh=True
+2026-06-23 13:00:03 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 13:00:03 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T08:08:46.051785, has_refresh=True
+2026-06-23 13:00:05 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 13:00:06 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T08:08:41.847462, has_refresh=True
+2026-06-23 13:00:08 | ERROR    | yesboss.email | Failed to send email to user2@demo1.value-score.co.in: (535, b'Authentication Failed')
+2026-06-23 13:00:10 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars "HTTP/1.1 200 "
+2026-06-23 13:00:10 | INFO     | yesboss.zoho.calendar | List calendars response: status=200 for url=https://calendar.zoho.com/api/v1/calendars
+2026-06-23 13:00:10 | INFO     | yesboss.zoho.calendar | Calendar API response keys: ['calendars']
+2026-06-23 13:00:10 | INFO     | yesboss.zoho.calendar | get_default_calendar_uid: found 1 calendars
+2026-06-23 13:00:10 | INFO     | yesboss.zoho.calendar | Found default calendar: uid=7fc5edf3083749c88e3c5135487fef4d
+2026-06-23 13:00:11 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/7fc5edf3083749c88e3c5135487fef4d/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
+2026-06-23 13:00:12 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T08:08:46.051785, has_refresh=True
+2026-06-23 13:00:13 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars "HTTP/1.1 200 "
+2026-06-23 13:00:13 | INFO     | yesboss.zoho.calendar | List calendars response: status=200 for url=https://calendar.zoho.com/api/v1/calendars
+2026-06-23 13:00:13 | INFO     | yesboss.zoho.calendar | Calendar API response keys: ['calendars']
+2026-06-23 13:00:13 | INFO     | yesboss.zoho.calendar | get_default_calendar_uid: found 1 calendars
+2026-06-23 13:00:13 | INFO     | yesboss.zoho.calendar | Found default calendar: uid=d71add2764484e7aab21b6d1b9b54ca3
+2026-06-23 13:00:15 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/d71add2764484e7aab21b6d1b9b54ca3/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
+2026-06-23 14:29:06 | WARNING  | yesboss.scheduler | Zoho task sync error: ac-ovjiufo-shard-00-01.kf8ash8.mongodb.net:27017: connection pool paused (configured timeouts: connectTimeoutMS: 15000.0ms)
+nges detected
 2026-06-23 11:10:46 | INFO     | watchfiles.main | 2 changes detected
 2026-06-23 11:10:46 | INFO     | watchfiles.main | 2 changes detected
 2026-06-23 11:10:47 | INFO     | watchfiles.main | 1 change detected
@@ -2700,3 +2558,184 @@ s.zoho.calendar | Found default calendar: uid=d71add2764484e7aab21b6d1b9b54ca3
 2026-06-23 11:24:19 | INFO     | yesboss.zoho.calendar | get_default_calendar_uid: found 1 calendars
 2026-06-23 11:24:19 | INFO     | yesboss.zoho.calendar | Found default calendar: uid=d71add2764484e7aab21b6d1b9b54ca3
 2026-06-23 11:24:21 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/d71add2764484e7aab21b6d1b9b54ca3/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
+2026-06-23 11:29:28 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T06:17:58.626943, has_refresh=True
+2026-06-23 11:29:29 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 11:29:30 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T06:18:01.466894, has_refresh=True
+2026-06-23 11:29:32 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 11:34:32 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T06:17:58.626943, has_refresh=True
+2026-06-23 11:34:33 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 11:34:34 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T06:18:01.466894, has_refresh=True
+2026-06-23 11:34:35 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 11:39:36 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T06:17:58.626943, has_refresh=True
+2026-06-23 11:39:37 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 11:39:38 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T06:18:01.466894, has_refresh=True
+2026-06-23 11:39:40 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 11:39:40 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T06:17:58.626943, has_refresh=True
+2026-06-23 11:39:42 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars "HTTP/1.1 200 "
+2026-06-23 11:39:42 | INFO     | yesboss.zoho.calendar | List calendars response: status=200 for url=https://calendar.zoho.com/api/v1/calendars
+2026-06-23 11:39:42 | INFO     | yesboss.zoho.calendar | Calendar API response keys: ['calendars']
+2026-06-23 11:39:42 | INFO     | yesboss.zoho.calendar | get_default_calendar_uid: found 1 calendars
+2026-06-23 11:39:42 | INFO     | yesboss.zoho.calendar | Found default calendar: uid=7fc5edf3083749c88e3c5135487fef4d
+2026-06-23 11:39:44 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/7fc5edf3083749c88e3c5135487fef4d/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
+2026-06-23 11:39:44 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T06:18:01.466894, has_refresh=True
+2026-06-23 11:39:46 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars "HTTP/1.1 200 "
+2026-06-23 11:39:46 | INFO     | yesboss.zoho.calendar | List calendars response: status=200 for url=https://calendar.zoho.com/api/v1/calendars
+2026-06-23 11:39:46 | INFO     | yesboss.zoho.calendar | Calendar API response keys: ['calendars']
+2026-06-23 11:39:46 | INFO     | yesboss.zoho.calendar | get_default_calendar_uid: found 1 calendars
+2026-06-23 11:39:46 | INFO     | yesboss.zoho.calendar | Found default calendar: uid=d71add2764484e7aab21b6d1b9b54ca3
+2026-06-23 11:39:47 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/d71add2764484e7aab21b6d1b9b54ca3/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
+2026-06-23 11:44:48 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 11:44:49 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 11:44:50 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 11:44:51 | WARNING  | yesboss.notification_service | pywebpush not installed — skipping push
+2026-06-23 11:44:51 | WARNING  | yesboss.notification_service | pywebpush not installed — skipping push
+2026-06-23 11:44:51 | WARNING  | yesboss.notification_service | pywebpush not installed — skipping push
+2026-06-23 11:44:51 | WARNING  | yesboss.notification_service | pywebpush not installed — skipping push
+2026-06-23 11:44:52 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 11:44:53 | WARNING  | yesboss.notification_service | pywebpush not installed — skipping push
+2026-06-23 11:44:53 | WARNING  | yesboss.notification_service | pywebpush not installed — skipping push
+2026-06-23 11:44:53 | WARNING  | yesboss.notification_service | pywebpush not installed — skipping push
+2026-06-23 11:44:53 | WARNING  | yesboss.notification_service | pywebpush not installed — skipping push
+2026-06-23 11:44:53 | WARNING  | yesboss.notification_service | pywebpush not installed — skipping push
+2026-06-23 11:44:54 | ERROR    | yesboss.email | Failed to send email to krisha@value-score.co.in: (535, b'Authentication Failed')
+2026-06-23 11:44:54 | ERROR    | yesboss.email | Failed to send email to krisha@value-score.co.in: (535, b'Authentication Failed')
+2026-06-23 11:44:54 | ERROR    | yesboss.email | Failed to send email to krisha@value-score.co.in: (535, b'Authentication Failed')
+2026-06-23 11:44:54 | ERROR    | yesboss.email | Failed to send email to krisha@value-score.co.in: (535, b'Authentication Failed')
+2026-06-23 11:44:56 | ERROR    | yesboss.email | Failed to send email to prince@value-score.co.in: (535, b'Authentication Failed')
+2026-06-23 11:44:56 | ERROR    | yesboss.email | Failed to send email to prince@value-score.co.in: (535, b'Authentication Failed')
+2026-06-23 11:44:56 | ERROR    | yesboss.email | Failed to send email to prince@value-score.co.in: (535, b'Authentication Failed')
+2026-06-23 11:44:56 | ERROR    | yesboss.email | Failed to send email to prince@value-score.co.in: (535, b'Authentication Failed')
+2026-06-23 11:44:56 | ERROR    | yesboss.email | Failed to send email to prince@value-score.co.in: (535, b'Authentication Failed')
+2026-06-23 11:49:53 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 11:49:55 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 11:49:56 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 11:49:57 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 11:54:58 | INFO     | yesboss.scheduler | Deadline check done: 0 due tomorrow, 0 due in 3 days, 0 overdue, 0 escalated to owner, 0 at 7d alert
+2026-06-23 11:54:59 | INFO     | yesboss.scheduler | Check-in reminders sent to 1 owner(s)
+2026-06-23 11:54:59 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 11:55:00 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 11:55:01 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 11:55:02 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 11:55:03 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 11:55:04 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars "HTTP/1.1 200 "
+2026-06-23 11:55:04 | INFO     | yesboss.zoho.calendar | List calendars response: status=200 for url=https://calendar.zoho.com/api/v1/calendars
+2026-06-23 11:55:04 | INFO     | yesboss.zoho.calendar | Calendar API response keys: ['calendars']
+2026-06-23 11:55:04 | INFO     | yesboss.zoho.calendar | get_default_calendar_uid: found 1 calendars
+2026-06-23 11:55:04 | INFO     | yesboss.zoho.calendar | Found default calendar: uid=7fc5edf3083749c88e3c5135487fef4d
+2026-06-23 11:55:06 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/7fc5edf3083749c88e3c5135487fef4d/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
+2026-06-23 11:55:06 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 11:55:06 | ERROR    | yesboss.email | Failed to send email to user2@demo1.value-score.co.in: (535, b'Authentication Failed')
+2026-06-23 11:55:08 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars "HTTP/1.1 200 "
+2026-06-23 11:55:08 | INFO     | yesboss.zoho.calendar | List calendars response: status=200 for url=https://calendar.zoho.com/api/v1/calendars
+2026-06-23 11:55:08 | INFO     | yesboss.zoho.calendar | Calendar API response keys: ['calendars']
+2026-06-23 11:55:08 | INFO     | yesboss.zoho.calendar | get_default_calendar_uid: found 1 calendars
+2026-06-23 11:55:08 | INFO     | yesboss.zoho.calendar | Found default calendar: uid=d71add2764484e7aab21b6d1b9b54ca3
+2026-06-23 11:55:09 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/d71add2764484e7aab21b6d1b9b54ca3/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
+2026-06-23 12:00:10 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 12:00:13 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:00:14 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 12:00:18 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:05:18 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 12:05:20 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:05:20 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 12:05:22 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:10:23 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 12:10:24 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:10:25 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 12:10:26 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:10:27 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 12:10:28 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars "HTTP/1.1 200 "
+2026-06-23 12:10:28 | INFO     | yesboss.zoho.calendar | List calendars response: status=200 for url=https://calendar.zoho.com/api/v1/calendars
+2026-06-23 12:10:28 | INFO     | yesboss.zoho.calendar | Calendar API response keys: ['calendars']
+2026-06-23 12:10:28 | INFO     | yesboss.zoho.calendar | get_default_calendar_uid: found 1 calendars
+2026-06-23 12:10:28 | INFO     | yesboss.zoho.calendar | Found default calendar: uid=7fc5edf3083749c88e3c5135487fef4d
+2026-06-23 12:10:29 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/7fc5edf3083749c88e3c5135487fef4d/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
+2026-06-23 12:10:30 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 12:10:31 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars "HTTP/1.1 200 "
+2026-06-23 12:10:31 | INFO     | yesboss.zoho.calendar | List calendars response: status=200 for url=https://calendar.zoho.com/api/v1/calendars
+2026-06-23 12:10:31 | INFO     | yesboss.zoho.calendar | Calendar API response keys: ['calendars']
+2026-06-23 12:10:31 | INFO     | yesboss.zoho.calendar | get_default_calendar_uid: found 1 calendars
+2026-06-23 12:10:31 | INFO     | yesboss.zoho.calendar | Found default calendar: uid=d71add2764484e7aab21b6d1b9b54ca3
+2026-06-23 12:10:32 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/d71add2764484e7aab21b6d1b9b54ca3/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
+2026-06-23 12:15:33 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 12:15:34 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:15:35 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 12:15:37 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:20:37 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 12:20:39 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:20:39 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 12:20:41 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:25:42 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 12:25:43 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:25:43 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 12:25:45 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:25:45 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 12:25:47 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars "HTTP/1.1 200 "
+2026-06-23 12:25:47 | INFO     | yesboss.zoho.calendar | List calendars response: status=200 for url=https://calendar.zoho.com/api/v1/calendars
+2026-06-23 12:25:47 | INFO     | yesboss.zoho.calendar | Calendar API response keys: ['calendars']
+2026-06-23 12:25:47 | INFO     | yesboss.zoho.calendar | get_default_calendar_uid: found 1 calendars
+2026-06-23 12:25:47 | INFO     | yesboss.zoho.calendar | Found default calendar: uid=7fc5edf3083749c88e3c5135487fef4d
+2026-06-23 12:25:48 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/7fc5edf3083749c88e3c5135487fef4d/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
+2026-06-23 12:25:48 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 12:25:49 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars "HTTP/1.1 200 "
+2026-06-23 12:25:49 | INFO     | yesboss.zoho.calendar | List calendars response: status=200 for url=https://calendar.zoho.com/api/v1/calendars
+2026-06-23 12:25:49 | INFO     | yesboss.zoho.calendar | Calendar API response keys: ['calendars']
+2026-06-23 12:25:49 | INFO     | yesboss.zoho.calendar | get_default_calendar_uid: found 1 calendars
+2026-06-23 12:25:49 | INFO     | yesboss.zoho.calendar | Found default calendar: uid=d71add2764484e7aab21b6d1b9b54ca3
+2026-06-23 12:25:51 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/d71add2764484e7aab21b6d1b9b54ca3/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
+2026-06-23 12:30:51 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 12:30:52 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:30:53 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 12:30:55 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:35:55 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T07:13:08.885156, has_refresh=True
+2026-06-23 12:35:57 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:35:58 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T07:13:12.337034, has_refresh=True
+2026-06-23 12:35:59 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:41:00 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T08:08:41.847462, has_refresh=True
+2026-06-23 12:41:02 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:41:02 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T08:08:46.051785, has_refresh=True
+2026-06-23 12:41:04 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:41:05 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T08:08:41.847462, has_refresh=True
+2026-06-23 12:41:06 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars "HTTP/1.1 200 "
+2026-06-23 12:41:06 | INFO     | yesboss.zoho.calendar | List calendars response: status=200 for url=https://calendar.zoho.com/api/v1/calendars
+2026-06-23 12:41:06 | INFO     | yesboss.zoho.calendar | Calendar API response keys: ['calendars']
+2026-06-23 12:41:06 | INFO     | yesboss.zoho.calendar | get_default_calendar_uid: found 1 calendars
+2026-06-23 12:41:06 | INFO     | yesboss.zoho.calendar | Found default calendar: uid=7fc5edf3083749c88e3c5135487fef4d
+2026-06-23 12:41:09 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/7fc5edf3083749c88e3c5135487fef4d/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
+2026-06-23 12:41:09 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T08:08:46.051785, has_refresh=True
+2026-06-23 12:41:11 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars "HTTP/1.1 200 "
+2026-06-23 12:41:11 | INFO     | yesboss.zoho.calendar | List calendars response: status=200 for url=https://calendar.zoho.com/api/v1/calendars
+2026-06-23 12:41:11 | INFO     | yesboss.zoho.calendar | Calendar API response keys: ['calendars']
+2026-06-23 12:41:11 | INFO     | yesboss.zoho.calendar | get_default_calendar_uid: found 1 calendars
+2026-06-23 12:41:11 | INFO     | yesboss.zoho.calendar | Found default calendar: uid=d71add2764484e7aab21b6d1b9b54ca3
+2026-06-23 12:41:13 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/d71add2764484e7aab21b6d1b9b54ca3/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
+2026-06-23 12:46:13 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T08:08:41.847462, has_refresh=True
+2026-06-23 12:46:15 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:46:17 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T08:08:46.051785, has_refresh=True
+2026-06-23 12:46:18 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:51:19 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T08:08:41.847462, has_refresh=True
+2026-06-23 12:51:21 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:51:21 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T08:08:46.051785, has_refresh=True
+2026-06-23 12:51:23 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:56:24 | INFO     | yesboss.scheduler | Deadline check done: 0 due tomorrow, 0 due in 3 days, 0 overdue, 0 escalated to owner, 0 at 7d alert
+2026-06-23 12:56:24 | INFO     | yesboss.scheduler | Check-in reminders sent to 1 owner(s)
+2026-06-23 12:56:24 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T08:08:41.847462, has_refresh=True
+2026-06-23 12:56:25 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:56:26 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T08:08:46.051785, has_refresh=True
+2026-06-23 12:56:27 | INFO     | httpx | HTTP Request: GET https://mail.zoho.com/api/tasks/me?from=0&limit=499 "HTTP/1.1 200 "
+2026-06-23 12:56:28 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=sqvtdO9eINOJVt9kbzFTRKlV9J52, expires_at=2026-06-23T08:08:41.847462, has_refresh=True
+2026-06-23 12:56:29 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars "HTTP/1.1 200 "
+2026-06-23 12:56:29 | INFO     | yesboss.zoho.calendar | List calendars response: status=200 for url=https://calendar.zoho.com/api/v1/calendars
+2026-06-23 12:56:29 | INFO     | yesboss.zoho.calendar | Calendar API response keys: ['calendars']
+2026-06-23 12:56:29 | INFO     | yesboss.zoho.calendar | get_default_calendar_uid: found 1 calendars
+2026-06-23 12:56:29 | INFO     | yesboss.zoho.calendar | Found default calendar: uid=7fc5edf3083749c88e3c5135487fef4d
+2026-06-23 12:56:31 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/7fc5edf3083749c88e3c5135487fef4d/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
+2026-06-23 12:56:31 | INFO     | yesboss.zoho.oauth | get_valid_token: token found for user_id=Mr2Ntluu21dBw5zn4gbf40foMiv2, expires_at=2026-06-23T08:08:46.051785, has_refresh=True
+2026-06-23 12:56:32 | ERROR    | yesboss.email | Failed to send email to user2@demo1.value-score.co.in: (535, b'Authentication Failed')
+2026-06-23 12:56:33 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars "HTTP/1.1 200 "
+2026-06-23 12:56:33 | INFO     | yesboss.zoho.calendar | List calendars response: status=200 for url=https://calendar.zoho.com/api/v1/calendars
+2026-06-23 12:56:33 | INFO     | yesboss.zoho.calendar | Calendar API response keys: ['calendars']
+2026-06-23 12:56:33 | INFO     | yesboss.zoho.calendar | get_default_calendar_uid: found 1 calendars
+2026-06-23 12:56:33 | INFO     | yesboss.zoho.calendar | Found default calendar: uid=d71add2764484e7aab21b6d1b9b54ca3
+2026-06-23 12:56:34 | INFO     | httpx | HTTP Request: GET https://calendar.zoho.com/api/v1/calendars/d71add2764484e7aab21b6d1b9b54ca3/events?range=%7B%22start%22%3A+%2220260623%22%2C+%22end%22%3A+%2220260723%22%7D "HTTP/1.1 200 "
+2026-06-23 14:29:05 | WARNING  | yesboss.scheduler | Zoho task sync error: ac-ovjiufo-shard-00-01.kf8ash8.mongodb.net:27017: [Errno 11001] getaddrinfo failed (configured timeouts: socketTimeoutMS: 15000.0ms, connectTimeoutMS: 15000.0ms),ac-ovjiufo-shard-00-00.kf8ash8.mongodb.net:27017: [Errno 11001] getaddrinfo failed (configured timeouts: socketTimeoutMS: 15000.0ms, connectTimeoutMS: 15000.0ms),ac-ovjiufo-shard-00-02.kf8ash8.mongodb.net:27017: [Errno 11001] getaddrinfo failed (configured timeouts: socketTimeoutMS: 15000.0ms, connectTimeoutMS: 15000.0ms), Timeout: 15.0s, Topology Description: <TopologyDescription id: 6a3a184e02bb52785865bde2, topology_type: ReplicaSetNoPrimary, servers: [<ServerDescription ('ac-ovjiufo-shard-00-00.kf8ash8.mongodb.net', 27017) server_type: Unknown, rtt: None, error=AutoReconnect('ac-ovjiufo-shard-00-00.kf8ash8.mongodb.net:27017: [Errno 11001] getaddrinfo failed (configured timeouts: socketTimeoutMS: 15000.0ms, connectTimeoutMS: 15000.0ms)')>, <ServerDescription ('ac-ovjiufo-shard-00-01.kf8ash8.mongodb.net', 27017) server_type: Unknown, rtt: None, error=AutoReconnect('ac-ovjiufo-shard-00-01.kf8ash8.mongodb.net:27017: [Errno 11001] getaddrinfo failed (configured timeouts: socketTimeoutMS: 15000.0ms, connectTimeoutMS: 15000.0ms)')>, <ServerDescription ('ac-ovjiufo-shard-00-02.kf8ash8.mongodb.net', 27017) server_type: Unknown, rtt: None, error=AutoReconnect('ac-ovjiufo-shard-00-02.kf8ash8.mongodb.net:27017: [Errno 11001] getaddrinfo failed (configured timeouts: socketTimeoutMS: 15000.0ms, connectTimeoutMS: 15000.0ms)')>]>

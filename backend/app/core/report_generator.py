@@ -53,9 +53,41 @@ async def generate_employee_report(
         t.get("goal_id") or t.get("goal_title", "") for t in period_tasks if t.get("goal_id") or t.get("goal_title")
     ))
 
+    escalated = [t for t in period_tasks if t.get("escalation_level", 0) > 0]
+    escalated_count = len(escalated)
+    avg_overdue_days = 0.0
+    overdue_days_list = []
+    now = datetime.utcnow()
+    for t in overdue:
+        due = t.get("due_date")
+        if due:
+            try:
+                d = datetime.fromisoformat(str(due).replace("Z", "")) if isinstance(due, str) else due
+                overdue_days_list.append((now - d).days)
+            except Exception:
+                pass
+    if overdue_days_list:
+        avg_overdue_days = round(sum(overdue_days_list) / len(overdue_days_list), 1)
+
     member = db.org_chart_members.find_one({"email": employee_email.lower(), "organization_id": org_id})
     employee_name = member.get("full_name", employee_email) if member else employee_email
     department = member.get("department", "") if member else ""
+    manager_email = member.get("manager_email", "") if member else ""
+
+    escalation_lines = []
+    for t in escalated:
+        level = t.get("escalation_level", 0)
+        label = "manager" if level == 1 else "owner"
+        days_overdue = 0
+        due = t.get("due_date")
+        if due:
+            try:
+                d = datetime.fromisoformat(str(due).replace("Z", "")) if isinstance(due, str) else due
+                days_overdue = (now - d).days
+            except Exception:
+                pass
+        escalation_lines.append(f"  - \"{t.get('title', 'Unknown')}\" overdue {days_overdue}d, escalated to {label}")
+    escalation_section = "[Escalated Tasks]\n" + "\n".join(escalation_lines) if escalation_lines else ""
 
     ai_feedback = ""
     prompt = (
@@ -66,11 +98,15 @@ async def generate_employee_report(
         f"Completed: {done}\n"
         f"Pending: {pending}\n"
         f"In Progress: {in_progress}\n"
-        f"Overdue: {len(overdue)}\n"
+        f"Overdue: {len(overdue)} (avg {avg_overdue_days}d overdue)\n"
+        f"Escalated: {escalated_count}\n"
         f"Completion rate: {completion_rate}%\n"
         f"Average completion time: {avg_completion_hours}h\n"
-        f"Goals contributed to: {len(goals_touched)}\n\n"
-        f"Provide 2-3 sentences of constructive feedback highlighting strengths and areas for improvement."
+        f"Goals contributed to: {len(goals_touched)}\n"
+        f"Manager: {manager_email}\n"
+        f"{escalation_section}\n"
+        f"Provide 2-3 sentences of constructive feedback highlighting strengths and areas for improvement. "
+        f"Flag any concerning escalation patterns."
     )
     try:
         ai_feedback = await get_ai_response(prompt)
@@ -82,6 +118,7 @@ async def generate_employee_report(
         "employee_email": employee_email,
         "employee_name": employee_name,
         "department": department,
+        "manager_email": manager_email,
         "period": period,
         "generated_at": datetime.utcnow().isoformat(),
         "metrics": {
@@ -90,9 +127,16 @@ async def generate_employee_report(
             "pending_tasks": len(pending),
             "in_progress_tasks": len(in_progress),
             "overdue_tasks": len(overdue),
+            "avg_overdue_days": avg_overdue_days,
+            "escalated_tasks": escalated_count,
             "completion_rate": completion_rate,
             "avg_completion_hours": avg_completion_hours,
             "goals_touched": len(goals_touched),
+        },
+        "escalation": {
+            "total": escalated_count,
+            "items": escalation_lines,
+            "manager_notified": manager_email if escalated_count else "",
         },
         "ai_feedback": ai_feedback,
     }
@@ -116,6 +160,7 @@ async def generate_org_health(db: Any, org_id: str) -> Dict:
     completed_tasks = len([t for t in tasks if t.get("status") == "completed"])
     pending_tasks = len([t for t in tasks if t.get("status") == "pending"])
     overdue_tasks = len([t for t in tasks if t.get("due_date") and t.get("status") not in ("completed", "approved") and _is_overdue(t.get("due_date"))])
+    escalated_tasks = len([t for t in tasks if t.get("escalation_level", 0) > 0])
     task_completion_rate = round((completed_tasks / total_tasks * 100), 1) if total_tasks > 0 else 0.0
 
     avg_quality_score = 0.0
@@ -164,9 +209,10 @@ async def generate_org_health(db: Any, org_id: str) -> Dict:
     structure_weight = 0.08
     market_weight = 0.10
     bottleneck_penalty = min(len(bottlenecks) * 5, 25)
+    escalated_penalty = min(escalated_tasks * 3, 20)
     overdue_penalty = min(overdue_tasks * 2, 15)
     health_score_raw = goal_score + task_score + quality_score + (structure_score * structure_weight) + (market_alignment_score * market_weight)
-    health_score = round(max(0, min(100, health_score_raw - bottleneck_penalty - overdue_penalty)), 1)
+    health_score = round(max(0, min(100, health_score_raw - bottleneck_penalty - overdue_penalty - escalated_penalty)), 1)
 
     if health_score >= 80:
         health_label = "Healthy"
@@ -180,7 +226,7 @@ async def generate_org_health(db: Any, org_id: str) -> Dict:
         f"Organization Health Assessment\n"
         f"Health Score: {health_score}/100 ({health_label})\n"
         f"Goals: {active_goals} active, {completed_goals} completed ({goal_completion_rate}%)\n"
-        f"Tasks: {completed_tasks}/{total_tasks} completed ({task_completion_rate}%), {overdue_tasks} overdue\n"
+        f"Tasks: {completed_tasks}/{total_tasks} completed ({task_completion_rate}%), {overdue_tasks} overdue, {escalated_tasks} escalated\n"
         f"Team Size: {team_size}\n"
         f"Departments: {list(departments.keys())}\n"
         f"Open Bottlenecks: {len(bottlenecks)}\n"
@@ -203,6 +249,7 @@ async def generate_org_health(db: Any, org_id: str) -> Dict:
             "task_completion_rate": task_completion_rate,
             "avg_quality_score": avg_quality_score,
             "overdue_tasks": overdue_tasks,
+            "escalated_tasks": escalated_tasks,
             "open_bottlenecks": len(bottlenecks),
             "team_size": team_size,
             "has_org_structure": has_org_structure,

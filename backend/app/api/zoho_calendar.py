@@ -9,6 +9,7 @@ from ..core.database import get_database
 from ..dependencies.auth import get_current_user_optional
 from ..core.zoho import ZohoCalendar, ZohoOAuth
 from ..api.websocket import manager as ws_manager
+from ..core.notification_service import create_and_deliver
 
 logger = logging.getLogger("yesboss.zoho_calendar")
 router = APIRouter()
@@ -296,6 +297,36 @@ async def book_event(
                     attendee_results.append({"email": email, "status": "no_token"})
             else:
                 attendee_results.append({"email": email, "status": "not_connected"})
+
+    meeting_doc = {
+        "title": request.title,
+        "description": request.description,
+        "organization_id": org_id,
+        "created_by": user_id,
+        "zoho_event_id": event_id,
+        "attendees": [a.get("email") for a in request.attendees],
+        "status": "booked",
+        "mom_uploaded": False,
+        "reminder_sent": False,
+        "start_dt": request.start,
+        "end_dt": request.end,
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow(),
+    }
+    db.meetings.insert_one(meeting_doc)
+
+    for att in request.attendees:
+        email = att.get("email", "")
+        if email:
+            asyncio.create_task(create_and_deliver(
+                user_id=email,
+                org_id=org_id,
+                type="meeting_scheduled",
+                title=f"Meeting: {request.title}",
+                message=f"Meeting '{request.title}' scheduled at {request.start} — upload MoM after",
+                link=f"/dashboard?zoho_event_id={event_id}",
+                metadata={"zoho_event_id": event_id, "start_dt": request.start},
+            ))
 
     asyncio.create_task(ws_manager.broadcast_to_organization(
         {"type": "event_created", "data": event_doc},

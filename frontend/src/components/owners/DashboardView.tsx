@@ -18,7 +18,7 @@ import {
   BarChart3, Target, Zap, Activity, ChevronRight,
   AlertTriangle, Info, Users, User, FileSpreadsheet,
   PieChart as PieChartIcon, Link2, X, Building2, Network,
-  Briefcase, Search, RefreshCw, Upload,
+  Briefcase, Search, RefreshCw, Upload, Trash2,
 } from "lucide-react";
 import {
   Card, CardHeader, CardTitle, CardDescription, CardContent,
@@ -1888,6 +1888,7 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
   const [showCheckInModal, setShowCheckInModal] = useState(false);
   const [meetingHistory, setMeetingHistory] = useState<any[]>([]);
   const [meetingHistoryLoading, setMeetingHistoryLoading] = useState(false);
+  const [expandedTitles, setExpandedTitles] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (searchParams?.get("checkin") === "true" && orgId) {
@@ -1899,7 +1900,7 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
     if (!orgId) return;
     setMeetingHistoryLoading(true);
     try {
-      const res = await fetch(`${API_URL}/meetings/history?organization_id=${orgId}`);
+      const res = await fetch(`${API_URL}/meetings/history?organization_id=${orgId}&limit=50`);
       if (res.ok) {
         const data = await res.json();
         setMeetingHistory(data.meetings || []);
@@ -1912,6 +1913,22 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
   useEffect(() => {
     if (orgId) fetchMeetingHistory();
   }, [orgId, fetchMeetingHistory]);
+
+  const handleDeleteMeeting = useCallback(async (meetingId: string) => {
+    if (!orgId) return;
+    try {
+      const res = await fetch(`${API_URL}/meetings/${meetingId}?organization_id=${orgId}`, {
+        method: "DELETE",
+        credentials: "include",
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        setMeetingHistory((prev) => prev.filter((m: any) => m.id !== meetingId));
+      }
+    } catch (e) {
+      console.error("Delete meeting error:", e);
+    }
+  }, [orgId]);
 
   const [dismissedSetupCards, setDismissedSetupCards] = useState<Set<string>>(() => {
     if (typeof window === "undefined") return new Set();
@@ -2194,24 +2211,66 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
               <p className="text-sm text-text-muted">No meetings uploaded yet</p>
               <p className="text-xs text-text-muted/60 mt-1">Upload meeting notes to extract tasks automatically</p>
             </div>
-          ) : (
-            <div className="space-y-2">
-              {meetingHistory.slice(0, 5).map((m: any) => (
-                <div key={m.id} className="flex items-center gap-3 p-3 rounded-xl bg-surface border border-border/50">
-                  <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                    <FileText className="w-4 h-4 text-primary" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{m.title}</p>
-                    <p className="text-xs text-text-muted">
-                      {m.task_count || 0} tasks · {m.created_at ? new Date(m.created_at).toLocaleDateString() : ""}
-                    </p>
-                  </div>
-                  <Badge variant="outline" className="text-xs flex-shrink-0">{m.task_count || 0}</Badge>
-                </div>
-              ))}
-            </div>
-          )}
+          ) : (() => {
+            const grouped = meetingHistory.reduce((acc: Record<string, any[]>, m: any) => {
+              const key = m.title || "Untitled";
+              (acc[key] = acc[key] || []).push(m);
+              return acc;
+            }, {} as Record<string, any[]>);
+            const sortedGroups = Object.entries(grouped).sort(([, a], [, b]) => {
+              const latestA = Math.max(...a.map((x: any) => new Date(x.created_at || 0).getTime()));
+              const latestB = Math.max(...b.map((x: any) => new Date(x.created_at || 0).getTime()));
+              return latestB - latestA;
+            });
+            const toggleTitle = (t: string) => {
+              setExpandedTitles(prev => {
+                const next = new Set(prev);
+                next.has(t) ? next.delete(t) : next.add(t);
+                return next;
+              });
+            };
+            return (
+              <div className="space-y-1">
+                {sortedGroups.map(([title, meetings]) => {
+                  const isExpanded = expandedTitles.has(title);
+                  const latest = meetings[0];
+                  return (
+                    <div key={title} className="rounded-xl border border-border/50 overflow-hidden">
+                      <button
+                        onClick={() => toggleTitle(title)}
+                        className="w-full flex items-center gap-3 p-3 bg-surface hover:bg-surface/80 transition-colors cursor-pointer text-left"
+                      >
+                        {isExpanded ? <ChevronDown className="w-4 h-4 text-text-muted flex-shrink-0" /> : <ChevronRight className="w-4 h-4 text-text-muted flex-shrink-0" />}
+                        <FileText className="w-4 h-4 text-primary flex-shrink-0" />
+                        <span className="text-sm font-medium flex-1 truncate">{title}</span>
+                        <Badge variant="outline" className="text-xs flex-shrink-0">{meetings.length}</Badge>
+                        {latest.created_at && (
+                          <span className="text-[10px] text-text-muted flex-shrink-0">{new Date(latest.created_at).toLocaleDateString()}</span>
+                        )}
+                      </button>
+                      {isExpanded && (
+                        <div className="border-t border-border/50">
+                          {meetings.map((m: any) => (
+                            <div key={m.id} className="flex items-center gap-3 px-3 py-2.5 pl-12 bg-surface/50 border-b border-border/30 last:border-0">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs text-text-muted">
+                                  {m.task_count || 0} tasks · {m.created_at ? new Date(m.created_at).toLocaleDateString() : ""}
+                                </p>
+                              </div>
+                              <Badge variant="outline" className="text-[10px] flex-shrink-0">{m.task_count || 0}</Badge>
+                              <button onClick={(e) => { e.stopPropagation(); handleDeleteMeeting(m.id); }} className="p-1 rounded-lg hover:bg-rose-500/10 text-text-muted hover:text-rose-400 transition-colors cursor-pointer flex-shrink-0">
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </CardContent>
       </Card>
 

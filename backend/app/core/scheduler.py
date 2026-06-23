@@ -38,6 +38,49 @@ async def get_org_owner_info(db, org_id: str) -> tuple[str | None, str | None]:
     return owner_id, email
 
 
+async def check_mom_reminders(db):
+    try:
+        from ..core.notification_service import create_and_deliver
+        from ..core.zoho.taz import send_reminder as taz_send
+
+        now = datetime.utcnow()
+        two_hours_ago = now - timedelta(hours=2)
+
+        ended_meetings = list(db.meetings.find({
+            "end_dt": {"$gte": two_hours_ago, "$lte": now},
+            "mom_uploaded": False,
+            "reminder_sent": {"$ne": True},
+        }))
+
+        for mt in ended_meetings:
+            title = mt.get("title", "Untitled")
+            atts = mt.get("attendees", [])
+            org_id = mt.get("organization_id", "")
+            event_id = mt.get("zoho_event_id", "")
+
+            for att in atts:
+                await create_and_deliver(
+                    user_id=att, org_id=org_id,
+                    type="mom_reminder",
+                    title="Upload MoM for " + title,
+                    message=f"Meeting '{title}' just ended — please upload your Minutes of Meeting",
+                    link=f"/dashboard?zoho_event_id={event_id}",
+                    metadata={"zoho_event_id": event_id},
+                )
+                asyncio.create_task(taz_send(
+                    message=f"Meeting '{title}' just ended — upload MoM now",
+                    assignee_email=att,
+                ))
+
+            db.meetings.update_one(
+                {"_id": mt["_id"]},
+                {"$set": {"reminder_sent": True, "updated_at": now}},
+            )
+            logger.info("MoM reminders sent for meeting '%s' to %d attendees", title, len(atts))
+    except Exception as e:
+        logger.warning("MoM reminder check failed: %s", e)
+
+
 async def check_deadline_reminders():
     try:
         from ..core.database import get_database
@@ -73,6 +116,11 @@ async def check_deadline_reminders():
                 link=f"/tasks/{task.get('_id')}",
                 metadata={"task_id": str(task.get("_id", "")), "due_date": str(task.get("due_date", ""))},
             )
+            from ..core.zoho.taz import send_task_reminder as taz_remind
+            asyncio.create_task(taz_remind(
+                task_title=task.get("title", ""), due_date=str(task.get("due_date", ""))[:10],
+                assignee_email=assignee_id, task_id=str(task.get("_id", "")), reminder_type="upcoming",
+            ))
             mgr = await find_manager_email(db, assignee_id)
             if mgr:
                 await create_and_deliver(
@@ -104,6 +152,11 @@ async def check_deadline_reminders():
                 link=f"/tasks/{task.get('_id')}",
                 metadata={"task_id": str(task.get("_id", "")), "due_date": str(task.get("due_date", ""))},
             )
+            from ..core.zoho.taz import send_task_reminder as taz_remind
+            asyncio.create_task(taz_remind(
+                task_title=task.get("title", ""), due_date=str(task.get("due_date", ""))[:10],
+                assignee_email=assignee_id, task_id=str(task.get("_id", "")), reminder_type="upcoming",
+            ))
             db.tasks.update_one(
                 {"_id": task["_id"]},
                 {"$set": {"deadline_reminded_3day": True}},
@@ -139,6 +192,11 @@ async def check_deadline_reminders():
                 link=f"/tasks/{task.get('_id')}",
                 metadata={"task_id": str(task.get("_id", "")), "due_date": str(task.get("due_date", ""))},
             )
+            from ..core.zoho.taz import send_task_reminder as taz_remind
+            asyncio.create_task(taz_remind(
+                task_title=task.get("title", ""), due_date=str(task.get("due_date", ""))[:10],
+                assignee_email=assignee_id, task_id=str(task.get("_id", "")), reminder_type="overdue",
+            ))
             db.tasks.update_one(
                 {"_id": task["_id"]},
                 {"$set": {"overdue_notified": True}},
@@ -193,6 +251,11 @@ async def check_deadline_reminders():
                             "days_overdue": days_overdue,
                         },
                     ))
+            from ..core.zoho.taz import send_task_reminder as taz_remind
+            asyncio.create_task(taz_remind(
+                task_title=task.get("title", ""), due_date=str(task.get("due_date", ""))[:10],
+                assignee_email=assignee_id, task_id=str(task.get("_id", "")), reminder_type="overdue",
+            ))
             db.tasks.update_one(
                 {"_id": task["_id"]},
                 {"$set": {"escalation_level": 2, "owner_escalated": True, "owner_escalated_at": now}},
@@ -262,11 +325,18 @@ async def check_deadline_reminders():
                     html_body, summary_text
                 ))
             for task in org_tasks:
+                from ..core.zoho.taz import send_task_reminder as taz_remind
+                asyncio.create_task(taz_remind(
+                    task_title=task.get("title", ""), due_date=str(task.get("due_date", ""))[:10],
+                    assignee_email=task.get("assignee_id") or task.get("assignee_email", ""),
+                    task_id=str(task.get("_id", "")), reminder_type="overdue",
+                ))
                 db.tasks.update_one(
                     {"_id": task["_id"]},
                     {"$set": {"escalation_level": 3, "owner_escalated_at": now}},
                 )
 
+        await check_mom_reminders(db)
         logger.info(f"Deadline check done: {len(tasks_due_soon)} due tomorrow, {len(tasks_due_3)} due in 3 days, {len(tasks_overdue)} overdue, {len(tasks_3d_overdue)} escalated to owner, {len(tasks_7d_overdue)} at 7d alert")
     except Exception as e:
         logger.error(f"Deadline check failed: {e}")

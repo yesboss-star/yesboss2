@@ -59,8 +59,22 @@ export default function ZohoCalendarBooking({ onClose }: { onClose?: () => void 
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState("");
   const [attendeeResults, setAttendeeResults] = useState<any[]>([]);
+  const [titleSuggestions, setTitleSuggestions] = useState<string[]>([]);
+  const [showTitleDropdown, setShowTitleDropdown] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const titleRef = useRef<HTMLDivElement>(null);
+  const titleDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (titleRef.current && !titleRef.current.contains(e.target as Node)) {
+        setShowTitleDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   if (initialLoading || loading) {
     return (
@@ -158,6 +172,27 @@ export default function ZohoCalendarBooking({ onClose }: { onClose?: () => void 
     } finally {
       setLoadingCheck(false);
     }
+  };
+
+  const fetchTitleSuggestions = async (q: string) => {
+    if (!q || q.length < 1) { setTitleSuggestions([]); setShowTitleDropdown(false); return; }
+    try {
+      const res = await fetch(`${API_URL}/meetings/titles?q=${encodeURIComponent(q)}`, {
+        credentials: "include",
+        headers: authHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTitleSuggestions(data.titles || []);
+        setShowTitleDropdown((data.titles || []).length > 0);
+      }
+    } catch {}
+  };
+
+  const onTitleChange = (val: string) => {
+    setTitle(val);
+    clearTimeout(titleDebounceRef.current);
+    titleDebounceRef.current = setTimeout(() => fetchTitleSuggestions(val), 200);
   };
 
   const bookMeeting = async () => {
@@ -347,9 +382,23 @@ export default function ZohoCalendarBooking({ onClose }: { onClose?: () => void 
               ))}
             </div>
 
-            <div>
+            <div ref={titleRef} className="relative">
               <Label>Meeting Title</Label>
-              <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Sprint Planning" className="mt-1" />
+              <Input value={title} onChange={(e) => onTitleChange(e.target.value)} onFocus={() => { if (titleSuggestions.length > 0) setShowTitleDropdown(true); }} placeholder="e.g. Sprint Planning" className="mt-1" />
+              {showTitleDropdown && titleSuggestions.length > 0 && (
+                <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-surface border border-border/50 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                  {titleSuggestions.map((t, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => { setTitle(t); setShowTitleDropdown(false); }}
+                      className="w-full text-left px-4 py-2.5 text-sm hover:bg-primary/10 transition-colors cursor-pointer border-b border-border/20 last:border-0"
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <div>
               <Label>Description (optional)</Label>

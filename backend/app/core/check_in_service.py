@@ -34,6 +34,45 @@ async def generate_check_in(db, org_id: str, owner_id: str) -> dict:
     behind_count = 0
     stale_count = 0
 
+    task_pipeline = [
+        {"$match": {"organization_id": org_id}},
+        {"$group": {
+            "_id": None,
+            "total": {"$sum": 1},
+            "completed": {"$sum": {"$cond": [{"$eq": ["$status", "completed"]}, 1, 0]}},
+            "overdue": {"$sum": {"$cond": [
+                {"$and": [
+                    {"$ne": ["$status", "completed"]},
+                    {"$ne": ["$status", "approved"]},
+                    {"$lt": ["$due_date", now]},
+                ]}, 1, 0
+            ]}},
+            "escalated": {"$sum": {"$cond": [{"$gt": ["$escalation_level", 0]}, 1, 0]}},
+            "pending_deadline": {"$sum": {"$cond": [{"$eq": ["$status", "pending_deadline"]}, 1, 0]}},
+        }},
+    ]
+    task_agg = list(db.tasks.aggregate(task_pipeline))
+    ts = task_agg[0] if task_agg else {"total": 0, "completed": 0, "overdue": 0, "escalated": 0, "pending_deadline": 0}
+
+    assignee_stats = list(db.tasks.aggregate([
+        {"$match": {"organization_id": org_id}},
+        {"$group": {
+            "_id": {"$ifNull": ["$assignee_email", {"$ifNull": ["$assignee_id", "unassigned"]}]},
+            "total": {"$sum": 1},
+            "completed": {"$sum": {"$cond": [{"$eq": ["$status", "completed"]}, 1, 0]}},
+            "overdue": {"$sum": {"$cond": [
+                {"$and": [
+                    {"$ne": ["$status", "completed"]},
+                    {"$ne": ["$status", "approved"]},
+                    {"$lt": ["$due_date", now]},
+                ]}, 1, 0
+            ]}},
+            "escalated": {"$sum": {"$cond": [{"$gt": ["$escalation_level", 0]}, 1, 0]}},
+        }},
+        {"$sort": {"overdue": -1}},
+    ]))
+    behind_assignees = [a["_id"] for a in assignee_stats if a.get("overdue", 0) > 0]
+
     for g in active_goals:
         gid = str(g["_id"])
         progress = g.get("progress", 0)
@@ -78,6 +117,16 @@ async def generate_check_in(db, org_id: str, owner_id: str) -> dict:
         "behind_count": behind_count,
         "stale_count": stale_count,
         "goals": goal_entries,
+        "task_health": {
+            "total": ts["total"],
+            "completed": ts["completed"],
+            "overdue": ts["overdue"],
+            "escalated": ts["escalated"],
+            "pending_deadline": ts["pending_deadline"],
+            "completion_rate": round(ts["completed"] / ts["total"] * 100, 1) if ts["total"] > 0 else 0.0,
+        },
+        "assignee_stats": assignee_stats,
+        "behind_assignees": behind_assignees,
     }
 
 
@@ -89,12 +138,27 @@ async def send_check_in_notification(db, check_in_data: dict):
     total = check_in_data["total_active"]
     behind = check_in_data["behind_count"]
     stale = check_in_data["stale_count"]
+    th = check_in_data.get("task_health", {})
+    behind_assignees = check_in_data.get("behind_assignees", [])
 
     message_parts = [f"You have {total} active goal{'s' if total != 1 else ''}"]
     if behind:
         message_parts.append(f"{behind} behind schedule")
     if stale:
         message_parts.append(f"{stale} with no updates in 7+ days")
+    if th:
+        parts = []
+        if th.get("overdue", 0):
+            parts.append(f"{th['overdue']} overdue")
+        if th.get("escalated", 0):
+            parts.append(f"{th['escalated']} escalated")
+        if th.get("pending_deadline", 0):
+            parts.append(f"{th['pending_deadline']} missing deadlines")
+        if parts:
+            message_parts.append(f"Tasks: {', '.join(parts)}")
+    if behind_assignees:
+        names = behind_assignees[:3]
+        message_parts.append(f"Members behind: {', '.join(names[:3])}{'...' if len(behind_assignees) > 3 else ''}")
     message = ". ".join(message_parts) + ". Review now?"
 
     await create_and_deliver(
@@ -120,6 +184,9 @@ async def store_check_in(db, check_in_data: dict) -> dict:
         "goals_adjusted": 0,
         "notes": [],
         "goals_snapshot": check_in_data["goals"],
+        "task_health": check_in_data.get("task_health", {}),
+        "behind_assignees": check_in_data.get("behind_assignees", []),
+        "assignee_stats": check_in_data.get("assignee_stats", []),
     }
     result = db.check_ins.insert_one(doc)
     doc["_id"] = str(result.inserted_id)

@@ -355,6 +355,18 @@ async def create_task_from_meeting(
             actor_id=user_id,
         ))
 
+    if not task_doc.get("due_date") and user_id:
+        from ..core.notification_service import create_and_deliver
+        asyncio.create_task(create_and_deliver(
+            user_id=user_id,
+            org_id=org_id,
+            type="deadline_needed",
+            title="Task needs a deadline",
+            message=f"Task '{task_doc['title']}' has no deadline — please set one",
+            link=f"/tasks/{result.inserted_id}",
+            actor_id=user_id,
+        ))
+
     asyncio.create_task(_push_to_zoho_todo(db, org_id, task_doc, assignee_emails))
 
     return task_doc
