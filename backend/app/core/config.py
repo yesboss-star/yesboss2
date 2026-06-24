@@ -55,9 +55,9 @@ class Settings:
     ZOHO_CLIENT_ID: str = os.getenv("ZOHO_CLIENT_ID", "")
     ZOHO_CLIENT_SECRET: str = os.getenv("ZOHO_CLIENT_SECRET", "")
     ZOHO_REDIRECT_URI: str = os.getenv("ZOHO_REDIRECT_URI", "http://localhost:8000/api/v1/zoho/callback")
-    ZOHO_ACCOUNTS_URL: str = os.getenv("ZOHO_ACCOUNTS_URL", "https://accounts.zoho.in")
-    ZOHO_MAIL_API_URL: str = os.getenv("ZOHO_MAIL_API_URL", "https://mail.zoho.in/api")
-    ZOHO_CALENDAR_API_URL: str = os.getenv("ZOHO_CALENDAR_API_URL", "https://calendar.zoho.in/api/v1")
+    ZOHO_ACCOUNTS_URL: str = os.getenv("ZOHO_ACCOUNTS_URL", "https://accounts.zoho.com")
+    ZOHO_MAIL_API_URL: str = os.getenv("ZOHO_MAIL_API_URL", "https://mail.zoho.com/api")
+    ZOHO_CALENDAR_API_URL: str = os.getenv("ZOHO_CALENDAR_API_URL", "https://calendar.zoho.com/api/v1")
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
     VAPID_PUBLIC_KEY: str = os.getenv("VAPID_PUBLIC_KEY", "")

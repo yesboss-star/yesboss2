@@ -21,8 +21,12 @@ FULL_SCOPE = f"{SCOPE_MAIL_TASKS},{SCOPE_CALENDAR_CALENDARS},{SCOPE_CALENDAR_EVE
 # so OAuth tokens match the API data center (mail.zoho.in, calendar.zoho.in)
 print("*** ZOHO BASE LOADED ***")
 _ZOHO_ACCOUNTS_URL = settings.ZOHO_ACCOUNTS_URL.rstrip("/")  # e.g. https://accounts.zoho.in
-_ZOHO_CLIENT_ID = settings.ZOHO_CLIENT_ID or "1000.BDDTALKCJ6V1S6WFV4GIYQI22LB9FF"
-_ZOHO_CLIENT_SECRET = settings.ZOHO_CLIENT_SECRET or "317dba2c9d35bb8bfd6c37085351ed3093304a6d6d"
+if not settings.ZOHO_CLIENT_ID:
+    raise RuntimeError("ZOHO_CLIENT_ID is not set in environment variables")
+if not settings.ZOHO_CLIENT_SECRET:
+    raise RuntimeError("ZOHO_CLIENT_SECRET is not set in environment variables")
+_ZOHO_CLIENT_ID = settings.ZOHO_CLIENT_ID
+_ZOHO_CLIENT_SECRET = settings.ZOHO_CLIENT_SECRET
 _ZOHO_REDIRECT_URI = settings.ZOHO_REDIRECT_URI or "http://localhost:8000/api/v1/zoho/callback"
 
 
@@ -55,12 +59,13 @@ class ZohoOAuth:
                     data=data,
                 )
                 if resp.status_code != 200:
-                    logger.error("Zoho token request failed: %s %s", resp.status_code, resp.text)
-                    return None
+                    logger.error("Zoho token request failed: status=%s body=%s", resp.status_code, resp.text)
+                    # Return error detail so caller can propagate it
+                    return {"error": True, "status_code": resp.status_code, "detail": resp.text}
                 result = resp.json()
                 if not isinstance(result, dict):
                     logger.error("Zoho token response was not a dict: type=%s, body=%s", type(result).__name__, resp.text)
-                    return None
+                    return {"error": True, "detail": f"Response was {type(result).__name__}"}
                 return result
         except Exception as e:
             logger.error("Zoho token request error: %s", e)
@@ -162,7 +167,10 @@ class ZohoOAuth:
                             self.db.zoho_tokens.update_one({"_id": doc["_id"]}, {"$set": update})
                             logger.info("get_valid_token: token refreshed successfully for user_id=%s", user_id)
                             return result["access_token"]
-                        logger.warning("get_valid_token: token refresh failed for user %s — refresh returned None", user_id)
+                        if result and result.get("error"):
+                            logger.error("get_valid_token: token refresh failed for user %s — %s", user_id, result.get("detail", "unknown error"))
+                        else:
+                            logger.warning("get_valid_token: token refresh returned no access_token for user %s", user_id)
                         return None
                     logger.warning("get_valid_token: token expired but no refresh_token available for user_id=%s", user_id)
                     return None

@@ -282,7 +282,7 @@ async def list_org_members(organization_id: Optional[str] = None, current_user =
 
     org_id = organization_id or get_user_org_id(current_user)
     if not org_id:
-        raise HTTPException(status_code=400, detail="Organization ID required")
+        return {"members": [], "total": 0}
 
     members = list(db.org_chart_members.find({"organization_id": org_id}).sort("full_name", 1))
     for m in members:
