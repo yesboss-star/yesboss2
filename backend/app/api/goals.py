@@ -264,6 +264,18 @@ async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user_
                 email=goal.assignee_email,
             ))
     
+    for rid in reviewer_ids:
+        if rid != user_id and rid not in assignee_ids:
+            asyncio.create_task(create_notification(
+                user_id=rid,
+                org_id=org_id,
+                type="goal_review",
+                title="Goal Needs Review",
+                message=f"Goal needs your review: {goal.title}",
+                link=f"/goals/{result.inserted_id}",
+                actor_id=user_id,
+            ))
+    
     from ..agents.frequency_agent import process_goal as _freq_goal
     asyncio.create_task(_freq_goal(goal_doc, org_id))
     

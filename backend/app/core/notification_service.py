@@ -29,7 +29,7 @@ def get_user_email(user_id: str) -> Optional[str]:
     db = get_database()
     if db is None:
         return None
-    for collection_name in ["users", "employees"]:
+    for collection_name in ["users", "employees", "org_chart_members"]:
         for query in [
             {"uid": user_id},
             {"id": user_id},
