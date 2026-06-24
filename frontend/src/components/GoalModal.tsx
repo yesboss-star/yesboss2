@@ -142,6 +142,11 @@ export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
   const [parentSearchOpen, setParentSearchOpen] = useState(false);
   const [parentQuery, setParentQuery] = useState("");
   const parentRef = useRef<HTMLDivElement>(null);
+  const [breakdownSuggestions, setBreakdownSuggestions] = useState<{ sub_goals: any[]; tasks: any[] }>({ sub_goals: [], tasks: [] });
+  const [selectedSubGoals, setSelectedSubGoals] = useState<Set<number>>(new Set());
+  const [selectedTasks, setSelectedTasks] = useState<Set<number>>(new Set());
+  const [fetchingBreakdown, setFetchingBreakdown] = useState(false);
+  const [showBreakdown, setShowBreakdown] = useState(false);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -198,6 +203,49 @@ export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
     return () => clearTimeout(timer);
   }, [formData.title, formData.description, analyzeDepartment]);
 
+  const fetchBreakdown = useCallback(async () => {
+    if (!formData.title.trim() || !organization?.id) return;
+    setFetchingBreakdown(true);
+    try {
+      const res = await fetch(`${API_URL}/goals/suggest-breakdown`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: formData.title,
+          description: formData.description || "",
+          goal_type: formData.goal_type,
+          department: formData.department || "",
+          industry: "",
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setBreakdownSuggestions({ sub_goals: data.sub_goals || [], tasks: data.tasks || [] });
+        setSelectedSubGoals(new Set());
+        setSelectedTasks(new Set());
+        setShowBreakdown(true);
+      } else {
+        setError(`Failed to generate breakdown (${res.status})`);
+      }
+    } catch (err) {
+      setError("Network error while generating breakdown");
+    } finally {
+      setFetchingBreakdown(false);
+    }
+  }, [formData.title, formData.description, formData.goal_type, formData.department, organization?.id]);
+
+  useEffect(() => {
+    if (!formData.title.trim() || formData.title.trim().length < 4) {
+      setBreakdownSuggestions({ sub_goals: [], tasks: [] });
+      setShowBreakdown(false);
+      return;
+    }
+    setShowBreakdown(false);
+    setFetchingBreakdown(true);
+    const timer = setTimeout(fetchBreakdown, 600);
+    return () => clearTimeout(timer);
+  }, [formData.title, formData.description, formData.goal_type, fetchBreakdown]);
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -211,11 +259,17 @@ export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
       return;
     }
 
+    // First click: generate breakdown instead of submitting
+    if (!showBreakdown) {
+      await fetchBreakdown();
+      return;
+    }
+
     setSubmitting(true);
     setError("");
 
     try {
-      await createGoal({
+      const created = await createGoal({
         title: formData.title,
         description: formData.description,
         priority: formData.priority,
@@ -233,6 +287,58 @@ export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
         parent_goal_id: formData.parent_goal_id || undefined,
       });
 
+      const goalId = created?.id;
+      const orgId = organization.id;
+
+      // Create selected sub-goals (inherit assignee from parent)
+      if (goalId && selectedSubGoals.size > 0) {
+        const subGoalPromises = Array.from(selectedSubGoals).map(async (i) => {
+          const sg = breakdownSuggestions.sub_goals[i];
+          if (!sg) return;
+          try {
+            await createGoal({
+              title: sg.title,
+              description: sg.description || sg.title,
+              priority: sg.priority || "medium",
+              department: sg.department || formData.department || "",
+              assignee_id: formData.assignee_id.length > 0 ? formData.assignee_id : undefined,
+              assignee_name: formData.assignee_name.length > 0 ? formData.assignee_name : undefined,
+              organization_id: orgId,
+              goal_type: "short_term",
+              duration: "one_time",
+              parent_goal_id: goalId,
+              timeline: sg.suggested_timeline || "",
+            });
+          } catch {}
+        });
+        await Promise.all(subGoalPromises);
+      }
+
+      // Create selected tasks (inherit assignee from parent)
+      if (goalId && selectedTasks.size > 0) {
+        const taskPromises = Array.from(selectedTasks).map(async (i) => {
+          const t = breakdownSuggestions.tasks[i];
+          if (!t) return;
+          try {
+            await fetch(`${API_URL}/tasks`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                title: t.title,
+                description: t.description || t.title,
+                priority: t.priority || "medium",
+                status: "pending",
+                goal_id: goalId,
+                organization_id: orgId,
+                assignee_name: formData.assignee_name.length > 0 ? formData.assignee_name.join(", ") : (t.assignee_hint || ""),
+                assignee_id: formData.assignee_id.length > 0 ? formData.assignee_id : undefined,
+              }),
+            });
+          } catch {}
+        });
+        await Promise.all(taskPromises);
+      }
+
       setFormData({
         title: "", description: "", priority: "medium", timeline: "",
         due_date: "",
@@ -242,6 +348,9 @@ export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
         parent_goal_id: "", parent_goal_title: "",
       });
       setDetectedDept(null);
+      setBreakdownSuggestions({ sub_goals: [], tasks: [] });
+      setSelectedSubGoals(new Set());
+      setSelectedTasks(new Set());
       onClose();
     } catch (err: any) {
       setError(err.message || "Failed to create goal");
@@ -327,6 +436,12 @@ export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
                 <option value="short_term">Short Term</option>
                 <option value="long_term">Long Term</option>
               </select>
+              {formData.goal_type === "short_term" && (
+                <p className="text-[11px] text-text-muted mt-1.5 flex items-center gap-1">
+                  <GitBranch className="w-3 h-3 text-primary flex-shrink-0" />
+                  Link this under a long-term goal below to show how it contributes to bigger objectives
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium mb-2"><Clock className="w-4 h-4 inline mr-1" />Duration</label>
@@ -345,7 +460,15 @@ export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
           )}
 
           <div ref={parentRef} className="relative">
-            <label className="block text-sm font-medium mb-2"><GitBranch className="w-4 h-4 inline mr-1" />Parent Goal (optional — makes this a sub-goal)</label>
+            <label className="block text-sm font-medium mb-2"><GitBranch className="w-4 h-4 inline mr-1" />
+              {formData.goal_type === "short_term" ? "Link under a Long-Term Goal (optional)" : "Parent Goal (optional — makes this a sub-goal)"}
+            </label>
+            {formData.goal_type === "short_term" && !formData.parent_goal_id && (
+              <div className="mb-2 p-2.5 rounded-lg bg-primary/5 border border-primary/20 text-[11px] text-text-muted flex items-center gap-2">
+                <GitBranch className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                <span>Short-term goals work best when linked to a long-term goal. Select a <strong className="text-primary">Long Term</strong> goal below as the parent.</span>
+              </div>
+            )}
             {formData.parent_goal_id && (
               <div className="flex items-center gap-2 mb-2 px-3 py-2 rounded-lg bg-primary/10 text-primary text-sm">
                 <span>Sub-goal of: {formData.parent_goal_title}</span>
@@ -361,13 +484,14 @@ export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
                   value={parentQuery}
                   onChange={(e) => { setParentQuery(e.target.value); setParentSearchOpen(true); }}
                   onFocus={() => setParentSearchOpen(true)}
-                  placeholder="Search existing goals..."
+                  placeholder={formData.goal_type === "short_term" ? "Search long-term goals..." : "Search existing goals..."}
                   className="w-full px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm"
                 />
                 {parentSearchOpen && (
                   <div className="absolute z-50 mt-1 w-full bg-background border border-border rounded-xl shadow-2xl max-h-48 overflow-y-auto">
                     {existingGoals
                       .filter((g) => g.title.toLowerCase().includes(parentQuery.toLowerCase()) && g.id !== formData.parent_goal_id)
+                      .filter((g) => formData.goal_type === "short_term" ? g.goal_type === "long_term" : true)
                       .slice(0, 8)
                       .map((g) => (
                         <button
@@ -381,14 +505,135 @@ export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
                           {g.goal_type && <span className="text-[10px] text-text-muted ml-auto capitalize">{g.goal_type.replace("_", " ")}</span>}
                         </button>
                       ))}
-                    {existingGoals.filter((g) => g.title.toLowerCase().includes(parentQuery.toLowerCase())).length === 0 && (
-                      <div className="p-3 text-xs text-text-muted">No goals found</div>
+                    {existingGoals.filter((g) => g.title.toLowerCase().includes(parentQuery.toLowerCase()) && (formData.goal_type !== "short_term" || g.goal_type === "long_term")).length === 0 && (
+                      <div className="p-3 text-xs text-text-muted">
+                        {formData.goal_type === "short_term" ? "No long-term goals found. Create a long-term goal first." : "No goals found"}
+                      </div>
                     )}
                   </div>
                 )}
               </div>
             )}
           </div>
+
+          {/* AI Suggestions */}
+          {fetchingBreakdown && formData.title.trim().length >= 5 && (
+            <div className="p-4 rounded-xl bg-surface border border-primary/20 text-center">
+              <Loader2 className="w-5 h-5 animate-spin text-primary mx-auto mb-2" />
+              <p className="text-xs text-text-muted">AI is analyzing your goal and suggesting breakdown...</p>
+            </div>
+          )}
+
+          {!fetchingBreakdown && (breakdownSuggestions.sub_goals.length > 0 || breakdownSuggestions.tasks.length > 0) && (
+            <div className="p-4 rounded-xl bg-primary/5 border border-primary/20">
+              <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-primary" />
+                AI Suggested Breakdown
+                <span className="text-[10px] text-text-muted font-normal">(select items to auto-create)</span>
+              </h4>
+
+              {breakdownSuggestions.sub_goals.length > 0 && (
+                <div className="mb-3">
+                  <p className="text-xs font-medium text-text-muted mb-2">Sub-Goals</p>
+                  <div className="space-y-1.5">
+                    {breakdownSuggestions.sub_goals.map((sg: any, i: number) => {
+                      const sel = selectedSubGoals.has(i);
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => {
+                            const next = new Set(selectedSubGoals);
+                            sel ? next.delete(i) : next.add(i);
+                            setSelectedSubGoals(next);
+                          }}
+                          className={`w-full text-left p-2.5 rounded-lg border text-xs transition-all cursor-pointer ${
+                            sel
+                              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                              : "bg-surface border-border/50 hover:border-primary/40 text-text-muted"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 ${
+                              sel ? "bg-emerald-500 border-emerald-500" : "border-border"
+                            }`}>
+                              {sel && <Check className="w-3 h-3 text-white" />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <span className="font-medium text-foreground">{sg.title}</span>
+                              <p className="text-[10px] text-text-muted truncate">{sg.description}</p>
+                              <div className="flex items-center gap-2 mt-1">
+                                {sg.department && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">{sg.department}</span>}
+                                {sg.priority && <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${
+                                  sg.priority === "high" ? "bg-red-500/10 text-red-400" : "bg-amber-500/10 text-amber-400"
+                                }`}>{sg.priority}</span>}
+                                {sg.suggested_timeline && <span className="text-[9px] text-text-muted">{sg.suggested_timeline}</span>}
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {breakdownSuggestions.tasks.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-text-muted mb-2">Tasks</p>
+                  <div className="space-y-1.5">
+                    {breakdownSuggestions.tasks.map((t: any, i: number) => {
+                      const sel = selectedTasks.has(i);
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => {
+                            const next = new Set(selectedTasks);
+                            sel ? next.delete(i) : next.add(i);
+                            setSelectedTasks(next);
+                          }}
+                          className={`w-full text-left p-2.5 rounded-lg border text-xs transition-all cursor-pointer ${
+                            sel
+                              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                              : "bg-surface border-border/50 hover:border-primary/40 text-text-muted"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 ${
+                              sel ? "bg-emerald-500 border-emerald-500" : "border-border"
+                            }`}>
+                              {sel && <Check className="w-3 h-3 text-white" />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <span className="font-medium text-foreground">{t.title}</span>
+                              <p className="text-[10px] text-text-muted truncate">{t.description}</p>
+                              <div className="flex items-center gap-2 mt-1">
+                                {t.priority && <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${
+                                  t.priority === "high" ? "bg-red-500/10 text-red-400" : "bg-amber-500/10 text-amber-400"
+                                }`}>{t.priority}</span>}
+                                {t.assignee_hint && <span className="text-[9px] text-text-muted">Assignee: {t.assignee_hint}</span>}
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {(selectedSubGoals.size > 0 || selectedTasks.size > 0) && (
+                <p className="text-[10px] text-emerald-400 mt-2 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" />
+                  {selectedSubGoals.size} sub-goal{selectedSubGoals.size !== 1 ? "s" : ""}
+                  {selectedTasks.size > 0 && (selectedSubGoals.size > 0 ? " & " : " ")}
+                  {selectedTasks.size > 0 && `${selectedTasks.size} task${selectedTasks.size !== 1 ? "s" : ""}`}
+                  {" "}will be created automatically
+                </p>
+              )}
+            </div>
+          )}
 
           <PersonMultiSelect
             label="Defaulter (Assign to)"
@@ -413,8 +658,25 @@ export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
 
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose} className="flex-1 py-3 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer">Cancel</button>
-            <button type="submit" disabled={submitting || loading} className="flex-1 py-3 rounded-xl bg-accent hover:bg-accent-hover text-white font-medium transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-              {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Creating...</> : <><Sparkles className="w-4 h-4" /> Create Goal</>}
+            <button
+              type="submit"
+              disabled={submitting || loading || fetchingBreakdown}
+              className="flex-1 py-3 rounded-xl bg-accent hover:bg-accent-hover text-white font-medium transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {submitting ? (
+                <><Loader2 className="w-4 h-4 animate-spin" /> Creating...</>
+              ) : fetchingBreakdown ? (
+                <><Loader2 className="w-4 h-4 animate-spin" /> Generating...</>
+              ) : !showBreakdown ? (
+                <><Sparkles className="w-4 h-4" /> Generate Breakdown</>
+              ) : (selectedSubGoals.size > 0 || selectedTasks.size > 0) ? (
+                <><Sparkles className="w-4 h-4" /> Create Goal
+                  {selectedSubGoals.size > 0 && ` (+${selectedSubGoals.size} sub-goal${selectedSubGoals.size > 1 ? "s" : ""})`}
+                  {selectedTasks.size > 0 && ` (+${selectedTasks.size} task${selectedTasks.size > 1 ? "s" : ""})`}
+                </>
+              ) : (
+                <><Sparkles className="w-4 h-4" /> Create Goal</>
+              )}
             </button>
           </div>
         </form>

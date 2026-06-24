@@ -118,6 +118,15 @@ class SelectStrategyRequest(BaseModel):
     organization_id: Optional[str] = None
 
 
+class GoalBreakdownRequest(BaseModel):
+    title: str
+    description: Optional[str] = ""
+    industry: Optional[str] = ""
+    micro_vertical: Optional[str] = ""
+    goal_type: Optional[str] = "short_term"
+    department: Optional[str] = ""
+
+
 class DepartmentAnalysisRequest(BaseModel):
     title: str
     description: Optional[str] = None
@@ -184,19 +193,7 @@ async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user_
     reviewer_ids = _normalize_list(goal.reviewer_id) or []
     reviewer_names = _normalize_list(goal.reviewer_name) or []
     
-    # Auto-link parent goal if parent_goal_id is provided
     parent_goal_id = goal.parent_goal_id or None
-    sub_goal_ids = []
-    if parent_goal_id:
-        parent = db.goals.find_one({"_id": ObjectId(parent_goal_id)})
-        if parent:
-            existing_subs = parent.get("sub_goal_ids") or []
-            if parent_goal_id not in existing_subs:
-                existing_subs.append(parent_goal_id)
-                db.goals.update_one(
-                    {"_id": ObjectId(parent_goal_id)},
-                    {"$set": {"sub_goal_ids": existing_subs}}
-                )
     
     goal_doc = {
         "title": goal.title,
@@ -217,7 +214,7 @@ async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user_
         "duration": goal.duration or "one_time",
         "end_date": goal.end_date,
         "parent_goal_id": parent_goal_id,
-        "sub_goal_ids": sub_goal_ids,
+        "sub_goal_ids": [],
         "is_default": goal.is_default,
         "industry": goal.industry or "",
         "micro_vertical": goal.micro_vertical or "",
@@ -227,6 +224,17 @@ async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user_
     
     result = db.goals.insert_one(goal_doc)
     goal_doc["_id"] = str(result.inserted_id)
+    child_id_str = str(result.inserted_id)
+
+    # Link to parent goal after insert (child ID must be known)
+    if parent_goal_id and ObjectId.is_valid(parent_goal_id):
+        existing_subs = (db.goals.find_one({"_id": ObjectId(parent_goal_id)}) or {}).get("sub_goal_ids") or []
+        if child_id_str not in existing_subs:
+            existing_subs.append(child_id_str)
+            db.goals.update_one(
+                {"_id": ObjectId(parent_goal_id)},
+                {"$set": {"sub_goal_ids": existing_subs}}
+            )
     
     asyncio.create_task(ws_manager.broadcast_to_organization(
         {"type": "goal_created", "data": goal_doc},
@@ -338,6 +346,58 @@ async def list_goals(
     return {"goals": goals}
 
 
+@router.post("/suggest-breakdown")
+async def suggest_goal_breakdown(request: GoalBreakdownRequest):
+    """Suggest sub-goals and tasks for a goal based on its title/description."""
+    try:
+        from ..core.ai_client import get_ai_response
+        import json, re
+
+        prompt = (
+            f"Analyze this goal and suggest how to break it down into sub-goals and tasks.\n\n"
+            f"Title: {request.title}\n"
+            f"Description: {request.description}\n"
+            f"Industry: {request.industry}\n"
+            f"Micro-vertical: {request.micro_vertical}\n"
+            f"Goal type: {request.goal_type}\n"
+            f"Department: {request.department}\n\n"
+            "Return a JSON object with two arrays:\n"
+            "1. 'sub_goals': only if goal_type is 'long_term' — 2-4 short-term sub-goals that break this down. Each has: title, description, department, priority, suggested_timeline\n"
+            "2. 'tasks': 3-5 concrete tasks needed to make progress. Each has: title, description, priority (high/medium/low), assignee_hint (what role should do this)\n\n"
+            "Example:\n"
+            '{"sub_goals": [{"title": "...", "description": "...", "department": "Engineering", "priority": "high", "suggested_timeline": "2 months"}], "tasks": [{"title": "...", "description": "...", "priority": "medium", "assignee_hint": "Developer"}]}\n\n'
+            "Return ONLY valid JSON. No markdown."
+        )
+
+        raw = await get_ai_response(
+            prompt=prompt,
+            system_prompt="You are a goal-breakdown specialist. Return ONLY valid JSON. No markdown.",
+            temperature=0.3,
+            max_tokens=2500,
+        )
+
+        cleaned = raw.strip()
+        cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
+        cleaned = re.sub(r'\s*```$', '', cleaned)
+        start = cleaned.find('{')
+        end = cleaned.rfind('}') + 1
+        if start >= 0 and end > start:
+            cleaned = cleaned[start:end]
+        data = json.loads(cleaned)
+        sub_goals = (data.get("sub_goals") or [])[:4] if request.goal_type == "long_term" else []
+        tasks = (data.get("tasks") or [])[:5]
+        for s in sub_goals:
+            s.setdefault("department", request.department or "")
+            s.setdefault("priority", "medium")
+        for t in tasks:
+            t.setdefault("priority", "medium")
+        return {"sub_goals": sub_goals, "tasks": tasks}
+    except Exception as e:
+        logger = logging.getLogger("yesboss.goals")
+        logger.warning(f"Failed to suggest goal breakdown: {e}")
+        return {"sub_goals": [], "tasks": []}
+
+
 @router.get("/{goal_id}")
 async def get_goal(goal_id: str, current_user = Depends(get_current_user_optional)):
     db = get_database()
@@ -385,6 +445,63 @@ async def get_goal(goal_id: str, current_user = Depends(get_current_user_optiona
         task["_id"] = str(task["_id"])
     
     return {"goal": goal, "tasks": tasks}
+
+
+@router.post("/{goal_id}/suggest-children")
+async def suggest_child_goals(goal_id: str, current_user = Depends(get_current_user_optional)):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    goal = db.goals.find_one({"_id": ObjectId(goal_id)})
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+
+    title = goal.get("title", "")
+    description = goal.get("description", "")
+    industry = goal.get("industry", "")
+    micro_vertical = goal.get("micro_vertical", "")
+    department = goal.get("department", "")
+
+    prompt = (
+        f"Based on this parent goal, suggest 4 specific child goals (short-term milestones) that would help achieve it.\n\n"
+        f"Parent Goal: {title}\n"
+        f"Description: {description}\n"
+        f"Industry: {industry}\n"
+        f"Micro-vertical: {micro_vertical}\n"
+        f"Department: {department}\n\n"
+        "Return a JSON array ONLY. Each item must have: title, description, department, priority (high/medium/low), suggested_timeline.\n"
+        "Make each child goal concrete, actionable, and directly contributing to the parent goal."
+    )
+
+    try:
+        from ..core.ai_client import get_ai_response
+        import json, re
+
+        raw = await get_ai_response(
+            prompt=prompt,
+            system_prompt="You are a goal-decomposition specialist. Return ONLY a valid JSON array. No markdown.",
+            temperature=0.4,
+            max_tokens=2000,
+        )
+        cleaned = raw.strip()
+        cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
+        cleaned = re.sub(r'\s*```$', '', cleaned)
+        start = cleaned.find('[')
+        end = cleaned.rfind(']') + 1
+        if start >= 0 and end > start:
+            cleaned = cleaned[start:end]
+        suggestions = json.loads(cleaned)
+        if not isinstance(suggestions, list):
+            suggestions = []
+        for s in suggestions:
+            s.setdefault("department", department or "")
+            s.setdefault("priority", "medium")
+        return {"suggestions": suggestions[:6]}
+    except Exception as e:
+        logger = logging.getLogger("yesboss.goals")
+        logger.warning(f"Failed to suggest child goals: {e}")
+        return {"suggestions": []}
 
 
 @router.put("/{goal_id}")
@@ -636,6 +753,70 @@ async def delete_goal(goal_id: str, current_user = Depends(get_current_user_opti
 
 class BulkDeleteDefaultGoalsRequest(BaseModel):
     organization_id: str
+
+
+@router.get("/defaults")
+async def get_or_generate_default_goals(
+    organization_id: Optional[str] = None,
+    current_user = Depends(get_current_user_optional)
+):
+    """Return existing default goals for the org, or generate them on-demand if none exist."""
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    org_id = organization_id or get_user_org_id(current_user)
+    if not org_id:
+        raise HTTPException(status_code=400, detail="Organization ID required")
+
+    existing = list(db.goals.find(
+        {"organization_id": org_id, "is_default": True}
+    ).sort("created_at", -1))
+
+    if existing:
+        goals = []
+        for g in existing:
+            g["_id"] = str(g["_id"])
+            goals.append(g)
+        return {"goals": goals, "generated": False}
+
+    # No defaults exist — generate them on-demand
+    org = db.organizations.find_one({"_id": ObjectId(org_id)})
+    industry = (org.get("industry") or "General") if org else "General"
+    micro_vertical = (org.get("micro_vertical") or "") if org else ""
+    owner_id = (org.get("owner_id") or getattr(current_user, 'id', None)) if org else getattr(current_user, 'id', None)
+
+    try:
+        from ..agents.default_goals_agent import generate_default_goals as _gen
+        ai_goals = await _gen(industry, micro_vertical, count=5)
+    except Exception as e:
+        logging.getLogger("yesboss.goals").warning(f"Failed to generate default goals: {e}")
+        ai_goals = []
+
+    created = []
+    for g in ai_goals:
+        goal_doc = {
+            "title": g["title"],
+            "description": g.get("description", ""),
+            "priority": g.get("priority", "medium"),
+            "timeline": g.get("suggested_timeline"),
+            "department": g.get("department"),
+            "organization_id": org_id,
+            "created_by": owner_id,
+            "status": "active",
+            "goal_type": g.get("goal_type", "short_term"),
+            "duration": g.get("duration", "one_time"),
+            "is_default": True,
+            "industry": industry,
+            "micro_vertical": micro_vertical,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+        }
+        result = db.goals.insert_one(goal_doc)
+        goal_doc["_id"] = str(result.inserted_id)
+        created.append(goal_doc)
+
+    return {"goals": created, "generated": True}
 
 
 @router.post("/delete-defaults")

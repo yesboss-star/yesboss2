@@ -18,7 +18,7 @@ import {
   BarChart3, Target, Zap, Activity, ChevronRight,
   AlertTriangle, Info, Users, User, FileSpreadsheet,
   PieChart as PieChartIcon, Link2, X, Building2, Network,
-  Briefcase, Search, RefreshCw, Upload, Trash2,
+  Briefcase, Search, RefreshCw, Upload, Trash2, GitBranch, Plus,
 } from "lucide-react";
 import {
   Card, CardHeader, CardTitle, CardDescription, CardContent,
@@ -31,7 +31,6 @@ import {
   AreaChart, Area, Legend
 } from "recharts";
 import { getAuthHeaders } from "@/lib/utils";
-import GoalDetailChat from "@/components/owners/GoalDetailChat";
 import KPISuggestionsCard from "@/components/owners/KPISuggestionsCard";
 import AISummaryChat from "@/components/AISummaryChat";
 import MeetingUploadModal from "@/components/owners/MeetingUploadModal";
@@ -148,12 +147,67 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [goalData, setGoalData] = useState(goal);
-  const [chatPanelOpen, setChatPanelOpen] = useState(true);
   const { updateTask } = useTaskStore();
-  const { generateStrategies, selectStrategy } = useGoalStore();
+  const { generateStrategies, selectStrategy, createGoal } = useGoalStore();
   const { members, fetchOrgMembers } = useOrgChartStore();
   const [confirmingStrategy, setConfirmingStrategy] = useState<{ index: number; strat: any } | null>(null);
   const [selecting, setSelecting] = useState(false);
+  const [childGoalSuggestions, setChildGoalSuggestions] = useState<any[]>([]);
+  const [generatingChildGoals, setGeneratingChildGoals] = useState(false);
+  const [childGoalsBeingAdded, setChildGoalsBeingAdded] = useState<number[]>([]);
+
+  const handleGenerateChildGoals = async () => {
+    setGeneratingChildGoals(true);
+    try {
+      const res = await fetch(`${API_URL}/goals/${goalData.id || goalData._id}/suggest-children`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setChildGoalSuggestions(data.suggestions || []);
+      }
+    } catch (e) {
+      console.error("Failed to generate child goal suggestions", e);
+    } finally {
+      setGeneratingChildGoals(false);
+    }
+  };
+
+  const handleAddChildGoal = async (suggestion: any, index: number) => {
+    if (childGoalsBeingAdded.includes(index)) return;
+    setChildGoalsBeingAdded((prev) => [...prev, index]);
+    try {
+      await createGoal({
+        title: suggestion.title,
+        description: suggestion.description || suggestion.title,
+        priority: suggestion.priority || "medium",
+        department: suggestion.department || goalData.department || "",
+        assignee_id: goalData.assignee_id || [],
+        assignee_name: goalData.assignee_name || [],
+        timeline: suggestion.suggested_timeline || "",
+        organization_id: propOrgId || goalData.organization_id,
+        goal_type: "short_term",
+        duration: "one_time",
+        parent_goal_id: goalData.id || goalData._id,
+        industry: goalData.industry || "",
+        micro_vertical: goalData.micro_vertical || "",
+      });
+      // Refresh goal data to pick up new sub-goal
+      try {
+        const refresh = await fetch(`${API_URL}/goals/${goalData.id || goalData._id}`, {
+          headers: { ...getAuthHeaders() },
+        });
+        if (refresh.ok) {
+          const data = await refresh.json();
+          if (data.goal) setGoalData((prev: any) => ({ ...prev, sub_goals: data.goal.sub_goals }));
+        }
+      } catch {}
+    } catch (e) {
+      console.error("Failed to add child goal", e);
+      setChildGoalsBeingAdded((prev) => prev.filter((i) => i !== index));
+    }
+  };
 
   useEffect(() => {
     document.body.style.overflow = "hidden";
@@ -290,6 +344,15 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
                     <Sparkles className="w-3 h-3" /> Default
                   </span>
                 )}
+                {goal.goal_type && (
+                  <span className={`text-xs px-2.5 py-1 rounded-full border flex items-center gap-1 ${
+                    goal.goal_type === "long_term"
+                      ? "text-indigo-400 bg-indigo-500/10 border-indigo-500/20"
+                      : "text-amber-400 bg-amber-500/10 border-amber-500/20"
+                  }`}>
+                    <Flag className="w-3 h-3" /> {goal.goal_type === "long_term" ? "Long Term" : "Short Term"}
+                  </span>
+                )}
                 {goal.status === "pending_review" && (
                   <span className="text-xs px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1 animate-pulse">
                     <Clock className="w-3 h-3" /> Waiting for Review
@@ -305,6 +368,16 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
               {/* Request Review — shown when goal is active and current user is NOT the owner (assignee side) */}
               {goal.status === "active" && user?.uid !== goal.created_by && (
                 <RequestReviewButton goalId={goal.id || goal._id} goalTitle={goal.title} onReviewRequested={() => loadTasks()} />
+              )}
+
+              {/* Parent goal link */}
+              {goalData.parent_goal && (
+                <div className="p-3 rounded-xl bg-primary/5 border border-primary/20 text-sm flex items-center gap-2">
+                  <GitBranch className="w-4 h-4 text-primary flex-shrink-0" />
+                  <span className="text-text-muted">
+                    Sub-goal of: <span className="text-primary font-medium">{goalData.parent_goal.title}</span>
+                  </span>
+                </div>
               )}
 
               {/* Description */}
@@ -449,6 +522,80 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
                 )}
               </div>
 
+              {/* Suggested Child Goals (for long-term goals) */}
+              {goalData.goal_type === "long_term" && (
+                <div>
+                  <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                    <GitBranch className="w-4 h-4 text-primary" />
+                    Suggested Child Goals
+                  </h4>
+                  {!childGoalSuggestions || childGoalSuggestions.length === 0 ? (
+                    <div className="p-4 rounded-xl bg-surface border border-primary/20 text-center">
+                      <p className="text-xs text-text-muted mb-2">Generate AI-suggested short-term child goals for this parent goal.</p>
+                      <button
+                        onClick={handleGenerateChildGoals}
+                        disabled={generatingChildGoals}
+                        className="px-4 py-2 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-xs font-medium cursor-pointer disabled:opacity-50"
+                      >
+                        {generatingChildGoals ? (
+                          <span className="flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin" /> Generating...</span>
+                        ) : "Generate Child Goals"}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {childGoalSuggestions.map((s: any, i: number) => {
+                        const alreadyAdded = childGoalsBeingAdded.includes(i);
+                        return (
+                          <div key={i} className="p-3 rounded-xl border bg-surface border-border/50 hover:border-primary/40 transition-all">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-semibold">{s.title}</span>
+                                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                                    s.priority === "high"
+                                      ? "bg-red-500/15 text-red-400"
+                                      : s.priority === "medium"
+                                      ? "bg-amber-500/15 text-amber-400"
+                                      : "bg-blue-500/15 text-blue-400"
+                                  }`}>{s.priority}</span>
+                                </div>
+                                <p className="text-xs text-text-muted mt-1">{s.description}</p>
+                                <div className="flex items-center gap-2 mt-1.5">
+                                  {s.department && (
+                                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/15 text-primary font-medium">{s.department}</span>
+                                  )}
+                                  {s.suggested_timeline && (
+                                    <span className="text-[10px] text-text-muted flex items-center gap-1">
+                                      <Calendar className="w-3 h-3" /> {s.suggested_timeline}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => handleAddChildGoal(s, i)}
+                                disabled={alreadyAdded}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer flex-shrink-0 ${
+                                  alreadyAdded
+                                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
+                                    : "bg-primary/10 text-primary hover:bg-primary/20"
+                                }`}
+                              >
+                                {alreadyAdded ? (
+                                  <span className="flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Added</span>
+                                ) : (
+                                  <span className="flex items-center gap-1"><Plus className="w-3 h-3" /> Add</span>
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Tasks */}
               <div>
                 <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
@@ -478,14 +625,6 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
                 )}
               </div>
 
-              {/* Chat toggle button */}
-              <button
-                onClick={() => setChatPanelOpen(!chatPanelOpen)}
-                className="flex items-center gap-2 text-sm font-medium text-primary hover:text-primary/80 transition-colors cursor-pointer"
-              >
-                <MessageSquare className="w-4 h-4" />
-                <span>{chatPanelOpen ? "Hide" : "Open"} Goal Refinement Chat</span>
-              </button>
             </div>
           </div>
 
@@ -494,45 +633,6 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
             <Button variant="outline" onClick={onClose}>Close</Button>
           </div>
         </div>
-
-        {/* Chat Side Panel */}
-        {chatPanelOpen && (
-          <div className="w-[528px] max-w-full bg-surface border border-border rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-right fade-in duration-200 flex flex-col h-[calc(100vh-80px)]">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
-              <div className="flex items-center gap-2">
-                <MessageSquare className="w-4 h-4 text-primary" />
-                <span className="text-sm font-semibold">Goal Refinement Chat</span>
-              </div>
-              <button
-                onClick={() => setChatPanelOpen(false)}
-                className="p-1 rounded-lg hover:bg-surface-light text-text-muted hover:text-foreground transition-colors cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="flex-1 flex flex-col min-h-0 p-4">
-              <GoalDetailChat
-                goalId={goal.id || goal._id}
-                goalTitle={goal.title}
-                initialBreakdown={goalData.breakdown_history || goal.breakdown_history || []}
-                existingFields={{
-                  success_criteria: goalData.success_criteria || goal.success_criteria,
-                  kpis: goalData.kpis || goal.kpis,
-                  timeline_detail: goalData.timeline_detail || goal.timeline_detail,
-                  dependencies: goalData.dependencies || goal.dependencies,
-                }}
-                assigneeName={goalData.assignee_name}
-                assigneeId={goalData.assignee_id}
-                reviewerName={goalData.reviewer_name}
-                reviewerId={goalData.reviewer_id}
-                organizationId={propOrgId || goal.organization_id}
-                onGoalUpdate={handleGoalUpdate}
-                defaultExpanded
-                hideToggleHeader
-              />
-            </div>
-          </div>
-          )}
 
           {/* Strategy Confirmation Modal */}
           <Modal open={!!confirmingStrategy} onOpenChange={(open: boolean) => { if (!open) setConfirmingStrategy(null); }} size="md">
@@ -1098,6 +1198,7 @@ function GoalSection() {
   const orgId = organization?.id;
   const [expandedGoal, setExpandedGoal] = useState<any>(null);
   const [openDepartment, setOpenDepartment] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"department" | "hierarchy">("department");
 
   useEffect(() => {
     if (orgId) fetchGoals(orgId);
@@ -1112,6 +1213,29 @@ function GoalSection() {
       map.get(key)!.goals.push(g);
     }
     return Array.from(map.values()).sort((a, b) => b.goals.length - a.goals.length);
+  }, [goals]);
+
+  const hierarchy = useMemo(() => {
+    const ltGoals = goals.filter((g) => g.goal_type === "long_term");
+    const stGoals = goals.filter((g) => g.goal_type !== "long_term");
+    const stByParent = new Map<string, any[]>();
+    const orphanSt: any[] = [];
+    for (const g of stGoals) {
+      if (g.parent_goal_id) {
+        const arr = stByParent.get(g.parent_goal_id) || [];
+        arr.push(g);
+        stByParent.set(g.parent_goal_id, arr);
+      } else {
+        orphanSt.push(g);
+      }
+    }
+    const ltWithChildren = ltGoals
+      .filter((g) => stByParent.has(g.id))
+      .sort((a, b) => (b.progress ?? 0) - (a.progress ?? 0));
+    const ltWithoutChildren = ltGoals
+      .filter((g) => !stByParent.has(g.id))
+      .sort((a, b) => (b.progress ?? 0) - (a.progress ?? 0));
+    return { ltWithChildren, ltWithoutChildren, stByParent, orphanSt };
   }, [goals]);
 
   const totalActive = goals.filter((g) => g.status === "active").length;
@@ -1144,6 +1268,9 @@ function GoalSection() {
     );
   }
 
+  const ltCount = hierarchy.ltWithChildren.length + hierarchy.ltWithoutChildren.length;
+  const stLinked = goals.filter((g) => g.goal_type !== "long_term" && g.parent_goal_id).length;
+
   return (
     <>
       <Card>
@@ -1154,13 +1281,33 @@ function GoalSection() {
               <CardTitle>Goals Pipeline</CardTitle>
             </div>
             <div className="flex items-center gap-2 flex-wrap justify-end">
+              <div className="flex items-center gap-1 p-0.5 rounded-lg bg-surface border border-border/50">
+                <button
+                  onClick={() => setViewMode("department")}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
+                    viewMode === "department" ? "bg-primary text-white shadow-sm" : "text-text-muted hover:text-foreground"
+                  }`}
+                >
+                  Department
+                </button>
+                <button
+                  onClick={() => setViewMode("hierarchy")}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
+                    viewMode === "hierarchy" ? "bg-primary text-white shadow-sm" : "text-text-muted hover:text-foreground"
+                  }`}
+                >
+                  Hierarchy
+                </button>
+              </div>
               <Badge variant="outline" className="text-xs">{goals.length} total</Badge>
               <Badge variant="outline" className="text-xs">{totalActive} active</Badge>
               <Badge variant="outline" className="text-xs">{totalCompleted} done</Badge>
             </div>
           </div>
           <CardDescription>
-            Goals grouped by department. Click a department to view its goals, then click any goal to manage its task pipeline, assignees and refinement chat.
+            {viewMode === "department"
+              ? "Goals grouped by department. Click a department to view its goals, then click any goal to manage its task pipeline, assignees and refinement chat."
+              : "Long-term goals with their linked short-term goals. Shows how short-term work contributes to bigger objectives."}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -1191,94 +1338,207 @@ function GoalSection() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {departments.map((dept) => {
-              const style = getDepartmentStyle(dept.name);
-              const DeptIcon = style.icon;
-              const activeCount = dept.goals.filter((g) => g.status === "active").length;
-              const completedCount = dept.goals.filter((g) => g.status === "completed").length;
-              const dTasks = dept.goals.reduce((acc, g) => acc + (g.task_counts?.total || 0), 0);
-              const dDone = dept.goals.reduce((acc, g) => acc + (g.task_counts?.completed || 0), 0);
-              const dProgress = dTasks > 0 ? Math.round((dDone / dTasks) * 100) : 0;
-              const topGoals = [...dept.goals]
-                .sort((a, b) => (b.progress ?? 0) - (a.progress ?? 0))
-                .slice(0, 3);
+          {viewMode === "hierarchy" && ltCount === 0 && (
+            <div className="flex flex-col items-center justify-center py-6 text-center">
+              <Flag className="w-8 h-8 text-text-muted/40 mb-2" />
+              <p className="text-sm text-text-muted">No long-term goals yet</p>
+              <p className="text-xs text-text-muted/60 mt-1">Create a long-term goal to start building a goal hierarchy</p>
+            </div>
+          )}
 
-              return (
-                <button
-                  key={dept.name}
-                  onClick={() => setOpenDepartment(dept.name)}
-                  className={`group text-left p-4 rounded-2xl bg-gradient-to-br ${style.bg} ${style.border} border hover:shadow-lg hover:scale-[1.01] transition-all cursor-pointer`}
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-9 h-9 rounded-xl bg-background/60 border ${style.border} flex items-center justify-center`}>
-                        <DeptIcon className={`w-4 h-4 ${style.text}`} />
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold capitalize leading-none">{dept.name}</p>
-                        <p className="text-[10px] text-text-muted mt-1">
-                          {dept.goals.length} goal{dept.goals.length === 1 ? "" : "s"}
-                        </p>
-                      </div>
-                    </div>
-                    <ChevronRight className={`w-4 h-4 ${style.text} opacity-50 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all`} />
-                  </div>
+          {viewMode === "hierarchy" && ltCount > 0 && (
+            <div className="space-y-4">
+              {/* Summary stats */}
+              <div className="grid grid-cols-3 gap-2">
+                <div className="p-2.5 rounded-xl bg-surface border border-border/50 text-center">
+                  <p className="text-lg font-bold text-primary">{ltCount}</p>
+                  <p className="text-[10px] text-text-muted">Long-Term</p>
+                </div>
+                <div className="p-2.5 rounded-xl bg-surface border border-border/50 text-center">
+                  <p className="text-lg font-bold text-emerald-400">{stLinked}</p>
+                  <p className="text-[10px] text-text-muted">Linked ST</p>
+                </div>
+                <div className="p-2.5 rounded-xl bg-surface border border-border/50 text-center">
+                  <p className={`text-lg font-bold ${hierarchy.orphanSt.length > 0 ? "text-yellow-400" : "text-emerald-400"}`}>
+                    {hierarchy.orphanSt.length}
+                  </p>
+                  <p className="text-[10px] text-text-muted">Unlinked ST</p>
+                </div>
+              </div>
 
-                  <div className="flex items-center gap-2 mb-2 text-[10px]">
-                    {activeCount > 0 && (
-                      <span className="px-1.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-                        {activeCount} active
-                      </span>
-                    )}
-                    {completedCount > 0 && (
-                      <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                        {completedCount} done
-                      </span>
-                    )}
-                  </div>
+              {/* LT goals with children */}
+              {hierarchy.ltWithChildren.map((lt) => (
+                <HierarchyGoalCard
+                  key={lt.id}
+                  parentGoal={lt}
+                  childGoals={hierarchy.stByParent.get(lt.id) || []}
+                  onOpenGoal={(g) => setExpandedGoal(g)}
+                  onAssign={async (g, role, member) => {
+                    try {
+                      await updateGoal(g.id || g._id, {
+                        ...(role === "defaulter"
+                          ? { assignee_id: member?.id || undefined, assignee_name: member?.full_name || undefined }
+                          : { reviewer_id: member?.id || undefined, reviewer_name: member?.full_name || undefined }),
+                      } as any);
+                    } catch {}
+                  }}
+                />
+              ))}
 
-                  <div className="space-y-1 mb-2">
-                    {topGoals.map((g) => (
-                      <div key={g.id || g._id} className="flex items-center gap-1.5 text-[11px] truncate">
-                        {g.status === "completed" ? (
-                          <CheckCircle className="w-3 h-3 text-emerald-400 flex-shrink-0" />
-                        ) : g.status === "active" ? (
-                          <Clock className="w-3 h-3 text-primary flex-shrink-0" />
-                        ) : (
-                          <AlertCircle className="w-3 h-3 text-yellow-400 flex-shrink-0" />
-                        )}
-                        <span className="truncate text-text-muted">{g.title}</span>
-                      </div>
+              {/* LT goals without children */}
+              {hierarchy.ltWithoutChildren.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-text-muted mb-2 flex items-center gap-1">
+                    <Flag className="w-3 h-3" /> Long-Term Goals (no sub-goals yet)
+                  </p>
+                  <div className="space-y-2">
+                    {hierarchy.ltWithoutChildren.map((g) => (
+                      <HierarchyGoalCard
+                        key={g.id}
+                        parentGoal={g}
+                        childGoals={[]}
+                        onOpenGoal={(goal) => setExpandedGoal(goal)}
+                        onAssign={async (goal, role, member) => {
+                          try {
+                            await updateGoal(goal.id || goal._id, {
+                              ...(role === "defaulter"
+                                ? { assignee_id: member?.id || undefined, assignee_name: member?.full_name || undefined }
+                                : { reviewer_id: member?.id || undefined, reviewer_name: member?.full_name || undefined }),
+                            } as any);
+                          } catch {}
+                        }}
+                      />
                     ))}
-                    {dept.goals.length > topGoals.length && (
-                      <p className="text-[10px] text-text-muted/60">+{dept.goals.length - topGoals.length} more</p>
-                    )}
                   </div>
+                </div>
+              )}
 
-                  {dTasks > 0 && (
-                    <div>
-                      <div className="flex items-center justify-between text-[10px] text-text-muted mb-1">
-                        <span>{dDone}/{dTasks} tasks</span>
-                        <span className={dProgress >= 100 ? "text-emerald-400" : dProgress >= 50 ? "text-primary" : "text-yellow-400"}>
-                          {dProgress}%
-                        </span>
+              {/* Orphan short-term goals */}
+              {hierarchy.orphanSt.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-yellow-400 mb-2 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3" /> Unlinked Short-Term Goals ({hierarchy.orphanSt.length})
+                  </p>
+                  <p className="text-[10px] text-text-muted mb-2">
+                    These short-term goals are not linked to any long-term goal. Edit them to set a parent goal.
+                  </p>
+                  <div className="space-y-1.5">
+                    {hierarchy.orphanSt.map((g) => (
+                      <button
+                        key={g.id}
+                        onClick={() => setExpandedGoal(g)}
+                        className="w-full text-left p-2.5 rounded-xl bg-surface border border-yellow-500/20 hover:border-yellow-500/40 hover:bg-surface-light transition-all cursor-pointer flex items-center gap-2"
+                      >
+                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                          g.status === "completed" ? "bg-emerald-500/10" : "bg-yellow-500/10"
+                        }`}>
+                          {g.status === "completed" ? (
+                            <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                          ) : (
+                            <Clock className="w-3.5 h-3.5 text-yellow-400" />
+                          )}
+                        </div>
+                        <span className="text-sm truncate flex-1">{g.title}</span>
+                        <span className="text-[10px] text-text-muted">{g.department || "No dept"}</span>
+                        <ChevronRight className="w-3.5 h-3.5 text-text-muted" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {viewMode === "department" && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {departments.map((dept) => {
+                const style = getDepartmentStyle(dept.name);
+                const DeptIcon = style.icon;
+                const activeCount = dept.goals.filter((g) => g.status === "active").length;
+                const completedCount = dept.goals.filter((g) => g.status === "completed").length;
+                const dTasks = dept.goals.reduce((acc, g) => acc + (g.task_counts?.total || 0), 0);
+                const dDone = dept.goals.reduce((acc, g) => acc + (g.task_counts?.completed || 0), 0);
+                const dProgress = dTasks > 0 ? Math.round((dDone / dTasks) * 100) : 0;
+                const topGoals = [...dept.goals]
+                  .sort((a, b) => (b.progress ?? 0) - (a.progress ?? 0))
+                  .slice(0, 3);
+
+                return (
+                  <button
+                    key={dept.name}
+                    onClick={() => setOpenDepartment(dept.name)}
+                    className={`group text-left p-4 rounded-2xl bg-gradient-to-br ${style.bg} ${style.border} border hover:shadow-lg hover:scale-[1.01] transition-all cursor-pointer`}
+                  >
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-9 h-9 rounded-xl bg-background/60 border ${style.border} flex items-center justify-center`}>
+                          <DeptIcon className={`w-4 h-4 ${style.text}`} />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold capitalize leading-none">{dept.name}</p>
+                          <p className="text-[10px] text-text-muted mt-1">
+                            {dept.goals.length} goal{dept.goals.length === 1 ? "" : "s"}
+                          </p>
+                        </div>
                       </div>
-                      <div className="h-1.5 bg-background/60 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all ${
-                            dProgress >= 100 ? "bg-emerald-400" :
-                            dProgress >= 50 ? "bg-primary" : "bg-yellow-400"
-                          }`}
-                          style={{ width: `${Math.min(dProgress, 100)}%` }}
-                        />
-                      </div>
+                      <ChevronRight className={`w-4 h-4 ${style.text} opacity-50 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all`} />
                     </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+
+                    <div className="flex items-center gap-2 mb-2 text-[10px]">
+                      {activeCount > 0 && (
+                        <span className="px-1.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                          {activeCount} active
+                        </span>
+                      )}
+                      {completedCount > 0 && (
+                        <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          {completedCount} done
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="space-y-1 mb-2">
+                      {topGoals.map((g) => (
+                        <div key={g.id || g._id} className="flex items-center gap-1.5 text-[11px] truncate">
+                          {g.status === "completed" ? (
+                            <CheckCircle className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+                          ) : g.status === "active" ? (
+                            <Clock className="w-3 h-3 text-primary flex-shrink-0" />
+                          ) : (
+                            <AlertCircle className="w-3 h-3 text-yellow-400 flex-shrink-0" />
+                          )}
+                          <span className="truncate text-text-muted">{g.title}</span>
+                        </div>
+                      ))}
+                      {dept.goals.length > topGoals.length && (
+                        <p className="text-[10px] text-text-muted/60">+{dept.goals.length - topGoals.length} more</p>
+                      )}
+                    </div>
+
+                    {dTasks > 0 && (
+                      <div>
+                        <div className="flex items-center justify-between text-[10px] text-text-muted mb-1">
+                          <span>{dDone}/{dTasks} tasks</span>
+                          <span className={dProgress >= 100 ? "text-emerald-400" : dProgress >= 50 ? "text-primary" : "text-yellow-400"}>
+                            {dProgress}%
+                          </span>
+                        </div>
+                        <div className="h-1.5 bg-background/60 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${
+                              dProgress >= 100 ? "bg-emerald-400" :
+                              dProgress >= 50 ? "bg-primary" : "bg-yellow-400"
+                            }`}
+                            style={{ width: `${Math.min(dProgress, 100)}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -1308,6 +1568,158 @@ function GoalSection() {
         />
       )}
     </>
+  );
+}
+
+function HierarchyGoalCard({
+  parentGoal,
+  childGoals,
+  onOpenGoal,
+  onAssign,
+}: {
+  parentGoal: any;
+  childGoals: any[];
+  onOpenGoal: (goal: any) => void;
+  onAssign: (goal: any, role: "defaulter" | "reviewer", member: { id: string; full_name: string; email: string } | null) => Promise<void> | void;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const { members, fetchOrgMembers } = useOrgChartStore();
+  const { organization } = useOrganizationStore();
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (organization?.id) fetchOrgMembers(organization.id);
+  }, [organization?.id, fetchOrgMembers]);
+
+  const parentProgress = parentGoal.progress ?? 0;
+  const parentTasks = parentGoal.task_counts ?? { total: 0, completed: 0, in_progress: 0, pending: 0 };
+
+  const handleAssign = async (goal: any, role: "defaulter" | "reviewer", member: { id: string; full_name: string; email: string } | null) => {
+    const key = `${goal.id || goal._id}:${role}`;
+    setSavingKey(key);
+    try {
+      await onAssign(goal, role, member);
+    } finally {
+      setSavingKey(null);
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/5 to-purple-500/5 overflow-hidden">
+      {/* Parent (LT) goal header */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-3 p-3.5 hover:bg-primary/5 transition-colors cursor-pointer text-left"
+      >
+        <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${
+          parentGoal.status === "completed" ? "bg-emerald-500/10" : "bg-primary/10"
+        }`}>
+          {parentGoal.status === "completed" ? (
+            <CheckCircle className="w-4 h-4 text-emerald-400" />
+          ) : (
+            <Flag className="w-4 h-4 text-primary" />
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold truncate">{parentGoal.title}</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 flex-shrink-0">
+              Long Term
+            </span>
+            {parentGoal.status === "completed" && (
+              <Badge variant="success" className="text-[10px]">Done</Badge>
+            )}
+          </div>
+          <div className="flex items-center gap-2 text-[11px] text-text-muted mt-0.5">
+            <span>{parentGoal.department || "No department"}</span>
+            {parentTasks.total > 0 && (
+              <span>&middot; {parentTasks.completed}/{parentTasks.total} tasks</span>
+            )}
+            <span>&middot; {childGoals.length} sub-goal{childGoals.length !== 1 ? "s" : ""}</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="w-16">
+            <div className="flex items-center gap-1">
+              <div className="flex-1 h-1.5 bg-background rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${
+                    parentProgress >= 100 ? "bg-emerald-400" :
+                    parentProgress >= 50 ? "bg-primary" :
+                    parentProgress > 0 ? "bg-yellow-400" : "bg-gray-500/30"
+                  }`}
+                  style={{ width: `${Math.min(parentProgress, 100)}%` }}
+                />
+              </div>
+              <span className="text-[10px] text-text-muted w-7 text-right">{parentProgress}%</span>
+            </div>
+          </div>
+          {expanded ? <ChevronDown className="w-4 h-4 text-text-muted" /> : <ChevronRight className="w-4 h-4 text-text-muted" />}
+        </div>
+      </button>
+
+      {/* Child goals */}
+      {expanded && childGoals.length > 0 && (
+        <div className="border-t border-primary/10">
+          <div className="py-1.5 px-2">
+            {childGoals.map((child) => {
+              const childProgress = child.progress ?? 0;
+              const childTasks = child.task_counts ?? { total: 0, completed: 0, in_progress: 0, pending: 0 };
+              return (
+                <div
+                  key={child.id}
+                  className="flex items-center gap-2 p-2 rounded-xl hover:bg-surface/80 transition-colors group cursor-pointer"
+                  onClick={() => onOpenGoal(child)}
+                >
+                  <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 bg-yellow-500/10">
+                    <Target className="w-3 h-3 text-yellow-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium truncate">{child.title}</p>
+                    <p className="text-[10px] text-text-muted">
+                      {child.department || "No dept"} &middot; {childTasks.completed}/{childTasks.total} tasks
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                    <InlinePersonPicker
+                      type="defaulter"
+                      value={{ id: child.assignee_id?.[0], name: child.assignee_name?.[0] }}
+                      members={members}
+                      saving={savingKey === `${child.id || child._id}:defaulter`}
+                      onChange={(m) => handleAssign(child, "defaulter", m)}
+                    />
+                  </div>
+                  <div className="w-14 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center gap-1">
+                      <div className="flex-1 h-1 bg-background rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${
+                            childProgress >= 100 ? "bg-emerald-400" :
+                            childProgress >= 50 ? "bg-primary" :
+                            childProgress > 0 ? "bg-yellow-400" : "bg-gray-500/30"
+                          }`}
+                          style={{ width: `${Math.min(childProgress, 100)}%` }}
+                        />
+                      </div>
+                      <span className="text-[9px] text-text-muted w-5 text-right">{childProgress}%</span>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-3 h-3 text-text-muted opacity-0 group-hover:opacity-100 transition-opacity" />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Empty state for LT goal without children */}
+      {expanded && childGoals.length === 0 && (
+        <div className="border-t border-primary/10 px-4 py-3 text-center">
+          <p className="text-[11px] text-text-muted">No short-term goals linked yet</p>
+          <p className="text-[10px] text-text-muted/60 mt-0.5">Create a short-term goal and set this as its parent</p>
+        </div>
+      )}
+    </div>
   );
 }
 

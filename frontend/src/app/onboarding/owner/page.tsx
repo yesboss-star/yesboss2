@@ -160,6 +160,7 @@ interface OnboardingGoal {
   priority: string;
   assignee_name: string;
   reviewer_name: string;
+  is_default?: boolean;
 }
 
 interface PersonaQuestion {
@@ -1075,9 +1076,39 @@ function OwnerOnboardingContent() {
     }
   };
 
+  const fetchDefaultGoals = async () => {
+    if (!orgId) return;
+    try {
+      const response = await fetch(`${API_URL}/goals/defaults?organization_id=${orgId}`, {
+        headers: { "Content-Type": "application/json" },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        const defaults = (data.goals || []).map((g: { _id: string; title: string; description?: string; department?: string; priority?: string }) => ({
+          id: `default_${g._id}`,
+          title: g.title,
+          description: g.description || g.title,
+          department: g.department || "",
+          priority: g.priority || "medium",
+          assignee_name: "",
+          reviewer_name: "",
+          is_default: true,
+        }));
+        setOnboardingGoals((prev) => {
+          const existingTitles = new Set(prev.map((g) => g.title.toLowerCase().trim()));
+          const newDefaults = defaults.filter((d: { title: string }) => !existingTitles.has(d.title.toLowerCase().trim()));
+          return [...newDefaults, ...prev];
+        });
+      }
+    } catch (error) {
+      console.error("Failed to fetch default goals:", error);
+    }
+  };
+
   useEffect(() => {
     if (step === "goals" && !goalsFetchedRef.current) {
       goalsFetchedRef.current = true;
+      fetchDefaultGoals().catch(() => {});
       fetchGoalSuggestions().catch(() => {});
     }
     if (step !== "goals") {
@@ -1145,7 +1176,7 @@ function OwnerOnboardingContent() {
   };
 
   const handleRemoveGoal = (goalId: string) => {
-    setOnboardingGoals((prev) => prev.filter((g) => g.id !== goalId));
+    setOnboardingGoals((prev) => prev.filter((g) => g.id !== goalId && !g.is_default));
   };
 
   const handleGoalFieldChange = (
@@ -1161,7 +1192,7 @@ function OwnerOnboardingContent() {
   const handleGoalsContinue = async () => {
     setSavingGoals(true);
     try {
-      const goalsToSave = onboardingGoals.filter((g) => g.title.trim());
+      const goalsToSave = onboardingGoals.filter((g) => g.title.trim() && !g.is_default);
       for (const goal of goalsToSave) {
         let dept = goal.department;
         if (!dept) {
@@ -2320,12 +2351,19 @@ function OwnerOnboardingContent() {
                           className="w-full bg-transparent text-xs text-text-muted mt-1 border-b border-transparent hover:border-border focus:border-primary focus:outline-none transition-colors"
                         />
                       </div>
-                      <button
-                        onClick={() => handleRemoveGoal(goal.id)}
-                        className="p-1.5 rounded-lg hover:bg-red-500/10 text-text-muted hover:text-red-400 transition-all cursor-pointer shrink-0"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {goal.is_default ? (
+                        <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-purple-500/10 text-purple-400 border border-purple-500/20 text-xs shrink-0">
+                          <Sparkles className="w-3 h-3" />
+                          Default
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => handleRemoveGoal(goal.id)}
+                          className="p-1.5 rounded-lg hover:bg-red-500/10 text-text-muted hover:text-red-400 transition-all cursor-pointer shrink-0"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
