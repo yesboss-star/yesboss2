@@ -60,7 +60,8 @@ async def sync_task_to_zoho(db, task_doc: dict, org_id: str, old_data: dict = No
         for email in assignee_emails:
             if not email:
                 continue
-            assignee_token = await zoho.get_valid_token(email)
+            from ..api.meetings import _resolve_token_for_email
+            assignee_token = await _resolve_token_for_email(db, email, org_id)
             if not assignee_token:
                 continue
 

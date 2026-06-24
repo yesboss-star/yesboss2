@@ -342,6 +342,261 @@ async def check_deadline_reminders():
         logger.error(f"Deadline check failed: {e}")
 
 
+async def check_goal_deadlines(db):
+    try:
+        from ..core.notification_service import create_and_deliver
+        from ..core.email_service import send_notification_email
+        from ..core.zoho.taz import send_task_reminder as taz_remind
+
+        now = datetime.utcnow()
+        tomorrow = now + timedelta(days=1)
+        in_3_days = now + timedelta(days=3)
+        days_3_ago = now - timedelta(days=3)
+        days_7_ago = now - timedelta(days=7)
+
+        def _first_assignee(g):
+            aids = g.get("assignee_id") or []
+            return aids[0] if aids else (g.get("assignee_email") or None)
+
+        goals_due_soon = list(db.goals.find({
+            "due_date": {"$gte": now, "$lte": tomorrow},
+            "status": {"$ne": "completed"},
+        }))
+
+        for g in goals_due_soon:
+            aid = _first_assignee(g)
+            if not aid:
+                continue
+            await create_and_deliver(
+                user_id=aid,
+                org_id=g.get("organization_id", ""),
+                type="goal_deadline",
+                title="Goal Due Tomorrow",
+                message=f"Goal '{g.get('title')}' is due tomorrow",
+                link=f"/goals/{g.get('_id')}",
+                metadata={"goal_id": str(g.get("_id", "")), "due_date": str(g.get("due_date", ""))},
+            )
+            asyncio.create_task(taz_remind(
+                task_title=g.get("title", ""), due_date=str(g.get("due_date", ""))[:10],
+                assignee_email=aid, task_id=str(g.get("_id", "")), reminder_type="upcoming",
+            ))
+            mgr = await find_manager_email(db, aid)
+            if mgr:
+                await create_and_deliver(
+                    user_id=mgr,
+                    org_id=g.get("organization_id", ""),
+                    type="goal_deadline",
+                    title="Team member's goal due tomorrow",
+                    message=f"Goal '{g.get('title')}' assigned to {aid} is due tomorrow",
+                    link=f"/goals/{g.get('_id')}",
+                    metadata={"goal_id": str(g.get("_id", "")), "assignee": aid},
+                )
+
+        goals_due_3 = list(db.goals.find({
+            "due_date": {"$gte": tomorrow, "$lte": in_3_days},
+            "status": {"$ne": "completed"},
+            "goal_deadline_reminded_3day": {"$ne": True},
+        }))
+
+        for g in goals_due_3:
+            aid = _first_assignee(g)
+            if not aid:
+                continue
+            await create_and_deliver(
+                user_id=aid,
+                org_id=g.get("organization_id", ""),
+                type="goal_deadline",
+                title="Goal Due in 3 Days",
+                message=f"Goal '{g.get('title')}' is due in 3 days",
+                link=f"/goals/{g.get('_id')}",
+                metadata={"goal_id": str(g.get("_id", "")), "due_date": str(g.get("due_date", ""))},
+            )
+            asyncio.create_task(taz_remind(
+                task_title=g.get("title", ""), due_date=str(g.get("due_date", ""))[:10],
+                assignee_email=aid, task_id=str(g.get("_id", "")), reminder_type="upcoming",
+            ))
+            db.goals.update_one(
+                {"_id": g["_id"]},
+                {"$set": {"goal_deadline_reminded_3day": True}},
+            )
+            mgr = await find_manager_email(db, aid)
+            if mgr:
+                await create_and_deliver(
+                    user_id=mgr,
+                    org_id=g.get("organization_id", ""),
+                    type="goal_deadline",
+                    title="Team member's goal due in 3 days",
+                    message=f"Goal '{g.get('title')}' assigned to {aid} is due in 3 days",
+                    link=f"/goals/{g.get('_id')}",
+                    metadata={"goal_id": str(g.get("_id", "")), "assignee": aid},
+                )
+
+        goals_overdue = list(db.goals.find({
+            "due_date": {"$lt": now},
+            "status": {"$ne": "completed"},
+            "goal_overdue_notified": {"$ne": True},
+        }))
+
+        for g in goals_overdue:
+            aid = _first_assignee(g)
+            if not aid:
+                continue
+            await create_and_deliver(
+                user_id=aid,
+                org_id=g.get("organization_id", ""),
+                type="goal_deadline",
+                title="Goal Overdue",
+                message=f"Goal '{g.get('title')}' is overdue!",
+                link=f"/goals/{g.get('_id')}",
+                metadata={"goal_id": str(g.get("_id", "")), "due_date": str(g.get("due_date", ""))},
+            )
+            asyncio.create_task(taz_remind(
+                task_title=g.get("title", ""), due_date=str(g.get("due_date", ""))[:10],
+                assignee_email=aid, task_id=str(g.get("_id", "")), reminder_type="overdue",
+            ))
+            db.goals.update_one(
+                {"_id": g["_id"]},
+                {"$set": {"goal_overdue_notified": True}},
+            )
+            mgr = await find_manager_email(db, aid)
+            if mgr:
+                await create_and_deliver(
+                    user_id=mgr,
+                    org_id=g.get("organization_id", ""),
+                    type="goal_deadline",
+                    title="Goal Overdue — team member",
+                    message=f"Goal '{g.get('title')}' assigned to {aid} is overdue!",
+                    link=f"/goals/{g.get('_id')}",
+                    metadata={"goal_id": str(g.get("_id", "")), "assignee": aid},
+                )
+
+        goals_3d_overdue = list(db.goals.find({
+            "due_date": {"$lt": days_3_ago},
+            "status": {"$ne": "completed"},
+            "goal_escalation_level": {"$lt": 2},
+        }))
+
+        for g in goals_3d_overdue:
+            aid = _first_assignee(g)
+            org_id = g.get("organization_id", "")
+            if not aid or not org_id:
+                continue
+            owner_id, owner_email = await get_org_owner_info(db, org_id)
+            if owner_id:
+                g_title = g.get("title", "Unknown")
+                days_overdue = (now - datetime.fromisoformat(str(g.get("due_date", now)))).days if g.get("due_date") else 0
+                await create_and_deliver(
+                    user_id=owner_id,
+                    org_id=org_id,
+                    type="escalation_owner",
+                    title="Goal Escalated - Overdue",
+                    message=f"Goal '{g_title}' assigned to {aid} is {days_overdue} days overdue and requires your attention.",
+                    link=f"/goals/{g.get('_id')}",
+                    email=owner_email,
+                )
+                if owner_email:
+                    asyncio.create_task(asyncio.to_thread(
+                        send_notification_email,
+                        owner_email,
+                        f"Escalation - Goal Overdue ({days_overdue}d)",
+                        f"Goal '{g_title}' assigned to {aid} is {days_overdue} days overdue.",
+                        link=f"/goals/{g.get('_id')}",
+                        template_name="escalation_owner",
+                        template_data={
+                            "task_name": g_title,
+                            "assignee": str(aid),
+                            "days_overdue": days_overdue,
+                        },
+                    ))
+            asyncio.create_task(taz_remind(
+                task_title=g.get("title", ""), due_date=str(g.get("due_date", ""))[:10],
+                assignee_email=aid, task_id=str(g.get("_id", "")), reminder_type="overdue",
+            ))
+            db.goals.update_one(
+                {"_id": g["_id"]},
+                {"$set": {"goal_escalation_level": 2, "goal_owner_escalated": True, "goal_owner_escalated_at": now}},
+            )
+
+        goals_7d_overdue = list(db.goals.find({
+            "due_date": {"$lt": days_7_ago},
+            "status": {"$ne": "completed"},
+            "goal_escalation_level": {"$lt": 3},
+        }))
+
+        org_groups = {}
+        for g in goals_7d_overdue:
+            oid = g.get("organization_id", "")
+            if oid:
+                org_groups.setdefault(oid, []).append(g)
+
+        for org_id, org_goals in org_groups.items():
+            owner_id, owner_email = await get_org_owner_info(db, org_id)
+            if not owner_id or not owner_email:
+                continue
+            all_overdue = list(db.goals.find({
+                "organization_id": org_id,
+                "due_date": {"$lt": now},
+                "status": {"$ne": "completed"},
+            }).sort("due_date", 1))
+            summary_lines = []
+            for g in all_overdue:
+                g_title = g.get("title", "Unknown")
+                g_assignee = _first_assignee(g) or "Unassigned"
+                g_due = str(g.get("due_date", ""))[:10]
+                g_days = (now - datetime.fromisoformat(str(g.get("due_date", now)))).days if g.get("due_date") else 0
+                summary_lines.append(f"• {g_title} — {g_assignee} (due {g_due}, {g_days}d overdue)")
+            summary_text = "\n".join(summary_lines[:20])
+            if len(summary_lines) > 20:
+                summary_text += f"\n... and {len(summary_lines) - 20} more"
+            await create_and_deliver(
+                user_id=owner_id,
+                org_id=org_id,
+                type="escalation_owner",
+                title="7-Day Overdue Goals Alert - Action Required",
+                message=f"{len(org_goals)} goals have been overdue for 7+ days. {len(all_overdue)} total overdue goals in your organization.",
+                link="/dashboard",
+                email=owner_email,
+            )
+            if owner_email:
+                from ..core.email_service import send_email
+                html_body = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="font-family:-apple-system,sans-serif;background:#f5f5f5;padding:32px">
+  <table style="max-width:600px;margin:0 auto;background:white;border-radius:12px;overflow:hidden">
+    <tr><td style="padding:24px 32px;background:linear-gradient(135deg,#dc2626,#ef4444)">
+      <h1 style="color:white;margin:0;font-size:20px">YESBOSS — Overdue Goals Summary</h1>
+    </td></tr>
+    <tr><td style="padding:32px">
+      <h2 style="margin:0 0 8px;font-size:18px;color:#1e293b">Overdue Goal Summary</h2>
+      <p style="color:#555;line-height:1.5">{len(all_overdue)} goal(s) are currently overdue in your organization.</p>
+      <pre style="background:#f8fafc;padding:16px;border-radius:8px;font-size:13px;line-height:1.6;white-space:pre-wrap">{summary_text}</pre>
+      <p style="margin-top:16px;font-size:12px;color:#999">This is an automated alert from YESBOSS. Please review and take action.</p>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+                asyncio.create_task(asyncio.to_thread(
+                    send_email, owner_email,
+                    f"Urgent: {len(all_overdue)} Overdue Goals Need Attention",
+                    html_body, summary_text
+                ))
+            for g in org_goals:
+                asyncio.create_task(taz_remind(
+                    task_title=g.get("title", ""), due_date=str(g.get("due_date", ""))[:10],
+                    assignee_email=_first_assignee(g) or "",
+                    task_id=str(g.get("_id", "")), reminder_type="overdue",
+                ))
+                db.goals.update_one(
+                    {"_id": g["_id"]},
+                    {"$set": {"goal_escalation_level": 3, "goal_owner_escalated_at": now}},
+                )
+
+        if goals_due_soon or goals_due_3 or goals_overdue or goals_3d_overdue or goals_7d_overdue:
+            logger.info(f"Goal deadline check: {len(goals_due_soon)} due tomorrow, {len(goals_due_3)} due in 3d, {len(goals_overdue)} overdue, {len(goals_3d_overdue)} escalated, {len(goals_7d_overdue)} at 7d alert")
+    except Exception as e:
+        logger.error(f"Goal deadline check failed: {e}")
+
+
 async def send_digests():
     try:
         from ..core.database import get_database
@@ -625,6 +880,14 @@ async def scheduler_loop():
         try:
             if deadline_counter % 12 == 0:  # every ~60 min
                 await check_deadline_reminders()
+                db = None
+                try:
+                    from ..core.database import get_database as _gd
+                    db = _gd()
+                except Exception:
+                    pass
+                if db is not None:
+                    await check_goal_deadlines(db)
                 hour = datetime.utcnow().hour
                 if hour == 8:
                     await send_digests()

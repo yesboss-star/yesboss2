@@ -44,6 +44,74 @@ def _normalize_list(v):
     return list(v)
 
 
+async def sync_goal_to_zoho(db, goal_doc: dict, org_id: str):
+    try:
+        from ..core.zoho.mail_tasks import ZohoMailTasks
+        from ..core.zoho.base import ZohoOAuth
+        from ..api.meetings import _resolve_token_for_email
+        import logging as _log
+        logger = _log.getLogger("yesboss.goals")
+
+        assignee_emails = goal_doc.get("assignee_id") or []
+        if isinstance(assignee_emails, str):
+            assignee_emails = [assignee_emails]
+        if not assignee_emails:
+            return
+
+        due = goal_doc.get("due_date") or goal_doc.get("end_date")
+        task_data = {
+            "title": goal_doc.get("title", "Untitled Goal"),
+            "description": goal_doc.get("description", ""),
+            "priority": goal_doc.get("priority", "medium"),
+            "due_date": due,
+        }
+
+        zmt = ZohoMailTasks(db)
+        zoho = ZohoOAuth(db)
+
+        owner = db.organizations.find_one({"_id": ObjectId(org_id)}) if ObjectId.is_valid(org_id) else None
+        org_name = owner.get("name", "") if owner else ""
+        owner_id = owner.get("owner_id", "") if owner else ""
+        owner_token = await zoho.get_valid_token(owner_id) if owner_id else None
+
+        zgid = None
+        if owner_token and org_name:
+            zgid = await zmt.ensure_group(org_name, owner_token)
+
+        goal_zoho_ids = []
+
+        for email in assignee_emails:
+            if not email:
+                continue
+            token = await _resolve_token_for_email(db, email, org_id)
+            if not token:
+                logger.warning("No Zoho token for assignee %s, skipping Zoho sync", email)
+                continue
+
+            personal_id = await zmt.create_personal_task(token, task_data)
+            group_id = None
+            if zgid and owner_token:
+                assignee_zoho_id = await zmt.get_zoho_user_id(token)
+                group_id = await zmt.create_group_task(owner_token, zgid, task_data, assignee_zoho_id)
+
+            if personal_id or group_id:
+                goal_zoho_ids.append({
+                    "email": email,
+                    "personal_task_id": personal_id,
+                    "group_task_id": group_id,
+                })
+
+        if goal_zoho_ids:
+            db.goals.update_one(
+                {"_id": ObjectId(goal_doc["_id"])},
+                {"$set": {"zoho_task_ids": goal_zoho_ids}}
+            )
+            logger.info("Synced goal %s to Zoho for %d assignees", goal_doc.get("_id"), len(goal_zoho_ids))
+    except Exception as e:
+        logger = __import__("logging").getLogger("yesboss.goals")
+        logger.warning("Zoho goal sync failed: %s", e)
+
+
 class GoalCreate(BaseModel):
     title: str
     description: Optional[str] = None
@@ -278,7 +346,9 @@ async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user_
     
     from ..agents.frequency_agent import process_goal as _freq_goal
     asyncio.create_task(_freq_goal(goal_doc, org_id))
-    
+
+    asyncio.create_task(sync_goal_to_zoho(db, goal_doc, org_id))
+
     return {"goal": goal_doc}
 
 

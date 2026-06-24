@@ -55,7 +55,7 @@ class ZohoMailTasks:
     ) -> Optional[int]:
         payload = {
             "title": task_data.get("title", "Untitled"),
-            "description": task_data.get("description", ""),
+            "description": task_data.get("description") or "",
             "priority": self._map_priority(task_data.get("priority", "medium")),
         }
         due = task_data.get("due_date")
@@ -94,7 +94,7 @@ class ZohoMailTasks:
     ) -> Optional[int]:
         payload = {
             "title": task_data.get("title", "Untitled"),
-            "description": task_data.get("description", ""),
+            "description": task_data.get("description") or "",
             "priority": self._map_priority(task_data.get("priority", "medium")),
         }
         due = task_data.get("due_date")
