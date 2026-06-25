@@ -11,9 +11,9 @@ import { useWebSocket } from "@/hooks/useWebSocket";
 import {
   Flag, Loader2, CheckCircle, Clock, AlertCircle,
   AlertTriangle, Calendar, Lightbulb,
-  Users, Bell, Wifi, WifiOff,   ChevronDown, ChevronRight, Circle, Edit3, X, Check, Trash2,
+  Users, Bell, Wifi, WifiOff,   ChevronDown, ChevronRight, Circle, Edit3, X, Check, Trash2, Search,
 } from "lucide-react";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, Badge, Button, Modal } from "@/components/ui";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, Badge, Button, Modal, Input } from "@/components/ui";
 import GoalModal from "@/components/GoalModal";
 import TaskModal from "@/components/TaskModal";
 
@@ -113,6 +113,8 @@ export default function TaskView({ goals: propGoals }: { goals?: any[] }) {
   const [showGoalModal, setShowGoalModal] = useState(false);
   const [realtimeNotif, setRealtimeNotif] = useState<{ type: string; message: string } | null>(null);
   const [editingGoal, setEditingGoal] = useState<string | null>(null);
+  const [goalFilterStatus, setGoalFilterStatus] = useState<string>("all");
+  const [goalSearchQuery, setGoalSearchQuery] = useState("");
   const [editDept, setEditDept] = useState("");
   const [editAssigneeId, setEditAssigneeId] = useState<string[]>([]);
   const [editAssigneeName, setEditAssigneeName] = useState<string[]>([]);
@@ -125,6 +127,25 @@ export default function TaskView({ goals: propGoals }: { goals?: any[] }) {
     if (!expandedGoalId) return [];
     return tasks.filter((t) => t.goal_id === expandedGoalId);
   }, [expandedGoalId, tasks]);
+
+  const filteredGoals = useMemo(() => {
+    return goals.filter((g) => {
+      if (goalFilterStatus !== "all") {
+        if (goalFilterStatus === "active") {
+          if (g.status !== "active" && g.status !== "pending") return false;
+        } else if (g.status !== goalFilterStatus) return false;
+      }
+      if (goalSearchQuery && !g.title.toLowerCase().includes(goalSearchQuery.toLowerCase())) return false;
+      return true;
+    });
+  }, [goals, goalFilterStatus, goalSearchQuery]);
+
+  const goalStats = useMemo(() => ({
+    total: goals.length,
+    active: goals.filter((g) => g.status === "active" || g.status === "pending").length,
+    inProgress: goals.filter((g) => g.status === "in_progress").length,
+    completed: goals.filter((g) => g.status === "completed").length,
+  }), [goals]);
 
   const handleTaskStatusChange = async (taskId: string, status: string) => {
     try { await updateTask(taskId, { status } as any); } catch {}
@@ -235,22 +256,73 @@ export default function TaskView({ goals: propGoals }: { goals?: any[] }) {
             <div className="flex items-center gap-2">
               <Flag className="w-5 h-5 text-primary" />
               <CardTitle>Goals</CardTitle>
-              <Badge variant="outline" className="text-[10px] ml-1">{goals.filter((g) => g.status === "active").length} active</Badge>
+              <Badge variant="outline" className="text-[10px] ml-1">{goalStats.active} active</Badge>
             </div>
             <Badge variant="outline" className="text-xs">{goals.length} total</Badge>
           </div>
           <CardDescription>All goals with AI-detected department, defaulter &amp; reviewer. Click ✏️ to edit.</CardDescription>
+
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 mt-4">
+            <div className="relative flex-1 max-w-xs">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+              <Input
+                type="text"
+                placeholder="Search goals..."
+                value={goalSearchQuery}
+                onChange={(e) => setGoalSearchQuery(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant={goalFilterStatus === "all" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setGoalFilterStatus("all")}
+                className="cursor-pointer"
+              >
+                All
+              </Button>
+              <Button
+                variant={goalFilterStatus === "active" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setGoalFilterStatus("active")}
+                className="cursor-pointer"
+              >
+                Pending
+              </Button>
+              <Button
+                variant={goalFilterStatus === "in_progress" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setGoalFilterStatus("in_progress")}
+                className="cursor-pointer"
+              >
+                In Progress
+              </Button>
+              <Button
+                variant={goalFilterStatus === "completed" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setGoalFilterStatus("completed")}
+                className="cursor-pointer"
+              >
+                Done
+              </Button>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
-          {goals.length === 0 ? (
+          {filteredGoals.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <Flag className="w-10 h-10 text-text-muted/40 mb-2" />
-              <p className="text-sm text-text-muted">No goals yet</p>
-              <p className="text-xs text-text-muted/60 mt-1">Create a goal to get started with AI-powered department detection</p>
+              <p className="text-sm text-text-muted">{goals.length === 0 ? "No goals yet" : "No goals match your filters"}</p>
+              <p className="text-xs text-text-muted/60 mt-1">
+                {goals.length === 0
+                  ? "Create a goal to get started with AI-powered department detection"
+                  : "Try adjusting your search or filter"}
+              </p>
             </div>
           ) : (
             <div className="space-y-2">
-              {goals.map((goal) => {
+              {filteredGoals.map((goal) => {
                 const isEditing = editingGoal === goal.id;
                 const assigneeMembers = members.filter((m) => {
                   const ids = Array.isArray(goal.assignee_id) ? goal.assignee_id : goal.assignee_id ? [goal.assignee_id] : [];

@@ -221,6 +221,11 @@ export default function TaskPage() {
           </Card>
         </div>
 
+        <div className="border-t border-border pt-6">
+          <h2 className="text-lg font-semibold mb-4">Task Cascade</h2>
+          <TaskView goals={visibleGoals} />
+        </div>
+
         <div className="flex flex-col sm:flex-row items-center gap-4">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
@@ -282,11 +287,6 @@ export default function TaskPage() {
               <LayoutGrid className="w-4 h-4" />
             </button>
           </div>
-        </div>
-
-        <div className="border-t border-border pt-6">
-          <h2 className="text-lg font-semibold mb-4">Task Cascade</h2>
-          <TaskView goals={visibleGoals} />
         </div>
 
         {viewMode === "list" ? (
