@@ -400,6 +400,24 @@ Domain: {org.get('domain', 'N/A')}
             )
         )
         lines.append("Members: " + ", ".join(names))
+
+        import hashlib
+        org_ref = hashlib.sha256(org_id.encode()).hexdigest()[:16]
+        freqs = list(self.db.employee_frequencies.find({"org_ref": org_ref}))
+        if freqs:
+            lines.append("\nEmployee Work Patterns (proven categories, frequency, complexity):")
+            emp_patterns = {}
+            for f in freqs:
+                emp = f.get("employee_role", "unknown")
+                if emp not in emp_patterns:
+                    emp_patterns[emp] = []
+                emp_patterns[emp].append(
+                    f"{f.get('work_category', 'general')} ({f.get('level', 'intermediate')}, "
+                    f"~{f.get('avg_completion_hours', 4):.1f}h, freq: {f.get('frequency_per_week', 0):.1f}/week)"
+                )
+            for emp, cats in sorted(emp_patterns.items()):
+                lines.append(f"  - {emp}: {', '.join(cats[:5])}")
+
         return "===== TEAM =====\n" + "\n".join(lines) + "\n================\n"
 
     async def _build_documents_section(self, org_id: str) -> str:

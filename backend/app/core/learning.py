@@ -492,4 +492,200 @@ class ContinuousLearning:
             return []
 
 
+    def record_performance_snapshot(self, organization_id: str) -> dict:
+        """Weekly snapshot of per-employee avg completion hours for trend tracking."""
+        db = self._get_db()
+        if db is None:
+            return {"success": False}
+        try:
+            org_ref = hashlib.sha256(organization_id.encode()).hexdigest()[:16]
+            freqs = list(db.employee_frequencies.find({"org_ref": org_ref}))
+            if not freqs:
+                return {"success": False, "message": "No frequency data"}
+            snapshot = {
+                "organization_id": organization_id,
+                "week_start": datetime.utcnow().isoformat(),
+                "employees": [],
+                "created_at": datetime.utcnow(),
+            }
+            for f in freqs:
+                emp = f.get("employee_role", "")
+                existing = next((e for e in snapshot["employees"] if e["email"] == emp), None)
+                if existing:
+                    existing["categories"] += 1
+                    existing["total_hours"] += f.get("avg_completion_hours", 0)
+                    existing["total_freq"] += f.get("frequency_per_week", 0)
+                else:
+                    snapshot["employees"].append({
+                        "email": emp,
+                        "categories": 1,
+                        "total_hours": f.get("avg_completion_hours", 0),
+                        "total_freq": f.get("frequency_per_week", 0),
+                        "tasks_completed": 0,
+                    })
+            completed = db.task_outcomes.aggregate([
+                {"$match": {"organization_id": organization_id, "created_at": {"$gte": datetime.utcnow() - timedelta(days=7)}}},
+                {"$group": {"_id": "$assignee_id", "count": {"$sum": 1}}},
+            ])
+            for row in completed:
+                for e in snapshot["employees"]:
+                    if e["email"] == row["_id"]:
+                        e["tasks_completed"] = row["count"]
+            db.performance_history.insert_one(snapshot)
+            return {"success": True, "employee_count": len(snapshot["employees"])}
+        except Exception as e:
+            logger.error(f"Performance snapshot error: {e}")
+            return {"success": False, "error": str(e)}
+
+    def workload_analysis(self, organization_id: str) -> dict:
+        db = self._get_db()
+        if db is None:
+            return {"employees": []}
+        try:
+            org_ref = hashlib.sha256(organization_id.encode()).hexdigest()[:16]
+            freqs = list(db.employee_frequencies.find({"org_ref": org_ref}))
+            if not freqs:
+                return {"employees": []}
+            weekly_capacity = {}
+            for f in freqs:
+                emp = f.get("employee_role", "")
+                if emp not in weekly_capacity:
+                    weekly_capacity[emp] = {"categories": set(), "total_hours": 0, "total_freq": 0}
+                weekly_capacity[emp]["categories"].add(f.get("work_category", ""))
+                weekly_capacity[emp]["total_hours"] += f.get("avg_completion_hours", 0) * f.get("frequency_per_week", 0)
+                weekly_capacity[emp]["total_freq"] += f.get("frequency_per_week", 0)
+            active_pipeline = [
+                {"$match": {"organization_id": organization_id, "status": {"$in": ["pending", "in_progress"]}}},
+                {"$unwind": "$assignee_id"},
+                {"$group": {"_id": "$assignee_id", "count": {"$sum": 1}}}
+            ]
+            active_counts = {}
+            try:
+                for row in db.tasks.aggregate(active_pipeline):
+                    active_counts[row["_id"]] = row["count"]
+            except Exception:
+                pass
+            employees = []
+            for emp, data in weekly_capacity.items():
+                weekly_hours = data["total_hours"]
+                active = active_counts.get(emp, 0)
+                estimated_capacity = max(weekly_hours, 1) * 1.5
+                load_pct = round((active / estimated_capacity) * 100, 1) if estimated_capacity > 0 else 0
+                status = "overloaded" if load_pct > 80 else ("underutilized" if load_pct < 30 else "balanced")
+                employees.append({
+                    "email": emp,
+                    "active_tasks": active,
+                    "estimated_weekly_hours": round(weekly_hours, 1),
+                    "estimated_capacity": round(estimated_capacity, 1),
+                    "load_percent": load_pct,
+                    "status": status,
+                    "categories": list(data["categories"]),
+                    "total_frequency": round(data["total_freq"], 1),
+                })
+            employees.sort(key=lambda x: x["load_percent"], reverse=True)
+            return {
+                "employees": employees,
+                "overloaded": [e for e in employees if e["status"] == "overloaded"],
+                "underutilized": [e for e in employees if e["status"] == "underutilized"],
+                "balanced": [e for e in employees if e["status"] == "balanced"],
+                "total_analyzed": len(employees),
+            }
+        except Exception as e:
+            logger.error(f"Workload analysis error: {e}")
+            return {"employees": [], "error": str(e)}
+
+    def estimate_deadline(self, organization_id: str, work_category: str = None) -> dict:
+        db = self._get_db()
+        if db is None:
+            return {"estimated_hours": 4, "confidence": "low"}
+        try:
+            org_ref = hashlib.sha256(organization_id.encode()).hexdigest()[:16]
+            match = {"org_ref": org_ref}
+            if work_category:
+                match["work_category"] = work_category
+            freqs = list(db.employee_frequencies.find(match))
+            if not freqs:
+                return {"estimated_hours": 4, "confidence": "low", "message": "Not enough data"}
+            weighted_sum = sum(f.get("avg_completion_hours", 4) * f.get("_total_samples", 1) for f in freqs)
+            total_samples = sum(f.get("_total_samples", 1) for f in freqs)
+            avg_hours = round(weighted_sum / total_samples, 1) if total_samples > 0 else 4
+            if total_samples >= 20:
+                confidence = "high"
+            elif total_samples >= 5:
+                confidence = "medium"
+            else:
+                confidence = "low"
+            if avg_hours <= 4:
+                suggested_text = "1 day"
+                days = 1
+            elif avg_hours <= 8:
+                suggested_text = "2 days"
+                days = 2
+            elif avg_hours <= 20:
+                suggested_text = "3-5 days"
+                days = 5
+            elif avg_hours <= 40:
+                suggested_text = "1 week"
+                days = 7
+            else:
+                suggested_text = "2 weeks"
+                days = 14
+            from datetime import datetime, timedelta
+            return {
+                "estimated_hours": avg_hours,
+                "confidence": confidence,
+                "samples": total_samples,
+                "suggested_text": suggested_text,
+                "suggested_date": (datetime.utcnow() + timedelta(days=days)).strftime("%Y-%m-%d"),
+                "business_days": days,
+                "work_category": work_category or "all",
+            }
+        except Exception as e:
+            logger.error(f"Deadline estimation error: {e}")
+            return {"estimated_hours": 4, "confidence": "low", "error": str(e)}
+
+    def get_performance_trends(self, organization_id: str, weeks: int = 8) -> list:
+        db = self._get_db()
+        if db is None:
+            return []
+        try:
+            history = list(db.performance_history.find(
+                {"organization_id": organization_id}
+            ).sort("created_at", -1).limit(weeks))
+            if not history:
+                return []
+            all_emps = set()
+            for h in history:
+                for e in h.get("employees", []):
+                    all_emps.add(e["email"])
+            trends = []
+            for email in all_emps:
+                weekly_hours = []
+                for h in reversed(history):
+                    emp_data = next((e for e in h.get("employees", []) if e["email"] == email), None)
+                    weekly_hours.append(emp_data["total_hours"] if emp_data else None)
+                valid = [h for h in weekly_hours if h is not None]
+                direction = "stable"
+                if len(valid) >= 4:
+                    first_half = sum(valid[:len(valid)//2]) / (len(valid)//2)
+                    second_half = sum(valid[len(valid)//2:]) / (len(valid) - len(valid)//2)
+                    if first_half > 0:
+                        change = ((second_half - first_half) / first_half) * 100
+                        if change < -5:
+                            direction = "improving"
+                        elif change > 5:
+                            direction = "slipping"
+                trends.append({
+                    "email": email,
+                    "weekly_hours": weekly_hours,
+                    "direction": direction,
+                    "weeks_of_data": len(valid),
+                    "current_avg_hours": valid[-1] if valid else None,
+                })
+            return trends
+        except Exception as e:
+            logger.error(f"Performance trends error: {e}")
+            return []
+
+
 learning = ContinuousLearning()

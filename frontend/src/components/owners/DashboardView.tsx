@@ -38,6 +38,7 @@ import ZohoCalendarBooking from "@/components/owners/ZohoCalendarBooking";
 import OrgHealthWidget from "@/components/owners/OrgHealthWidget";
 import MarketImpactCard from "@/components/owners/MarketImpactCard";
 import CheckInModal from "@/components/owners/CheckInModal";
+import IndustryBenchmarksCard from "@/components/owners/IndustryBenchmarksCard";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -2535,7 +2536,12 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
         </div>
       )}
 
-      {adaptation.showRevenueRisk && <RevenueRiskRadar />}
+      {adaptation.showRevenueRisk && (
+        <>
+          <RevenueRiskRadar />
+          <IndustryBenchmarksCard industry={organization?.industry || ""} microVertical={organization?.micro_vertical} />
+        </>
+      )}
 
       {escalatedTasks.length > 0 && (
         <Card className="border-rose-500/20 bg-gradient-to-br from-rose-500/5 to-transparent">

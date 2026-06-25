@@ -150,3 +150,23 @@ async def trigger_aggregation(industry: Optional[str] = None, micro_vertical: Op
 @router.get("/industry-recommendations")
 async def get_recommendations(industry: str, micro_vertical: Optional[str] = None):
     return learning.get_industry_recommendations(industry, micro_vertical)
+
+
+@router.get("/workload-analysis/{organization_id}")
+async def get_workload_analysis(organization_id: str):
+    return learning.workload_analysis(organization_id)
+
+
+@router.get("/estimate-deadline/{organization_id}")
+async def estimate_deadline(organization_id: str, work_category: Optional[str] = None):
+    return learning.estimate_deadline(organization_id, work_category)
+
+
+@router.post("/performance-snapshot/{organization_id}")
+async def trigger_performance_snapshot(organization_id: str):
+    return learning.record_performance_snapshot(organization_id)
+
+
+@router.get("/performance-trends/{organization_id}")
+async def get_performance_trends(organization_id: str, weeks: int = 8):
+    return {"trends": learning.get_performance_trends(organization_id, weeks)}

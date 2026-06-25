@@ -872,6 +872,116 @@ async def aggregate_cross_company_patterns():
         logger.error(f"Pattern aggregation failed: {e}")
 
 
+async def record_performance_snapshots():
+    try:
+        from ..core.database import get_database as _gd
+        from ..core.learning import learning
+        db = _gd()
+        if db is None:
+            return
+        orgs = list(db.organizations.find({}, {"_id": 1}))
+        for org in orgs:
+            org_id = str(org["_id"])
+            await asyncio.to_thread(learning.record_performance_snapshot, org_id)
+        logger.info(f"Recorded performance snapshots for {len(orgs)} orgs")
+    except Exception as e:
+        logger.error(f"Performance snapshot recording failed: {e}")
+
+
+async def generate_weekly_owner_briefings():
+    try:
+        from ..core.database import get_database as _gd
+        from ..core.learning import learning
+        from ..core.notification_service import create_and_deliver
+        db = _gd()
+        if db is None:
+            return
+        import hashlib
+
+        orgs = list(db.organizations.find({}, {"_id": 1, "name": 1, "owner_id": 1}))
+        for org in orgs:
+            org_id = str(org["_id"])
+            owner_id = org.get("owner_id")
+            if not owner_id:
+                continue
+
+            org_ref = hashlib.sha256(org_id.encode()).hexdigest()[:16]
+            trends = learning.get_performance_trends(org_id, weeks=8)
+            freqs = list(db.employee_frequencies.find({"org_ref": org_ref}))
+            goals = list(db.goals.find({"organization_id": org_id, "status": "active"}))
+            tasks = list(db.tasks.find({"organization_id": org_id}))
+
+            overloaded = []
+            top_performers = []
+            emp_patterns = {}
+            for f in freqs:
+                emp = f.get("employee_role", "")
+                if emp not in emp_patterns:
+                    emp_patterns[emp] = {"categories": set(), "total_freq": 0, "total_hours": 0}
+                emp_patterns[emp]["categories"].add(f.get("work_category", ""))
+                emp_patterns[emp]["total_freq"] += f.get("frequency_per_week", 0)
+                emp_patterns[emp]["total_hours"] += f.get("avg_completion_hours", 0)
+
+            for emp, data in emp_patterns.items():
+                if data["total_freq"] > 5 or len(data["categories"]) > 4:
+                    overloaded.append(emp)
+
+            for t in trends:
+                if t.get("direction") == "improving":
+                    top_performers.append(t["email"])
+
+            completed_count = len([t for t in tasks if t.get("status") == "completed"])
+            overdue_count = len([t for t in tasks if t.get("status") in ("pending", "in_progress") and t.get("due_date") and t["due_date"] < datetime.utcnow().isoformat()])
+            escalation_count = len([t for t in tasks if t.get("escalation_level", 0) >= 1])
+            completion_rate = round((completed_count / len(tasks) * 100) if tasks else 0, 1)
+
+            skill_gaps = []
+            goal_cats = set()
+            for g in goals:
+                goal_cats.add(g.get("department", "general"))
+            all_proven = set()
+            for f in freqs:
+                all_proven.add(f.get("work_category", ""))
+            for c in goal_cats:
+                if c.lower() not in [p.lower() for p in all_proven]:
+                    skill_gaps.append(c)
+
+            briefing_lines = [
+                f"--- Weekly Owner Briefing for {org.get('name', 'Your Org')} ---",
+                f"Active Goals: {len(goals)}",
+                f"Tasks: {len(tasks)} total, {completion_rate}% completion",
+                f"Overdue: {overdue_count} | Escalated: {escalation_count}",
+            ]
+            if overloaded:
+                briefing_lines.append(f"Overloaded Employees: {', '.join(overloaded[:5])}")
+            if top_performers:
+                briefing_lines.append(f"Top Performers (improving): {', '.join(top_performers[:5])}")
+            if skill_gaps:
+                briefing_lines.append(f"Skill Gaps: {', '.join(skill_gaps[:5])}")
+            briefing_lines.append(f"--- Generated {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC ---")
+
+            briefing_text = "\n".join(briefing_lines)
+            db.owner_briefings.insert_one({
+                "organization_id": org_id,
+                "owner_id": owner_id,
+                "content": briefing_text,
+                "generated_at": datetime.utcnow(),
+            })
+
+            await create_and_deliver(
+                user_id=owner_id,
+                org_id=org_id,
+                type="weekly_briefing",
+                title="Weekly Owner Briefing",
+                message=f"Your weekly briefing is ready. {len(goals)} active goals, {completion_rate}% task completion.",
+                link="/dashboard/reports",
+            )
+
+        logger.info(f"Generated weekly briefings for {len(orgs)} orgs")
+    except Exception as e:
+        logger.error(f"Weekly briefing generation failed: {e}")
+
+
 async def scheduler_loop():
     logger.info("Scheduler started")
     deadline_counter = 0
@@ -893,6 +1003,8 @@ async def scheduler_loop():
                     await send_digests()
                 if hour == 9:
                     await send_auto_reports()
+                    await record_performance_snapshots()
+                    await generate_weekly_owner_briefings()
                 if hour == 3:
                     await aggregate_cross_company_patterns()
                 await check_owner_check_ins()

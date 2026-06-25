@@ -51,6 +51,9 @@ interface TaskState {
   deleteTask: (taskId: string) => Promise<void>;
   completeTask: (taskId: string) => Promise<void>;
   approveTask: (taskId: string) => Promise<void>;
+  fetchSuggestions: (orgId: string, title: string, description?: string, department?: string) => Promise<any>;
+  fetchDeadlineSuggestion: (title: string, description?: string) => Promise<any>;
+  fetchWorkloadCheck: (orgId: string, email: string) => Promise<any>;
   addComment: (taskId: string, content: string) => Promise<void>;
 }
 
@@ -274,6 +277,44 @@ export const useTaskStore = create<TaskState>()(
           set({ error: error.message });
           throw error;
         }
+      },
+
+      fetchSuggestions: async (orgId: string, title: string, description?: string, department?: string) => {
+        try {
+          const params = new URLSearchParams({
+            title,
+            organization_id: orgId,
+          });
+          if (description) params.append("description", description);
+          if (department) params.append("department", department);
+          const response = await fetch(`${API_URL}/smart/suggest-assignees?${params}`, {
+            headers: { ...getAuthHeaders() },
+          });
+          if (!response.ok) return null;
+          return await response.json();
+        } catch { return null; }
+      },
+
+      fetchDeadlineSuggestion: async (title: string, description?: string) => {
+        try {
+          const response = await fetch(`${API_URL}/smart/suggest-deadline`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+            body: JSON.stringify({ title, description: description || "" }),
+          });
+          if (!response.ok) return null;
+          return await response.json();
+        } catch { return null; }
+      },
+
+      fetchWorkloadCheck: async (orgId: string, email: string) => {
+        try {
+          const response = await fetch(`${API_URL}/smart/check-workload/${orgId}/${email}`, {
+            headers: { ...getAuthHeaders() },
+          });
+          if (!response.ok) return null;
+          return await response.json();
+        } catch { return null; }
       },
 
       addComment: async (taskId, content) => {

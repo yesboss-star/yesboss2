@@ -89,7 +89,39 @@ async def generate_employee_report(
         escalation_lines.append(f"  - \"{t.get('title', 'Unknown')}\" overdue {days_overdue}d, escalated to {label}")
     escalation_section = "[Escalated Tasks]\n" + "\n".join(escalation_lines) if escalation_lines else ""
 
+    import hashlib
+    org_ref = hashlib.sha256(org_id.encode()).hexdigest()[:16]
+    emp_freqs = list(db.employee_frequencies.find({"org_ref": org_ref, "employee_role": employee_email}))
+    work_patterns = []
+    for f in emp_freqs:
+        work_patterns.append(
+            f"{f.get('work_category', 'general')} ({f.get('level', 'intermediate')}, "
+            f"~{f.get('avg_completion_hours', 4):.1f}h avg, {f.get('frequency_per_week', 0):.1f}x/week)"
+        )
+    org_freqs = list(db.employee_frequencies.find({"org_ref": org_ref}))
+    org_avg_by_cat = {}
+    for f in org_freqs:
+        cat = f.get("work_category", "general")
+        if cat not in org_avg_by_cat:
+            org_avg_by_cat[cat] = {"total_hours": 0, "count": 0}
+        org_avg_by_cat[cat]["total_hours"] += f.get("avg_completion_hours", 4)
+        org_avg_by_cat[cat]["count"] += 1
+    comparison_lines = []
+    for f in emp_freqs:
+        cat = f.get("work_category", "general")
+        emp_avg = f.get("avg_completion_hours", 4)
+        org_avg = org_avg_by_cat.get(cat, {}).get("total_hours", 0) / max(org_avg_by_cat.get(cat, {}).get("count", 1), 1)
+        diff = emp_avg - org_avg
+        if diff < -1:
+            comparison_lines.append(f"  - {cat}: {emp_avg:.1f}h (vs org avg {org_avg:.1f}h) — faster")
+        elif diff > 1:
+            comparison_lines.append(f"  - {cat}: {emp_avg:.1f}h (vs org avg {org_avg:.1f}h) — slower")
+        else:
+            comparison_lines.append(f"  - {cat}: {emp_avg:.1f}h (vs org avg {org_avg:.1f}h) — on par")
+
     ai_feedback = ""
+    work_patterns_section = f"[Work Patterns]\n" + "\n".join(work_patterns) if work_patterns else ""
+    comparison_section = f"[Org Comparison]\n" + "\n".join(comparison_lines) if comparison_lines else ""
     prompt = (
         f"Employee Performance Report for {period} period.\n"
         f"Name: {employee_name}\n"
@@ -105,7 +137,10 @@ async def generate_employee_report(
         f"Goals contributed to: {len(goals_touched)}\n"
         f"Manager: {manager_email}\n"
         f"{escalation_section}\n"
+        f"{work_patterns_section}\n"
+        f"{comparison_section}\n"
         f"Provide 2-3 sentences of constructive feedback highlighting strengths and areas for improvement. "
+        f"Reference their work patterns and org comparison where relevant. "
         f"Flag any concerning escalation patterns."
     )
     try:
@@ -137,6 +172,10 @@ async def generate_employee_report(
             "total": escalated_count,
             "items": escalation_lines,
             "manager_notified": manager_email if escalated_count else "",
+        },
+        "work_patterns": {
+            "categories": work_patterns,
+            "org_comparison": comparison_lines,
         },
         "ai_feedback": ai_feedback,
     }
@@ -221,6 +260,38 @@ async def generate_org_health(db: Any, org_id: str) -> Dict:
     else:
         health_label = "At Risk"
 
+    import hashlib
+    org_ref = hashlib.sha256(org_id.encode()).hexdigest()[:16]
+    org_freqs = list(db.employee_frequencies.find({"org_ref": org_ref}))
+    team_patterns = []
+    emp_cats = {}
+    for f in org_freqs:
+        emp = f.get("employee_role", "unknown")
+        if emp not in emp_cats:
+            emp_cats[emp] = []
+        emp_cats[emp].append(f.get("work_category", "general"))
+    overloaded = []
+    best_per_cat = {}
+    for f in org_freqs:
+        emp = f.get("employee_role", "")
+        cat = f.get("work_category", "")
+        hours = f.get("avg_completion_hours", 4)
+        if cat not in best_per_cat or hours < best_per_cat[cat]["hours"]:
+            best_per_cat[cat] = {"email": emp, "hours": hours}
+    for emp, cats in emp_cats.items():
+        if len(cats) > 4:
+            overloaded.append(emp)
+            team_patterns.append(f"{emp}: multi-category ({', '.join(cats[:5])})")
+    overloaded_section = f"[Overloaded Employees]\n" + "\n".join(f"  - {e}" for e in overloaded) if overloaded else ""
+    best_performer_lines = [f"  - {cat}: {info['email']} (~{info['hours']:.1f}h)" for cat, info in sorted(best_per_cat.items())]
+    best_performer_section = "[Best Performer per Category]\n" + "\n".join(best_performer_lines) if best_performer_lines else ""
+    category_summary = {}
+    for f in org_freqs:
+        cat = f.get("work_category", "general")
+        category_summary[cat] = category_summary.get(cat, 0) + 1
+    cat_lines = [f"  - {cat}: {count} employee(s)" for cat, count in sorted(category_summary.items(), key=lambda x: -x[1])]
+    cat_section = "[Work Categories Across Team]\n" + "\n".join(cat_lines) if cat_lines else ""
+
     ai_recommendations = ""
     prompt = (
         f"Organization Health Assessment\n"
@@ -230,8 +301,12 @@ async def generate_org_health(db: Any, org_id: str) -> Dict:
         f"Team Size: {team_size}\n"
         f"Departments: {list(departments.keys())}\n"
         f"Open Bottlenecks: {len(bottlenecks)}\n"
-        f"Quality Score: {avg_quality_score}/5\n\n"
-        f"Provide 2-3 strategic recommendations to improve organizational health."
+        f"Quality Score: {avg_quality_score}/5\n"
+        f"{overloaded_section}\n"
+        f"{best_performer_section}\n"
+        f"{cat_section}\n\n"
+        f"Provide 2-3 strategic recommendations to improve organizational health. "
+        f"Reference team work patterns, overloaded employees, and top performers where relevant."
     )
     try:
         ai_recommendations = await get_ai_response(prompt)
@@ -255,6 +330,11 @@ async def generate_org_health(db: Any, org_id: str) -> Dict:
             "has_org_structure": has_org_structure,
         },
         "departments": departments,
+        "work_patterns": {
+            "categories": cat_lines,
+            "overloaded_employees": overloaded,
+            "best_performers": {cat: info for cat, info in best_per_cat.items()},
+        },
         "ai_recommendations": ai_recommendations,
     }
 

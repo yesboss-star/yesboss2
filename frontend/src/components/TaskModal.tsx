@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useTaskStore } from "@/stores/taskStore";
 import { useGoalStore } from "@/stores/goalStore";
 import { useOrgChartStore } from "@/stores/orgChartStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { useAuth } from "@/contexts/AuthContext";
-import { X, Loader2, Sparkles, Calendar, Users, Flag, CheckSquare, ChevronDown, Check } from "lucide-react";
+import { X, Loader2, Sparkles, Calendar, Users, Flag, CheckSquare, ChevronDown, Check, Clock, AlertTriangle, Zap } from "lucide-react";
 
 function PersonMultiSelect({ label, valueIds, valueNames, members, filterDept, onChange }: {
   label: string;
@@ -114,7 +114,7 @@ interface TaskModalProps {
 }
 
 export default function TaskModal({ isOpen, onClose, goalId }: TaskModalProps) {
-  const { createTask, loading } = useTaskStore();
+  const { createTask, loading, fetchSuggestions, fetchDeadlineSuggestion, fetchWorkloadCheck } = useTaskStore();
   const { goals } = useGoalStore();
   const { organization } = useOrganizationStore();
   const { members, fetchOrgMembers } = useOrgChartStore();
@@ -138,11 +138,83 @@ export default function TaskModal({ isOpen, onClose, goalId }: TaskModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
+  const [suggestions, setSuggestions] = useState<any>(null);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [deadlineSuggestion, setDeadlineSuggestion] = useState<any>(null);
+  const [deadlineLoading, setDeadlineLoading] = useState(false);
+  const [workloadWarnings, setWorkloadWarnings] = useState<Record<string, any>>({});
+  const debounceRef = useRef<any>(null);
+
   useEffect(() => {
     if (isOpen && organization?.id) {
       fetchOrgMembers(organization.id);
     }
   }, [isOpen, organization?.id, fetchOrgMembers]);
+
+  const fetchSuggestionsDebounced = useCallback((title: string, description: string, department: string) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!title || title.length < 3 || !organization?.id) {
+      setSuggestions(null);
+      return;
+    }
+    debounceRef.current = setTimeout(async () => {
+      setSuggestionsLoading(true);
+      const result = await fetchSuggestions(organization.id, title, description, department);
+      setSuggestions(result);
+      setSuggestionsLoading(false);
+    }, 600);
+  }, [fetchSuggestions, organization?.id]);
+
+  const fetchDeadlineDebounced = useCallback((title: string, description: string) => {
+    if (!title || title.length < 3) {
+      setDeadlineSuggestion(null);
+      return;
+    }
+    fetchDeadlineSuggestion(title, description).then((r) => {
+      setDeadlineSuggestion(r);
+      setDeadlineLoading(false);
+    });
+  }, [fetchDeadlineSuggestion]);
+
+  const handleTitleChange = (title: string) => {
+    setFormData((prev) => ({ ...prev, title }));
+    if (title.length >= 3) {
+      setDeadlineLoading(true);
+      fetchDeadlineDebounced(title, formData.description);
+      fetchSuggestionsDebounced(title, formData.description, formData.department);
+    } else {
+      setSuggestions(null);
+      setDeadlineSuggestion(null);
+    }
+  };
+
+  const handleDescriptionChange = (description: string) => {
+    setFormData((prev) => ({ ...prev, description }));
+    if (formData.title.length >= 3) {
+      setDeadlineLoading(true);
+      fetchDeadlineDebounced(formData.title, description);
+      fetchSuggestionsDebounced(formData.title, description, formData.department);
+    }
+  };
+
+  const handleDepartmentChange = (department: string) => {
+    setFormData((prev) => ({ ...prev, department }));
+    if (formData.title.length >= 3) {
+      fetchSuggestionsDebounced(formData.title, formData.description, department);
+    }
+  };
+
+  useEffect(() => {
+    if (formData.assignee_id.length > 0 && organization?.id) {
+      formData.assignee_id.forEach((email) => {
+        if (!workloadWarnings[email]) {
+          fetchWorkloadCheck(organization.id, email).then((r) => {
+            if (r) setWorkloadWarnings((prev) => ({ ...prev, [email]: r }));
+          });
+        }
+      });
+    }
+  }, [formData.assignee_id, organization?.id, fetchWorkloadCheck, workloadWarnings]);
 
   if (!isOpen) return null;
 
@@ -177,6 +249,9 @@ export default function TaskModal({ isOpen, onClose, goalId }: TaskModalProps) {
         title: "", description: "", priority: "medium", due_date: "",
         department: "", goal_id: "", assignee_id: [], assignee_name: [],
       });
+      setSuggestions(null);
+      setDeadlineSuggestion(null);
+      setWorkloadWarnings({});
       onClose();
     } catch (err: any) {
       setError(err.message || "Failed to create task");
@@ -190,7 +265,7 @@ export default function TaskModal({ isOpen, onClose, goalId }: TaskModalProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-lg mx-4 bg-background rounded-2xl border border-border shadow-2xl overflow-hidden">
+      <div className="relative w-full max-w-2xl mx-4 bg-background rounded-2xl border border-border shadow-2xl overflow-hidden">
         <div className="flex items-center justify-between p-6 border-b border-border">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
@@ -206,89 +281,168 @@ export default function TaskModal({ isOpen, onClose, goalId }: TaskModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-5 max-h-[70vh] overflow-y-auto">
-          {error && (
-            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">{error}</div>
-          )}
+        <form onSubmit={handleSubmit} className="flex">
+          <div className="flex-1 p-6 space-y-5 max-h-[70vh] overflow-y-auto">
+            {error && (
+              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">{error}</div>
+            )}
 
-          <div>
-            <label className="block text-sm font-medium mb-2">Task Title <span className="text-red-400">*</span></label>
-            <input type="text" value={formData.title} onChange={(e) => setFormData({ ...formData, title: e.target.value })} placeholder="e.g., Design new landing page" className="w-full px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm" />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">Description</label>
-            <textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} placeholder="Describe the task details, acceptance criteria, etc..." rows={3} className="w-full px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm resize-none" />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2"><Flag className="w-4 h-4 inline mr-1" />Department</label>
-            <div className="relative">
-              <input type="text" value={formData.department} onChange={(e) => setFormData({ ...formData, department: e.target.value })} placeholder="e.g., Engineering, Marketing..." list="dept-list" className="w-full px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm" />
-              <datalist id="dept-list">
-                {["Engineering", "Marketing", "Sales", "Operations", "Finance", "Human Resources", "Product", "Design", "Customer Support", "R&D", "Supply Chain", "Legal"].map((d) => <option key={d} value={d} />)}
-              </datalist>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-2"><Flag className="w-4 h-4 inline mr-1" />Priority</label>
-              <select value={formData.priority} onChange={(e) => setFormData({ ...formData, priority: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm appearance-none cursor-pointer">
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="urgent">Urgent</option>
+              <label className="block text-sm font-medium mb-2">Task Title <span className="text-red-400">*</span></label>
+              <input type="text" value={formData.title} onChange={(e) => handleTitleChange(e.target.value)} placeholder="e.g., Design new landing page" className="w-full px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm" />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">Description</label>
+              <textarea value={formData.description} onChange={(e) => handleDescriptionChange(e.target.value)} placeholder="Describe the task details, acceptance criteria, etc..." rows={3} className="w-full px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm resize-none" />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2"><Flag className="w-4 h-4 inline mr-1" />Department</label>
+              <div className="relative">
+                <input type="text" value={formData.department} onChange={(e) => handleDepartmentChange(e.target.value)} placeholder="e.g., Engineering, Marketing..." list="dept-list" className="w-full px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm" />
+                <datalist id="dept-list">
+                  {["Engineering", "Marketing", "Sales", "Operations", "Finance", "Human Resources", "Product", "Design", "Customer Support", "R&D", "Supply Chain", "Legal"].map((d) => <option key={d} value={d} />)}
+                </datalist>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-2"><Flag className="w-4 h-4 inline mr-1" />Priority</label>
+                <select value={formData.priority} onChange={(e) => setFormData({ ...formData, priority: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm appearance-none cursor-pointer">
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2"><Calendar className="w-4 h-4 inline mr-1" />Deadline</label>
+                <div className="flex gap-2">
+                  <input type="date" value={formData.due_date} onChange={(e) => setFormData({ ...formData, due_date: e.target.value })} className="flex-1 px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm" />
+                  {deadlineLoading && <Loader2 className="w-5 h-5 animate-spin text-primary mt-3" />}
+                  {deadlineSuggestion && !deadlineLoading && (
+                    <button
+                      type="button"
+                      onClick={() => setFormData((prev) => ({ ...prev, due_date: deadlineSuggestion.suggested_date }))}
+                      className="px-2 py-1 rounded-lg bg-accent/10 text-accent text-xs hover:bg-accent/20 transition-colors flex items-center gap-1 cursor-pointer"
+                      title={`Suggested: ${deadlineSuggestion.suggested_text} (~${deadlineSuggestion.estimated_hours}h)`}
+                    >
+                      <Zap className="w-3 h-3" /> Auto-fill
+                    </button>
+                  )}
+                </div>
+                {deadlineSuggestion && !deadlineLoading && (
+                  <p className="text-xs text-text-muted mt-1">
+                    <Clock className="w-3 h-3 inline mr-1" />~{deadlineSuggestion.estimated_hours}h ({deadlineSuggestion.complexity}) &rarr; {deadlineSuggestion.suggested_text}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2"><CheckSquare className="w-4 h-4 inline mr-1" />Related Goal (optional)</label>
+              <select value={formData.goal_id} onChange={(e) => setFormData({ ...formData, goal_id: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm appearance-none cursor-pointer">
+                <option value="">No goal linked</option>
+                {goals.filter((g) => g.status === "active").map((goal) => (
+                  <option key={goal.id} value={goal.id}>{goal.title}</option>
+                ))}
               </select>
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-2"><Calendar className="w-4 h-4 inline mr-1" />Deadline</label>
-              <input type="date" value={formData.due_date} onChange={(e) => setFormData({ ...formData, due_date: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm" />
+
+            <PersonMultiSelect
+              label="Assign to"
+              valueIds={formData.assignee_id}
+              valueNames={formData.assignee_name}
+              members={members}
+              filterDept={formData.department || null}
+              onChange={(ids, names) => setFormData({ ...formData, assignee_id: ids, assignee_name: names })}
+            />
+            {formData.assignee_id.length === 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFormData({ ...formData, assignee_id: [userEmail], assignee_name: ["Myself"] });
+                }}
+                className="text-xs text-primary hover:text-primary-light transition-colors"
+              >
+                Assign to myself
+              </button>
+            )}
+
+            {Object.entries(workloadWarnings).map(([email, w]: [string, any]) => (
+              w.is_overloaded ? (
+                <div key={email} className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  <span>{w.warning}</span>
+                </div>
+              ) : null
+            ))}
+
+            <div className="flex gap-3 pt-2">
+              <button type="button" onClick={onClose} className="flex-1 py-3 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer">Cancel</button>
+              <button type="submit" disabled={submitting || loading} className="flex-1 py-3 rounded-xl bg-accent hover:bg-accent-hover text-white font-medium transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Creating...</> : <><Sparkles className="w-4 h-4" /> Create Task</>}
+              </button>
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-2"><CheckSquare className="w-4 h-4 inline mr-1" />Related Goal (optional)</label>
-            <select value={formData.goal_id} onChange={(e) => setFormData({ ...formData, goal_id: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm appearance-none cursor-pointer">
-              <option value="">No goal linked</option>
-              {goals.filter((g) => g.status === "active").map((goal) => (
-                <option key={goal.id} value={goal.id}>{goal.title}</option>
-              ))}
-            </select>
-          </div>
-
-          <PersonMultiSelect
-            label="Assign to"
-            valueIds={formData.assignee_id}
-            valueNames={formData.assignee_name}
-            members={members}
-            filterDept={formData.department || null}
-            onChange={(ids, names) => setFormData({ ...formData, assignee_id: ids, assignee_name: names })}
-          />
-          {formData.assignee_id.length === 0 && (
-            <button
-              type="button"
-              onClick={() => {
-                setFormData({ ...formData, assignee_id: [userEmail], assignee_name: ["Myself"] });
-              }}
-              className="text-xs text-primary hover:text-primary-light transition-colors"
-            >
-              Assign to myself
-            </button>
+          {suggestionsLoading && (
+            <div className="w-72 p-4 border-l border-border flex items-center justify-center">
+              <Loader2 className="w-5 h-5 animate-spin text-primary" />
+            </div>
           )}
-          {formData.assignee_id.length > 0 && formData.assignee_id.includes(userEmail) && (
-            <p className="text-xs text-text-muted -mt-3">You are assigned to this task</p>
+          {suggestions && !suggestionsLoading && suggestions.suggestions?.length > 0 && (
+            <div className="w-72 p-4 border-l border-border max-h-[70vh] overflow-y-auto">
+              <div className="flex items-center gap-2 mb-3">
+                <Zap className="w-4 h-4 text-accent" />
+                <h3 className="text-sm font-semibold">AI Suggestions</h3>
+              </div>
+              {suggestions.analysis && (
+                <p className="text-[10px] text-text-muted mb-3">
+                  Category: {suggestions.analysis.work_category} &middot; Complexity: {suggestions.analysis.complexity_level}
+                </p>
+              )}
+              <div className="space-y-2">
+                {suggestions.suggestions.map((s: any, i: number) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => {
+                      setFormData((prev) => ({
+                        ...prev,
+                        assignee_id: [s.email],
+                        assignee_name: [members.find((m) => m.email === s.email)?.full_name || s.email],
+                      }));
+                    }}
+                    className="w-full text-left p-3 rounded-xl bg-surface hover:bg-surface-light border border-border transition-all cursor-pointer"
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-medium truncate">{members.find((m) => m.email === s.email)?.full_name || s.email}</span>
+                      <span className="text-xs font-bold text-accent">{s.match_percent}%</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-[10px] text-text-muted">
+                      <span>{s.category}</span>
+                      <span>&middot;</span>
+                      <span>{s.level}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-[10px] text-text-muted mt-0.5">
+                      <span>{s.frequency_per_week.toFixed(1)}/wk</span>
+                      <span>&middot;</span>
+                      <span>~{s.avg_completion_hours.toFixed(1)}h avg</span>
+                      {s.active_tasks > 0 && (
+                        <>
+                          <span>&middot;</span>
+                          <span className="text-amber-400">{s.active_tasks} active</span>
+                        </>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
-          {formData.assignee_id.length > 0 && !formData.assignee_id.includes(userEmail) && (
-            <p className="text-xs text-text-muted -mt-3">Task will be assigned with real-time notification</p>
-          )}
-
-          <div className="flex gap-3 pt-2">
-            <button type="button" onClick={onClose} className="flex-1 py-3 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer">Cancel</button>
-            <button type="submit" disabled={submitting || loading} className="flex-1 py-3 rounded-xl bg-accent hover:bg-accent-hover text-white font-medium transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-              {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Creating...</> : <><Sparkles className="w-4 h-4" /> Create Task</>}
-            </button>
-          </div>
         </form>
       </div>
     </div>
