@@ -142,8 +142,9 @@ def _normalize_assignee_ids(v):
     if v is None:
         return None
     if isinstance(v, str):
-        return [v]
-    return list(v)
+        return [] if v == "" else [v]
+    result = list(v)
+    return [x for x in result if x is not None]
 
 class TaskCreate(BaseModel):
     title: str
@@ -164,6 +165,7 @@ class TaskUpdate(BaseModel):
     priority: Optional[str] = None
     status: Optional[str] = None
     assignee_id: Optional[Union[str, List[str]]] = None
+    assignee_name: Optional[Union[str, List[str]]] = None
     due_date: Optional[str] = None
     dependencies: Optional[List[str]] = None
     reviewers: Optional[List[str]] = None
@@ -290,6 +292,11 @@ async def list_tasks(
             task["assignee_id"] = [raw]
         elif raw is None:
             task["assignee_id"] = []
+        raw_name = task.get("assignee_name")
+        if isinstance(raw_name, str):
+            task["assignee_name"] = [raw_name]
+        elif raw_name is None:
+            task["assignee_name"] = []
     
     return {"tasks": tasks}
 
@@ -334,6 +341,8 @@ async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get
             continue
         if k == "assignee_id":
             update_data[k] = _normalize_assignee_ids(v) or []
+        elif k == "assignee_name":
+            update_data[k] = _normalize_assignee_ids(v) or []
         else:
             update_data[k] = v
     update_data["updated_at"] = datetime.utcnow()
@@ -350,6 +359,11 @@ async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get
         task_obj["assignee_id"] = [raw]
     elif raw is None:
         task_obj["assignee_id"] = []
+    raw_name = task_obj.get("assignee_name")
+    if isinstance(raw_name, str):
+        task_obj["assignee_name"] = [raw_name]
+    elif raw_name is None:
+        task_obj["assignee_name"] = []
     
     if org_id:
         asyncio.create_task(sync_task_to_zoho(db, task_obj, org_id, old_obj))
@@ -359,12 +373,32 @@ async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get
             org_id
         ))
 
-        if task.status and task_obj.get("assignee_id"):
-            status_title = task.status.replace("_", " ").title()
-            for aid in task_obj["assignee_id"]:
+        user_id = getattr(current_user, 'id', None) or str(current_user) if current_user else None
+        old_assignee_ids = _normalize_assignee_ids(old_obj.get("assignee_id")) or [] if old_obj else []
+        new_assignee_ids = task_obj.get("assignee_id") or []
+        new_assignees = [a for a in new_assignee_ids if a not in old_assignee_ids]
+
+        for aid in new_assignees:
+            if aid != user_id:
+                asyncio.create_task(ws_manager.send_personal_message(
+                    {"type": "task_assigned", "data": task_obj},
+                    aid
+                ))
                 asyncio.create_task(create_notification(
-                    user_id=aid,
-                    org_id=org_id,
+                    user_id=aid, org_id=org_id,
+                    type="task_assigned",
+                    title="Task Assigned to You",
+                    message=f"You have been assigned: {task_obj.get('title')}",
+                    link=f"/tasks/{task_id}",
+                    actor_id=user_id,
+                    email=task_obj.get("assignee_email"),
+                ))
+
+        if task.status and new_assignee_ids:
+            status_title = task.status.replace("_", " ").title()
+            for aid in new_assignee_ids:
+                asyncio.create_task(create_notification(
+                    user_id=aid, org_id=org_id,
                     type="task_status",
                     title=f"Task {status_title}",
                     message=f"Task '{task_obj.get('title')}' is now {task.status}",

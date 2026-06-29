@@ -35,7 +35,10 @@ def send_email(to_email: str, subject: str, html_body: str, text_body: Optional[
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
             server.starttls()
             server.login(SMTP_USER, SMTP_PASS)
-            server.sendmail(SMTP_FROM, to_email, msg.as_string())
+            import re
+            match = re.search(r'<([^>]+)>', SMTP_FROM)
+            from_addr = match.group(1) if match else SMTP_FROM
+            server.sendmail(from_addr, to_email, msg.as_string())
 
         logger.info(f"Email sent to {to_email}: {subject}")
         return True

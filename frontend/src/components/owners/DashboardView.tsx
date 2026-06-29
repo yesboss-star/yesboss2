@@ -18,7 +18,7 @@ import {
   BarChart3, Target, Zap, Activity, ChevronRight,
   AlertTriangle, Info, Users, User, FileSpreadsheet,
   PieChart as PieChartIcon, Link2, X, Building2, Network,
-  Briefcase, Search, RefreshCw, Upload, Trash2, GitBranch, Plus,
+  Briefcase, Search, RefreshCw, Upload, Trash2, GitBranch, Plus, List, ArrowLeft,
 } from "lucide-react";
 import {
   Card, CardHeader, CardTitle, CardDescription, CardContent,
@@ -228,7 +228,8 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
     fetch(`${API_URL}/goals/${goal.id}`)
       .then((r) => r.json())
       .then((data) => {
-        setTasks(data.tasks || []);
+        const normalizeList = (v: any) => Array.isArray(v) ? v : (v ? [v] : []);
+        setTasks((data.tasks || []).map((t: any) => ({ ...t, assignee_id: normalizeList(t.assignee_id), assignee_name: normalizeList(t.assignee_name) })));
         if (data.goal) {
           setGoalData((prev: any) => ({ ...prev, ...data.goal, id: data.goal._id || data.goal.id || prev.id }));
         }
@@ -277,7 +278,7 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
     const nextAssigneeName = member?.full_name ?? "";
     setTasks((prev) => prev.map((t) => (t._id === taskId || t.id === taskId ? { ...t, assignee_id: nextAssigneeIds, assignee_name: nextAssigneeName } : t)));
     try {
-      await updateTask(taskId, { assignee_id: nextAssigneeIds.length > 0 ? nextAssigneeIds : undefined } as any);
+      await updateTask(taskId, { assignee_id: nextAssigneeIds, assignee_name: nextAssigneeName } as any);
     } catch {
       loadTasks();
     }
@@ -729,7 +730,7 @@ function TaskRow({
       .slice(0, 8);
   }, [members, query, department]);
 
-  const selected = task.assignee_name || (task.assignee_id && task.assignee_id.length > 0 && members.find((m) => task.assignee_id.includes(m.id))?.full_name);
+  const selected = (Array.isArray(task.assignee_name) ? task.assignee_name[0] : task.assignee_name) || (task.assignee_id && task.assignee_id.length > 0 && members.find((m) => task.assignee_id.includes(m.id))?.full_name);
 
   const statusOptions = [
     { value: "pending", label: "Pending" },
@@ -955,6 +956,8 @@ function InlinePersonPicker({
   );
 }
 
+const _pick = (val: any) => (Array.isArray(val) && val.length > 0 ? val[0] : (Array.isArray(val) ? undefined : val));
+
 function DepartmentGoalRow({
   goal,
   members,
@@ -1038,7 +1041,7 @@ function DepartmentGoalRow({
       >
         <InlinePersonPicker
           type="defaulter"
-          value={{ id: goal.assignee_id, name: goal.assignee_name }}
+          value={{ id: _pick(goal.assignee_id), name: _pick(goal.assignee_name) }}
           members={members}
           saving={savingKey === `${goal.id || goal._id}:defaulter`}
           onChange={(m) => onAssign(goal, "defaulter", m)}
@@ -1072,9 +1075,11 @@ function DepartmentGoalsModal({
   const DeptIcon = style.icon;
   const { organization } = useOrganizationStore();
   const { members, fetchOrgMembers } = useOrgChartStore();
+  const { tasks } = useTaskStore();
   const orgId = organization?.id;
   const [search, setSearch] = useState("");
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"flat" | "hierarchy">("flat");
 
   useEffect(() => {
     if (orgId) fetchOrgMembers(orgId);
@@ -1116,15 +1121,35 @@ function DepartmentGoalsModal({
     <Modal open={true} onOpenChange={(open) => { if (!open) onClose(); }} size="xl">
       <ModalHeader>
         <ModalTitle>
-          <div className="flex items-center gap-2">
-            <div className={`w-8 h-8 rounded-xl bg-gradient-to-br ${style.bg} ${style.border} border flex items-center justify-center`}>
-              <DeptIcon className={`w-4 h-4 ${style.text}`} />
+          <div className="flex items-center justify-between w-full">
+            <div className="flex items-center gap-2">
+              <div className={`w-8 h-8 rounded-xl bg-gradient-to-br ${style.bg} ${style.border} border flex items-center justify-center`}>
+                <DeptIcon className={`w-4 h-4 ${style.text}`} />
+              </div>
+              <div className="flex flex-col">
+                <span>{department.name} Goals</span>
+                <span className="text-[10px] text-text-muted font-normal">
+                  {goals.length} goal{goals.length === 1 ? "" : "s"} · {activeCount} active · {completedCount} done · {unassignedCount} unassigned
+                </span>
+              </div>
             </div>
-            <div className="flex flex-col">
-              <span>{department.name} Goals</span>
-              <span className="text-[10px] text-text-muted font-normal">
-                {goals.length} goal{goals.length === 1 ? "" : "s"} · {activeCount} active · {completedCount} done · {unassignedCount} unassigned
-              </span>
+            <div className="flex items-center gap-1 p-0.5 rounded-lg bg-surface border border-border/50">
+              <button
+                onClick={() => setViewMode("flat")}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
+                  viewMode === "flat" ? "bg-primary text-white shadow-sm" : "text-text-muted hover:text-foreground"
+                }`}
+              >
+                Flat
+              </button>
+              <button
+                onClick={() => setViewMode("hierarchy")}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
+                  viewMode === "hierarchy" ? "bg-primary text-white shadow-sm" : "text-text-muted hover:text-foreground"
+                }`}
+              >
+                Hierarchy
+              </button>
             </div>
           </div>
         </ModalTitle>
@@ -1150,13 +1175,6 @@ function DepartmentGoalsModal({
             </div>
           </div>
 
-          <div className="p-2.5 rounded-lg bg-primary/5 border border-primary/20 text-[11px] text-text-muted flex items-center gap-2">
-            <User className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-            <span>
-              Use the <strong className="text-primary">Defaulter</strong> and <strong className="text-primary">Reviewer</strong> pickers below to assign each goal. Click a goal to open its full pipeline.
-            </span>
-          </div>
-
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -1165,24 +1183,46 @@ function DepartmentGoalsModal({
             className="text-xs h-9"
           />
 
-          {filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-8 text-center">
-              <Target className="w-8 h-8 text-text-muted/40 mb-2" />
-              <p className="text-sm text-text-muted">No goals match your search</p>
-            </div>
+          {viewMode === "flat" ? (
+            <>
+              <div className="p-2.5 rounded-lg bg-primary/5 border border-primary/20 text-[11px] text-text-muted flex items-center gap-2">
+                <User className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                <span>
+                  Use the <strong className="text-primary">Defaulter</strong> and <strong className="text-primary">Reviewer</strong> pickers below to assign each goal. Click a goal to open its full pipeline.
+                </span>
+              </div>
+
+              {filtered.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-center">
+                  <Target className="w-8 h-8 text-text-muted/40 mb-2" />
+                  <p className="text-sm text-text-muted">No goals match your search</p>
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-[50vh] overflow-y-auto custom-scrollbar pr-1">
+                  {filtered.map((goal) => (
+                    <DepartmentGoalRow
+                      key={goal.id || goal._id}
+                      goal={goal}
+                      members={members}
+                      onOpenGoal={onSelectGoal}
+                      onAssign={handleAssign}
+                      savingKey={savingKey}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
           ) : (
-            <div className="space-y-2 max-h-[50vh] overflow-y-auto custom-scrollbar pr-1">
-              {filtered.map((goal) => (
-                <DepartmentGoalRow
-                  key={goal.id || goal._id}
-                  goal={goal}
-                  members={members}
-                  onOpenGoal={onSelectGoal}
-                  onAssign={handleAssign}
-                  savingKey={savingKey}
-                />
-              ))}
-            </div>
+            <DepartmentDrillView
+              goals={filtered}
+              members={members}
+              tasks={tasks}
+              orgId={orgId}
+              savingKey={savingKey}
+              onOpenGoal={onSelectGoal}
+              onAssign={handleAssign}
+              departmentName={department.name}
+            />
           )}
         </div>
       </ModalContent>
@@ -1191,6 +1231,526 @@ function DepartmentGoalsModal({
       </ModalFooter>
     </Modal>
   );
+}
+
+function DepartmentDrillView({
+  goals,
+  members,
+  tasks: _tasks,
+  orgId,
+  savingKey,
+  onOpenGoal,
+  onAssign,
+  departmentName,
+}: {
+  goals: any[];
+  members: any[];
+  tasks: any[];
+  orgId: string | undefined;
+  savingKey: string | null;
+  onOpenGoal: (goal: any) => void;
+  onAssign: (goal: any, role: "defaulter" | "reviewer", member: { id: string; full_name: string; email: string } | null) => Promise<void> | void;
+  departmentName: string;
+}) {
+  const [level, setLevel] = useState<"goals" | "subgoals" | "tasks">("goals");
+  const [parentGoal, setParentGoal] = useState<any>(null);
+  const [subGoal, setSubGoal] = useState<any>(null);
+  const [suggestedSubgoals, setSuggestedSubgoals] = useState<any[]>([]);
+  const [loadingSubgoals, setLoadingSubgoals] = useState(false);
+  const [suggestedTasks, setSuggestedTasks] = useState<any[]>([]);
+  const [loadingTasks, setLoadingTasks] = useState(false);
+  const [taskSearch, setTaskSearch] = useState("");
+  const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [selectedSuggestionIds, setSelectedSuggestionIds] = useState<Set<number>>(new Set());
+  const [selectedTaskSuggestionIds, setSelectedTaskSuggestionIds] = useState<Set<number>>(new Set());
+  const [addingSubgoals, setAddingSubgoals] = useState(false);
+  const [addingTasks, setAddingTasks] = useState(false);
+  const { updateTask, createTask, deleteTask, fetchTasks } = useTaskStore();
+  const { createGoal, fetchGoals } = useGoalStore();
+  const [goalTaskCache, setGoalTaskCache] = useState<Record<string, any[]>>({});
+  const [subgoalOptimistic, setSubgoalOptimistic] = useState<Record<string, Record<string, any>>>({});
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "completed": return "text-emerald-400 bg-emerald-500/10 border-emerald-500/20";
+      case "in_progress": return "text-primary bg-primary/10 border-primary/20";
+      default: return "text-yellow-400 bg-yellow-500/10 border-yellow-500/20";
+    }
+  };
+
+  const pick = (val: any) => (Array.isArray(val) && val.length > 0 ? val[0] : (Array.isArray(val) ? undefined : val));
+
+  const parentGoals = useMemo(() => {
+    const childIds = new Set(goals.filter((g) => g.parent_goal_id).map((g) => g.parent_goal_id));
+    return goals.filter((g) => g.goal_type === "long_term" || childIds.has(g.id || g._id) || (!g.parent_goal_id && g.goal_type !== "short_term"));
+  }, [goals]);
+
+  const childGoalsByParent = useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (const g of goals) {
+      const pid = g.parent_goal_id;
+      if (pid) {
+        const arr = map.get(pid) || [];
+        arr.push(g);
+        map.set(pid, arr);
+      }
+    }
+    return map;
+  }, [goals]);
+
+  const orphanGoals = useMemo(() => {
+    const parentIds = new Set(parentGoals.map((g) => g.id || g._id));
+    return goals.filter((g) => !g.parent_goal_id && !parentIds.has(g.id || g._id));
+  }, [goals, parentGoals]);
+
+  const loadGoalTasks = async (gid: string) => {
+    if (goalTaskCache[gid]) return;
+    try {
+      const res = await fetch(`${API_URL}/tasks?goal_id=${gid}&organization_id=${orgId}`, {
+        headers: { ...getAuthHeaders() },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const norm = (v: any) => Array.isArray(v) ? v : (v ? [v] : []);
+        setGoalTaskCache((prev) => ({ ...prev, [gid]: (data.tasks || []).map((t: any) => ({ ...t, id: t._id || t.id, assignee_id: norm(t.assignee_id), assignee_name: norm(t.assignee_name) })) }));
+      }
+    } catch {}
+  };
+
+  const suggestSubgoals = async () => {
+    if (!parentGoal || !orgId) return;
+    setLoadingSubgoals(true);
+    setSuggestedSubgoals([]);
+    setSelectedSuggestionIds(new Set());
+    try {
+      const res = await fetch(`${API_URL}/goals/${parentGoal.id || parentGoal._id}/suggest-children`, {
+        method: "POST",
+        headers: { ...getAuthHeaders() },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSuggestedSubgoals(data.suggestions || []);
+      }
+    } catch {} finally {
+      setLoadingSubgoals(false);
+    }
+  };
+
+  const suggestTasks = async () => {
+    if (!subGoal) return;
+    setLoadingTasks(true);
+    setSuggestedTasks([]);
+    setSelectedTaskSuggestionIds(new Set());
+    try {
+      const res = await fetch(`${API_URL}/goals/suggest-breakdown`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({
+          title: subGoal.title,
+          description: subGoal.description || "",
+          industry: subGoal.industry || "",
+          micro_vertical: subGoal.micro_vertical || "",
+          goal_type: subGoal.goal_type || "short_term",
+          department: subGoal.department || departmentName,
+          organization_id: orgId,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSuggestedTasks(data.tasks || []);
+      }
+    } catch {} finally {
+      setLoadingTasks(false);
+    }
+  };
+
+  const addSelectedSubgoals = async () => {
+    if (!parentGoal || !orgId) return;
+    setAddingSubgoals(true);
+    const items = suggestedSubgoals.filter((_, i) => selectedSuggestionIds.has(i));
+    for (const s of items) {
+      try {
+        await createGoal({
+          title: s.title,
+          description: s.description || s.title,
+          priority: s.priority || "medium",
+          department: s.department || parentGoal.department || departmentName,
+          organization_id: orgId,
+          goal_type: "short_term",
+          duration: "one_time",
+          parent_goal_id: parentGoal.id || parentGoal._id,
+          industry: parentGoal.industry || "",
+          micro_vertical: parentGoal.micro_vertical || "",
+        } as any);
+      } catch {}
+    }
+    await fetchGoals(orgId);
+    setSuggestedSubgoals([]);
+    setSelectedSuggestionIds(new Set());
+    setAddingSubgoals(false);
+  };
+
+  const addSelectedTasks = async () => {
+    if (!subGoal || !orgId) return;
+    setAddingTasks(true);
+    const items = suggestedTasks.filter((_, i) => selectedTaskSuggestionIds.has(i));
+    const gid = subGoal.id || subGoal._id;
+    for (const s of items) {
+      try {
+        await createTask({
+          title: s.title,
+          description: s.description || "",
+          priority: s.priority || "medium",
+          goal_id: gid,
+          organization_id: orgId,
+        } as any);
+      } catch {}
+    }
+    await loadGoalTasks(gid);
+    setSuggestedTasks([]);
+    setSelectedTaskSuggestionIds(new Set());
+    setAddingTasks(false);
+  };
+
+  const handleCreateTask = async () => {
+    if (!newTaskTitle.trim() || !subGoal || !orgId) return;
+    const gid = subGoal.id || subGoal._id;
+    try {
+      await createTask({ title: newTaskTitle.trim(), goal_id: gid, organization_id: orgId } as any);
+      setNewTaskTitle("");
+      setShowCreateForm(false);
+      await loadGoalTasks(gid);
+    } catch {}
+  };
+
+  const handleDeleteTask = async (taskId: string) => {
+    try {
+      await deleteTask(taskId);
+      if (subGoal) {
+        const gid = subGoal.id || subGoal._id;
+        setGoalTaskCache((prev) => ({ ...prev, [gid]: (prev[gid] || []).filter((t: any) => t.id !== taskId) }));
+      }
+    } catch {}
+  };
+
+  const currentTasks = subGoal ? goalTaskCache[subGoal.id || subGoal._id] || _tasks.filter((t: any) => t.goal_id === (subGoal.id || subGoal._id)) : [];
+
+  const filteredTasks = useMemo(() => {
+    const q = taskSearch.trim().toLowerCase();
+    if (!q) return currentTasks;
+    return currentTasks.filter((t: any) => (t.title || "").toLowerCase().includes(q));
+  }, [currentTasks, taskSearch]);
+
+  const renderProgressBar = (pct: number) => (
+    <div className="flex items-center gap-1 w-16 flex-shrink-0">
+      <div className="flex-1 h-1.5 bg-background rounded-full overflow-hidden">
+        <div className={`h-full rounded-full ${pct >= 100 ? "bg-emerald-400" : pct >= 50 ? "bg-primary" : pct > 0 ? "bg-yellow-400" : "bg-gray-500/30"}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+      </div>
+      <span className="text-[10px] text-text-muted w-7 text-right font-medium">{pct}%</span>
+    </div>
+  );
+
+  const renderPersonPickers = (goal: any) => {
+    const gid = goal.id || goal._id;
+    const ov = subgoalOptimistic[gid];
+    const handleAssignLocal = async (g: any, role: "defaulter" | "reviewer", member: { id: string; full_name: string; email: string } | null) => {
+      const ggid = g.id || g._id;
+      if (role === "defaulter") {
+        setSubgoalOptimistic((prev) => ({ ...prev, [ggid]: { ...prev[ggid], assignee_id: member?.id ? [member.id] : [], assignee_name: member?.full_name || "" } }));
+      } else {
+        setSubgoalOptimistic((prev) => ({ ...prev, [ggid]: { ...prev[ggid], reviewer_id: member?.id ? [member.id] : [], reviewer_name: member?.full_name || "" } }));
+      }
+      try {
+        await onAssign(g, role, member);
+      } catch {
+        setSubgoalOptimistic((prev) => { const n = { ...prev }; delete n[ggid]; return n; });
+      }
+    };
+    return (
+      <div className="flex items-center gap-2">
+        <InlinePersonPicker type="defaulter" value={{ id: pick(ov?.assignee_id ?? goal.assignee_id), name: pick(ov?.assignee_name ?? goal.assignee_name) }} members={members} saving={savingKey === `${gid}:defaulter`} onChange={(m) => handleAssignLocal(goal, "defaulter", m)} />
+        <InlinePersonPicker type="reviewer" value={{ id: pick(ov?.reviewer_id ?? goal.reviewer_id), name: pick(ov?.reviewer_name ?? goal.reviewer_name) }} members={members} saving={savingKey === `${gid}:reviewer`} onChange={(m) => handleAssignLocal(goal, "reviewer", m)} />
+      </div>
+    );
+  };
+
+  // ─── Level 1: Goals (Long-term goals list) ───
+  const renderGoalsList = () => (
+    <div className="space-y-2 max-h-[55vh] overflow-y-auto custom-scrollbar pr-1">
+      {parentGoals.length === 0 && orphanGoals.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-8 text-center">
+          <Target className="w-8 h-8 text-text-muted/40 mb-2" />
+          <p className="text-sm text-text-muted">No goals</p>
+        </div>
+      ) : (
+        <>
+          {parentGoals.length > 0 && <p className="text-[11px] font-medium text-text-muted mb-1 flex items-center gap-1"><Flag className="w-3.5 h-3.5 text-primary" /> Long-term Goals ({parentGoals.length})</p>}
+          {parentGoals.map((goal) => {
+            const gid = goal.id || goal._id;
+            const t = goal.task_counts || {};
+            const pct = t.total > 0 ? Math.round((t.completed / t.total) * 100) : goal.progress || 0;
+            return (
+              <div key={gid} className="border border-primary/20 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 overflow-hidden">
+                <div onClick={() => { setParentGoal(goal); setLevel("subgoals"); }} className="flex items-center gap-3 p-3 hover:bg-primary/5 transition-colors cursor-pointer" role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setParentGoal(goal); setLevel("subgoals"); } }}>
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 bg-primary/10">
+                    <Flag className="w-4 h-4 text-primary" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-semibold truncate">{goal.title}</span>
+                    <div className="flex items-center gap-2 text-[10px] text-text-muted mt-0.5">
+                      {(childGoalsByParent.get(gid)?.length || 0) > 0 && <span>{childGoalsByParent.get(gid)?.length} sub-goals</span>}
+                      {t.total > 0 && <span>{t.completed}/{t.total} tasks</span>}
+                    </div>
+                  </div>
+                  {renderProgressBar(pct)}
+                  <ChevronRight className="w-4 h-4 text-primary flex-shrink-0" />
+                </div>
+              </div>
+            );
+          })}
+          {orphanGoals.length > 0 && (
+            <div className="pt-1">
+              <p className="text-[10px] font-medium text-text-muted mb-1 flex items-center gap-1"><Flag className="w-3 h-3" /> Standalone ({orphanGoals.length})</p>
+              {orphanGoals.map((goal) => (
+                <div key={goal.id || goal._id} className="border border-primary/20 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 overflow-hidden">
+                  <div onClick={() => onOpenGoal(goal)} className="flex items-center gap-3 p-3 hover:bg-primary/5 transition-colors cursor-pointer" role="button" tabIndex={0}>
+                    <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 bg-primary/10"><Flag className="w-3.5 h-3.5 text-primary" /></div>
+                    <div className="flex-1 min-w-0"><span className="text-xs font-semibold truncate">{goal.title}</span></div>
+                    <ChevronRight className="w-3.5 h-3.5 text-text-muted flex-shrink-0" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+
+  // ─── Level 2: Sub-goals of a parent ───
+  const renderSubgoalsView = () => {
+    if (!parentGoal) return null;
+    const pid = parentGoal.id || parentGoal._id;
+    const children = childGoalsByParent.get(pid) || [];
+    return (
+      <div className="space-y-3 max-h-[55vh] overflow-y-auto custom-scrollbar pr-1">
+        <button onClick={() => { setLevel("goals"); setParentGoal(null); setSuggestedSubgoals([]); }} className="flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 transition-colors cursor-pointer mb-1">
+          <ArrowLeft className="w-3.5 h-3.5" /> Back to goals
+        </button>
+        <div className="flex items-center gap-2 p-3 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 border border-primary/20">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center bg-primary/10"><Flag className="w-4 h-4 text-primary" /></div>
+          <div className="flex-1 min-w-0">
+            <span className="text-sm font-semibold">{parentGoal.title}</span>
+            <span className="text-[10px] text-text-muted ml-1">{children.length} sub-goal{children.length !== 1 ? "s" : ""}</span>
+          </div>
+        </div>
+
+        {/* Suggest sub-goals */}
+        <div className="p-3 rounded-xl bg-primary/5 border border-primary/20">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[10px] font-semibold flex items-center gap-1"><GitBranch className="w-3 h-3 text-primary" /> Suggested Sub-goals</span>
+            <button onClick={suggestSubgoals} disabled={loadingSubgoals} className="px-2.5 py-1 rounded-lg text-[10px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1">
+              {loadingSubgoals ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+              {loadingSubgoals ? "Loading..." : "Generate"}
+            </button>
+          </div>
+          {suggestedSubgoals.length === 0 ? (
+            <p className="text-[9px] text-text-muted">Generate AI-suggested sub-goals for this goal.</p>
+          ) : (
+            <div className="space-y-1.5 mt-1.5">
+              {suggestedSubgoals.map((s: any, i: number) => {
+                const isSelected = selectedSuggestionIds.has(i);
+                return (
+                  <div key={i} className={`p-2 rounded-lg border ${isSelected ? "bg-emerald-500/10 border-emerald-500/30" : "bg-surface border-border/50"}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <span className="text-xs font-medium">{s.title}</span>
+                        <p className="text-[10px] text-text-muted mt-0.5">{s.description}</p>
+                        <div className="flex items-center gap-2 mt-1 text-[9px] text-text-muted">
+                          {s.department && <span>{s.department}</span>}
+                          {s.suggested_timeline && <span><Calendar className="w-2.5 h-2.5 inline mr-0.5" />{s.suggested_timeline}</span>}
+                          {s.priority && <span className={`px-1 py-0.5 rounded text-[8px] font-medium ${s.priority === "high" ? "text-orange-400 bg-orange-500/10" : s.priority === "medium" ? "text-yellow-400 bg-yellow-500/10" : "text-gray-400 bg-gray-500/10"}`}>{s.priority}</span>}
+                        </div>
+                      </div>
+                      <div
+                        onClick={(e) => { e.stopPropagation(); setSelectedSuggestionIds((prev) => { const next = new Set(prev); next.has(i) ? next.delete(i) : next.add(i); return next; }); }}
+                        className={`w-4 h-4 rounded border flex items-center justify-center cursor-pointer flex-shrink-0 mt-0.5 ${isSelected ? "bg-primary border-primary" : "bg-background border-border"}`}
+                        role="button"
+                        tabIndex={0}
+                      >
+                        {isSelected && <CheckCircle className="w-3 h-3 text-white" />}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {selectedSuggestionIds.size > 0 && (
+                <button onClick={addSelectedSubgoals} disabled={addingSubgoals} className="w-full py-1.5 rounded-lg text-[10px] font-medium bg-primary text-white hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50">
+                  {addingSubgoals ? <span className="flex items-center gap-1 justify-center"><Loader2 className="w-3 h-3 animate-spin" /> Adding...</span> : `Add ${selectedSuggestionIds.size} selected`}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Existing sub-goals */}
+        {children.length > 0 ? (
+          <div className="space-y-1.5">
+            <p className="text-[10px] font-medium text-text-muted flex items-center gap-1">{children.length} sub-goal{children.length !== 1 ? "s" : ""}</p>
+            {children.map((child) => (
+              <div key={child.id || child._id} className="border border-primary/20 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 overflow-hidden">
+                <div onClick={() => { setSubGoal(child); setLevel("tasks"); loadGoalTasks(child.id || child._id); }} className="flex items-center gap-3 p-3 hover:bg-primary/5 transition-colors cursor-pointer" role="button" tabIndex={0}>
+                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${child.status === "completed" ? "bg-emerald-500/10" : "bg-primary/10"}`}>
+                    {child.status === "completed" ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> : <Clock className="w-3.5 h-3.5 text-primary" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-xs font-semibold truncate">{child.title}</span>
+                    <div className="flex items-center gap-1.5 text-[9px] text-text-muted mt-0.5">
+                      {(child.task_counts?.total || 0) > 0 && <span>{child.task_counts.completed}/{child.task_counts.total} tasks</span>}
+                      {child.priority && <span className={`px-1 py-0.5 rounded text-[8px] font-medium ${child.priority === "urgent" ? "text-rose-400 bg-rose-500/10" : child.priority === "high" ? "text-orange-400 bg-orange-500/10" : child.priority === "medium" ? "text-yellow-400 bg-yellow-500/10" : "text-gray-400 bg-gray-500/10"}`}>{child.priority}</span>}
+                    </div>
+                  </div>
+                  <ChevronRight className="w-3.5 h-3.5 text-text-muted flex-shrink-0" />
+                </div>
+                <div onClick={(e) => e.stopPropagation()} className="px-3 pb-2 flex items-center gap-1.5 flex-wrap">
+                  {renderPersonPickers(child)}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : suggestedSubgoals.length === 0 ? (
+          <p className="text-[10px] text-text-muted text-center py-3">No sub-goals yet. Use the Generate button above to create AI-suggested sub-goals.</p>
+        ) : null}
+      </div>
+    );
+  };
+
+  // ─── Level 3: Tasks of a sub-goal ───
+  const renderTasksView = () => {
+    if (!subGoal) return null;
+    const gid = subGoal.id || subGoal._id;
+    return (
+      <div className="space-y-3 max-h-[55vh] overflow-y-auto custom-scrollbar pr-1">
+        <button onClick={() => { setLevel("subgoals"); setSubGoal(null); setSuggestedTasks([]); setTaskSearch(""); setShowCreateForm(false); }} className="flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 transition-colors cursor-pointer mb-1">
+          <ArrowLeft className="w-3.5 h-3.5" /> Back to sub-goals
+        </button>
+        <div className="flex items-center gap-2 p-3 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 border border-primary/20">
+          <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${subGoal.status === "completed" ? "bg-emerald-500/10" : "bg-primary/10"}`}>
+            {subGoal.status === "completed" ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> : <Flag className="w-3.5 h-3.5 text-primary" />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <span className="text-sm font-semibold">{subGoal.title}</span>
+            <span className="text-[10px] text-text-muted ml-1">{currentTasks.length} task{currentTasks.length !== 1 ? "s" : ""}</span>
+          </div>
+          {renderPersonPickers(subGoal)}
+        </div>
+
+        {/* Search + Create */}
+        <div className="flex items-center gap-2">
+          <div className="flex-1 relative">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
+            <input value={taskSearch} onChange={(e) => setTaskSearch(e.target.value)} placeholder="Search tasks..." className="w-full h-8 pl-8 pr-3 text-xs bg-background border border-border rounded-lg focus:outline-none focus:border-primary" />
+          </div>
+          <button onClick={() => setShowCreateForm((v) => !v)} className="px-3 h-8 rounded-lg text-xs font-medium bg-primary text-white hover:bg-primary/90 transition-colors cursor-pointer flex items-center gap-1 flex-shrink-0">
+            <Plus className="w-3.5 h-3.5" /> Create
+          </button>
+        </div>
+
+        {/* Suggest tasks */}
+        <div className="p-3 rounded-xl bg-primary/5 border border-primary/20">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[10px] font-semibold flex items-center gap-1"><Sparkles className="w-3 h-3 text-primary" /> AI Task Suggestions</span>
+            <button onClick={suggestTasks} disabled={loadingTasks} className="px-2.5 py-1 rounded-lg text-[10px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1">
+              {loadingTasks ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+              {loadingTasks ? "Loading..." : "Suggest"}
+            </button>
+          </div>
+          {suggestedTasks.length > 0 && (
+            <div className="space-y-1.5 mt-1.5">
+              {suggestedTasks.map((s: any, i: number) => {
+                const isSelected = selectedTaskSuggestionIds.has(i);
+                return (
+                  <div key={i} className={`p-2 rounded-lg border ${isSelected ? "bg-emerald-500/10 border-emerald-500/30" : "bg-surface border-border/50"}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <span className="text-xs font-medium">{s.title}</span>
+                        <p className="text-[10px] text-text-muted mt-0.5">{s.description}</p>
+                        {s.assignee_hint && <span className="text-[9px] text-text-muted mt-0.5 block"><User className="w-2.5 h-2.5 inline mr-0.5" />{s.assignee_hint}</span>}
+                      </div>
+                      <div
+                        onClick={(e) => { e.stopPropagation(); setSelectedTaskSuggestionIds((prev) => { const next = new Set(prev); next.has(i) ? next.delete(i) : next.add(i); return next; }); }}
+                        className={`w-4 h-4 rounded border flex items-center justify-center cursor-pointer flex-shrink-0 mt-0.5 ${isSelected ? "bg-primary border-primary" : "bg-background border-border"}`}
+                        role="button"
+                        tabIndex={0}
+                      >
+                        {isSelected && <CheckCircle className="w-3 h-3 text-white" />}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {selectedTaskSuggestionIds.size > 0 && (
+                <button onClick={addSelectedTasks} disabled={addingTasks} className="w-full py-1.5 rounded-lg text-[10px] font-medium bg-primary text-white hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50">
+                  {addingTasks ? <span className="flex items-center gap-1 justify-center"><Loader2 className="w-3 h-3 animate-spin" /> Adding...</span> : `Add ${selectedTaskSuggestionIds.size} selected`}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Manual create form */}
+        {showCreateForm && (
+          <div className="p-3 rounded-xl bg-surface border border-primary/20">
+            <p className="text-[10px] font-semibold mb-2">Create Task</p>
+            <div className="flex gap-2">
+              <input value={newTaskTitle} onChange={(e) => setNewTaskTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleCreateTask(); }} placeholder="Task title..." className="flex-1 h-8 px-3 text-xs bg-background border border-border rounded-lg focus:outline-none focus:border-primary" autoFocus />
+              <button onClick={handleCreateTask} disabled={!newTaskTitle.trim()} className="px-3 h-8 rounded-lg text-xs font-medium bg-primary text-white hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1">
+                <Plus className="w-3 h-3" /> Add
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Tasks list */}
+        <div className="space-y-1.5">
+          {filteredTasks.length === 0 ? (
+            <p className="text-[10px] text-text-muted text-center py-3">{taskSearch ? "No matching tasks" : "No tasks yet. Create one or use AI suggestions above."}</p>
+          ) : (
+            filteredTasks.map((task: any) => (
+              <div key={task.id} className="flex items-center gap-2 p-2 rounded-lg bg-surface border border-border/50 group">
+                <div className="flex-1 min-w-0">
+                  <TaskRow
+                    task={task}
+                    members={members}
+                    department={subGoal.department}
+                    onAssigneeChange={(member) => {
+                      const tid = task.id;
+                      updateTask(tid, { assignee_id: member?.id ? [member.id] : [], assignee_name: member?.full_name || "" } as any).catch(() => {});
+                      setGoalTaskCache((prev) => ({ ...prev, [gid]: (prev[gid] || _tasks.filter((t: any) => t.goal_id === gid)).map((t: any) => t.id === tid ? { ...t, assignee_id: member?.id ? [member.id] : [], assignee_name: member?.full_name || "" } : t) }));
+                    }}
+                    onStatusChange={(status) => {
+                      const tid = task.id;
+                      updateTask(tid, { status } as any).catch(() => {});
+                      setGoalTaskCache((prev) => ({ ...prev, [gid]: (prev[gid] || _tasks.filter((t: any) => t.goal_id === gid)).map((t: any) => t.id === tid ? { ...t, status } : t) }));
+                    }}
+                    getStatusColor={getStatusColor}
+                  />
+                </div>
+                <button onClick={() => handleDeleteTask(task.id)} className="p-1 rounded text-text-muted hover:text-rose-400 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100 transition-all cursor-pointer flex-shrink-0" title="Delete task">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  if (level === "tasks" && subGoal) return renderTasksView();
+  if (level === "subgoals" && parentGoal) return renderSubgoalsView();
+  return renderGoalsList();
 }
 
 function GoalSection() {
@@ -1550,13 +2110,16 @@ function GoalSection() {
           onClose={() => setOpenDepartment(null)}
           onSelectGoal={(g) => { setOpenDepartment(null); setExpandedGoal(g); }}
           onAssignGoal={async (g, role, member) => {
+            const gid = g.id || g._id;
+            const data = role === "defaulter"
+              ? { assignee_id: member?.id ? [member.id] : [], assignee_name: member?.full_name || "" }
+              : { reviewer_id: member?.id ? [member.id] : [], reviewer_name: member?.full_name || "" };
             try {
-              await updateGoal(g.id || g._id, {
-                ...(role === "defaulter"
-                  ? { assignee_id: member?.id || undefined, assignee_name: member?.full_name || undefined }
-                  : { reviewer_id: member?.id || undefined, reviewer_name: member?.full_name || undefined }),
-              } as any);
-            } catch {}
+              await updateGoal(gid, data as any);
+              console.warn("[assign] updateGoal OK", gid, role, member?.full_name);
+            } catch (e) {
+              console.error("[assign] updateGoal FAILED", gid, role, member?.full_name, e);
+            }
           }}
         />
       )}

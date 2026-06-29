@@ -19,6 +19,10 @@ class PushSubscriptionCreate(BaseModel):
     user_agent: Optional[str] = None
 
 
+class PushSubscriptionUnsubscribe(BaseModel):
+    endpoint: str
+
+
 def get_push_collection():
     db = get_database()
     if db is None:
@@ -52,7 +56,7 @@ async def subscribe(
 
 @router.post("/unsubscribe")
 async def unsubscribe(
-    endpoint: str,
+    body: PushSubscriptionUnsubscribe,
     current_user=Depends(get_current_user_optional),
 ):
     user_id = getattr(current_user, "id", None) or str(current_user) if current_user else None
@@ -60,7 +64,7 @@ async def unsubscribe(
         raise HTTPException(status_code=400, detail="User not authenticated")
 
     collection = get_push_collection()
-    collection.delete_one({"user_id": user_id, "endpoint": endpoint})
+    collection.delete_one({"user_id": user_id, "endpoint": body.endpoint})
     return {"success": True, "message": "Unsubscribed"}
 
 

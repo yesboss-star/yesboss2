@@ -25,6 +25,22 @@ def _check_email_rate_limit(org_id: str, max_per_hour: int = 50) -> bool:
     return True
 
 
+def resolve_uid(user_id: str) -> str:
+    db = get_database()
+    if db is None:
+        return user_id
+    user = db["users"].find_one({"uid": user_id})
+    if user:
+        return user_id
+    user = db["users"].find_one({"email": user_id.lower()})
+    if user and user.get("uid"):
+        return user["uid"]
+    emp = db["employees"].find_one({"email": user_id.lower()})
+    if emp and emp.get("uid"):
+        return emp["uid"]
+    return user_id
+
+
 def get_user_email(user_id: str) -> Optional[str]:
     db = get_database()
     if db is None:
@@ -82,6 +98,7 @@ async def create_and_deliver(
         return None
 
     prefs = get_preferences(user_id, org_id)
+    resolved_uid = resolve_uid(user_id)
 
     notif_doc = None
 
@@ -90,7 +107,7 @@ async def create_and_deliver(
             "type": type,
             "title": title,
             "message": message,
-            "user_id": user_id,
+            "user_id": resolved_uid,
             "organization_id": org_id,
             "link": link,
             "actor_id": actor_id,
@@ -104,7 +121,7 @@ async def create_and_deliver(
 
         asyncio.create_task(ws_manager.send_personal_message(
             {"type": "notification", "data": notif_doc},
-            user_id,
+            resolved_uid,
         ))
 
     if is_channel_enabled(prefs, "email", type) and is_email_configured():
@@ -115,7 +132,7 @@ async def create_and_deliver(
             ))
 
     if is_channel_enabled(prefs, "push", type):
-        asyncio.create_task(_send_push(user_id, title, message, link, notif_doc.get("_id") if notif_doc else None))
+        asyncio.create_task(_send_push(resolved_uid, title, message, link, notif_doc.get("_id") if notif_doc else None))
 
     return notif_doc
 
@@ -194,13 +211,6 @@ async def send_digest(user_id: str, org_id: str, frequency: str = "daily"):
              "created_at": str(n.get("created_at", ""))}
             for n in notifications
         ]
-        asyncio.create_task(asyncio.to_thread(
-            send_notification_email, email,
-            f"Your {frequency.capitalize()} Digest — {len(items)} notifications",
-            "Here's your summary",
-            None
-        ))
-        # Use digest email function
         from ..core.email_service import send_digest_email
         asyncio.create_task(asyncio.to_thread(
             send_digest_email, email, items, frequency

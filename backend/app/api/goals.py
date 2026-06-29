@@ -40,8 +40,9 @@ def _normalize_list(v):
     if v is None:
         return None
     if isinstance(v, str):
-        return [v]
-    return list(v)
+        return [] if v == "" else [v]
+    result = list(v)
+    return [x for x in result if x is not None]
 
 
 async def sync_goal_to_zoho(db, goal_doc: dict, org_id: str):
@@ -525,6 +526,16 @@ async def get_goal(goal_id: str, current_user = Depends(get_current_user_optiona
     tasks = list(db.tasks.find({"goal_id": goal_id}))
     for task in tasks:
         task["_id"] = str(task["_id"])
+        raw = task.get("assignee_id")
+        if isinstance(raw, str):
+            task["assignee_id"] = [raw]
+        elif raw is None:
+            task["assignee_id"] = []
+        raw_name = task.get("assignee_name")
+        if isinstance(raw_name, str):
+            task["assignee_name"] = [raw_name]
+        elif raw_name is None:
+            task["assignee_name"] = []
     
     return {"goal": goal, "tasks": tasks}
 
@@ -592,6 +603,8 @@ async def update_goal(goal_id: str, goal: GoalUpdate, current_user = Depends(get
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
+    old_goal_doc = db.goals.find_one({"_id": ObjectId(goal_id)})
+    
     update_data = {}
     for k, v in goal.model_dump().items():
         if v is None:
@@ -607,63 +620,97 @@ async def update_goal(goal_id: str, goal: GoalUpdate, current_user = Depends(get
         {"$set": update_data}
     )
     
-    goal = db.goals.find_one({"_id": ObjectId(goal_id)})
-    goal["_id"] = str(goal["_id"])
+    goal_doc = db.goals.find_one({"_id": ObjectId(goal_id)})
+    goal_doc["_id"] = str(goal_doc["_id"])
     for f in ("assignee_id", "assignee_name", "reviewer_id", "reviewer_name"):
-        raw = goal.get(f)
+        raw = goal_doc.get(f)
         if isinstance(raw, str):
-            goal[f] = [raw]
+            goal_doc[f] = [raw]
         elif raw is None:
-            goal[f] = []
+            goal_doc[f] = []
 
     asyncio.create_task(ws_manager.broadcast_to_organization(
-        {"type": "goal_updated", "data": goal},
-        goal.get("organization_id", "")
+        {"type": "goal_updated", "data": goal_doc},
+        goal_doc.get("organization_id", "")
     ))
+
+    user_id = getattr(current_user, 'id', None) or str(current_user) if current_user else None
+    org_id = goal_doc.get("organization_id", "")
+    new_assignee_ids = goal_doc.get("assignee_id") or []
+    new_reviewer_ids = goal_doc.get("reviewer_id") or []
+    old_assignee_ids = _normalize_list(old_goal_doc.get("assignee_id")) or [] if old_goal_doc else []
+    old_reviewer_ids = _normalize_list(old_goal_doc.get("reviewer_id")) or [] if old_goal_doc else []
+
+    new_assignees = [a for a in new_assignee_ids if a not in old_assignee_ids]
+    new_reviewers = [r for r in new_reviewer_ids if r not in old_reviewer_ids]
+
+    for aid in new_assignees:
+        if aid != user_id:
+            asyncio.create_task(create_notification(
+                user_id=aid, org_id=org_id,
+                type="goal_assigned",
+                title="Goal Assigned to You",
+                message=f"You have been assigned: {goal_doc.get('title')}",
+                link=f"/goals/{goal_id}",
+                actor_id=user_id,
+                email=aid,
+            ))
+
+    for rid in new_reviewers:
+        if rid != user_id:
+            asyncio.create_task(create_notification(
+                user_id=rid, org_id=org_id,
+                type="goal_review",
+                title="Goal Needs Your Review",
+                message=f"Goal requires your review: {goal_doc.get('title')}",
+                link=f"/goals/{goal_id}",
+                actor_id=user_id,
+            ))
+
+    if new_assignees:
+        asyncio.create_task(sync_goal_to_zoho(db, goal_doc, org_id))
 
     # If goal was moved to pending_review, notify the owner who created it
     if update_data.get("status") == "pending_review":
-        created_by = goal.get("created_by")
-        assignee_names = goal.get("assignee_name") or []
+        created_by = goal_doc.get("created_by")
+        assignee_names = goal_doc.get("assignee_name") or []
         submitter = assignee_names[0] if assignee_names else "An assignee"
         asyncio.create_task(create_notification(
             user_id=created_by or "",
-            org_id=goal.get("organization_id", ""),
+            org_id=org_id,
             type="goal_pending_review",
             title="Goal Ready for Review",
-            message=f"{submitter} marked goal '{goal.get('title')}' as complete. Review it now.",
+            message=f"{submitter} marked goal '{goal_doc.get('title')}' as complete. Review it now.",
             link=f"/goals/{goal_id}",
         ))
 
-    assignee_ids = goal.get("assignee_id") or []
-    if goal.get("status") and assignee_ids:
-        for aid in assignee_ids:
+    if goal_doc.get("status") and new_assignee_ids:
+        for aid in new_assignee_ids:
             asyncio.create_task(create_notification(
-                user_id=aid,
-                org_id=goal.get("organization_id", ""),
+                user_id=aid, org_id=org_id,
                 type="goal_status",
-                title=f"Goal Status: {goal['status'].title()}",
-                message=f"Goal '{goal.get('title')}' status updated to {goal['status']}",
+                title=f"Goal Status: {goal_doc['status'].title()}",
+                message=f"Goal '{goal_doc.get('title')}' status updated to {goal_doc['status']}",
                 link=f"/goals/{goal_id}",
-                email=goal.get("assignee_email"),
+                email=goal_doc.get("assignee_email"),
             ))
 
-    if goal.get("created_by") and assignee_ids:
-        for aid in assignee_ids:
-            if goal["created_by"] != aid:
+    created_by = goal_doc.get("created_by")
+    if created_by and new_assignee_ids:
+        for aid in new_assignee_ids:
+            if created_by != aid:
                 asyncio.create_task(create_notification(
-                    user_id=goal["created_by"],
-                    org_id=goal.get("organization_id", ""),
+                    user_id=created_by, org_id=org_id,
                     type="goal_status",
-                    title=f"Goal Status: {goal['status'].title()}",
-                    message=f"Goal '{goal.get('title')}' updated to {goal['status']}",
+                    title=f"Goal Status: {goal_doc['status'].title()}",
+                    message=f"Goal '{goal_doc.get('title')}' updated to {goal_doc['status']}",
                     link=f"/goals/{goal_id}",
                 ))
     
     from ..agents.frequency_agent import process_goal as _freq_goal
-    asyncio.create_task(_freq_goal(goal, goal.get("organization_id", "")))
+    asyncio.create_task(_freq_goal(goal_doc, org_id))
     
-    return {"goal": goal}
+    return {"goal": goal_doc}
 
 
 class ReviewRequest(BaseModel):

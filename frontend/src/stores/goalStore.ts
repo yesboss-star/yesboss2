@@ -192,13 +192,19 @@ export const useGoalStore = create<GoalState>()(
       updateGoal: async (goalId, data) => {
         set({ loading: true, error: null });
         try {
+          console.warn("[goalStore] updateGoal SENDING", { goalId, data });
           const response = await fetch(`${API_URL}/goals/${goalId}`, {
             method: "PUT",
             headers: { ...getAuthHeaders() },
             body: JSON.stringify(data),
           });
-          if (!response.ok) throw new Error("Failed to update goal");
+          if (!response.ok) {
+            const errText = await response.text();
+            console.error("[goalStore] updateGoal API ERROR", response.status, errText);
+            throw new Error(`Failed to update goal: ${response.status} ${errText}`);
+          }
           const result = await response.json();
+          console.warn("[goalStore] updateGoal API RESPONSE", { goalId, assignee_id: result.goal?.assignee_id, assignee_name: result.goal?.assignee_name });
           const normalizeField = (v: any) => Array.isArray(v) ? v : (v ? [v] : []);
           const updatedGoal = {
             ...result.goal,
@@ -208,12 +214,21 @@ export const useGoalStore = create<GoalState>()(
             reviewer_id: normalizeField(result.goal.reviewer_id),
             reviewer_name: normalizeField(result.goal.reviewer_name),
           };
-          set((state) => ({
-            goals: state.goals.map((g) => (g.id === goalId ? updatedGoal : g)),
-            currentGoal: state.currentGoal?.id === goalId ? updatedGoal : state.currentGoal,
-            loading: false,
-          }));
+          let matched = false;
+          set((state) => {
+            const newGoals = state.goals.map((g) => {
+              if (g.id === goalId) { matched = true; return updatedGoal; }
+              return g;
+            });
+            console.warn("[goalStore] updateGoal STORE matched?", matched, "goals count", newGoals.length);
+            return {
+              goals: newGoals,
+              currentGoal: state.currentGoal?.id === goalId ? updatedGoal : state.currentGoal,
+              loading: false,
+            };
+          });
         } catch (error: any) {
+          console.error("[goalStore] updateGoal FAILED", error);
           set({ error: error.message, loading: false });
           throw error;
         }

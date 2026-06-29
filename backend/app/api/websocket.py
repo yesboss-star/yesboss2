@@ -36,19 +36,23 @@ class ConnectionManager:
 
     async def send_personal_message(self, message: dict, user_id: str):
         if user_id in self.user_connections:
+            stale = set()
             for connection in self.user_connections[user_id]:
                 try:
                     await connection.send_json(message)
-                except:
-                    pass
+                except Exception:
+                    stale.add(connection)
+            self.user_connections[user_id] -= stale
 
     async def broadcast_to_organization(self, message: dict, organization_id: str):
         if organization_id in self.active_connections:
+            stale = set()
             for connection in self.active_connections[organization_id]:
                 try:
                     await connection.send_json(message)
-                except:
-                    pass
+                except Exception:
+                    stale.add(connection)
+            self.active_connections[organization_id] -= stale
 
 manager = ConnectionManager()
 

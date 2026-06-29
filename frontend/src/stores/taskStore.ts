@@ -191,18 +191,26 @@ export const useTaskStore = create<TaskState>()(
       updateTask: async (taskId, data) => {
         set({ loading: true, error: null });
         try {
+          console.warn("[taskStore] updateTask SENDING", { taskId, data });
           const response = await fetch(`${API_URL}/tasks/${taskId}`, {
             method: "PUT",
             headers: { ...getAuthHeaders() },
             body: JSON.stringify(data),
           });
-          if (!response.ok) throw new Error("Failed to update task");
+          if (!response.ok) {
+            const errText = await response.text();
+            console.error("[taskStore] updateTask API ERROR", response.status, errText);
+            throw new Error(`Failed to update task: ${response.status} ${errText}`);
+          }
           const result = await response.json();
+          console.warn("[taskStore] updateTask API RESPONSE", { taskId, assignee_id: result.task?.assignee_id, assignee_name: result.task?.assignee_name });
           const raw = result.task.assignee_id;
+          const rawName = result.task.assignee_name;
           const task = {
             ...result.task,
             id: result.task._id || result.task.id,
             assignee_id: Array.isArray(raw) ? raw : (raw ? [raw] : []),
+            assignee_name: Array.isArray(rawName) ? rawName : (rawName ? [rawName] : []),
           };
           set((state) => ({
             tasks: state.tasks.map((t) => (t.id === taskId ? task : t)),
@@ -210,6 +218,7 @@ export const useTaskStore = create<TaskState>()(
             loading: false,
           }));
         } catch (error: any) {
+          console.error("[taskStore] updateTask FAILED", error);
           set({ error: error.message, loading: false });
           throw error;
         }

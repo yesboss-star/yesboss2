@@ -101,6 +101,7 @@ async def check_deadline_reminders():
         tasks_due_soon = list(db.tasks.find({
             "due_date": {"$gte": now, "$lte": tomorrow},
             "status": {"$nin": ["completed", "approved"]},
+            "deadline_reminded_1day": {"$ne": True},
         }))
 
         for task in tasks_due_soon:
@@ -132,6 +133,11 @@ async def check_deadline_reminders():
                     link=f"/tasks/{task.get('_id')}",
                     metadata={"task_id": str(task.get("_id", "")), "assignee": assignee_id},
                 )
+
+            db.tasks.update_one(
+                {"_id": task["_id"]},
+                {"$set": {"deadline_reminded_1day": True}},
+            )
 
         tasks_due_3 = list(db.tasks.find({
             "due_date": {"$gte": tomorrow, "$lte": in_3_days},
