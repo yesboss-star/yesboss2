@@ -44,20 +44,33 @@ def resolve_uid(user_id: str) -> str:
 def get_user_email(user_id: str) -> Optional[str]:
     db = get_database()
     if db is None:
+        logger.warning("get_user_email: no database")
         return None
+
+    # Fast path: direct uid lookup in users collection
+    doc = db["users"].find_one({"uid": user_id}, {"email": 1})
+    if doc and doc.get("email"):
+        return doc["email"]
+
+    # Fallback: search across collections with multiple query patterns
     for collection_name in ["users", "employees", "org_chart_members"]:
         for query in [
             {"uid": user_id},
             {"id": user_id},
             {"user_id": user_id},
-            {"_id": user_id},
-            {"email": user_id},
+            {"email": user_id.lower()},
         ]:
-            doc = db[collection_name].find_one(query)
-            if doc:
-                email = doc.get("email") or doc.get("user_email")
-                if email:
-                    return email
+            try:
+                doc = db[collection_name].find_one(query)
+                if doc:
+                    email = doc.get("email") or doc.get("user_email")
+                    if email:
+                        logger.info("get_user_email: found %s for %s in %s via %s", email, user_id, collection_name, query)
+                        return email
+            except Exception as e:
+                logger.debug("get_user_email: query %s on %s failed: %s", query, collection_name, e)
+
+    logger.warning("get_user_email: no email found for user_id=%s", user_id)
     return None
 
 

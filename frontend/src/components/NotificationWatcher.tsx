@@ -116,13 +116,19 @@ export function NotificationWatcher({ children }: { children: React.ReactNode })
   }, [user, organization, addNotification, addUiNotification, addTaskFromWs, updateTaskFromWs, addGoalFromWs, updateGoalFromWs]);
 
   useEffect(() => {
-    fetchNotifications({ limit: 50 });
+    const orgId = organization?.id;
+    if (orgId) {
+      fetchNotifications({ limit: 50, organization_id: orgId });
+    }
     refreshUnreadCount();
     connect();
     registerPushNotifications();
 
     const pollInterval = setInterval(() => {
       refreshUnreadCount();
+      if (organization?.id) {
+        fetchNotifications({ limit: 10, organization_id: organization.id });
+      }
     }, 30000);
 
     return () => {
@@ -134,7 +140,7 @@ export function NotificationWatcher({ children }: { children: React.ReactNode })
         wsRef.current = null;
       }
     };
-  }, [connect, fetchNotifications, refreshUnreadCount]);
+  }, [connect, fetchNotifications, refreshUnreadCount, organization?.id]);
 
   return <>{children}</>;
 }

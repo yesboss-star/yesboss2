@@ -1,4 +1,5 @@
 import smtplib
+import re
 import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -24,6 +25,7 @@ def send_email(to_email: str, subject: str, html_body: str, text_body: Optional[
         logger.warning("SMTP not configured - skipping email")
         return False
 
+    logger.info("Preparing to send email to %s: %s", to_email, subject)
     try:
         msg = MIMEMultipart("alternative")
         msg["From"] = SMTP_FROM
@@ -32,18 +34,26 @@ def send_email(to_email: str, subject: str, html_body: str, text_body: Optional[
         msg.attach(MIMEText(text_body or "", "plain"))
         msg.attach(MIMEText(html_body, "html"))
 
+        logger.debug("Connecting to SMTP %s:%s", SMTP_HOST, SMTP_PORT)
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.set_debuglevel(1)
             server.starttls()
+            logger.debug("Logging in as %s", SMTP_USER)
             server.login(SMTP_USER, SMTP_PASS)
-            import re
             match = re.search(r'<([^>]+)>', SMTP_FROM)
             from_addr = match.group(1) if match else SMTP_FROM
             server.sendmail(from_addr, to_email, msg.as_string())
 
-        logger.info(f"Email sent to {to_email}: {subject}")
+        logger.info(f"Email sent successfully to {to_email}: {subject}")
         return True
+    except smtplib.SMTPAuthenticationError as e:
+        logger.error("SMTP authentication failed for %s: %s. Check SMTP_USER/SMTP_PASS and ensure an app-specific password is used.", SMTP_USER, e)
+        return False
+    except smtplib.SMTPException as e:
+        logger.error("SMTP error sending to %s: %s", to_email, e)
+        return False
     except Exception as e:
-        logger.error(f"Failed to send email to {to_email}: {e}")
+        logger.error("Failed to send email to %s: %s", to_email, e, exc_info=True)
         return False
 
 

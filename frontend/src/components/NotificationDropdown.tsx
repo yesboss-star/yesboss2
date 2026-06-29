@@ -50,8 +50,16 @@ function timeAgo(dateStr: string): string {
 
 export function NotificationDropdown() {
   const [open, setOpen] = useState(false);
+  const [initialFetchDone, setInitialFetchDone] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const { notifications, unreadCount, fetchNotifications, markAsRead, markAllAsRead, loading } = useNotificationStore();
+
+  useEffect(() => {
+    if (!initialFetchDone) {
+      fetchNotifications({ limit: 20 });
+      setInitialFetchDone(true);
+    }
+  }, [fetchNotifications, initialFetchDone]);
 
   useEffect(() => {
     if (open) {
