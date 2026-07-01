@@ -45,6 +45,60 @@ async def list_employees(org_id: Optional[str] = None, search: Optional[str] = N
     
     return {"employees": employees}
 
+@router.get("/tasks")
+async def get_employee_tasks(org_id: str, email: str | None = None):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+    
+    query = {"organization_id": org_id}
+    if email:
+        query["$or"] = [
+            {"assignee_email": email},
+            {"assigned_to": email},
+        ]
+    
+    try:
+        tasks = list(db.tasks.find(query).sort("due_date", 1).limit(20))
+        
+        for task in tasks:
+            task["_id"] = str(task["_id"])
+        
+        pending_reviews = list(db.approval_requests.find(
+            {"reviewer_email": email, "status": "pending"}
+        ).limit(10))
+        
+        for review in pending_reviews:
+            review["_id"] = str(review["_id"])
+        
+        team_updates = list(db.team_updates.find(
+            {"organization_id": org_id}
+        ).sort("created_at", -1).limit(10))
+        
+        for update in team_updates:
+            update["_id"] = str(update["_id"])
+        
+        return {
+            "tasks": tasks,
+            "pending_reviews": pending_reviews,
+            "team_updates": team_updates
+        }
+    except Exception:
+        return {"tasks": [], "pending_reviews": [], "team_updates": []}
+
+@router.get("/by-domain/{domain}")
+async def find_employee_by_domain(domain: str):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+    
+    employees = list(db.employees.find({"email": {"$regex": f"@{domain}$"}}))
+    
+    for emp in employees:
+        emp["_id"] = str(emp["_id"])
+    
+    return {"employees": employees, "domain": domain}
+
 @router.get("/{employee_id}")
 async def get_employee(employee_id: str):
     db = get_database()
@@ -113,19 +167,6 @@ async def delete_employee(employee_id: str):
     db.employees.delete_one({"_id": ObjectId(employee_id)})
     
     return {"success": True, "message": "Employee deleted"}
-
-@router.get("/by-domain/{domain}")
-async def find_employee_by_domain(domain: str):
-    db = get_database()
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not configured")
-    
-    employees = list(db.employees.find({"email": {"$regex": f"@{domain}$"}}))
-    
-    for emp in employees:
-        emp["_id"] = str(emp["_id"])
-    
-    return {"employees": employees, "domain": domain}
 
 
 class EmployeePersonaRequest(BaseModel):
@@ -196,45 +237,3 @@ async def save_employee_persona(request: EmployeePersonaRequest):
         emp_doc["_id"] = str(result.inserted_id)
         
         return {"employee": emp_doc, "message": "Persona saved"}
-
-
-@router.get("/tasks")
-async def get_employee_tasks(org_id: str, email: str | None = None):
-    db = get_database()
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not configured")
-    
-    query = {"organization_id": org_id}
-    if email:
-        query["$or"] = [
-            {"assignee_email": email},
-            {"assigned_to": email},
-        ]
-    
-    try:
-        tasks = list(db.tasks.find(query).sort("due_date", 1).limit(20))
-        
-        for task in tasks:
-            task["_id"] = str(task["_id"])
-        
-        pending_reviews = list(db.approval_requests.find(
-            {"reviewer_email": email, "status": "pending"}
-        ).limit(10))
-        
-        for review in pending_reviews:
-            review["_id"] = str(review["_id"])
-        
-        team_updates = list(db.team_updates.find(
-            {"organization_id": org_id}
-        ).sort("created_at", -1).limit(10))
-        
-        for update in team_updates:
-            update["_id"] = str(update["_id"])
-        
-        return {
-            "tasks": tasks,
-            "pending_reviews": pending_reviews,
-            "team_updates": team_updates
-        }
-    except Exception as e:
-        return {"tasks": [], "pending_reviews": [], "team_updates": []}

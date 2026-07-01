@@ -1773,14 +1773,16 @@ class SessionUpdateRequest(BaseModel):
 
 
 @router.post("/sessions")
-async def create_session(request: SessionCreateRequest):
+async def create_session(request: SessionCreateRequest, current_user = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+    user_id = getattr(current_user, 'id', None) if current_user else None
     now = datetime.utcnow()
     session = {
         "title": request.title or "New Chat",
         "organization_id": request.organization_id,
+        "user_id": user_id,
         "messages": [],
         "context": {},
         "created_at": now,
@@ -1792,12 +1794,16 @@ async def create_session(request: SessionCreateRequest):
 
 
 @router.get("/sessions")
-async def list_sessions(organization_id: str):
+async def list_sessions(organization_id: str, current_user = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+    user_id = getattr(current_user, 'id', None) if current_user else None
+    query = {"organization_id": organization_id}
+    if user_id:
+        query["user_id"] = user_id
     sessions = list(
-        db.assistant_sessions.find({"organization_id": organization_id})
+        db.assistant_sessions.find(query)
         .sort("updated_at", -1)
         .limit(50)
     )
@@ -1806,26 +1812,37 @@ async def list_sessions(organization_id: str):
     return {"sessions": sessions}
 
 
-@router.get("/sessions/{session_id}")
-async def get_session(session_id: str):
-    db = get_database()
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not configured")
+def _get_session_or_404(db, session_id: str, user_id: Optional[str] = None):
     try:
-        s = db.assistant_sessions.find_one({"_id": ObjectId(session_id)})
+        query: Dict[str, Any] = {"_id": ObjectId(session_id)}
+        if user_id:
+            query["user_id"] = user_id
+        s = db.assistant_sessions.find_one(query)
     except Exception:
         raise HTTPException(status_code=404, detail="Session not found")
     if not s:
         raise HTTPException(status_code=404, detail="Session not found")
+    return s
+
+
+@router.get("/sessions/{session_id}")
+async def get_session(session_id: str, current_user = Depends(get_current_user_optional)):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+    user_id = getattr(current_user, 'id', None) if current_user else None
+    s = _get_session_or_404(db, session_id, user_id)
     s["_id"] = str(s["_id"])
     return s
 
 
 @router.put("/sessions/{session_id}")
-async def update_session(session_id: str, request: SessionUpdateRequest):
+async def update_session(session_id: str, request: SessionUpdateRequest, current_user = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+    user_id = getattr(current_user, 'id', None) if current_user else None
+    _get_session_or_404(db, session_id, user_id)
     update = {"updated_at": datetime.utcnow()}
     if request.title is not None:
         update["title"] = request.title
@@ -1842,10 +1859,12 @@ async def update_session(session_id: str, request: SessionUpdateRequest):
 
 
 @router.delete("/sessions/{session_id}")
-async def delete_session(session_id: str):
+async def delete_session(session_id: str, current_user = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+    user_id = getattr(current_user, 'id', None) if current_user else None
+    _get_session_or_404(db, session_id, user_id)
     try:
         db.assistant_sessions.delete_one({"_id": ObjectId(session_id)})
     except Exception as e:
@@ -1858,11 +1877,13 @@ class AddMessageRequest(BaseModel):
 
 
 @router.post("/sessions/{session_id}/messages")
-async def add_session_message(session_id: str, request: AddMessageRequest):
+async def add_session_message(session_id: str, request: AddMessageRequest, current_user = Depends(get_current_user_optional)):
     """Append a message to a session's message history."""
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+    user_id = getattr(current_user, 'id', None) if current_user else None
+    _get_session_or_404(db, session_id, user_id)
     try:
         db.assistant_sessions.update_one(
             {"_id": ObjectId(session_id)},

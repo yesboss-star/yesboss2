@@ -1,27 +1,20 @@
-self.addEventListener("push", function (event) {
-  let data = {};
-  try {
-    data = event.data ? event.data.json() : {};
-  } catch (e) {
-    data = { title: "YESBOSS", message: event.data ? event.data.text() : "" };
-  }
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (event) => event.waitUntil(clients.claim()));
 
-  const title = data.title || "YESBOSS";
+self.addEventListener("push", (event) => {
+  const data = event.data?.json() || {};
+  const title = data.title || "YesBoss";
   const options = {
-    body: data.message || "",
-    icon: "/icon.png",
-    badge: "/badge.png",
-    data: {
-      link: data.link || "/dashboard/notifications",
-      notification_id: data.notification_id || "",
-    },
+    body: data.body || "",
+    icon: data.icon || "/favicon.ico",
+    badge: data.badge || "/favicon.ico",
+    data: data.data || {},
   };
-
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
-self.addEventListener("notificationclick", function (event) {
+self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const link = event.notification.data?.link || "/dashboard/notifications";
-  event.waitUntil(clients.openWindow(link));
+  const url = event.notification.data?.url || "/dashboard";
+  event.waitUntil(clients.openWindow(url));
 });

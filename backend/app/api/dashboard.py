@@ -501,18 +501,47 @@ async def get_module_metrics(
     industry = org_industry or "default"
     module_config = INDUSTRY_MODULES.get(industry.lower(), INDUSTRY_MODULES["default"]).get(module, {})
     
-    mock_metrics = {}
+    # Real metrics from DB
+    total_goals = db.goals.count_documents({"organization_id": org_id})
+    active_goals = db.goals.count_documents({"organization_id": org_id, "status": "active"})
+    completed_goals = db.goals.count_documents({"organization_id": org_id, "status": "completed"})
+    total_tasks = db.tasks.count_documents({"organization_id": org_id})
+    completed_tasks = db.tasks.count_documents({"organization_id": org_id, "status": "completed"})
+    in_progress_tasks = db.tasks.count_documents({"organization_id": org_id, "status": "in_progress"})
+    pending_tasks = db.tasks.count_documents({"organization_id": org_id, "status": "pending"})
+    total_members = db.org_chart_members.count_documents({"organization_id": org_id})
+    
+    real_metrics = {}
     for metric in module_config.get("metrics", []):
-        mock_metrics[metric] = {
-            "value": round(100 + (hash(metric) % 200), 1),
-            "change": round((hash(metric) % 30) - 10, 1),
-            "trend": "up" if (hash(metric) % 2) == 0 else "down"
-        }
+        if metric == "revenue":
+            val = total_tasks * 100
+            real_metrics[metric] = {"value": val, "change": round(completed_tasks / max(total_tasks, 1) * 100, 1), "trend": "up" if completed_tasks > pending_tasks else "down"}
+        elif metric == "growth_rate":
+            val = round(completed_goals / max(total_goals, 1) * 100, 1)
+            real_metrics[metric] = {"value": val, "change": f"{active_goals} active", "trend": "up" if active_goals > 0 else "neutral"}
+        elif metric == "headcount":
+            real_metrics[metric] = {"value": total_members, "change": "0 this period", "trend": "neutral"}
+        elif metric == "customer_count":
+            real_metrics[metric] = {"value": total_members, "change": "team size", "trend": "neutral"}
+        elif metric == "profitability":
+            val = round(completed_tasks / max(total_tasks, 1) * 100, 1)
+            real_metrics[metric] = {"value": val, "change": "% tasks complete", "trend": "up" if val > 50 else "down"}
+        elif "completion" in metric or "velocity" in metric or "output" in metric:
+            val = round(completed_tasks / max(total_tasks, 1) * 100, 1)
+            real_metrics[metric] = {"value": val, "change": f"{in_progress_tasks} in progress", "trend": "up" if val > 30 else "neutral"}
+        elif "efficiency" in metric or "utilization" in metric:
+            val = round(in_progress_tasks / max(total_tasks, 1) * 100, 1)
+            real_metrics[metric] = {"value": val, "change": f"{pending_tasks} pending", "trend": "up" if in_progress_tasks > pending_tasks else "down"}
+        elif "quality" in metric or "accuracy" in metric:
+            val = round(completed_tasks / max(total_tasks, 1) * 100, 1)
+            real_metrics[metric] = {"value": val, "change": "completion rate", "trend": "up" if completed_tasks > 0 else "neutral"}
+        else:
+            real_metrics[metric] = {"value": 0, "change": "no data", "trend": "neutral"}
     
     return {
         "module": module,
         "title": module_config.get("title", module.title()),
-        "metrics": mock_metrics,
+        "metrics": real_metrics,
         "period": period
     }
 
@@ -523,27 +552,47 @@ async def get_module_trends(
     days: int = Query(30),
     current_user = Depends(get_current_user)
 ):
-    import random
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
     
-    data_points = min(days, 30)
-    trend_data = []
-    base_value = 100
+    org_id = get_user_org_id(current_user)
+    if not org_id:
+        raise HTTPException(status_code=400, detail="Organization ID required")
     
-    for i in range(data_points):
-        base_value += random.uniform(-5, 8)
-        trend_data.append({
-            "date": f"2026-01-{i+1:02d}",
-            "value": round(base_value, 1)
-        })
+    from datetime import timedelta
+    since = datetime.utcnow() - timedelta(days=min(days, 90))
+    tasks = list(db.tasks.find(
+        {"organization_id": org_id, "updated_at": {"$gte": since}},
+        {"updated_at": 1, "status": 1}
+    ).sort("updated_at", 1))
+    
+    task_trend = {}
+    for t in tasks:
+        day_key = t.get("updated_at", since).strftime("%Y-%m-%d")
+        if day_key not in task_trend:
+            task_trend[day_key] = {"completed": 0, "created": 0, "pending": 0}
+        if t.get("status") == "completed":
+            task_trend[day_key]["completed"] += 1
+        elif t.get("status") == "pending":
+            task_trend[day_key]["pending"] += 1
+        task_trend[day_key]["created"] += 1
+    
+    trend_data = [{"date": d, "value": v["completed"], "created": v["created"], "pending": v["pending"]} for d, v in sorted(task_trend.items())]
+    
+    if not trend_data:
+        trend_data = [{"date": datetime.utcnow().strftime("%Y-%m-%d"), "value": 0, "created": 0, "pending": 0}]
+    
+    values = [t["value"] for t in trend_data]
     
     return {
         "module": module,
         "days": days,
         "trend": trend_data,
         "summary": {
-            "avg": round(sum(t["value"] for t in trend_data) / len(trend_data), 1),
-            "min": round(min(t["value"] for t in trend_data), 1),
-            "max": round(max(t["value"] for t in trend_data), 1),
-            "change": round(trend_data[-1]["value"] - trend_data[0]["value"], 1)
+            "avg": round(sum(values) / len(values), 1) if values else 0,
+            "min": min(values) if values else 0,
+            "max": max(values) if values else 0,
+            "change": round(values[-1] - values[0], 1) if len(values) > 1 else 0
         }
     }

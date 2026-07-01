@@ -170,7 +170,7 @@ async def get_conversation(conversation_id: str) -> Optional[dict]:
 
 async def store_conversation_embedding(conversation_id: str, user_id: str, text: str, metadata: dict):
     try:
-        from .qdrant import get_qdrant_client
+        from .qdrant import get_qdrant_client, get_embedding
         
         client = get_qdrant_client()
         if not client:
@@ -179,12 +179,7 @@ async def store_conversation_embedding(conversation_id: str, user_id: str, text:
         from qdrant_client.models import PointStruct
         import uuid
         
-        text_hash = hash(text)
-        import random
-        random.seed(text_hash % (2**32))
-        embedding = [random.random() for _ in range(1536)]
-        norm = sum(x*x for x in embedding) ** 0.5
-        embedding = [x/norm for x in embedding]
+        embedding = get_embedding(text)
         
         point = PointStruct(
             id=str(uuid.uuid4()),

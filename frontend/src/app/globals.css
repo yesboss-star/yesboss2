@@ -19,19 +19,19 @@
 
 [data-theme="light"] {
   --background: #ffffff;
-  --foreground: #0b132b;
-  --primary: #5bc0be;
-  --primary-light: #7dd4d2;
-  --accent: #215554;
-  --accent-hover: #0b403f;
-  --surface: #f4f5f7;
-  --surface-light: #a9bbce;
-  --border: #d4d6dd;
-  --border-light: #a2a2a2;
-  --text-muted: #3a506b;
-  --gradient-start: #5bc0be;
-  --gradient-end: #0b132b;
-  --heading: #0b132b;
+  --foreground: #042C53;
+  --primary: #0F6E56;
+  --primary-light: #1A8A6E;
+  --accent: #0F6E56;
+  --accent-hover: #0A5643;
+  --surface: #FAFAF8;
+  --surface-light: #F0EFEC;
+  --border: #E3E2DD;
+  --border-light: #EBEAE6;
+  --text-muted: #6B6A63;
+  --gradient-start: #0F6E56;
+  --gradient-end: #042C53;
+  --heading: #042C53;
 }
 
 [data-theme="light"] h1,
@@ -73,6 +73,19 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans);
   overflow-x: hidden;
+}
+
+:where(.text-sm, .text-xs, .text-\[10px\], .text-\[11px\]) {
+  font-weight: 500;
+}
+
+.text-xs {
+  font-size: 0.8125rem;
+}
+
+.text-\[10px\],
+.text-\[11px\] {
+  font-size: 0.75rem;
 }
 
 @keyframes slide-in-from-right {
@@ -125,14 +138,18 @@ body {
   border: 1px solid rgba(51, 65, 85, 0.3);
 }
 
+[data-theme="light"] .hero-glow {
+  background: radial-gradient(circle, rgba(15, 110, 86, 0.12) 0%, transparent 70%);
+}
+
 [data-theme="light"] .glass {
-  background: rgba(244, 245, 247, 0.7);
-  border-color: rgba(212, 214, 221, 0.6);
+  background: rgba(250, 250, 248, 0.7);
+  border-color: rgba(227, 226, 221, 0.6);
 }
 
 [data-theme="light"] .glass-light {
-  background: rgba(250, 251, 252, 0.6);
-  border-color: rgba(229, 231, 235, 0.5);
+  background: rgba(250, 250, 248, 0.6);
+  border-color: rgba(235, 234, 230, 0.5);
 }
 
 .gradient-text {
@@ -165,7 +182,7 @@ body {
 }
 
 [data-theme="light"] .card-hover:hover {
-  box-shadow: 0 20px 40px rgba(91, 192, 190, 0.15);
+  box-shadow: 0 20px 40px rgba(15, 110, 86, 0.12);
 }
 
 .claude-loader {

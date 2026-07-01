@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useOrganizationStore } from "@/stores/organizationStore";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent } from "@/components/ui";
 import { Users, Search, Loader2, ArrowLeft } from "lucide-react";
@@ -19,6 +20,7 @@ interface TeamMember {
 
 export default function TeamPage() {
   const router = useRouter();
+  const { organization } = useOrganizationStore();
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -26,7 +28,10 @@ export default function TeamPage() {
   useEffect(() => {
     const fetchTeam = async () => {
       try {
-        const res = await fetch(`${API_URL}/employees`);
+        const params = new URLSearchParams();
+        if (organization?.id) params.set("org_id", organization.id);
+        const query = params.toString() ? `?${params.toString()}` : "";
+        const res = await fetch(`${API_URL}/employees${query}`);
         if (!res.ok) throw new Error("Failed to fetch");
         const data = await res.json();
         setMembers((data.employees || []).map((e: any) => ({ ...e, id: e._id || e.id })));
@@ -37,7 +42,7 @@ export default function TeamPage() {
       }
     };
     fetchTeam();
-  }, []);
+  }, [organization?.id]);
 
   const filtered = members.filter((m) =>
     m.full_name?.toLowerCase().includes(search.toLowerCase()) ||

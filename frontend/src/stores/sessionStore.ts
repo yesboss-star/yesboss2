@@ -3,6 +3,19 @@ import { persist } from "zustand/middleware";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
+function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  try {
+    const raw = localStorage.getItem("yesboss_user");
+    if (raw) {
+      const user = JSON.parse(raw);
+      if (user.uid) headers["X-User-ID"] = user.uid;
+      if (user.email) headers["X-User-Email"] = user.email;
+    }
+  } catch {}
+  return headers;
+}
+
 export interface BookingSlot {
   start: string;
   end: string;
@@ -78,7 +91,7 @@ export const useSessionStore = create<SessionState>()(
         if (!orgId) return;
         set({ isLoading: true });
         try {
-          const res = await fetch(`${API_URL}/assistant/sessions?organization_id=${orgId}`);
+          const res = await fetch(`${API_URL}/assistant/sessions?organization_id=${orgId}`, { headers: getAuthHeaders() });
           if (res.ok) {
             const data = await res.json();
             const mapped = (data.sessions || []).map((s: any) => ({
@@ -118,7 +131,7 @@ export const useSessionStore = create<SessionState>()(
         try {
           const res = await fetch(`${API_URL}/assistant/sessions`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: getAuthHeaders(),
             body: JSON.stringify({ organization_id: orgId, title: title || "New Chat" }),
           });
           if (res.ok) {
@@ -150,7 +163,7 @@ export const useSessionStore = create<SessionState>()(
           activeSessionId: s.activeSessionId === sessionId ? null : s.activeSessionId,
         }));
         try {
-          await fetch(`${API_URL}/assistant/sessions/${sessionId}`, { method: "DELETE" });
+          await fetch(`${API_URL}/assistant/sessions/${sessionId}`, { method: "DELETE", headers: getAuthHeaders() });
         } catch {
           // Local delete is enough
         }
@@ -165,7 +178,7 @@ export const useSessionStore = create<SessionState>()(
         try {
           await fetch(`${API_URL}/assistant/sessions/${sessionId}`, {
             method: "PUT",
-            headers: { "Content-Type": "application/json" },
+            headers: getAuthHeaders(),
             body: JSON.stringify({ title }),
           });
         } catch {
@@ -193,7 +206,7 @@ export const useSessionStore = create<SessionState>()(
         if (!sessionId.startsWith("local_")) {
           fetch(`${API_URL}/assistant/sessions/${sessionId}/messages`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: getAuthHeaders(),
             body: JSON.stringify({ message }),
           }).catch(() => {});
         }
@@ -223,7 +236,7 @@ export const useSessionStore = create<SessionState>()(
         if (!sessionId.startsWith("local_")) {
           fetch(`${API_URL}/assistant/sessions/${sessionId}`, {
             method: "PUT",
-            headers: { "Content-Type": "application/json" },
+            headers: getAuthHeaders(),
             body: JSON.stringify({ context }),
           }).catch(() => {});
         }

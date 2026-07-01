@@ -87,7 +87,7 @@ export default function CheckInModal({ open, onOpenChange, orgId, initialData }:
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({
-          check_in_id: "pending",
+          check_in_id: checkInData.check_in_id || "pending",
           notes: Object.values(notes).filter((n) => n.action_taken !== "none" || n.note),
         }),
       });
@@ -114,7 +114,7 @@ export default function CheckInModal({ open, onOpenChange, orgId, initialData }:
       await fetch(`${API_URL}/organizations/${orgId}/check-ins/pending/respond`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({ check_in_id: "pending", notes: [] }),
+        body: JSON.stringify({ check_in_id: checkInData.check_in_id || "pending", notes: [] }),
       });
       setSubmitted(true);
       setTimeout(() => {

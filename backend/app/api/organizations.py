@@ -100,6 +100,37 @@ async def create_organization(request: OrganizationCreate, current_user: Optiona
     
     return {"organization": org_doc}
 
+@router.get("/me")
+async def get_my_organization(current_user = Depends(get_current_user_optional)):
+    """Return the organization for the current user by looking up owner_id or co_owners."""
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    user_id = getattr(current_user, 'id', None) if current_user else None
+    user_email = getattr(current_user, 'email', None) if current_user else None
+
+    if not user_id and not user_email:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    query = {"$or": []}
+    if user_id:
+        query["$or"].append({"owner_id": user_id})
+        query["$or"].append({"co_owners": user_id})
+    if user_email:
+        query["$or"].append({"owner_id": user_email})
+        query["$or"].append({"co_owners": user_email})
+
+    if not query["$or"]:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    org = db.organizations.find_one(query)
+    if not org:
+        raise HTTPException(status_code=404, detail="No organization found for this user")
+
+    org["_id"] = str(org["_id"])
+    return {"organization": org}
+
 @router.get("/{org_id}")
 async def get_organization(org_id: str):
     db = get_database()

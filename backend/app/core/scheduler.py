@@ -657,22 +657,34 @@ async def send_auto_reports():
 
             try:
                 if is_monday:
+                    # Determine recipient: owner first, fallback to root org chart member
+                    _, recipient_email = await get_org_owner_info(db, org_id)
+                    if not recipient_email:
+                        root = db.org_chart_members.find_one(
+                            {"organization_id": org_id, "manager_email": {"$in": [None, ""]}}
+                        )
+                        if root:
+                            recipient_email = root.get("email")
+                    if not recipient_email:
+                        logger.warning(f"No owner or root user found for org {org_id}, skipping reports")
+                        continue
+
                     members = list(db.org_chart_members.find({"organization_id": org_id}))
                     for m in members:
-                        email = m.get("email", "")
-                        if not email:
+                        emp_email = m.get("email", "")
+                        if not emp_email:
                             continue
-                        report = await generate_employee_report(db, org_id, email, "weekly")
+                        report = await generate_employee_report(db, org_id, emp_email, "weekly")
                         await create_and_deliver(
-                            user_id=email,
+                            user_id=recipient_email,
                             org_id=org_id,
                             type="report_weekly",
-                            title="Weekly Performance Report",
-                            message=f"Your weekly report is ready — {report['metrics']['completion_rate']}% completion rate.",
+                            title=f"Weekly Performance Report — {m.get('name', emp_email)}",
+                            message=f"Report for {m.get('name', emp_email)} — {report['metrics']['completion_rate']}% completion rate.",
                             link="/dashboard/reports",
-                            email=email,
+                            email=recipient_email,
                         )
-                    logger.info(f"Weekly reports sent for org {org_id} ({len(members)} employees)")
+                    logger.info(f"Weekly reports sent to {recipient_email} for org {org_id} ({len(members)} employees)")
 
                 if is_first_of_month:
                     health = await generate_org_health(db, org_id)

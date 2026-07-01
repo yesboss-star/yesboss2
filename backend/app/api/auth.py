@@ -4,7 +4,7 @@ import logging
 from typing import Optional
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, field_validator
 
 from ..core.firebase_admin import (
@@ -20,6 +20,7 @@ from ..core.firebase_admin import (
     set_custom_user_claims,
 )
 from ..core.database import get_database
+from ..dependencies.auth import get_current_user
 
 try:
     initialize_firebase()
@@ -266,12 +267,8 @@ async def verify_otp(request: VerifyOTPRequest):
 
 
 @router.get("/me", response_model=AuthResponse)
-async def get_me(uid: str = None):
-    if not uid:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not authenticated",
-        )
+async def get_me(current_user = Depends(get_current_user)):
+    uid = current_user.id or current_user.sub
 
     try:
         user = get_user(uid)

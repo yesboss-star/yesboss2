@@ -34,4 +34,5 @@ aiohttp
 firebase-admin
 google-generativeai
 reportlab
+sentry-sdk
 pywebpush

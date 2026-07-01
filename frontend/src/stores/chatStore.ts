@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { getAuthHeaders } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -75,7 +76,7 @@ export const useChatStore = create<ChatState>()(
 
     fetchExperts: async () => {
       try {
-        const response = await fetch(`${API_URL}/strategy-chat/experts`);
+        const response = await fetch(`${API_URL}/strategy-chat/experts`, { headers: getAuthHeaders() });
         if (!response.ok) throw new Error("Failed to fetch experts");
         const result = await response.json();
         set({ experts: result.experts || [] });
@@ -102,7 +103,7 @@ export const useChatStore = create<ChatState>()(
       try {
         const response = await fetch(`${API_URL}/strategy-chat/chat`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: getAuthHeaders(),
           body: JSON.stringify({
             message,
             organization_id,
@@ -167,7 +168,7 @@ export const useChatStore = create<ChatState>()(
         const { activeSessionId, messages } = get();
         const response = await fetch(`${API_URL}/strategy-chat/ask`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: getAuthHeaders(),
           body: JSON.stringify({
             message,
             organization_id,
@@ -223,7 +224,7 @@ export const useChatStore = create<ChatState>()(
     loadHistory: async () => {
       set({ loading: true });
       try {
-        const response = await fetch(`${API_URL}/strategy-chat/history`);
+        const response = await fetch(`${API_URL}/strategy-chat/history`, { headers: getAuthHeaders() });
         if (!response.ok) throw new Error("Failed to load history");
         const result = await response.json();
         
@@ -242,7 +243,7 @@ export const useChatStore = create<ChatState>()(
 
     fetchSessions: async (orgId) => {
       try {
-        const res = await fetch(`${API_URL}/strategy-chat/sessions?organization_id=${orgId}`);
+        const res = await fetch(`${API_URL}/strategy-chat/sessions?organization_id=${orgId}`, { headers: getAuthHeaders() });
         if (res.ok) {
           const data = await res.json();
           set({ sessions: data.sessions || [] });
@@ -258,7 +259,7 @@ export const useChatStore = create<ChatState>()(
       try {
         const res = await fetch(`${API_URL}/strategy-chat/sessions`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: getAuthHeaders(),
           body: JSON.stringify({ title, organization_id: orgId }),
         });
         if (res.ok) {
@@ -273,7 +274,7 @@ export const useChatStore = create<ChatState>()(
 
     deleteSession: async (sessionId) => {
       try {
-        await fetch(`${API_URL}/strategy-chat/sessions/${sessionId}`, { method: "DELETE" });
+        await fetch(`${API_URL}/strategy-chat/sessions/${sessionId}`, { method: "DELETE", headers: getAuthHeaders() });
         set((state) => ({
           sessions: state.sessions.filter((s) => s._id !== sessionId),
           activeSessionId: state.activeSessionId === sessionId ? null : state.activeSessionId,

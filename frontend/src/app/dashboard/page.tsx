@@ -83,14 +83,15 @@ export default function DashboardPage() {
   const fetchEmployeeData = async () => {
     setTasksLoading(true);
     try {
-      const res = await fetch(`${API_URL}/employees/tasks?org_id=${organization?.id}&email=${user?.email}`);
+      const res = await fetch(`${API_URL}/employees/tasks?org_id=${organization?.id}&email=${user?.email}`, { headers: getAuthHeaders() });
       if (res.ok) {
         const data = await res.json();
         setAssignedTasks(data.tasks || []);
         setPendingReviews(data.pending_reviews || []);
         setTeamUpdates(data.team_updates || []);
       }
-    } catch {
+    } catch (e) {
+      console.error("Failed to fetch employee data", e);
     } finally {
       setTasksLoading(false);
     }
@@ -100,12 +101,13 @@ export default function DashboardPage() {
     if (!organization?.id) return;
     setKpiLoading(true);
     try {
-      const res = await fetch(`${API_URL}/dashboard/kpi?organization_id=${organization.id}`);
+      const res = await fetch(`${API_URL}/dashboard/kpi?organization_id=${organization.id}`, { headers: getAuthHeaders() });
       if (res.ok) {
         const data = await res.json();
         setKpiData(data);
       }
-    } catch {
+    } catch (e) {
+      console.error("Failed to fetch KPI data", e);
     } finally {
       setKpiLoading(false);
     }

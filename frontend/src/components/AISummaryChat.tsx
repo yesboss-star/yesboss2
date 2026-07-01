@@ -836,7 +836,7 @@ export default function AISummaryChat() {
                   <Sparkles className="w-6 h-6 text-primary" />
                 </div>
                 <h2 className="text-lg font-semibold text-foreground mb-1">How can I help you today?</h2>
-                <p className="text-sm text-text-muted max-w-sm mb-6">
+                <p className="text-sm text-text-muted font-medium max-w-sm mb-6">
                   Ask me anything about your business — goals, tasks, documents, or advice.
                 </p>
                 <div className="flex flex-wrap gap-2 justify-center">

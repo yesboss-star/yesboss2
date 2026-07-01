@@ -1,12 +1,46 @@
 import asyncio
 import logging
+import uuid
 from contextlib import asynccontextmanager
+from collections import defaultdict
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 import time
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, max_requests: int = 60, window_seconds: int = 60):
+        super().__init__(app)
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self.requests: dict = defaultdict(list)
+
+    async def dispatch(self, request: Request, call_next):
+        # Skip static/health
+        if request.url.path in ("/", "/api/docs", "/api/redoc", "/api/openapi.json") or request.url.path.startswith("/api/v1/health"):
+            return await call_next(request)
+
+        key = request.client.host if request.client else "unknown"
+        now = time.time()
+        window_start = now - self.window_seconds
+        self.requests[key] = [t for t in self.requests[key] if t > window_start]
+
+        if len(self.requests[key]) >= self.max_requests:
+            return JSONResponse(status_code=429, content={"error": True, "detail": "Rate limit exceeded. Try again later."})
+
+        self.requests[key].append(now)
+        return await call_next(request)
+
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        request_id = request.headers.get("X-Request-Id") or str(uuid.uuid4())
+        response = await call_next(request)
+        response.headers["X-Request-Id"] = request_id
+        return response
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -103,9 +137,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Sentry
+sentry_dsn = getattr(settings, "SENTRY_DSN", "")
+if sentry_dsn:
+    try:
+        import sentry_sdk
+        sentry_sdk.init(dsn=sentry_dsn, traces_sample_rate=0.1)
+        logger.info("Sentry initialized")
+    except ImportError:
+        logger.info("sentry-sdk not installed, skipping Sentry")
+
+app.add_middleware(RequestIDMiddleware)
+app.add_middleware(RateLimitMiddleware, max_requests=60, window_seconds=60)
 app.add_middleware(SecurityHeadersMiddleware)
 
-allowed_origins = settings.__dict__.get("CORS_ORIGINS", "*").split(",")
+allowed_origins = getattr(settings, "CORS_ORIGINS", "*").split(",")
 
 app.add_middleware(
     CORSMiddleware,

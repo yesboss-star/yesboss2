@@ -102,7 +102,7 @@ async def zoho_callback(
             raise HTTPException(status_code=502, detail="Failed to save Zoho token. Please try again.")
 
         from ..core.config import settings
-        frontend_url = settings.__dict__.get("FRONTEND_URL", "http://localhost:3000")
+        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
         redirect_url = f"{frontend_url}/dashboard/settings?zoho=connected"
 
         from fastapi.responses import RedirectResponse

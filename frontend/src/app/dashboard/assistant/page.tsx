@@ -6,6 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useUIStore } from "@/stores/uiStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { useSessionStore, type ChatSession, type SessionMessage, type ClarifyingQuestion, type BookingParams } from "@/stores/sessionStore";
+import { getAuthHeaders } from "@/lib/utils";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, Button } from "@/components/ui";
 import {
@@ -242,7 +243,7 @@ function AssistantInner() {
 
       const res = await fetch(`${API_URL}/assistant/ask`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           message: valueLabel,
           session_id: activeSession.id,
@@ -330,7 +331,7 @@ function AssistantInner() {
       const history = [...activeSession.messages, userMsg].map((m) => ({ role: m.role, content: m.content }));
       const res = await fetch(`${API_URL}/assistant/ask`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           message: text,
           session_id: activeSession.id,

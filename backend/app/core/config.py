@@ -67,6 +67,11 @@ class Settings:
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8000"))
 
+    SENTRY_DSN: str = os.getenv("SENTRY_DSN", "")
+
+    FIREBASE_CREDENTIALS_PATH: str = os.getenv("FIREBASE_CREDENTIALS_PATH", "")
+    FIREBASE_CREDENTIALS_JSON: str = os.getenv("FIREBASE_CREDENTIALS_JSON", "")
+
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
 
     def validate(self):
