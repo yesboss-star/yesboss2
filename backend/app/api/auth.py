@@ -344,25 +344,39 @@ async def sync_user(request: SyncUserRequest):
         existing = db.users.find_one({"uid": request.uid})
         now = datetime.utcnow().isoformat()
 
-        user_doc = {
-            "uid": request.uid,
-            "email": request.email or "",
-            "full_name": request.full_name or "",
-            "phone": request.phone or "",
-            "role": request.role,
-            "phone_verified": request.phone_verified,
-            "organization_id": None,
-            "organization_completed": False,
-            "updated_at": now,
-        }
-
         if existing:
+            existing_role = existing.get("role", "employee")
+            user_doc = {
+                "uid": request.uid,
+                "email": request.email or "",
+                "full_name": request.full_name or "",
+                "phone": request.phone or "",
+                "role": existing_role,
+                "phone_verified": request.phone_verified,
+                "organization_id": existing.get("organization_id"),
+                "organization_completed": existing.get("organization_completed", False),
+                "updated_at": now,
+            }
             db.users.update_one({"uid": request.uid}, {"$set": user_doc})
             logger.info("User synced (updated): %s", request.email)
+            actual_role = existing_role
         else:
-            user_doc["created_at"] = now
+            role_val = request.role if request.role else "employee"
+            user_doc = {
+                "uid": request.uid,
+                "email": request.email or "",
+                "full_name": request.full_name or "",
+                "phone": request.phone or "",
+                "role": role_val,
+                "phone_verified": request.phone_verified,
+                "organization_id": None,
+                "organization_completed": False,
+                "created_at": now,
+                "updated_at": now,
+            }
             db.users.insert_one(user_doc)
             logger.info("User synced (created): %s", request.email)
+            actual_role = role_val
 
         return AuthResponse(
             success=True,
@@ -373,7 +387,7 @@ async def sync_user(request: SyncUserRequest):
                 email=request.email,
                 full_name=request.full_name,
                 phone=request.phone,
-                role=request.role,
+                role=actual_role,
             ),
         )
 

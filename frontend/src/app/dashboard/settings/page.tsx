@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, Tabs, TabsList, TabsTrigger, TabsContent, Input, Label, Button } from "@/components/ui";
-import { Bell, Shield, User, Palette, Save, ArrowLeft, Volume2, Mail, Smartphone, Plug } from "lucide-react";
+import { Bell, User, Save, ArrowLeft, Volume2, Mail, Smartphone, Plug } from "lucide-react";
 import ZohoConnectButton from "@/components/owners/ZohoConnectButton";
 import { useZohoStore } from "@/stores/zohoStore";
 import { useUIStore } from "@/stores/uiStore";
@@ -42,13 +42,38 @@ export default function SettingsPage() {
   const router = useRouter();
   const [prefs, setPrefs] = useState<any>(DEFAULT_PREFS);
   const [loading, setLoading] = useState(true);
+  const [profile, setProfile] = useState({ fullName: "", email: "", department: "", role: "" });
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetch(`${API_URL}/notification-preferences`, { headers: getAuthHeaders() })
-      .then((r) => r.json())
-      .then((data) => { if (data.preferences) setPrefs(data.preferences); })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    const stored = localStorage.getItem("yesboss_user");
+    let userName = "", userEmail = "";
+    if (stored) {
+      try {
+        const u = JSON.parse(stored);
+        userName = u?.full_name || u?.displayName || "";
+        userEmail = u?.email || "";
+      } catch {}
+    }
+    const headers = getAuthHeaders();
+
+    Promise.all([
+      fetch(`${API_URL}/notification-preferences`, { headers }).then(r => r.json()).catch(() => ({})),
+      userEmail ? fetch(`${API_URL}/employees/by-email/${encodeURIComponent(userEmail)}`, { headers }).then(r => r.json()).catch(() => ({})) : Promise.resolve({}),
+    ]).then(([prefData, empData]) => {
+      if (prefData.preferences) setPrefs(prefData.preferences);
+      const emp = empData.employee || {};
+      setProfile({
+        fullName: emp.full_name || userName || "",
+        email: emp.email || userEmail || "",
+        department: emp.department || "",
+        role: emp.role || "",
+      });
+    }).finally(() => {
+      setLoading(false);
+      setProfileLoading(false);
+    });
   }, []);
 
   useEffect(() => {
@@ -111,8 +136,6 @@ export default function SettingsPage() {
           <TabsList className="mb-4">
             <TabsTrigger value="notifications"><Bell className="w-4 h-4 mr-2" /> Notifications</TabsTrigger>
             <TabsTrigger value="profile"><User className="w-4 h-4 mr-2" /> Profile</TabsTrigger>
-            <TabsTrigger value="security"><Shield className="w-4 h-4 mr-2" /> Security</TabsTrigger>
-            <TabsTrigger value="appearance"><Palette className="w-4 h-4 mr-2" /> Appearance</TabsTrigger>
             <TabsTrigger value="integrations"><Plug className="w-4 h-4 mr-2" /> Integrations</TabsTrigger>
           </TabsList>
 
@@ -198,42 +221,53 @@ export default function SettingsPage() {
             <Card>
               <CardHeader><CardTitle>Profile Information</CardTitle></CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div><Label>Full Name</Label><Input defaultValue="User" /></div>
-                  <div><Label>Email</Label><Input defaultValue="user@company.com" /></div>
-                </div>
-                <div><Label>Department</Label><Input defaultValue="Engineering" /></div>
-                <div className="flex justify-end">
-                  <Button className="cursor-pointer"><Save className="w-4 h-4 mr-2" /> Save Changes</Button>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="security">
-            <Card>
-              <CardHeader><CardTitle>Security Settings</CardTitle></CardHeader>
-              <CardContent className="space-y-4">
-                <div><Label>Current Password</Label><Input type="password" /></div>
-                <div><Label>New Password</Label><Input type="password" /></div>
-                <div className="flex justify-end">
-                  <Button className="cursor-pointer">Update Password</Button>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="appearance">
-            <Card>
-              <CardHeader><CardTitle>Appearance</CardTitle></CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between py-2">
-                  <span className="text-sm">Dark Mode</span>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" defaultChecked className="sr-only peer" />
-                    <div className="w-9 h-5 bg-border rounded-full peer peer-checked:bg-primary transition-colors" />
-                  </label>
-                </div>
+                {profileLoading ? (
+                  <p className="text-sm text-text-muted">Loading profile...</p>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div><Label>Full Name</Label><Input value={profile.fullName} onChange={(e) => setProfile({...profile, fullName: e.target.value})} /></div>
+                      <div><Label>Email</Label><Input value={profile.email} onChange={(e) => setProfile({...profile, email: e.target.value})} /></div>
+                    </div>
+                    <div><Label>Department</Label><Input value={profile.department} onChange={(e) => setProfile({...profile, department: e.target.value})} /></div>
+                    <div><Label>Role / Title</Label><Input value={profile.role} onChange={(e) => setProfile({...profile, role: e.target.value})} /></div>
+                    <div className="flex justify-end">
+                      <Button
+                        disabled={saving}
+                        onClick={async () => {
+                          setSaving(true);
+                          try {
+                            await fetch(`${API_URL}/employees/persona`, {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+                              body: JSON.stringify({
+                                email: profile.email,
+                                department: profile.department,
+                                role: profile.role,
+                              }),
+                            });
+                            useUIStore.getState().addNotification({
+                              type: "success",
+                              title: "Profile Updated",
+                              message: "Your profile has been saved.",
+                            });
+                          } catch {
+                            useUIStore.getState().addNotification({
+                              type: "error",
+                              title: "Save Failed",
+                              message: "Could not save profile. Try again.",
+                            });
+                          } finally {
+                            setSaving(false);
+                          }
+                        }}
+                        className="cursor-pointer"
+                      >
+                        <Save className="w-4 h-4 mr-2" /> {saving ? "Saving..." : "Save Changes"}
+                      </Button>
+                    </div>
+                  </>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

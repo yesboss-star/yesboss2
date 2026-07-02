@@ -305,7 +305,7 @@ async def list_reports(current_user = Depends(get_current_user)):
 
     query = {"organization_id": org_id}
     if current_user and getattr(current_user, 'id', None):
-        if await _is_org_owner(db, org_id, current_user.id):
+        if not await _is_org_owner(db, org_id, current_user.id):
             query["created_by"] = current_user.id
     
     reports = list(db.reports.find(query).sort("created_at", -1).limit(20))

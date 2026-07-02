@@ -280,8 +280,13 @@ async def list_tasks(
         query["escalation_level"] = escalation_level
     
     if current_user and getattr(current_user, 'id', None):
-        if await _is_org_owner(db, org_id, current_user.id):
-            query["created_by"] = current_user.id
+        if not await _is_org_owner(db, org_id, current_user.id):
+            user_email = (getattr(current_user, 'email', '') or '').lower().strip()
+            query["$or"] = [
+                {"created_by": current_user.id},
+                {"assignee_email": user_email},
+                {"assigned_to": user_email},
+            ]
     
     tasks = list(db.tasks.find(query).sort("created_at", -1))
     
@@ -333,7 +338,15 @@ async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get
         raise HTTPException(status_code=500, detail="Database not configured")
     
     old_obj = db.tasks.find_one({"_id": ObjectId(task_id)})
-    org_id = old_obj.get("organization_id", "") if old_obj else ""
+    if not old_obj:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    org_id = old_obj.get("organization_id", "")
+    if current_user and getattr(current_user, 'id', None):
+        if not await _is_org_owner(db, org_id, current_user.id):
+            user_email = (getattr(current_user, 'email', '') or '').lower().strip()
+            if old_obj.get("created_by") != current_user.id and old_obj.get("assignee_email") != user_email and old_obj.get("assigned_to") != user_email:
+                raise HTTPException(status_code=403, detail="Access denied")
 
     update_data = {}
     for k, v in task.model_dump().items():
@@ -419,6 +432,16 @@ async def delete_task(task_id: str, current_user = Depends(get_current_user_opti
         raise HTTPException(status_code=500, detail="Database not configured")
 
     task = db.tasks.find_one({"_id": ObjectId(task_id)})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    if current_user and getattr(current_user, 'id', None):
+        t_org_id = task.get("organization_id", "")
+        if not await _is_org_owner(db, t_org_id, current_user.id):
+            user_email = (getattr(current_user, 'email', '') or '').lower().strip()
+            if task.get("created_by") != current_user.id and task.get("assignee_email") != user_email and task.get("assigned_to") != user_email:
+                raise HTTPException(status_code=403, detail="Access denied")
+    
     if task:
         raw_assignees = task.get("assignee_id", [])
         if isinstance(raw_assignees, str):

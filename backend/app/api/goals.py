@@ -390,8 +390,13 @@ async def list_goals(
         query["is_default"] = is_default
     
     if current_user and getattr(current_user, 'id', None):
-        if await _is_org_owner(db, org_id, current_user.id):
-            query["created_by"] = current_user.id
+        if not await _is_org_owner(db, org_id, current_user.id):
+            user_email = (getattr(current_user, 'email', '') or '').lower().strip()
+            query["$or"] = [
+                {"created_by": current_user.id},
+            ]
+            if user_email:
+                query["$or"].append({"assignee_email": user_email})
     
     goals = list(db.goals.find(query).sort("created_at", -1))
 
@@ -493,10 +498,11 @@ async def get_goal(goal_id: str, current_user = Depends(get_current_user_optiona
         raise HTTPException(status_code=404, detail="Goal not found")
     
     if current_user and getattr(current_user, 'id', None):
-        org_id = goal.get("organization_id", "")
-        if await _is_org_owner(db, org_id, current_user.id):
-            if goal.get("created_by") != current_user.id:
-                raise HTTPException(status_code=403, detail="Access denied: this goal belongs to another owner")
+        goal_org_id = goal.get("organization_id", "")
+        if not await _is_org_owner(db, goal_org_id, current_user.id):
+            user_email = (getattr(current_user, 'email', '') or '').lower().strip()
+            if goal.get("created_by") != current_user.id and goal.get("assignee_email") != user_email:
+                raise HTTPException(status_code=403, detail="Access denied")
     
     goal["_id"] = str(goal["_id"])
     for f in ("assignee_id", "assignee_name", "reviewer_id", "reviewer_name"):
@@ -604,6 +610,15 @@ async def update_goal(goal_id: str, goal: GoalUpdate, current_user = Depends(get
         raise HTTPException(status_code=500, detail="Database not configured")
     
     old_goal_doc = db.goals.find_one({"_id": ObjectId(goal_id)})
+    if not old_goal_doc:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    
+    if current_user and getattr(current_user, 'id', None):
+        g_org_id = old_goal_doc.get("organization_id", "")
+        if not await _is_org_owner(db, g_org_id, current_user.id):
+            user_email = (getattr(current_user, 'email', '') or '').lower().strip()
+            if old_goal_doc.get("created_by") != current_user.id and old_goal_doc.get("assignee_email") != user_email:
+                raise HTTPException(status_code=403, detail="Access denied")
     
     update_data = {}
     for k, v in goal.model_dump().items():
@@ -846,6 +861,16 @@ async def delete_goal(goal_id: str, current_user = Depends(get_current_user_opti
         raise HTTPException(status_code=500, detail="Database not configured")
 
     goal = db.goals.find_one({"_id": ObjectId(goal_id)})
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    
+    if current_user and getattr(current_user, 'id', None):
+        g_org_id = goal.get("organization_id", "")
+        if not await _is_org_owner(db, g_org_id, current_user.id):
+            user_email = (getattr(current_user, 'email', '') or '').lower().strip()
+            if goal.get("created_by") != current_user.id and goal.get("assignee_email") != user_email:
+                raise HTTPException(status_code=403, detail="Access denied")
+    
     if goal:
         assignee_ids = goal.get("assignee_id") or []
         if isinstance(assignee_ids, str):

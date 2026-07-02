@@ -67,11 +67,11 @@ export default function TaskPage() {
 
   useEffect(() => {
     if (organization?.id) {
-      fetchGoals(organization.id);
+      if (role === "owner") fetchGoals(organization.id);
       fetchTasks(organization.id);
       fetchOrgMembers(organization.id);
     }
-  }, [organization?.id, fetchGoals, fetchTasks, fetchOrgMembers]);
+  }, [organization?.id, role, fetchGoals, fetchTasks, fetchOrgMembers]);
 
   const visibleTasks = useMemo(() => {
     if (role === "owner") return tasks;
@@ -89,15 +89,10 @@ export default function TaskPage() {
     });
   }, [tasks, role, taskView, userEmail, directReportEmails]);
 
-  const visibleGoalIds = useMemo(() => {
-    const ids = new Set(visibleTasks.map((t) => t.goal_id).filter(Boolean));
-    return ids;
-  }, [visibleTasks]);
-
   const visibleGoals = useMemo(() => {
-    if (role === "owner") return goals;
-    return goals.filter((g) => visibleGoalIds.has((g as any).id || (g as any)._id));
-  }, [goals, role, visibleGoalIds]);
+    if (role !== "owner") return [];
+    return goals;
+  }, [goals, role]);
 
   const filteredTasks = visibleTasks.filter((task) => {
     if (filterStatus !== "all" && task.status !== filterStatus) return false;

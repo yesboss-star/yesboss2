@@ -86,6 +86,31 @@ async def get_employee_tasks(org_id: str, email: str | None = None):
     except Exception:
         return {"tasks": [], "pending_reviews": [], "team_updates": []}
 
+@router.get("/by-email/{email}")
+async def find_employee_by_email(email: str):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+    
+    clean_email = email.lower().strip()
+    employee = db.employees.find_one({"email": clean_email})
+    
+    if employee:
+        employee["_id"] = str(employee["_id"])
+        return {"employee": employee}
+    
+    org_member = db.org_chart_members.find_one({"email": clean_email})
+    if org_member:
+        org_member["_id"] = str(org_member["_id"])
+        return {"employee": {
+            "full_name": org_member.get("full_name", ""),
+            "email": org_member.get("email", ""),
+            "department": org_member.get("department", ""),
+            "role": org_member.get("role", ""),
+        }}
+    
+    return {"employee": None}
+
 @router.get("/by-domain/{domain}")
 async def find_employee_by_domain(domain: str):
     db = get_database()

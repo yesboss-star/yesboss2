@@ -620,6 +620,7 @@ async def delete_meeting(
 async def list_meetings(
     organization_id: Optional[str] = Query(None),
     limit: int = Query(20, ge=1, le=100),
+    email: Optional[str] = Query(None),
     current_user=Depends(get_current_user_optional),
 ):
     db = get_database()
@@ -630,8 +631,17 @@ async def list_meetings(
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
 
+    query: dict = {"organization_id": org_id}
+    if email:
+        clean_email = email.lower().strip()
+        query["$or"] = [
+            {"participants": clean_email},
+            {"attendees": clean_email},
+            {"created_by": current_user.id if current_user else clean_email},
+        ]
+
     meetings = list(
-        db.meetings.find({"organization_id": org_id})
+        db.meetings.find(query)
         .sort("created_at", -1)
         .limit(limit)
     )

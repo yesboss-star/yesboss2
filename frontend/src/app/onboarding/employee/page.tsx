@@ -122,10 +122,10 @@ export default function EmployeeOnboarding() {
       return;
     }
     try {
-      const res = await fetch(`${API_URL}/employees?org_id=${empData.orgId}&search=${query}`);
+      const res = await fetch(`${API_URL}/org-chart/members/search?q=${encodeURIComponent(query)}&organization_id=${empData.orgId}`);
       if (res.ok) {
         const data = await res.json();
-        setManagerResults(data.employees || []);
+        setManagerResults(data.members || []);
       }
     } catch {
       setManagerResults([]);
@@ -139,10 +139,10 @@ export default function EmployeeOnboarding() {
       return;
     }
     try {
-      const res = await fetch(`${API_URL}/employees?org_id=${empData.orgId}&search=${query}`);
+      const res = await fetch(`${API_URL}/org-chart/members/search?q=${encodeURIComponent(query)}&organization_id=${empData.orgId}`);
       if (res.ok) {
         const data = await res.json();
-        setSubordinateResults(data.employees || []);
+        setSubordinateResults(data.members || []);
       }
     } catch {
       setSubordinateResults([]);

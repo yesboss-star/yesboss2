@@ -321,6 +321,7 @@ async def get_dashboard_modules(
 @router.get("/kpi")
 async def get_dashboard_kpi(
     organization_id: Optional[str] = Query(None),
+    email: Optional[str] = Query(None),
     current_user = Depends(get_current_user_optional)
 ):
     db = get_database()
@@ -331,31 +332,43 @@ async def get_dashboard_kpi(
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
 
-    cached = cache.get("kpi", {"org_id": org_id})
-    if cached is not None:
-        return cached
-
     org = db.organizations.find_one({"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id})
     org_industry = org.get("industry", "") if org else ""
     org_micro_vertical = org.get("micro_vertical", "") if org else ""
 
-    total_goals = db.goals.count_documents({"organization_id": org_id})
-    active_goals = db.goals.count_documents({"organization_id": org_id, "status": "active"})
-    completed_goals = db.goals.count_documents({"organization_id": org_id, "status": "completed"})
+    if email:
+        user_email = email.lower().strip()
+        user_filter = {"organization_id": org_id, "$or": [{"assignee_email": user_email}, {"assigned_to": user_email}]}
+        goal_filter = {"organization_id": org_id, "assignee_email": user_email}
 
-    total_tasks = db.tasks.count_documents({"organization_id": org_id})
-    completed_tasks = db.tasks.count_documents({"organization_id": org_id, "status": "completed"})
-    in_progress_tasks = db.tasks.count_documents({"organization_id": org_id, "status": "in_progress"})
-    pending_tasks = db.tasks.count_documents({"organization_id": org_id, "status": "pending"})
+        total_goals = db.goals.count_documents(goal_filter)
+        active_goals = db.goals.count_documents({**goal_filter, "status": "active"})
+        completed_goals = db.goals.count_documents({**goal_filter, "status": "completed"})
 
-    total_members = db.org_chart_members.count_documents({"organization_id": org_id})
+        total_tasks = db.tasks.count_documents(user_filter)
+        completed_tasks = db.tasks.count_documents({**user_filter, "status": "completed"})
+        in_progress_tasks = db.tasks.count_documents({**user_filter, "status": "in_progress"})
+        pending_tasks = db.tasks.count_documents({**user_filter, "status": "pending"})
+
+        member = db.org_chart_members.find_one({"organization_id": org_id, "email": user_email})
+        emp_dept = member.get("department", "") if member else ""
+        dept_members = db.org_chart_members.count_documents({"organization_id": org_id, "department": emp_dept}) if emp_dept else 0
+    else:
+        total_goals = db.goals.count_documents({"organization_id": org_id})
+        active_goals = db.goals.count_documents({"organization_id": org_id, "status": "active"})
+        completed_goals = db.goals.count_documents({"organization_id": org_id, "status": "completed"})
+
+        total_tasks = db.tasks.count_documents({"organization_id": org_id})
+        completed_tasks = db.tasks.count_documents({"organization_id": org_id, "status": "completed"})
+        in_progress_tasks = db.tasks.count_documents({"organization_id": org_id, "status": "in_progress"})
+        pending_tasks = db.tasks.count_documents({"organization_id": org_id, "status": "pending"})
+
+        total_members = db.org_chart_members.count_documents({"organization_id": org_id})
+        departments = db.org_chart_members.distinct("department", {"organization_id": org_id})
+        dept_count = len(departments)
 
     completion_rate = round((completed_tasks / total_tasks * 100) if total_tasks > 0 else 0, 1)
-
     total_files = db.files.count_documents({"organization_id": org_id})
-
-    departments = db.org_chart_members.distinct("department", {"organization_id": org_id})
-    dept_count = len(departments)
 
     kpi_response = {}
 
@@ -379,15 +392,26 @@ async def get_dashboard_kpi(
         "icon": "CheckCircle"
     }
 
-    kpi_response["team_size"] = {
-        "value": total_members,
-        "formatted": str(total_members),
-        "change": f"{dept_count} departments",
-        "trend": "neutral",
-        "label": "Team Size",
-        "description": f"Across {dept_count} departments",
-        "icon": "Users"
-    }
+    if email:
+        kpi_response["team_size"] = {
+            "value": dept_members,
+            "formatted": str(dept_members),
+            "change": f"{emp_dept or 'Your'} department",
+            "trend": "neutral",
+            "label": "Department Size",
+            "description": f"Members in {emp_dept or 'your'} department",
+            "icon": "Users"
+        }
+    else:
+        kpi_response["team_size"] = {
+            "value": total_members,
+            "formatted": str(total_members),
+            "change": f"{dept_count} departments",
+            "trend": "neutral",
+            "label": "Team Size",
+            "description": f"Across {dept_count} departments",
+            "icon": "Users"
+        }
 
     kpi_response["tasks_pipeline"] = {
         "value": in_progress_tasks,

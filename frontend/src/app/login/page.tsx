@@ -102,21 +102,21 @@ export default function LoginPage() {
 
   const finalizeLogin = async (uid: string, email: string) => {
     const storedUser = localStorage.getItem("yesboss_user");
-    let userData = storedUser ? JSON.parse(storedUser) : { uid, email, role: "owner" };
+    let userData = storedUser ? JSON.parse(storedUser) : { uid, email };
     userData = { ...userData, uid: userData.uid || uid, email: userData.email || email };
 
     try {
       const syncRes = await fetch(`${API_URL}/auth/sync-user`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uid: userData.uid, email: userData.email, full_name: userData.full_name || "", role: userData.role || "owner", phone_verified: true }),
+        body: JSON.stringify({ uid: userData.uid, email: userData.email, full_name: userData.full_name || "", role: userData.role || "", phone_verified: true }),
       });
       const syncData = await syncRes.json();
       if (syncData?.user?.role) userData.role = syncData.user.role;
     } catch {}
 
     localStorage.setItem("yesboss_user", JSON.stringify(userData));
-    localStorage.setItem("yesboss_role", userData.role);
+    localStorage.setItem("yesboss_role", userData.role || "");
     const userCookie = encodeURIComponent(JSON.stringify(userData));
     document.cookie = `yesboss_token=true; path=/; max-age=86400; SameSite=Lax`;
     document.cookie = `yesboss_user=${userCookie}; path=/; max-age=86400; SameSite=Lax`;

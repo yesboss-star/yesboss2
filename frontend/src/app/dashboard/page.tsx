@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUIStore } from "@/stores/uiStore";
@@ -97,11 +97,12 @@ export default function DashboardPage() {
     }
   };
 
-  const fetchKPI = async () => {
+  const fetchKPI = useCallback(async () => {
     if (!organization?.id) return;
     setKpiLoading(true);
     try {
-      const res = await fetch(`${API_URL}/dashboard/kpi?organization_id=${organization.id}`, { headers: getAuthHeaders() });
+      const emailParam = role === "employee" && user?.email ? `&email=${encodeURIComponent(user.email)}` : "";
+      const res = await fetch(`${API_URL}/dashboard/kpi?organization_id=${organization.id}${emailParam}`, { headers: getAuthHeaders() });
       if (res.ok) {
         const data = await res.json();
         setKpiData(data);
@@ -111,39 +112,21 @@ export default function DashboardPage() {
     } finally {
       setKpiLoading(false);
     }
-  };
-
-  useEffect(() => {
-    setBreadcrumbs([{ label: "Dashboard" }]);
-  }, [setBreadcrumbs]);
-
-  useEffect(() => {
-    if (loading || !user || organization) return;
-    const existingPersist = localStorage.getItem("yesboss-organization");
-    if (existingPersist) {
-      try {
-        const parsed = JSON.parse(existingPersist);
-        if (parsed?.state?.organization) {
-          setOrganization(parsed.state.organization);
-          return;
-        }
-      } catch {}
-    }
-    fetchOrganizationByEmail(user.email!);
-  }, [user, loading, organization, setOrganization, fetchOrganizationByEmail]);
+  }, [organization?.id, role, user?.email]);
 
   useEffect(() => {
     if (organization?.id) {
-      fetchGoals(organization.id);
+      if (role === "owner") fetchGoals(organization.id);
       fetchKPI();
     }
-  }, [organization?.id, fetchGoals]);
+  }, [organization?.id, fetchGoals, fetchKPI, role]);
 
-  const fetchMeetingHistory = async () => {
+  const fetchMeetingHistory = useCallback(async () => {
     if (!organization?.id) return;
     setMeetingsLoading(true);
     try {
-      const res = await fetch(`${API_URL}/meetings/history?organization_id=${organization.id}&limit=50`, {
+      const emailParam = role === "employee" && user?.email ? `&email=${encodeURIComponent(user.email)}` : "";
+      const res = await fetch(`${API_URL}/meetings/history?organization_id=${organization.id}&limit=50${emailParam}`, {
         credentials: "include",
         headers: getAuthHeaders(),
       });
@@ -155,13 +138,13 @@ export default function DashboardPage() {
     } finally {
       setMeetingsLoading(false);
     }
-  };
+  }, [organization?.id, role, user?.email]);
 
   useEffect(() => {
     if (role === "employee" && organization?.id) {
       fetchEmployeeData();
     }
-  }, [role, organization?.id, user?.email]);
+  }, [role, organization?.id]);
 
   const handleDeleteMeeting = async (meetingId: string) => {
     try {
@@ -187,7 +170,7 @@ export default function DashboardPage() {
     if (organization?.id && role === "employee") {
       fetchMeetingHistory();
     }
-  }, [organization?.id, role]);
+  }, [organization?.id, role, fetchMeetingHistory]);
 
   if (loading) {
     return (
@@ -266,31 +249,6 @@ export default function DashboardPage() {
             </p>
           </div>
         </div>
-
-        {role === "employee" && !kpiLoading && Object.keys(kpiData).length > 0 && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            {kpiCards.map(({ key, icon: Icon, label, color }) => {
-              const kpi = kpiData[key];
-              if (!kpi) return null;
-              return (
-                <Card key={key} className="card-hover">
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                        <Icon className="w-5 h-5 text-primary" />
-                      </div>
-                      <Badge variant={getStatBadge(kpi.trend)}>{kpi.change}</Badge>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className={`text-2xl font-bold ${color}`}>{kpi.formatted}</div>
-                    <div className="text-sm text-text-muted">{kpi.label}</div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        )}
 
         {role === "employee" && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -584,7 +542,7 @@ export default function DashboardPage() {
       </div>
       )}
 
-      <GoalModal isOpen={showGoalModal} onClose={() => setShowGoalModal(false)} />
+      {role === "owner" && <GoalModal isOpen={showGoalModal} onClose={() => setShowGoalModal(false)} />}
       <MeetingUploadModal
         open={showUploadModal}
         onOpenChange={setShowUploadModal}

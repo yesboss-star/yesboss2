@@ -276,6 +276,7 @@ export default function ProfilePage() {
           </div>
 
           <div className="lg:col-span-2 space-y-6">
+            {role === "owner" && (<>
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
@@ -397,6 +398,7 @@ export default function ProfilePage() {
                 </ul>
               </CardContent>
             </Card>
+            </>)}
           </div>
         </div>
       </div>
