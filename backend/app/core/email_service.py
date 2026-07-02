@@ -139,8 +139,27 @@ def _render_monthly_report(report_data: dict) -> str:
     return _TEMPLATE_HEADER.format(app_name=APP_NAME) + body + _TEMPLATE_FOOTER.format(app_name=APP_NAME)
 
 
+def _render_otp_email(otp: str, purpose: str = "verification") -> str:
+    if purpose == "password_reset":
+        title = "Reset Your Password"
+        message = "You requested a password reset. Use the code below to verify your identity and set a new password."
+    else:
+        title = "Verify Your Email"
+        message = "Thanks for signing up! Use the code below to verify your email address."
+    body = f"""<h2 style="margin:0 0 8px;font-size:18px;color:#1e293b">{title}</h2>
+      <p style="margin:0 0 20px;color:#555;line-height:1.5">{message}</p>
+      <div style="background:#f8fafc;border:2px dashed #6366f1;border-radius:12px;padding:24px;text-align:center;margin-bottom:20px">
+        <p style="margin:0 0 8px;font-size:12px;color:#888;text-transform:uppercase;letter-spacing:1px">Your 6-digit code</p>
+        <p style="margin:0;font-size:36px;font-weight:bold;letter-spacing:8px;color:#6366f1;font-family:monospace">{otp}</p>
+      </div>
+      <p style="margin:0 0 8px;color:#555;font-size:14px">This code expires in <strong>10 minutes</strong>.</p>
+      <p style="margin:0;color:#888;font-size:13px">If you didn't request this, you can safely ignore this email.</p>"""
+    return _TEMPLATE_HEADER.format(app_name=APP_NAME) + body + _TEMPLATE_FOOTER.format(app_name=APP_NAME)
+
+
 TEMPLATE_RENDERERS = {
     "default": _render_basic,
+    "otp": _render_otp_email,
     "task_deadline_reminder": _render_task_deadline_reminder,
     "task_overdue": _render_task_overdue,
     "escalation_owner": _render_escalation_owner,
@@ -167,6 +186,15 @@ def send_notification_email(to_email: str, title: str, message: str, link: Optio
     else:
         html = TEMPLATE_RENDERERS["default"](title, message, link, action_label)
     send_email(to_email, f"{APP_NAME} - {title}", html, text_body=f"{title}\n\n{message}\n\n{link or ''}")
+
+
+def send_otp_email(to_email: str, otp: str, purpose: str = "verification") -> bool:
+    if purpose == "password_reset":
+        subject = f"{APP_NAME} - Password Reset Code"
+    else:
+        subject = f"{APP_NAME} - Verify Your Email"
+    html = _render_otp_email(otp, purpose)
+    return send_email(to_email, subject, html, text_body=f"Your OTP code is: {otp}")
 
 
 def send_digest_email(to_email: str, digest_items: list, frequency: str = "daily"):

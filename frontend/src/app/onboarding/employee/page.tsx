@@ -53,8 +53,12 @@ export default function EmployeeOnboarding() {
   const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
   const [managerSearch, setManagerSearch] = useState("");
   const [managerResults, setManagerResults] = useState<Employee[]>([]);
+  const [managerAutoFetched, setManagerAutoFetched] = useState(false);
+  const [allOrgMembers, setAllOrgMembers] = useState<Employee[]>([]);
   const [subordinateSearch, setSubordinateSearch] = useState("");
   const [subordinateResults, setSubordinateResults] = useState<Employee[]>([]);
+  const [roleSuggestions, setRoleSuggestions] = useState<string[]>([]);
+  const [showRoleSuggestions, setShowRoleSuggestions] = useState(false);
   const [selectedSubordinates, setSelectedSubordinates] = useState<Employee[]>([]);
   const [orgSearchResults, setOrgSearchResults] = useState<{_id: string; name: string; domain: string; industry: string}[]>([]);
   const [orgSearchLoading, setOrgSearchLoading] = useState(false);
@@ -117,8 +121,13 @@ export default function EmployeeOnboarding() {
 
   const searchManagers = async (query: string) => {
     setManagerSearch(query);
-    if (query.length < 2) {
-      setManagerResults([]);
+    if (query.length < 1) {
+      // Show all org members when query is empty
+      if (allOrgMembers.length > 0) {
+        setManagerResults(allOrgMembers);
+      } else {
+        setManagerResults([]);
+      }
       return;
     }
     try {
@@ -129,6 +138,24 @@ export default function EmployeeOnboarding() {
       }
     } catch {
       setManagerResults([]);
+    }
+  };
+
+  const fetchRoleSuggestions = async (query: string) => {
+    if (query.length < 1) {
+      setRoleSuggestions([]);
+      setShowRoleSuggestions(false);
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/org-chart/role-suggestions?q=${encodeURIComponent(query)}&organization_id=${empData.orgId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setRoleSuggestions(data.suggestions || []);
+        setShowRoleSuggestions(data.suggestions?.length > 0);
+      }
+    } catch {
+      setRoleSuggestions([]);
     }
   };
 
@@ -357,6 +384,13 @@ export default function EmployeeOnboarding() {
           tools_preferred: userMessages[2] || "",
         }),
       });
+
+      // Register custom role if user entered one not in the common list
+      if (empData.role) {
+        fetch(`${API_URL}/org-chart/role-register?role=${encodeURIComponent(empData.role)}`, {
+          method: "POST",
+        }).catch(() => {});
+      }
     } catch {
     }
   };
@@ -406,6 +440,24 @@ export default function EmployeeOnboarding() {
       runDetect();
     }
   }, [step, user?.email]);
+
+  useEffect(() => {
+    if (step === "manager" && empData.orgId && !managerAutoFetched) {
+      const fetchAllMembers = async () => {
+        try {
+          const res = await fetch(`${API_URL}/org-chart/members?organization_id=${empData.orgId}`);
+          if (res.ok) {
+            const data = await res.json();
+            const members = data.members || [];
+            setAllOrgMembers(members);
+            setManagerResults(members);
+            setManagerAutoFetched(true);
+          }
+        } catch {}
+      };
+      fetchAllMembers();
+    }
+  }, [step, empData.orgId, managerAutoFetched]);
 
   useEffect(() => {
     if (step === "persona" && personaAnswers.length === 0 && !currentQuestion && !personaLoading) {
@@ -621,14 +673,7 @@ export default function EmployeeOnboarding() {
             )}
 
             {empData.orgName && orgSearchResults.length === 0 && !orgSearchLoading && (
-              <div className="mt-3">
-                <button
-                  onClick={handleCreateNewOrg}
-                  className="w-full py-2 text-sm text-primary hover:text-primary-light transition-colors cursor-pointer flex items-center justify-center gap-2"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  Create &quot;{empData.orgName}&quot; as new organization
-                </button>
+              <div className="mt-1">
               </div>
             )}
 
@@ -672,6 +717,7 @@ export default function EmployeeOnboarding() {
                     type="text"
                     value={managerSearch}
                     onChange={(e) => searchManagers(e.target.value)}
+                    onFocus={() => searchManagers(managerSearch)}
                     placeholder="Search for your manager..."
                     className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
                   />
@@ -717,13 +763,37 @@ export default function EmployeeOnboarding() {
 
               <div>
                 <label className="block text-sm font-medium mb-2">Your Role / Title</label>
-                <input
-                  type="text"
-                  value={empData.role}
-                  onChange={(e) => setEmpData({ ...empData, role: e.target.value })}
-                  placeholder="e.g. Senior Developer, Marketing Manager..."
-                  className="w-full px-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={empData.role}
+                    onChange={(e) => {
+                      setEmpData({ ...empData, role: e.target.value });
+                      fetchRoleSuggestions(e.target.value);
+                    }}
+                    onFocus={() => fetchRoleSuggestions(empData.role)}
+                    onBlur={() => setTimeout(() => setShowRoleSuggestions(false), 200)}
+                    placeholder="e.g. Senior Developer, Marketing Manager..."
+                    className="w-full px-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
+                  />
+                  {showRoleSuggestions && roleSuggestions.length > 0 && (
+                    <div className="absolute z-10 mt-1 w-full border border-border rounded-xl max-h-48 overflow-y-auto bg-background shadow-lg">
+                      {roleSuggestions.map((suggestion, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => {
+                            setEmpData({ ...empData, role: suggestion });
+                            setShowRoleSuggestions(false);
+                            setRoleSuggestions([]);
+                          }}
+                          className="w-full px-4 py-3 text-left hover:bg-surface-light transition-colors text-sm cursor-pointer"
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div>

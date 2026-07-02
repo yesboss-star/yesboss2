@@ -34,6 +34,7 @@ export default function SignupPage() {
   const [otpModalOpen, setOtpModalOpen] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
   const [otpVerified, setOtpVerified] = useState(false);
+  const [verificationToken, setVerificationToken] = useState<string | null>(null);
   const [resendTimer, setResendTimer] = useState(0);
   const [otpLoading, setOtpLoading] = useState(false);
   const [otpError, setOtpError] = useState("");
@@ -158,24 +159,17 @@ export default function SignupPage() {
     setOtpLoading(true);
     setOtpError("");
     try {
-      const body = contactKind === "email"
-        ? { email: formData.contact.trim() }
-        : { phone: `${selectedCountry.code}${formData.contact.replace(/\D/g, "")}` };
-      const res = await fetch(`${API_URL}/auth/forgot-password/send-otp`, {
+      const res = await fetch(`${API_URL}/auth/send-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ email: formData.contact.trim() }),
       });
       const data = await res.json();
       if (!data.success) {
-        throw new Error(data.message || "Could not send OTP");
+        throw new Error(data.message || data.detail || "Could not send OTP");
       }
       setOtpSent(true);
       setResendTimer(60);
-      // For dev: pre-fill the OTP from the debug_otp returned by the backend
-      if (data.debug_otp) {
-        setFormData((p) => ({ ...p, otp: data.debug_otp }));
-      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to send OTP";
       setOtpError(msg);
@@ -248,18 +242,17 @@ export default function SignupPage() {
         return;
       }
       // Email flow: call backend verify-otp
-      const body = contactKind === "email"
-        ? { email: formData.contact.trim(), otp: formData.otp }
-        : { phone: `${selectedCountry.code}${formData.contact.replace(/\D/g, "")}`, otp: formData.otp };
-      const res = await fetch(`${API_URL}/auth/forgot-password/verify-otp`, {
+      const res = await fetch(`${API_URL}/auth/verify-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ email: formData.contact.trim(), code: formData.otp }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
         throw new Error(data.detail || data.message || "Invalid OTP");
       }
+      // The uid field contains the verification_token
+      setVerificationToken(data.uid || null);
       setOtpVerified(true);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Verification failed";
@@ -286,7 +279,11 @@ export default function SignupPage() {
         firebaseUid = auth.currentUser?.uid || "";
       }
 
-      const userData = {
+      const userData: {
+        uid: string; email: string; full_name: string; phone: string;
+        role: UserRole; phone_verified: boolean; email_verified: boolean;
+        verification_token?: string;
+      } = {
         uid: firebaseUid,
         email: contactKind === "email" ? formData.contact.trim() : `${selectedCountry.code}${formData.contact.replace(/\D/g, "")}@phone.yesboss.app`,
         full_name: formData.fullName,
@@ -295,6 +292,10 @@ export default function SignupPage() {
         phone_verified: contactKind === "phone",
         email_verified: contactKind === "email",
       };
+
+      if (contactKind === "email" && verificationToken) {
+        userData.verification_token = verificationToken;
+      }
 
       const syncRes = await fetch(`${API_URL}/auth/sync-user`, {
         method: "POST",

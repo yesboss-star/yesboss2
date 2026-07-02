@@ -20,6 +20,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1
 
 interface Task {
   id: string;
+  _id?: string;
   title: string;
   status: string;
   priority: string;
@@ -29,6 +30,7 @@ interface Task {
 
 interface PendingReview {
   id: string;
+  _id?: string;
   type: string;
   title: string;
   submitted_by: string;
@@ -37,6 +39,7 @@ interface PendingReview {
 
 interface TeamUpdate {
   id: string;
+  _id?: string;
   type: string;
   message: string;
   user: string;
@@ -67,6 +70,7 @@ export default function DashboardPage() {
   const [tasksLoading, setTasksLoading] = useState(false);
   const [kpiData, setKpiData] = useState<Record<string, KPIItem>>({});
   const [kpiLoading, setKpiLoading] = useState(false);
+  const [kpiError, setKpiError] = useState(false);
 
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showBooking, setShowBooking] = useState(false);
@@ -100,15 +104,18 @@ export default function DashboardPage() {
   const fetchKPI = useCallback(async () => {
     if (!organization?.id) return;
     setKpiLoading(true);
+    setKpiError(false);
     try {
       const emailParam = role === "employee" && user?.email ? `&email=${encodeURIComponent(user.email)}` : "";
       const res = await fetch(`${API_URL}/dashboard/kpi?organization_id=${organization.id}${emailParam}`, { headers: getAuthHeaders() });
       if (res.ok) {
         const data = await res.json();
         setKpiData(data);
+      } else {
+        setKpiError(true);
       }
-    } catch (e) {
-      console.error("Failed to fetch KPI data", e);
+    } catch {
+      setKpiError(true);
     } finally {
       setKpiLoading(false);
     }
@@ -288,7 +295,7 @@ export default function DashboardPage() {
             <CardContent>
               <div className="space-y-3">
                 {assignedTasks.slice(0, 5).map((task) => (
-                  <div key={task.id} className="flex items-center gap-4 p-4 rounded-xl bg-surface hover:bg-surface-light transition-colors">
+                  <div key={task.id || task._id} className="flex items-center gap-4 p-4 rounded-xl bg-surface hover:bg-surface-light transition-colors">
                     <div className="text-primary">{getStatusIcon(task.status)}</div>
                     <div className="flex-1 min-w-0">
                       <p className="font-medium truncate">{task.title}</p>
@@ -325,7 +332,7 @@ export default function DashboardPage() {
             <CardContent>
               <div className="space-y-3">
                 {pendingReviews.map((review) => (
-                  <div key={review.id} className="flex items-center gap-4 p-4 rounded-xl bg-surface hover:bg-surface-light transition-colors">
+                  <div key={review.id || review._id} className="flex items-center gap-4 p-4 rounded-xl bg-surface hover:bg-surface-light transition-colors">
                     <div className="w-10 h-10 rounded-xl bg-orange-500/10 flex items-center justify-center">
                       <AlertCircle className="w-5 h-5 text-orange-400" />
                     </div>
@@ -360,7 +367,7 @@ export default function DashboardPage() {
             <CardContent>
               <div className="space-y-3">
                 {teamUpdates.map((update) => (
-                  <div key={update.id} className="flex items-start gap-3 p-3 rounded-xl bg-surface">
+                  <div key={update.id || update._id} className="flex items-start gap-3 p-3 rounded-xl bg-surface">
                     <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
                       <span className="text-xs text-primary font-medium">{update.user.charAt(0)}</span>
                     </div>
@@ -451,8 +458,8 @@ export default function DashboardPage() {
                           </button>
                           {isExpanded && (
                             <div className="border-t border-border/50">
-                              {meetings.map((m: any) => (
-                                <div key={m.id} className="flex items-center gap-3 px-3 py-2.5 pl-12 bg-surface/50 border-b border-border/30 last:border-0">
+                              {meetings.map((m: any, mi) => (
+                                <div key={m.id || m._id || mi} className="flex items-center gap-3 px-3 py-2.5 pl-12 bg-surface/50 border-b border-border/30 last:border-0">
                                   <div className="flex-1 min-w-0">
                                     <p className="text-xs text-text-muted">
                                       {m.task_count || 0} tasks · {m.created_at ? new Date(m.created_at).toLocaleDateString() : ""}
@@ -493,9 +500,9 @@ export default function DashboardPage() {
             <div className="space-y-3">
               {(role === "employee" ? getEmployeeInsights() : [
                 { text: kpiData?.completion_rate ? `${kpiData.completion_rate.formatted} task completion rate — ${kpiData.completion_rate.change}` : "Loading insights...", type: "info" as const },
-                { text: kpiData?.goal_completion_rate ? `Goal completion at ${kpiData.goal_completion_rate.formatted} — ${kpiData.goal_completion_rate.change}` : null, type: "success" as const },
-                { text: kpiData?.team_size ? `${kpiData.team_size.formatted} team members ${kpiData.team_size.change}` : null, type: "info" as const },
-              ].filter(Boolean) as { text: string; type: "success" | "warning" | "info" }[]).map((insight, i) => (
+                {text: kpiData?.goal_completion_rate ? `Goal completion at ${kpiData.goal_completion_rate.formatted} — ${kpiData.goal_completion_rate.change}` : null, type: "success" as const},
+                {text: kpiData?.team_size ? `${kpiData.team_size.formatted} team members ${kpiData.team_size.change}` : null, type: "info" as const},
+              ].filter(i => i.text !== null) as { text: string; type: "success" | "warning" | "info" }[]).map((insight, i) => (
                 <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-surface">
                   <Badge variant={insight.type} className="mt-0.5 flex-shrink-0">{insight.type}</Badge>
                   <p className="text-sm text-text-muted">{insight.text}</p>

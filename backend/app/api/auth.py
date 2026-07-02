@@ -72,20 +72,24 @@ class LoginRequest(BaseModel):
 
 
 class SendOTPRequest(BaseModel):
-    phone: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
 
-    @field_validator("phone")
+    @field_validator("email")
     @classmethod
-    def validate_phone(cls, v: str) -> str:
-        digits = re.sub(r"\D", "", v)
-        if len(digits) < 10:
-            raise ValueError("Phone number must have at least 10 digits")
-        return v.strip()
+    def validate_email(cls, v):
+        return v.strip().lower() if v else v
 
 
 class VerifyOTPRequest(BaseModel):
-    phone: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
     code: str
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v):
+        return v.strip().lower() if v else v
 
 
 class ResetPasswordRequest(BaseModel):
@@ -232,16 +236,47 @@ async def login(request: LoginRequest):
 
 @router.post("/send-otp", response_model=AuthResponse)
 async def send_otp(request: SendOTPRequest):
+    """Send a 6-digit OTP for email verification during signup.
+    Stores OTP in signup_otps collection with MongoDB TTL auto-cleanup.
+    Actually delivers the OTP via SMTP email."""
     try:
-        logger.info("OTP send requested for phone: %s", request.phone)
-        
+        db = get_database()
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not configured")
+
+        if not request.email:
+            raise HTTPException(status_code=400, detail="Email is required for OTP verification")
+
+        email = request.email.strip().lower()
+
+        otp = f"{secrets.randbelow(1000000):06d}"
+        expires_at = datetime.utcnow() + timedelta(minutes=10)
+
+        db.signup_otps.delete_many({"email": email})
+        db.signup_otps.insert_one({
+            "email": email,
+            "otp": otp,
+            "verified": False,
+            "expires_at": expires_at,
+            "created_at": datetime.utcnow(),
+        })
+
+        from ..core.email_service import send_otp_email, is_email_configured
+        if is_email_configured():
+            send_otp_email(email, otp, purpose="verification")
+            logger.info("Signup OTP sent to %s", email)
+        else:
+            logger.warning("SMTP not configured - OTP not sent to %s. Debug OTP: %s", email, otp)
+
         return AuthResponse(
             success=True,
-            message="OTP functionality handled on frontend via Firebase SDK",
+            message="OTP sent to your email",
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error("OTP send failed: %s", str(e))
+        logger.error("Send OTP failed: %s", str(e))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
@@ -250,19 +285,49 @@ async def send_otp(request: SendOTPRequest):
 
 @router.post("/verify-otp", response_model=AuthResponse)
 async def verify_otp(request: VerifyOTPRequest):
+    """Verify the 6-digit OTP for signup email verification.
+    Returns a verification_token that must be sent with /sync-user to complete signup."""
     try:
-        logger.info("OTP verification requested for phone: %s", request.phone)
-        
-        return AuthResponse(
-            success=True,
-            message="OTP verification handled on frontend via Firebase SDK",
+        if not request.email:
+            raise HTTPException(status_code=400, detail="Email is required")
+        email = request.email.strip().lower()
+        otp_code = request.code.strip()
+
+        db = get_database()
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not configured")
+
+        record = db.signup_otps.find_one({"email": email})
+        if not record:
+            raise HTTPException(status_code=400, detail="No OTP request found. Send OTP first.")
+
+        if record.get("expires_at") and record["expires_at"] < datetime.utcnow():
+            db.signup_otps.delete_one({"_id": record["_id"]})
+            raise HTTPException(status_code=400, detail="OTP expired. Request a new one.")
+
+        if record.get("otp") != otp_code:
+            raise HTTPException(status_code=400, detail="Invalid OTP")
+
+        verification_token = secrets.token_urlsafe(32)
+        db.signup_otps.update_one(
+            {"_id": record["_id"]},
+            {"$set": {"verified": True, "verification_token": verification_token, "verified_at": datetime.utcnow()}},
         )
 
+        logger.info("Signup OTP verified for %s", email)
+        return AuthResponse(
+            success=True,
+            message="OTP verified",
+            uid=verification_token,
+        )
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error("OTP verification failed: %s", str(e))
+        logger.error("Verify OTP failed: %s", str(e))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired OTP",
+            detail=str(e),
         )
 
 
@@ -332,6 +397,7 @@ class SyncUserRequest(BaseModel):
     phone: Optional[str] = None
     role: str = "owner"
     phone_verified: bool = False
+    verification_token: Optional[str] = None
 
 
 @router.post("/sync-user", response_model=AuthResponse)
@@ -340,6 +406,19 @@ async def sync_user(request: SyncUserRequest):
         db = get_database()
         if db is None:
             raise HTTPException(status_code=500, detail="Database not configured")
+
+        # For email signups, validate the verification_token to prove OTP was verified
+        if request.email and not request.phone_verified:
+            if not request.verification_token:
+                raise HTTPException(status_code=400, detail="Verification token required. Verify OTP first.")
+            token_record = db.signup_otps.find_one({
+                "email": request.email.strip().lower(),
+                "verification_token": request.verification_token,
+                "verified": True,
+            })
+            if not token_record:
+                raise HTTPException(status_code=400, detail="Invalid or expired verification token. Verify OTP first.")
+            db.signup_otps.delete_one({"_id": token_record["_id"]})
 
         existing = db.users.find_one({"uid": request.uid})
         now = datetime.utcnow().isoformat()
@@ -590,10 +669,16 @@ async def forgot_password_send_otp(request: ForgotSendOTPRequest):
             "created_at": datetime.utcnow(),
         })
 
-        link = None
         if channel == "email":
+            from ..core.email_service import send_otp_email, is_email_configured
+            if is_email_configured():
+                send_otp_email(contact, otp, purpose="password_reset")
+                logger.info("Password reset OTP sent to %s", contact)
+            else:
+                logger.warning("SMTP not configured - password reset OTP not sent to %s. Debug OTP: %s", contact, otp)
             try:
-                link = generate_password_reset_link(contact)
+                reset_link = generate_password_reset_link(contact)
+                logger.info("Password reset link also generated for: %s", contact)
             except Exception as e:
                 logger.warning("Could not generate password reset link: %s", e)
 

@@ -321,3 +321,239 @@ async def delete_org_member(member_id: str, current_user = Depends(get_current_u
 
     db.org_chart_members.delete_one({"_id": ObjectId(member_id)})
     return {"success": True}
+
+
+# Common role titles used as fallback suggestions
+COMMON_ROLES = [
+    # C-Suite / Executive
+    "Chief Executive Officer", "Chief Technology Officer", "Chief Financial Officer",
+    "Chief Operating Officer", "Chief Marketing Officer", "Chief Product Officer",
+    "Chief Information Officer", "Chief Revenue Officer", "Chief Data Officer",
+    "Chief People Officer", "Chief Legal Officer", "Chief Strategy Officer",
+    "Chief Compliance Officer", "Chief Innovation Officer", "Chief Growth Officer",
+    "Chief Risk Officer", "Chief Security Officer", "Chief Analytics Officer",
+    "Chief Customer Officer", "Chief Design Officer", "Chief Sustainability Officer",
+    "EVP Engineering", "EVP Sales", "EVP Marketing", "EVP Product",
+    "SVP Engineering", "SVP Technology", "SVP Sales", "SVP Marketing",
+    "SVP Product Management", "SVP People", "SVP Finance", "SVP Operations",
+
+    # VP Level
+    "VP of Engineering", "VP of Sales", "VP of Marketing", "VP of Operations",
+    "VP of Product", "VP of Design", "VP of Finance", "VP of People",
+    "VP of Data Science", "VP of Machine Learning", "VP of Infrastructure",
+    "VP of Customer Success", "VP of Business Development", "VP of Strategy",
+    "VP of Growth", "VP of Brand", "VP of Communications", "VP of Legal",
+
+    # Director Level
+    "Director of Engineering", "Director of Product", "Director of Sales",
+    "Director of Marketing", "Director of Design", "Director of Operations",
+    "Director of Finance", "Director of HR", "Director of Data Science",
+    "Director of Analytics", "Director of Machine Learning", "Director of Infrastructure",
+    "Director of Security", "Director of Customer Success", "Director of Partnerships",
+    "Director of Brand", "Director of Communications", "Director of Talent Acquisition",
+    "Director of Learning & Development", "Director of Business Development",
+    "Director of Program Management", "Director of Quality Assurance",
+
+    # Engineering
+    "Principal Engineer", "Principal Software Engineer", "Principal Architect",
+    "Staff Engineer", "Staff Software Engineer", "Senior Staff Engineer",
+    "Engineering Manager", "Senior Engineering Manager",
+    "Lead Software Engineer", "Lead Developer", "Tech Lead",
+    "Senior Software Engineer", "Senior Developer", "Senior Backend Engineer",
+    "Senior Frontend Engineer", "Senior Full Stack Engineer",
+    "Senior Systems Engineer", "Senior Platform Engineer", "Senior SRE",
+    "Software Engineer", "Full Stack Developer", "Frontend Developer",
+    "Backend Developer", "Systems Engineer", "Platform Engineer",
+    "Site Reliability Engineer", "DevOps Engineer", "Infrastructure Engineer",
+    "Cloud Engineer", "Security Engineer", "QA Engineer", "Test Engineer",
+    "Junior Developer", "Junior Software Engineer", "Associate Engineer",
+    "Mobile Developer", "iOS Developer", "Android Developer",
+    "Embedded Engineer", "Game Developer", "Blockchain Developer",
+
+    # Data & AI
+    "Principal Data Scientist", "Lead Data Scientist", "Machine Learning Engineer",
+    "Senior Data Scientist", "Data Scientist", "Junior Data Scientist",
+    "Data Engineer", "Senior Data Engineer", "Data Analyst", "Business Analyst",
+    "Senior Data Analyst", "Analytics Engineer", "AI Research Scientist",
+    "ML Ops Engineer", "Data Architect", "Business Intelligence Analyst",
+    "Quantitative Analyst", "Data Product Manager",
+
+    # Product
+    "Group Product Manager", "Senior Product Manager", "Product Manager",
+    "Associate Product Manager", "Principal Product Manager",
+    "Product Operations Manager", "Product Analyst", "Technical Product Manager",
+    "Product Owner", "Program Manager", "Technical Program Manager",
+    "Senior Program Manager", "Scrum Master", "Agile Coach",
+
+    # Design
+    "Head of Design", "Senior Product Designer", "Product Designer",
+    "UX Designer", "UI Designer", "UX Researcher", "Design Researcher",
+    "Senior UX Designer", "Lead Designer", "Visual Designer",
+    "Interaction Designer", "Motion Designer", "Brand Designer",
+    "Design Operations Manager", "Design System Designer", "Creative Director",
+    "Art Director", "Graphic Designer",
+
+    # Sales
+    "VP of Sales", "Regional Sales Director", "Sales Director",
+    "Senior Account Executive", "Account Executive", "Enterprise Account Executive",
+    "SDR Manager", "Sales Development Representative", "BDR Manager",
+    "Business Development Representative", "Sales Operations Manager",
+    "Sales Operations Analyst", "Sales Engineer", "Solutions Engineer",
+    "Customer Success Manager", "Senior Customer Success Manager",
+    "Account Manager", "Senior Account Manager", "Key Account Manager",
+    "Partnerships Manager", "Business Development Manager",
+
+    # Marketing
+    "Head of Growth", "Growth Manager", "Senior Marketing Manager",
+    "Marketing Manager", "Brand Manager", "Content Marketing Manager",
+    "SEO Manager", "SEM Manager", "Digital Marketing Manager",
+    "Social Media Manager", "Product Marketing Manager",
+    "Marketing Operations Manager", "Communications Manager",
+    "PR Manager", "Content Writer", "Content Strategist",
+    "Copywriter", "Marketing Analyst", "Growth Analyst",
+    "Demand Generation Manager", "Email Marketing Manager",
+    "Performance Marketing Manager", "Brand Strategist",
+
+    # Finance & Legal
+    "Chief Financial Officer", "VP of Finance", "Finance Director",
+    "Finance Manager", "Senior Financial Analyst", "Financial Analyst",
+    "Controller", "Accountant", "Staff Accountant", "Accounts Payable",
+    "Accounts Receivable", "FP&A Manager", "FP&A Analyst",
+    "Internal Auditor", "Tax Manager", "Treasury Manager",
+    "General Counsel", "Corporate Counsel", "Legal Counsel",
+    "Paralegal", "Compliance Officer", "Compliance Analyst",
+    "Contracts Manager", "Risk Analyst",
+
+    # HR / People
+    "Chief People Officer", "VP of People", "HR Director",
+    "HR Manager", "Senior HR Generalist", "HR Generalist",
+    "HR Coordinator", "HR Operations Manager", "People Operations Manager",
+    "People Operations Associate", "Talent Acquisition Manager",
+    "Senior Recruiter", "Recruiter", "Talent Acquisition Specialist",
+    "HR Business Partner", "L&D Manager", "Learning & Development Specialist",
+    "Training Manager", "DEI Manager", "DEI Specialist",
+    "Compensation & Benefits Manager", "Payroll Manager",
+    "Employee Relations Manager", "Culture & Engagement Manager",
+    "Onboarding Specialist", "HR Analyst",
+
+    # Operations
+    "Chief Operating Officer", "VP of Operations", "Operations Director",
+    "Operations Manager", "Senior Operations Analyst", "Operations Analyst",
+    "Supply Chain Manager", "Logistics Manager", "Procurement Manager",
+    "Facilities Manager", "Office Manager", "Administrative Assistant",
+    "Executive Assistant", "Business Operations Manager", "Strategy & Operations Manager",
+    "Project Manager", "Senior Project Manager", "Project Coordinator",
+
+    # Customer Support
+    "VP of Customer Experience", "Customer Support Director",
+    "Customer Support Manager", "Senior Support Engineer", "Support Engineer",
+    "Customer Support Specialist", "Technical Support Engineer",
+    "Customer Success Manager", "Onboarding Manager", "Solutions Consultant",
+    "Support Team Lead", "Escalation Manager",
+
+    # Intern / Entry Level
+    "Intern", "Software Engineering Intern", "Data Science Intern",
+    "Product Management Intern", "Design Intern", "Marketing Intern",
+    "Sales Intern", "Finance Intern", "Associate Consultant",
+    "Graduate Trainee", "Management Trainee", "Associate",
+    "Junior Associate", "Analyst", "Junior Analyst",
+]
+
+
+@router.post("/role-register")
+async def register_custom_role(
+    role: str,
+    organization_id: Optional[str] = None
+):
+    """Save a custom role that wasn't in the common list so it appears in future suggestions."""
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    role = role.strip().lower()
+    if not role or len(role) < 2:
+        return {"saved": False}
+
+    # Check if already in common list
+    if any(r.lower() == role for r in COMMON_ROLES):
+        return {"saved": False, "reason": "already in common list"}
+
+    # Upsert to role_registry
+    existing = db.role_registry.find_one({"role": role})
+    if existing:
+        db.role_registry.update_one(
+            {"_id": existing["_id"]},
+            {"$inc": {"count": 1}, "$set": {"updated_at": datetime.utcnow()}}
+        )
+    else:
+        db.role_registry.insert_one({
+            "role": role,
+            "display_role": role.title(),
+            "count": 1,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+        })
+
+    return {"saved": True}
+
+
+@router.get("/role-suggestions")
+async def get_role_suggestions(
+    q: str = "",
+    organization_id: Optional[str] = None,
+    current_user = Depends(get_current_user_optional)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    org_id = organization_id or get_user_org_id(current_user)
+    suggestions = []
+
+    if not q:
+        return {"suggestions": COMMON_ROLES[:15]}
+
+    query_lower = q.strip().lower()
+    if len(query_lower) < 1:
+        return {"suggestions": []}
+
+    # Get existing roles from org chart members
+    existing_roles = set()
+    if org_id:
+        try:
+            import re
+            regex = re.compile(re.escape(query_lower), re.IGNORECASE)
+            members = db.org_chart_members.find(
+                {"organization_id": org_id, "role": {"$regex": regex}},
+                {"role": 1}
+            ).limit(20)
+            for m in members:
+                role = m.get("role", "").strip()
+                if role:
+                    existing_roles.add(role)
+        except Exception:
+            pass
+
+    # Get user-entered roles from role_registry
+    registry_roles = set()
+    try:
+        import re
+        regex = re.compile(re.escape(query_lower), re.IGNORECASE)
+        registry = db.role_registry.find(
+            {"role": {"$regex": regex}},
+            {"display_role": 1}
+        ).sort("count", -1).limit(20)
+        for r in registry:
+            display = r.get("display_role", "").strip()
+            if display:
+                registry_roles.add(display)
+    except Exception:
+        pass
+
+    # Match common roles
+    matched_common = [r for r in COMMON_ROLES if query_lower in r.lower()]
+
+    suggestions = list(existing_roles) + list(registry_roles) + matched_common
+    suggestions = list(dict.fromkeys(suggestions))[:15]
+
+    return {"suggestions": suggestions}

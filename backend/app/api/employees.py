@@ -62,21 +62,21 @@ async def get_employee_tasks(org_id: str, email: str | None = None):
         tasks = list(db.tasks.find(query).sort("due_date", 1).limit(20))
         
         for task in tasks:
-            task["_id"] = str(task["_id"])
+            task["id"] = str(task.pop("_id"))
         
         pending_reviews = list(db.approval_requests.find(
             {"reviewer_email": email, "status": "pending"}
         ).limit(10))
         
         for review in pending_reviews:
-            review["_id"] = str(review["_id"])
+            review["id"] = str(review.pop("_id"))
         
         team_updates = list(db.team_updates.find(
             {"organization_id": org_id}
         ).sort("created_at", -1).limit(10))
         
         for update in team_updates:
-            update["_id"] = str(update["_id"])
+            update["id"] = str(update.pop("_id"))
         
         return {
             "tasks": tasks,

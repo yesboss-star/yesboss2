@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, Tabs, TabsList, TabsTrigger, TabsContent, Input, Label, Button } from "@/components/ui";
-import { Bell, User, Save, ArrowLeft, Volume2, Mail, Smartphone, Plug } from "lucide-react";
+import { Bell, User, Save, ArrowLeft, Volume2, Mail, Smartphone, Plug, MessageSquare, ExternalLink, X } from "lucide-react";
 import ZohoConnectButton from "@/components/owners/ZohoConnectButton";
 import { useZohoStore } from "@/stores/zohoStore";
 import { useUIStore } from "@/stores/uiStore";
@@ -45,6 +45,8 @@ export default function SettingsPage() {
   const [profile, setProfile] = useState({ fullName: "", email: "", department: "", role: "" });
   const [profileLoading, setProfileLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [feedbackPopupOpen, setFeedbackPopupOpen] = useState(false);
+  const [userInfo, setUserInfo] = useState({ name: "", email: "" });
 
   useEffect(() => {
     const stored = localStorage.getItem("yesboss_user");
@@ -56,6 +58,7 @@ export default function SettingsPage() {
         userEmail = u?.email || "";
       } catch {}
     }
+    setUserInfo({ name: userName, email: userEmail });
     const headers = getAuthHeaders();
 
     Promise.all([
@@ -137,6 +140,7 @@ export default function SettingsPage() {
             <TabsTrigger value="notifications"><Bell className="w-4 h-4 mr-2" /> Notifications</TabsTrigger>
             <TabsTrigger value="profile"><User className="w-4 h-4 mr-2" /> Profile</TabsTrigger>
             <TabsTrigger value="integrations"><Plug className="w-4 h-4 mr-2" /> Integrations</TabsTrigger>
+            <TabsTrigger value="feedback"><MessageSquare className="w-4 h-4 mr-2" /> Feedback</TabsTrigger>
           </TabsList>
 
           <TabsContent value="notifications">
@@ -310,6 +314,67 @@ export default function SettingsPage() {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="feedback">
+            <Card>
+              <CardHeader>
+                <CardTitle><MessageSquare className="w-4 h-4 inline mr-2" /> Send Feedback</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-text-muted">
+                  Have a suggestion or found a bug? We'd love to hear from you.
+                </p>
+                <button
+                  onClick={() => setFeedbackPopupOpen(true)}
+                  className="w-full py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 flex items-center justify-center gap-2"
+                >
+                  <MessageSquare className="w-5 h-5" />
+                  Send Feedback
+                </button>
+              </CardContent>
+            </Card>
+
+            {/* Feedback popup */}
+            {feedbackPopupOpen && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/60 backdrop-blur-sm">
+                <div className="w-full max-w-sm rounded-2xl bg-background border border-border p-6 shadow-2xl">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-bold">Choose email client</h3>
+                    <button
+                      onClick={() => setFeedbackPopupOpen(false)}
+                      className="text-text-muted hover:text-foreground cursor-pointer p-1"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                  <p className="text-sm text-text-muted mb-4">
+                    Your feedback will be sent to our team via email.
+                  </p>
+                  <div className="space-y-2">
+                    {[
+                      { name: "Gmail", icon: "📧", link: `mailto:yesbossvsllp1@gmail.com?subject=${encodeURIComponent(`YesBoss Feedback - ${userInfo.name}`)}&body=${encodeURIComponent(`Hi YesBoss Team,\n\nI'd like to share some feedback:\n\n---\nName: ${userInfo.name}\nEmail: ${userInfo.email}\n\n`)}` },
+                      { name: "Outlook", icon: "📧", link: `mailto:yesbossvsllp1@gmail.com?subject=${encodeURIComponent(`YesBoss Feedback - ${userInfo.name}`)}&body=${encodeURIComponent(`Hi YesBoss Team,\n\nI'd like to share some feedback:\n\n---\nName: ${userInfo.name}\nEmail: ${userInfo.email}\n\n`)}` },
+                      { name: "Zoho Mail", icon: "📧", link: `mailto:yesbossvsllp1@gmail.com?subject=${encodeURIComponent(`YesBoss Feedback - ${userInfo.name}`)}&body=${encodeURIComponent(`Hi YesBoss Team,\n\nI'd like to share some feedback:\n\n---\nName: ${userInfo.name}\nEmail: ${userInfo.email}\n\n`)}` },
+                    ].map((option) => (
+                      <a
+                        key={option.name}
+                        href={option.link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-3 p-3 rounded-xl bg-surface border border-border hover:border-primary/50 transition-all group cursor-pointer"
+                      >
+                        <span className="text-xl">{option.icon}</span>
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">{option.name}</p>
+                        </div>
+                        <ExternalLink className="w-4 h-4 text-text-muted group-hover:text-primary transition-colors" />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </TabsContent>
         </Tabs>
       </div>
