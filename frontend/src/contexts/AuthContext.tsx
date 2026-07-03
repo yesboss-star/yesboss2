@@ -33,7 +33,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       if (firebaseUser) {
         const storedRole = localStorage.getItem("yesboss_role");
-        setRole(storedRole as UserRole);
+        setRole((storedRole as UserRole) || "employee");
         setLastLoginAt(new Date().toISOString());
       } else {
         const storedUser = localStorage.getItem("yesboss_user");

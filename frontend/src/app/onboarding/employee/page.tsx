@@ -30,13 +30,14 @@ interface Employee {
   role: string;
   department: string;
   manager_id?: string;
+  manager_email?: string;
 }
 
 export default function EmployeeOnboarding() {
   const { user, signOut } = useAuth();
   const { setOrganization } = useOrganizationStore();
   const router = useRouter();
-  const [step, setStep] = useState<EmployeeStep>("department");
+  const [step, setStep] = useState<EmployeeStep>("org-detect");
   const [loading, setLoading] = useState(false);
 
   const [empData, setEmpData] = useState({
@@ -78,8 +79,8 @@ export default function EmployeeOnboarding() {
   const [isRedirecting, setIsRedirecting] = useState(false);
 
   const steps = [
-    { id: "department", label: "Department", icon: User },
     { id: "org-detect", label: "Organization", icon: Building2 },
+    { id: "department", label: "Department", icon: User },
     { id: "manager", label: "Reporting", icon: Users },
     { id: "persona", label: "AI Persona", icon: MessageSquare },
   ];
@@ -192,6 +193,7 @@ export default function EmployeeOnboarding() {
             orgDomain: data.organization.domain || domain,
             orgId: data.organization._id,
           }));
+          fetchOrgChartData(data.organization._id);
         } else {
           setEmpData((prev) => ({
             ...prev,
@@ -239,13 +241,14 @@ export default function EmployeeOnboarding() {
   };
 
   const handleOrgSelect = (org: {_id: string; name: string; domain: string; industry: string}) => {
-    setEmpData({
-      ...empData,
+    setEmpData((prev) => ({
+      ...prev,
       orgId: org._id,
       orgName: org.name,
       orgDomain: org.domain,
-    });
+    }));
     setOrgSearchResults([]);
+    fetchOrgChartData(org._id);
   };
 
   const handleCreateNewOrg = () => {
@@ -256,6 +259,57 @@ export default function EmployeeOnboarding() {
       orgDomain: empData.orgDomain || empData.orgName.toLowerCase().replace(/\s+/g, "") + ".com",
     });
     setOrgSearchResults([]);
+  };
+
+  const fetchOrgChartData = async (orgId: string) => {
+    if (!user?.email || !orgId) return;
+    try {
+      const res = await fetch(`${API_URL}/org-chart/members?organization_id=${orgId}`);
+      if (res.ok) {
+        const data = await res.json();
+        const members: (Employee & { manager_email?: string })[] = data.members || [];
+        const currentMember = members.find(
+          (m) => m.email?.toLowerCase() === user.email?.toLowerCase()
+        );
+        if (!currentMember) return;
+
+        const updates: Partial<typeof empData> = {};
+
+        if (currentMember.department) {
+          updates.department = currentMember.department;
+        }
+
+        const memberRole = currentMember.role || (currentMember as any).title;
+        if (memberRole && typeof memberRole === "string") {
+          updates.role = memberRole;
+          fetch(`${API_URL}/org-chart/role-register?role=${encodeURIComponent(memberRole)}`, { method: "POST" }).catch(() => {});
+        }
+
+        if (currentMember.manager_email) {
+          const managerMember = members.find(
+            (m) => m.email?.toLowerCase() === currentMember.manager_email?.toLowerCase()
+          );
+          if (managerMember) {
+            updates.managerId = managerMember._id;
+            updates.managerName = managerMember.full_name;
+            setManagerSearch(managerMember.full_name);
+            setManagerResults([]);
+          }
+        }
+
+        const directReports = members.filter(
+          (m) => m.email?.toLowerCase() !== user.email?.toLowerCase() &&
+            m.manager_email?.toLowerCase() === user.email?.toLowerCase()
+        );
+        if (directReports.length > 0) {
+          updates.subordinates = directReports.map((m) => m._id);
+          setSelectedSubordinates(directReports);
+        }
+
+        setEmpData((prev) => ({ ...prev, ...updates }));
+      }
+    } catch {
+    }
   };
 
   const goToDashboard = async () => {
@@ -297,14 +351,9 @@ export default function EmployeeOnboarding() {
           setCurrentQuestion(data);
           setShowCustomInput(false);
           setCustomAnswer("");
-        } else {
-          await goToDashboard();
         }
-      } else {
-        await goToDashboard();
       }
     } catch {
-      await goToDashboard();
     } finally {
       setPersonaLoading(false);
     }
@@ -346,14 +395,9 @@ export default function EmployeeOnboarding() {
           setCurrentQuestion(data);
           setShowCustomInput(false);
           setCustomAnswer("");
-        } else {
-          await goToDashboard();
         }
-      } else {
-        await goToDashboard();
       }
     } catch {
-      await goToDashboard();
     } finally {
       setPersonaLoading(false);
     }
@@ -413,6 +457,7 @@ export default function EmployeeOnboarding() {
                 orgDomain: data.organization.domain || domain,
                 orgId: data.organization._id,
               }));
+              fetchOrgChartData(data.organization._id);
             } else {
               setEmpData((prev) => ({
                 ...prev,
@@ -514,61 +559,6 @@ export default function EmployeeOnboarding() {
             </div>
           ))}
         </div>
-
-        {step === "department" && (
-          <div className="max-w-xl mx-auto">
-            <div className="text-center mb-8">
-              <h1 className="text-3xl font-bold mb-2">
-                What&apos;s your <span className="gradient-text">department?</span>
-              </h1>
-              <p className="text-text-muted">
-                Select your department or let AI suggest based on your profile.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 mb-6">
-              {aiSuggestions.map((dept, i) => (
-                <button
-                  key={i}
-                  onClick={() => setEmpData({ ...empData, department: dept })}
-                  className={`p-4 rounded-xl border-2 transition-all cursor-pointer text-left ${
-                    empData.department === dept
-                      ? "border-primary bg-primary/10"
-                      : "border-border hover:border-border-light"
-                  }`}
-                >
-                  <span className="font-medium text-sm">{dept}</span>
-                </button>
-              ))}
-            </div>
-
-            <div className="relative mb-6">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-border" />
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-4 bg-background text-text-muted">or type your own</span>
-              </div>
-            </div>
-
-            <input
-              type="text"
-              value={empData.department}
-              onChange={(e) => setEmpData({ ...empData, department: e.target.value })}
-              placeholder="e.g. Product Design, Data Science..."
-              className="w-full px-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm mb-6"
-            />
-
-            <button
-              onClick={() => setStep("org-detect")}
-              disabled={!empData.department}
-              className="w-full py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              Continue
-              <ArrowRight className="w-5 h-5" />
-            </button>
-          </div>
-        )}
 
         {step === "org-detect" && (
           <div className="max-w-xl mx-auto">
@@ -680,6 +670,61 @@ export default function EmployeeOnboarding() {
             <div className="flex gap-3">
               <button
                 onClick={() => setStep("department")}
+                disabled={!empData.orgName}
+                className="flex-1 py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                Continue
+                <ArrowRight className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step === "department" && (
+          <div className="max-w-xl mx-auto">
+            <div className="text-center mb-8">
+              <h1 className="text-3xl font-bold mb-2">
+                What&apos;s your <span className="gradient-text">department?</span>
+              </h1>
+
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mb-6">
+              {aiSuggestions.map((dept, i) => (
+                <button
+                  key={i}
+                  onClick={() => setEmpData({ ...empData, department: dept })}
+                  className={`p-4 rounded-xl border-2 transition-all cursor-pointer text-left ${
+                    empData.department === dept
+                      ? "border-primary bg-primary/10"
+                      : "border-border hover:border-border-light"
+                  }`}
+                >
+                  <span className="font-medium text-sm">{dept}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="relative mb-6">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-border" />
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-4 bg-background text-text-muted">or type your own</span>
+              </div>
+            </div>
+
+            <input
+              type="text"
+              value={empData.department}
+              onChange={(e) => setEmpData({ ...empData, department: e.target.value })}
+              placeholder="e.g. Product Design, Data Science..."
+              className="w-full px-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm mb-6"
+            />
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setStep("org-detect")}
                 className="flex-1 py-4 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer flex items-center justify-center gap-2"
               >
                 <ArrowLeft className="w-5 h-5" />
@@ -687,7 +732,7 @@ export default function EmployeeOnboarding() {
               </button>
               <button
                 onClick={() => setStep("manager")}
-                disabled={!empData.orgName}
+                disabled={!empData.department}
                 className="flex-1 py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 Continue
@@ -772,7 +817,12 @@ export default function EmployeeOnboarding() {
                       fetchRoleSuggestions(e.target.value);
                     }}
                     onFocus={() => fetchRoleSuggestions(empData.role)}
-                    onBlur={() => setTimeout(() => setShowRoleSuggestions(false), 200)}
+                    onBlur={() => {
+                      setTimeout(() => setShowRoleSuggestions(false), 200);
+                      if (empData.role) {
+                        fetch(`${API_URL}/org-chart/role-register?role=${encodeURIComponent(empData.role)}`, { method: "POST" }).catch(() => {});
+                      }
+                    }}
                     placeholder="e.g. Senior Developer, Marketing Manager..."
                     className="w-full px-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
                   />
@@ -870,7 +920,7 @@ export default function EmployeeOnboarding() {
 
             <div className="flex gap-3">
               <button
-                onClick={() => setStep("org-detect")}
+                onClick={() => setStep("department")}
                 className="flex-1 py-4 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer flex items-center justify-center gap-2"
               >
                 <ArrowLeft className="w-5 h-5" />
