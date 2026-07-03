@@ -1,9 +1,11 @@
+import logging
 from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from ..core.supabase_client import get_supabase
 from typing import Optional
 from types import SimpleNamespace
 
+logger = logging.getLogger("yesboss.auth")
 security = HTTPBearer(auto_error=False)
 
 
@@ -49,6 +51,9 @@ async def get_current_user_optional(
             except Exception:
                 pass
 
+    # SECURITY: Header-based auth is valid for testing only.
+    # TODO: For production (Azure VPS), require DB validation of the user.
+    logger.warning("Auth via X-User-ID/X-User-Email header — no token validation")
     if x_user_id:
         return SimpleNamespace(
             id=x_user_id,
