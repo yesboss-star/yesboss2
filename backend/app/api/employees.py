@@ -1,8 +1,11 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 from ..core.database import get_database
+import os
+import shutil
 
 router = APIRouter()
 
@@ -106,7 +109,7 @@ async def find_employee_by_email(email: str):
             "full_name": org_member.get("full_name", ""),
             "email": org_member.get("email", ""),
             "department": org_member.get("department", ""),
-            "role": org_member.get("role", ""),
+            "role": org_member.get("role") or org_member.get("title") or "",
         }}
     
     return {"employee": None}
@@ -205,6 +208,7 @@ class EmployeePersonaRequest(BaseModel):
     communication_style: str | None = None
     workflow_challenges: str | None = None
     tools_preferred: str | None = None
+    avatar_style: str | None = None
 
 
 @router.post("/persona")
@@ -219,23 +223,26 @@ async def save_employee_persona(request: EmployeePersonaRequest):
     existing = db.employees.find_one({"email": request.email})
     
     if existing:
+        update_doc = {
+            "department": request.department,
+            "role": request.role,
+            "manager_id": request.manager_id,
+            "subordinate_ids": request.subordinate_ids,
+            "persona": {
+                "communication_style": request.communication_style,
+                "workflow_challenges": request.workflow_challenges,
+                "tools_preferred": request.tools_preferred,
+                "preferences": request.preferences,
+                "updated_at": datetime.utcnow(),
+            },
+            "onboarding_completed": True,
+            "updated_at": datetime.utcnow(),
+        }
+        if request.avatar_style:
+            update_doc["avatar_style"] = request.avatar_style
         db.employees.update_one(
             {"email": request.email},
-            {"$set": {
-                "department": request.department,
-                "role": request.role,
-                "manager_id": request.manager_id,
-                "subordinate_ids": request.subordinate_ids,
-                "persona": {
-                    "communication_style": request.communication_style,
-                    "workflow_challenges": request.workflow_challenges,
-                    "tools_preferred": request.tools_preferred,
-                    "preferences": request.preferences,
-                    "updated_at": datetime.utcnow(),
-                },
-                "onboarding_completed": True,
-                "updated_at": datetime.utcnow(),
-            }}
+            {"$set": update_doc}
         )
         existing["_id"] = str(existing["_id"])
         return {"employee": existing, "message": "Persona updated"}
@@ -257,8 +264,73 @@ async def save_employee_persona(request: EmployeePersonaRequest):
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow(),
         }
+        if request.avatar_style:
+            emp_doc["avatar_style"] = request.avatar_style
         
         result = db.employees.insert_one(emp_doc)
         emp_doc["_id"] = str(result.inserted_id)
         
         return {"employee": emp_doc, "message": "Persona saved"}
+
+
+AVATAR_DIR = "uploads/avatars"
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+MAX_AVATAR_SIZE = 2 * 1024 * 1024  # 2MB
+
+
+@router.post("/avatar")
+async def upload_avatar(
+    email: str = Form(...),
+    file: UploadFile = File(...),
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    clean_email = email.lower().strip()
+
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed: {', '.join(ALLOWED_EXTENSIONS)}")
+
+    contents = await file.read()
+    if len(contents) > MAX_AVATAR_SIZE:
+        raise HTTPException(status_code=400, detail="File too large. Max 2MB")
+
+    os.makedirs(AVATAR_DIR, exist_ok=True)
+    file_path = os.path.join(AVATAR_DIR, f"{clean_email}{ext}").replace("\\", "/")
+
+    with open(file_path, "wb") as f:
+        f.write(contents)
+
+    avatar_url = f"/api/v1/employees/avatar/{clean_email}"
+
+    db.employees.update_one(
+        {"email": clean_email},
+        {"$set": {"avatar_url": avatar_url, "avatar_path": file_path, "updated_at": datetime.utcnow()}},
+        upsert=False,
+    )
+    db.org_chart_members.update_one(
+        {"email": clean_email},
+        {"$set": {"avatar_url": avatar_url, "updated_at": datetime.utcnow()}},
+        upsert=False,
+    )
+
+    return {"avatar_url": avatar_url}
+
+
+@router.get("/avatar/{email}")
+async def get_avatar(email: str):
+    clean_email = email.lower().strip()
+
+    for ext in ALLOWED_EXTENSIONS:
+        file_path = os.path.join(AVATAR_DIR, f"{clean_email}{ext}").replace("\\", "/")
+        if os.path.exists(file_path):
+            media_type = {
+                ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                ".png": "image/png", ".gif": "image/gif",
+                ".webp": "image/webp",
+            }.get(ext, "application/octet-stream")
+            return FileResponse(file_path, media_type=media_type)
+
+    raise HTTPException(status_code=404, detail="Avatar not found")

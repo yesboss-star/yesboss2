@@ -457,7 +457,20 @@ COMMON_ROLES = [
     "Sales Intern", "Finance Intern", "Associate Consultant",
     "Graduate Trainee", "Management Trainee", "Associate",
     "Junior Associate", "Analyst", "Junior Analyst",
+
+    # Standalone Common Titles
+    "Executive", "Officer", "Specialist", "Coordinator", "Lead",
+    "Head", "Supervisor", "Clerk", "Agent", "Planner",
+    "Scheduler", "Technician", "Operator", "Advisor", "Liaison",
+    "Auditor", "Strategist", "Representative", "Consultant",
 ]
+
+
+GENERIC_TITLES = {
+    "employee", "staff", "team member", "member",
+    "temp", "temporary", "contractor", "freelancer",
+    "worker", "personnel", "new hire",
+}
 
 
 @router.post("/role-register")
@@ -473,6 +486,9 @@ async def register_custom_role(
     role = role.strip().lower()
     if not role or len(role) < 2:
         return {"saved": False}
+
+    if role in GENERIC_TITLES:
+        return {"saved": False, "reason": "generic title"}
 
     # Check if already in common list
     if any(r.lower() == role for r in COMMON_ROLES):

@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, Tabs, TabsList, TabsTrigger, TabsContent, Input, Label, Button } from "@/components/ui";
-import { Bell, User, Save, ArrowLeft, Volume2, Mail, Smartphone, Plug, MessageSquare, ExternalLink, X } from "lucide-react";
+import { Bell, User, Save, ArrowLeft, Volume2, Mail, Smartphone, Plug, MessageSquare, ExternalLink, X, Camera, RefreshCw, Loader2 } from "lucide-react";
+import { Avatar, DICEBEAR_STYLES } from "@/components/ui/Avatar";
 import ZohoConnectButton from "@/components/owners/ZohoConnectButton";
 import { useZohoStore } from "@/stores/zohoStore";
 import { useUIStore } from "@/stores/uiStore";
@@ -47,6 +48,12 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [feedbackPopupOpen, setFeedbackPopupOpen] = useState(false);
   const [userInfo, setUserInfo] = useState({ name: "", email: "" });
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [dicebearStyle, setDicebearStyle] = useState("lorelei");
+  const [showStylePicker, setShowStylePicker] = useState(false);
+  const [profileError, setProfileError] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const stored = localStorage.getItem("yesboss_user");
@@ -67,12 +74,24 @@ export default function SettingsPage() {
     ]).then(([prefData, empData]) => {
       if (prefData.preferences) setPrefs(prefData.preferences);
       const emp = empData.employee || {};
-      setProfile({
-        fullName: emp.full_name || userName || "",
-        email: emp.email || userEmail || "",
-        department: emp.department || "",
-        role: emp.role || "",
-      });
+      if (emp) {
+        setProfile({
+          fullName: emp.full_name || userName || "",
+          email: emp.email || userEmail || "",
+          department: emp.department || "",
+          role: emp.role || "",
+        });
+        if (emp.avatar_style) setDicebearStyle(emp.avatar_style);
+        setProfileError(false);
+      }
+      if (userEmail) {
+        fetch(`${API_URL}/employees/avatar/${encodeURIComponent(userEmail)}`)
+          .then((r) => r.ok ? r.blob() : null)
+          .then((blob) => blob ? setAvatarUrl(URL.createObjectURL(blob)) : null)
+          .catch(() => {});
+      }
+    }).catch(() => {
+      setProfileError(true);
     }).finally(() => {
       setLoading(false);
       setProfileLoading(false);
@@ -113,6 +132,59 @@ export default function SettingsPage() {
   const toggleChannelType = (channel: string, type: string) => {
     const updated = { ...prefs[channel], [type]: !prefs[channel]?.[type] };
     updatePrefs({ [channel]: updated });
+  };
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!["image/png", "image/jpeg", "image/gif", "image/webp"].includes(file.type)) {
+      useUIStore.getState().addNotification({ type: "error", title: "Invalid File", message: "Please upload a PNG, JPG, GIF, or WebP image." });
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      useUIStore.getState().addNotification({ type: "error", title: "File Too Large", message: "Max 2MB allowed." });
+      return;
+    }
+
+    setAvatarUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("email", profile.email);
+      formData.append("file", file);
+      const res = await fetch(`${API_URL}/employees/avatar`, { method: "POST", body: formData });
+      if (res.ok) {
+        const data = await res.json();
+        setAvatarUrl(`${API_URL}${data.avatar_url}`);
+        useUIStore.getState().addNotification({ type: "success", title: "Avatar Updated", message: "Your profile picture has been updated." });
+      } else {
+        throw new Error("Upload failed");
+      }
+    } catch {
+      useUIStore.getState().addNotification({ type: "error", title: "Upload Failed", message: "Could not upload avatar. Try again." });
+    } finally {
+      setAvatarUploading(false);
+      if (e.target) e.target.value = "";
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    setAvatarUrl(null);
+    useUIStore.getState().addNotification({ type: "success", title: "Avatar Removed", message: "Character avatar will be shown." });
+  };
+
+  const handleStyleChange = async (style: string) => {
+    setDicebearStyle(style);
+    setShowStylePicker(false);
+    setAvatarUrl(null);
+    try {
+      await fetch(`${API_URL}/employees/persona`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({ email: profile.email, avatar_style: style }),
+      });
+    } catch {}
+    useUIStore.getState().addNotification({ type: "success", title: "Avatar Style Changed", message: "Your character avatar style has been updated." });
   };
 
   const Toggle = ({ checked, onChange }: { checked: boolean; onChange: () => void }) => (
@@ -223,43 +295,142 @@ export default function SettingsPage() {
 
           <TabsContent value="profile">
             <Card>
-              <CardHeader><CardTitle>Profile Information</CardTitle></CardHeader>
-              <CardContent className="space-y-4">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle>Profile Information</CardTitle>
+                  {profileError && (
+                    <Button variant="outline" size="sm" onClick={() => window.location.reload()} className="cursor-pointer">
+                      <RefreshCw className="w-4 h-4 mr-1" /> Retry
+                    </Button>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-6">
                 {profileLoading ? (
                   <p className="text-sm text-text-muted">Loading profile...</p>
+                ) : profileError ? (
+                  <div className="text-center py-6">
+                    <p className="text-sm text-text-muted">Could not load profile data.</p>
+                    <Button variant="outline" size="sm" onClick={() => window.location.reload()} className="mt-3 cursor-pointer">
+                      <RefreshCw className="w-4 h-4 mr-1" /> Retry
+                    </Button>
+                  </div>
                 ) : (
                   <>
+                    <div className="flex items-center gap-6">
+                      <div className="relative group">
+                        <div
+                          onClick={() => setShowStylePicker(!showStylePicker)}
+                          className="cursor-pointer ring-2 ring-border/50 group-hover:ring-primary/50 rounded-full transition-all"
+                        >
+                          <Avatar
+                            size="xl"
+                            src={avatarUrl || undefined}
+                            seed={profile.email || profile.fullName}
+                            dicebearStyle={dicebearStyle}
+                            fallback={profile.fullName}
+                          />
+                        </div>
+                        <div className="absolute -bottom-1 -right-1 flex gap-1">
+                          <div
+                            onClick={() => fileInputRef.current?.click()}
+                            className="w-8 h-8 rounded-full bg-background border border-border flex items-center justify-center cursor-pointer hover:bg-surface transition-colors shadow-sm"
+                            title="Upload photo"
+                          >
+                            {avatarUploading ? (
+                              <Loader2 className="w-4 h-4 text-text-muted animate-spin" />
+                            ) : (
+                              <Camera className="w-4 h-4 text-text-muted" />
+                            )}
+                          </div>
+                        </div>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          className="hidden"
+                          accept="image/png,image/jpeg,image/gif,image/webp"
+                          onChange={handleAvatarUpload}
+                        />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h2 className="text-xl font-bold truncate">{profile.fullName || "User"}</h2>
+                        <p className="text-sm text-text-muted truncate">{profile.role || profile.email}</p>
+                        <p className="text-xs text-text-muted/60 mt-1">Click avatar to change character style</p>
+                      </div>
+                    </div>
+
+                    {showStylePicker && (
+                      <div className="p-4 rounded-xl bg-surface border border-border">
+                        <div className="flex items-center justify-between mb-3">
+                          <p className="text-sm font-medium">Choose Character Style</p>
+                          <button onClick={() => setShowStylePicker(false)} className="text-text-muted hover:text-foreground cursor-pointer">
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-4 gap-3">
+                          {DICEBEAR_STYLES.map((style) => (
+                            <button
+                              key={style}
+                              onClick={() => handleStyleChange(style)}
+                              className={`p-2 rounded-xl border-2 transition-all cursor-pointer flex flex-col items-center gap-1 ${
+                                dicebearStyle === style
+                                  ? "border-primary bg-primary/10"
+                                  : "border-border hover:border-primary/40"
+                              }`}
+                            >
+                              <Avatar size="sm" seed={profile.email || profile.fullName} dicebearStyle={style} />
+                              <span className="text-[10px] text-text-muted capitalize truncate w-full text-center">
+                                {style.replace(/-/g, " ")}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                        {avatarUrl && (
+                          <button
+                            onClick={handleRemoveAvatar}
+                            className="mt-3 text-xs text-text-muted hover:text-rose-400 transition-colors cursor-pointer"
+                          >
+                            Remove custom photo &rarr; use character avatar
+                          </button>
+                        )}
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-2 gap-4">
                       <div><Label>Full Name</Label><Input value={profile.fullName} onChange={(e) => setProfile({...profile, fullName: e.target.value})} /></div>
                       <div><Label>Email</Label><Input value={profile.email} onChange={(e) => setProfile({...profile, email: e.target.value})} /></div>
                     </div>
-                    <div><Label>Department</Label><Input value={profile.department} onChange={(e) => setProfile({...profile, department: e.target.value})} /></div>
-                    <div><Label>Role / Title</Label><Input value={profile.role} onChange={(e) => setProfile({...profile, role: e.target.value})} /></div>
-                    <div className="flex justify-end">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div><Label>Department</Label><Input value={profile.department} onChange={(e) => setProfile({...profile, department: e.target.value})} /></div>
+                      <div><Label>Role / Title</Label><Input value={profile.role} onChange={(e) => setProfile({...profile, role: e.target.value})} /></div>
+                    </div>
+
+                    <div className="flex justify-end pt-2 border-t border-border/50">
                       <Button
                         disabled={saving}
                         onClick={async () => {
                           setSaving(true);
                           try {
-                            await fetch(`${API_URL}/employees/persona`, {
+                            const res = await fetch(`${API_URL}/employees/persona`, {
                               method: "POST",
                               headers: { "Content-Type": "application/json", ...getAuthHeaders() },
                               body: JSON.stringify({
                                 email: profile.email,
                                 department: profile.department,
                                 role: profile.role,
+                                avatar_style: dicebearStyle,
                               }),
                             });
-                            useUIStore.getState().addNotification({
-                              type: "success",
-                              title: "Profile Updated",
-                              message: "Your profile has been saved.",
-                            });
+                            if (res.ok) {
+                              useUIStore.getState().addNotification({
+                                type: "success", title: "Profile Updated", message: "Your profile has been saved.",
+                              });
+                            } else {
+                              throw new Error("Save failed");
+                            }
                           } catch {
                             useUIStore.getState().addNotification({
-                              type: "error",
-                              title: "Save Failed",
-                              message: "Could not save profile. Try again.",
+                              type: "error", title: "Save Failed", message: "Could not save profile. Try again.",
                             });
                           } finally {
                             setSaving(false);

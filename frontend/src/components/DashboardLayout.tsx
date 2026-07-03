@@ -139,7 +139,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       <div className="p-3 border-t border-border">
         <div className={`flex items-center gap-3 ${sidebarOpen ? "px-3 py-2" : "justify-center"}`}>
-          <Avatar size="sm" fallback={user?.email?.charAt(0) || (user as any)?.phone?.charAt(0) || "U"} />
+          <Avatar size="sm" seed={user?.email || (user as any)?.phone} fallback={(user as any)?.user_metadata?.full_name || user?.email || "U"} />
           {sidebarOpen && (
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium truncate">{user?.email || (user as any)?.phone}</p>

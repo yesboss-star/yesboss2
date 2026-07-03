@@ -21,6 +21,12 @@ import Link from "next/link";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
+const GENERIC_TITLES = new Set([
+  "employee", "staff", "team member", "member",
+  "temp", "temporary", "contractor", "freelancer",
+  "worker", "personnel", "new hire",
+]);
+
 type EmployeeStep = "department" | "org-detect" | "manager" | "persona";
 
 interface Employee {
@@ -280,7 +286,7 @@ export default function EmployeeOnboarding() {
         }
 
         const memberRole = currentMember.role || (currentMember as any).title;
-        if (memberRole && typeof memberRole === "string") {
+        if (memberRole && typeof memberRole === "string" && !GENERIC_TITLES.has(memberRole.toLowerCase().trim())) {
           updates.role = memberRole;
           fetch(`${API_URL}/org-chart/role-register?role=${encodeURIComponent(memberRole)}`, { method: "POST" }).catch(() => {});
         }
@@ -430,7 +436,7 @@ export default function EmployeeOnboarding() {
       });
 
       // Register custom role if user entered one not in the common list
-      if (empData.role) {
+      if (empData.role && !GENERIC_TITLES.has(empData.role.toLowerCase().trim())) {
         fetch(`${API_URL}/org-chart/role-register?role=${encodeURIComponent(empData.role)}`, {
           method: "POST",
         }).catch(() => {});
@@ -819,7 +825,7 @@ export default function EmployeeOnboarding() {
                     onFocus={() => fetchRoleSuggestions(empData.role)}
                     onBlur={() => {
                       setTimeout(() => setShowRoleSuggestions(false), 200);
-                      if (empData.role) {
+                      if (empData.role && !GENERIC_TITLES.has(empData.role.toLowerCase().trim())) {
                         fetch(`${API_URL}/org-chart/role-register?role=${encodeURIComponent(empData.role)}`, { method: "POST" }).catch(() => {});
                       }
                     }}
@@ -831,7 +837,7 @@ export default function EmployeeOnboarding() {
                       {roleSuggestions.map((suggestion, idx) => (
                         <button
                           key={idx}
-                          onClick={() => {
+                          onMouseDown={() => {
                             setEmpData({ ...empData, role: suggestion });
                             setShowRoleSuggestions(false);
                             setRoleSuggestions([]);
