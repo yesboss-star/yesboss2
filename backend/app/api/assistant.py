@@ -579,7 +579,18 @@ async def delegate_task(request: DelegateRequest):
         except Exception as e:
             logger.warning("Sub-task generation failed in delegate: %s", e)
 
-    # 4) Real-time push + notifications
+    # 4) Zoho ToDo sync
+    try:
+        from .tasks import sync_task_to_zoho
+        zoho_task = {**task_doc, "assignee_id": emp.get("email")}
+        asyncio.create_task(sync_task_to_zoho(db, zoho_task, org_id))
+        for st in sub_tasks:
+            st_zoho = {**st, "assignee_id": emp.get("email")}
+            asyncio.create_task(sync_task_to_zoho(db, st_zoho, org_id))
+    except Exception as e:
+        logger.warning("Zoho sync failed in delegate: %s", e)
+
+    # 5) Real-time push + notifications
     user_id = (request.context.user_email if request.context else None)
     try:
         asyncio.create_task(ws_manager.broadcast_to_organization(
@@ -742,8 +753,14 @@ async def handle_meeting_booking(booking_params: dict, db, org_id: str, user_id:
     zoho = ZohoOAuth(db)
 
     organizer_token = await zoho.get_valid_token(user_id) if user_id else None
+    if not organizer_token and user_id and "@" in user_id:
+        token_doc = db.zoho_tokens.find_one({"email": user_id})
+        if token_doc:
+            organizer_token = await zoho.get_valid_token(token_doc["user_id"])
     if not organizer_token:
         token_doc = db.zoho_tokens.find_one({"org_id": org_id})
+        if not token_doc and org_id:
+            token_doc = db.zoho_tokens.find_one({}, sort=[("connected_at", -1)])
         if token_doc:
             organizer_token = await zoho.get_valid_token(token_doc["user_id"])
     if not organizer_token:
@@ -1449,21 +1466,25 @@ User: "assign the Q4 report to John"
 
 When the user asks to book/schedule a meeting (e.g. "add meeting with @john next Tuesday", "schedule a call with @sarah", "book a meeting with team"), you must:
 
-1. Ask ONE clarifying question at a time via the "question" format:
-   - First ask: who should attend? (if not clear from @mentions)
-   - Second ask: what date? (e.g. "next Tuesday", "tomorrow", "June 23")
-   - Third ask: what time / duration? (e.g. "3pm for 1 hour", "morning")
-   - Fourth ask: what's the meeting title?
+1. **Extract all available info from their message first.** If they gave you attendees, date, time, and duration all in one message, do NOT ask any clarifying questions — just book it. The `Current date` line at the top tells you today's date. Use it to resolve relative dates like "today", "tomorrow", "next Tuesday", "this Friday" into absolute YYYY-MM-DD.
 
-2. Once ALL of the following are clear, output a meeting_booking response:
+2. Ask ONE clarifying question at a time via the "question" format — ONLY if something is truly missing:
+   - who should attend? (if not clear from @mentions)
+   - what date? (only if no date given — if they said "today"/"tomorrow"/"next Tuesday", resolve it yourself)
+   - what time / duration? (only if not given — e.g. if they said "9pm for 1hr", extract both)
+   - what's the meeting title? (only if not given)
+
+3. Once ALL of the following are clear (from their original message or your questions), output a meeting_booking response:
    - `attendee_names` — list of full names or emails of attendees (resolve @mentions to names)
-   - `date` — the specific calendar date (e.g. "2026-06-23"). Convert relative dates to absolute.
+   - `date` — the absolute calendar date in YYYY-MM-DD format. If they said "today", use the Current date from above. If "tomorrow", use the next day. If "next Tuesday", calculate it.
    - `duration_minutes` — numeric duration (15, 30, 60, 90, 120). Default 60 if unclear.
    - `title` — meeting title (default "Meeting" if unclear)
    - `preferred_time` — the specific time if they mentioned one (e.g. "15:00", "10:30", or leave empty and we'll find available slots)
    - `description` — optional meeting agenda or context
 
-3. If they said "sometime" or didn't specify a time, leave preferred_time empty. The system will check availability and return options.
+4. If they said "sometime" or didn't specify a time, leave preferred_time empty. The system will check availability and return options.
+
+5. CRITICAL: Never ask for the date if they already said "today". Never ask what "today" means. Use the Current date provided above.
 
 ## MEETING BOOKING RESPONSE FORMAT
 
@@ -1582,6 +1603,7 @@ async def smart_ask(request: AskRequest):
         f"{emp_block}"
         f"{ctx_block}\n"
         f"Recent chat:\n{history_block}\n\n"
+        f"Current date: {datetime.now().strftime('%A, %Y-%m-%d')}\n\n"
         f"User's message:\n\"{text}\"\n\n"
         "Decide: answer directly or ask one question for missing info."
     )
@@ -1656,7 +1678,7 @@ async def smart_ask(request: AskRequest):
         if parsed_type == "meeting_booking":
             bp = parsed.get("booking_params") or {}
             # Resolve @mentions from the original message
-            mention_emails = resolve_mentions(text, db, org_id) if db and org_id else []
+            mention_emails = resolve_mentions(text, db, org_id) if db is not None and org_id else []
             if mention_emails:
                 if "attendee_names" not in bp or not bp["attendee_names"]:
                     # Map emails back to names

@@ -486,6 +486,74 @@ async def suggest_goal_breakdown(request: GoalBreakdownRequest):
         return {"sub_goals": [], "tasks": []}
 
 
+class BulkDeleteDefaultGoalsRequest(BaseModel):
+    organization_id: str
+
+
+@router.get("/defaults")
+async def get_or_generate_default_goals(
+    organization_id: Optional[str] = None,
+    current_user = Depends(get_current_user_optional)
+):
+    """Return existing default goals for the org, or generate them on-demand if none exist."""
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    org_id = organization_id or get_user_org_id(current_user)
+    if not org_id:
+        raise HTTPException(status_code=400, detail="Organization ID required")
+
+    existing = list(db.goals.find(
+        {"organization_id": org_id, "is_default": True}
+    ).sort("created_at", -1))
+
+    if existing:
+        goals = []
+        for g in existing:
+            g["_id"] = str(g["_id"])
+            goals.append(g)
+        return {"goals": goals, "generated": False}
+
+    # No defaults exist — generate them on-demand
+    org = db.organizations.find_one({"_id": ObjectId(org_id)})
+    industry = (org.get("industry") or "General") if org else "General"
+    micro_vertical = (org.get("micro_vertical") or "") if org else ""
+    owner_id = (org.get("owner_id") or getattr(current_user, 'id', None)) if org else getattr(current_user, 'id', None)
+
+    try:
+        from ..agents.default_goals_agent import generate_default_goals as _gen
+        ai_goals = await _gen(industry, micro_vertical, count=5)
+    except Exception as e:
+        logging.getLogger("yesboss.goals").warning(f"Failed to generate default goals: {e}")
+        ai_goals = []
+
+    created = []
+    for g in ai_goals:
+        goal_doc = {
+            "title": g["title"],
+            "description": g.get("description", ""),
+            "priority": g.get("priority", "medium"),
+            "timeline": g.get("suggested_timeline"),
+            "department": g.get("department"),
+            "organization_id": org_id,
+            "created_by": owner_id,
+            "status": "active",
+            "goal_type": g.get("goal_type", "short_term"),
+            "duration": g.get("duration", "one_time"),
+            "is_default": True,
+            "industry": industry,
+            "micro_vertical": micro_vertical,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+        }
+        result = db.goals.insert_one(goal_doc)
+        goal_doc["_id"] = str(result.inserted_id)
+        created.append(goal_doc)
+
+    return {"goals": created, "generated": True}
+
+
 @router.get("/{goal_id}")
 async def get_goal(goal_id: str, current_user = Depends(get_current_user_optional)):
     db = get_database()
@@ -903,74 +971,6 @@ async def delete_goal(goal_id: str, current_user = Depends(get_current_user_opti
     db.tasks.delete_many({"goal_id": goal_id})
     
     return {"success": True, "message": "Goal deleted"}
-
-
-class BulkDeleteDefaultGoalsRequest(BaseModel):
-    organization_id: str
-
-
-@router.get("/defaults")
-async def get_or_generate_default_goals(
-    organization_id: Optional[str] = None,
-    current_user = Depends(get_current_user_optional)
-):
-    """Return existing default goals for the org, or generate them on-demand if none exist."""
-    db = get_database()
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not configured")
-
-    org_id = organization_id or get_user_org_id(current_user)
-    if not org_id:
-        raise HTTPException(status_code=400, detail="Organization ID required")
-
-    existing = list(db.goals.find(
-        {"organization_id": org_id, "is_default": True}
-    ).sort("created_at", -1))
-
-    if existing:
-        goals = []
-        for g in existing:
-            g["_id"] = str(g["_id"])
-            goals.append(g)
-        return {"goals": goals, "generated": False}
-
-    # No defaults exist — generate them on-demand
-    org = db.organizations.find_one({"_id": ObjectId(org_id)})
-    industry = (org.get("industry") or "General") if org else "General"
-    micro_vertical = (org.get("micro_vertical") or "") if org else ""
-    owner_id = (org.get("owner_id") or getattr(current_user, 'id', None)) if org else getattr(current_user, 'id', None)
-
-    try:
-        from ..agents.default_goals_agent import generate_default_goals as _gen
-        ai_goals = await _gen(industry, micro_vertical, count=5)
-    except Exception as e:
-        logging.getLogger("yesboss.goals").warning(f"Failed to generate default goals: {e}")
-        ai_goals = []
-
-    created = []
-    for g in ai_goals:
-        goal_doc = {
-            "title": g["title"],
-            "description": g.get("description", ""),
-            "priority": g.get("priority", "medium"),
-            "timeline": g.get("suggested_timeline"),
-            "department": g.get("department"),
-            "organization_id": org_id,
-            "created_by": owner_id,
-            "status": "active",
-            "goal_type": g.get("goal_type", "short_term"),
-            "duration": g.get("duration", "one_time"),
-            "is_default": True,
-            "industry": industry,
-            "micro_vertical": micro_vertical,
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow(),
-        }
-        result = db.goals.insert_one(goal_doc)
-        goal_doc["_id"] = str(result.inserted_id)
-        created.append(goal_doc)
-
-    return {"goals": created, "generated": True}
 
 
 @router.post("/delete-defaults")

@@ -1,17 +1,18 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUIStore } from "@/stores/uiStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { useChatStore, ChatMessage } from "@/stores/chatStore";
+import { useOrgChartStore } from "@/stores/orgChartStore";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, Button } from "@/components/ui";
 import { 
   Send, Loader2, Sparkles, Bot, User, Trash2, MessageSquare, Plus, X,
   ChevronRight, PanelLeftOpen, PanelLeftClose, FileText, Lightbulb, ArrowRight,
-  Check, Copy, Zap, TrendingUp, Target, Briefcase, BarChart3
+  Check, Copy, Zap, TrendingUp, Target, Briefcase, BarChart3, AtSign
 } from "lucide-react";
 
 const QUICK_ACTIONS = [
@@ -43,9 +44,15 @@ export default function StrategyChatPage() {
   const [input, setInput] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState("");
+  const [mentionStart, setMentionStart] = useState<number>(-1);
+  const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const mentionListRef = useRef<HTMLDivElement>(null);
   const orgId = organization?.id;
+  const { members, fetchOrgMembers } = useOrgChartStore();
 
   useEffect(() => {
     setBreadcrumbs([
@@ -59,8 +66,86 @@ export default function StrategyChatPage() {
   }, [orgId, fetchSessions]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (orgId) fetchOrgMembers(orgId);
+  }, [orgId, fetchOrgMembers]);
+
+  useEffect(() => {
+    if (mentionOpen && !members?.length && orgId) {
+      fetchOrgMembers(orgId);
+    }
+  }, [mentionOpen, members?.length, orgId, fetchOrgMembers]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView();
   }, [messages]);
+
+  const mentionSuggestions = useMemo(() => {
+    if (!members?.length) return [] as any[];
+    const q = mentionQuery.trim().toLowerCase();
+    const list = members
+      .map((m: any) => ({ m, name: (m.full_name || "").trim() }))
+      .filter((x) => x.name)
+      .map((x) => {
+        const lower = x.name.toLowerCase();
+        const starts = q && lower.startsWith(q) ? 0 : 1;
+        const includes = q && lower.includes(q) ? 0 : 1;
+        return { member: x.m, name: x.name, rank: starts * 2 + includes };
+      })
+      .filter((x) => (q ? x.rank < 2 : true))
+      .sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name))
+      .slice(0, 6)
+      .map((x) => x.member);
+    return list;
+  }, [members, mentionQuery]);
+
+  const updateMentionState = useCallback(
+    (text: string, cursor: number) => {
+      const upto = text.slice(0, cursor);
+      const atIdx = upto.lastIndexOf("@");
+      if (atIdx === -1) {
+        setMentionOpen(false);
+        setMentionQuery("");
+        setMentionStart(-1);
+        return;
+      }
+      const between = upto.slice(atIdx + 1);
+      if (/\s/.test(between)) {
+        setMentionOpen(false);
+        setMentionQuery("");
+        setMentionStart(-1);
+        return;
+      }
+      setMentionOpen(true);
+      setMentionQuery(between);
+      setMentionStart(atIdx);
+      setMentionActiveIndex(0);
+    },
+    []
+  );
+
+  const insertMention = useCallback(
+    (member: any) => {
+      if (!member || mentionStart < 0) return;
+      const name = (member.full_name || "").trim();
+      if (!name) return;
+      const cursor = inputRef.current?.selectionStart ?? input.length;
+      const before = input.slice(0, mentionStart);
+      const afterStart = mentionStart + 1 + mentionQuery.length;
+      const after = input.slice(afterStart);
+      const inserted = `@${name} `;
+      const newText = `${before}${inserted}${after}`.replace(/\s+/g, " ");
+      setInput(newText);
+      setMentionOpen(false);
+      setMentionQuery("");
+      setMentionStart(-1);
+      requestAnimationFrame(() => {
+        const pos = (before + inserted).length;
+        inputRef.current?.focus();
+        inputRef.current?.setSelectionRange(pos, pos);
+      });
+    },
+    [mentionStart, mentionQuery, input]
+  );
 
   const handleSubmit = useCallback(async () => {
     const text = input.trim();
@@ -70,6 +155,30 @@ export default function StrategyChatPage() {
   }, [input, askLoading, loading, askMessage, orgId]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (mentionOpen && mentionSuggestions.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setMentionActiveIndex((i) => (i + 1) % mentionSuggestions.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionActiveIndex((i) =>
+          (i - 1 + mentionSuggestions.length) % mentionSuggestions.length
+        );
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        insertMention(mentionSuggestions[mentionActiveIndex]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMentionOpen(false);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
@@ -325,10 +434,95 @@ export default function StrategyChatPage() {
           <div className="border-t border-border bg-surface/30 px-4 py-3">
             <div className="flex items-end gap-2 max-w-4xl mx-auto">
               <div className="flex-1 relative">
+                {mentionOpen && mentionSuggestions.length > 0 && (
+                  <div
+                    ref={mentionListRef}
+                    className="absolute bottom-full left-0 right-0 mb-2 rounded-2xl border-2 border-primary/40 bg-surface/95 backdrop-blur-md shadow-2xl shadow-black/50 overflow-hidden z-50 ring-1 ring-primary/10"
+                  >
+                    <div className="px-3 py-2 flex items-center gap-2 border-b border-border/60 bg-gradient-to-r from-primary/10 to-purple-500/10">
+                      <div className="w-6 h-6 rounded-lg bg-primary/20 border border-primary/30 flex items-center justify-center flex-shrink-0">
+                        <AtSign className="w-3.5 h-3.5 text-primary" />
+                      </div>
+                      <p className="text-[11px] font-semibold text-foreground flex-1">
+                        {mentionQuery
+                          ? `People matching "@${mentionQuery}"`
+                          : "Mention a team member"}
+                      </p>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
+                        {mentionSuggestions.length}
+                      </span>
+                    </div>
+                    <ul className="max-h-60 overflow-y-auto custom-scrollbar py-1" role="listbox">
+                      {mentionSuggestions.map((m: any, idx: number) => {
+                        const isActive = idx === mentionActiveIndex;
+                        return (
+                          <li
+                            key={m.id || m.email || m.full_name}
+                            role="option"
+                            aria-selected={isActive}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              insertMention(m);
+                            }}
+                            onMouseEnter={() => setMentionActiveIndex(idx)}
+                            className={`flex items-center gap-3 mx-1.5 my-0.5 px-2.5 py-2 rounded-xl cursor-pointer transition-all ${
+                              isActive
+                                ? "bg-primary/15 text-foreground ring-1 ring-primary/30 shadow-sm"
+                                : "text-text-muted hover:bg-surface-light/60"
+                            }`}
+                          >
+                            <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 border ${
+                              isActive
+                                ? "bg-gradient-to-br from-primary to-purple-500 border-primary/50"
+                                : "bg-gradient-to-br from-primary/20 to-purple-500/20 border-primary/20"
+                            }`}>
+                              <span className={`text-xs font-bold ${
+                                isActive ? "text-white" : "text-primary"
+                              }`}>
+                                {(m.full_name || "?").trim().charAt(0).toUpperCase()}
+                              </span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className={`text-sm font-medium truncate ${
+                                isActive ? "text-foreground" : "text-foreground/90"
+                              }`}>
+                                {m.full_name}
+                              </p>
+                              <p className="text-[11px] text-text-muted/70 truncate">
+                                {[m.role, m.department].filter(Boolean).join(" • ") || m.email}
+                              </p>
+                            </div>
+                            {isActive && (
+                              <div className="flex items-center gap-1 flex-shrink-0">
+                                <kbd className="text-[9px] px-1.5 py-0.5 rounded border border-border/60 bg-surface text-text-muted font-mono">
+                                  ↵
+                                </kbd>
+                              </div>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <div className="px-3 py-1.5 flex items-center justify-between border-t border-border/60 bg-surface-light/30 text-[10px] text-text-muted/70">
+                      <div className="flex items-center gap-2">
+                        <kbd className="px-1 py-0.5 rounded border border-border/60 bg-surface font-mono">↑↓</kbd>
+                        <span>navigate</span>
+                        <kbd className="px-1 py-0.5 rounded border border-border/60 bg-surface font-mono ml-1">↵</kbd>
+                        <span>select</span>
+                      </div>
+                      <kbd className="px-1 py-0.5 rounded border border-border/60 bg-surface font-mono">esc</kbd>
+                    </div>
+                  </div>
+                )}
                 <textarea
                   ref={inputRef}
                   value={input}
-                  onChange={(e) => setInput(e.target.value)}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setInput(next);
+                    const cursor = e.target.selectionStart ?? inputRef.current?.selectionStart ?? next.length;
+                    updateMentionState(next, cursor);
+                  }}
                   onKeyDown={handleKeyDown}
                   placeholder="Ask about your business, delegate a task, or explore strategy..."
                   rows={1}

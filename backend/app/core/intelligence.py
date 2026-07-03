@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Optional
 
 logger = logging.getLogger("yesboss.intelligence")
@@ -239,29 +240,53 @@ def build_pre_org_profile(domain: str) -> dict:
 
 async def generate_tasks_from_goal(goal_title: str, goal_description: str, count: int = 5) -> list:
     logger.info("Generating tasks for goal: %s", goal_title)
-    
-    task_templates = [
-        f"Research and analyze current market trends for {goal_title}",
-        f"Create initial draft of project plan for {goal_title}",
-        f"Identify key stakeholders and their requirements for {goal_title}",
-        f"Set up monitoring and metrics tracking for {goal_title}",
-        f"Prepare documentation and status reporting templates",
-        f"Coordinate with team members on task assignments",
-        f"Review and validate initial deliverables",
-        f"Schedule regular check-in meetings for progress updates",
-        f"Document risks and mitigation strategies",
-        f"Create user guides or training materials if applicable",
-    ]
-    
-    tasks = []
-    for i in range(min(count, len(task_templates))):
-        tasks.append({
-            "title": task_templates[i],
-            "description": f"Task {i+1} related to goal: {goal_title}. {goal_description}",
-            "priority": "medium" if i < count - 1 else "high",
-        })
-    
-    return tasks
+    prompt = f"""Generate exactly {count} concrete, actionable sub-tasks for the following goal.
+
+Goal: {goal_title}
+Description: {goal_description or goal_title}
+
+Each sub-task must:
+- Be a specific, measurable action (not vague)
+- Directly contribute to completing the goal
+- Have clear ownership and deliverable
+- Include relevant context from the goal description
+
+Return ONLY a JSON array of objects with these fields:
+- title: short actionable task title (5-12 words)
+- description: 1-2 sentence explanation of what needs to be done and why
+- priority: "high" | "medium" | "low" based on criticality to the goal
+
+Example:
+[
+  {{"title": "Draft job description for senior engineer role", "description": "Write a comprehensive JD highlighting key skills, experience, and cultural fit for the senior engineering position.", "priority": "high"}},
+  {{"title": "Post openings on LinkedIn and AngelList", "description": "Create and publish job postings on major platforms to attract qualified candidates.", "priority": "medium"}}
+]
+
+Return ONLY the JSON array, no other text."""
+
+    from .ai_client import get_ai_response
+    try:
+        raw = await get_ai_response(
+            prompt=prompt,
+            system_prompt="You are a project manager who breaks goals into clear, measurable sub-tasks. Return ONLY valid JSON.",
+            temperature=0.4,
+            max_tokens=1500,
+        )
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```(?:json)?", "", cleaned).strip()
+            cleaned = re.sub(r"```$", "", cleaned).strip()
+        import json
+        tasks = json.loads(cleaned)
+        if isinstance(tasks, list):
+            for t in tasks:
+                t.setdefault("priority", "medium")
+                t.setdefault("description", "")
+            return tasks[:count]
+    except Exception as e:
+        logger.warning("AI task generation failed, using fallback: %s", e)
+
+    return [{"title": f"Complete {goal_title}", "description": goal_description or goal_title, "priority": "medium"}]
 
 
 async def analyze_goal_department(title: str, description: str = "", industry: str = "") -> str:

@@ -3,6 +3,8 @@
 import { Suspense, useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { auth } from "@/lib/firebase";
+import { signOut as firebaseSignOut } from "firebase/auth";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { useDocumentStore } from "@/stores/documentStore";
 import {
@@ -277,6 +279,8 @@ function OwnerOnboardingContent() {
   const [existingOrg, setExistingOrg] = useState<{ _id: string; [k: string]: unknown } | null>(null);
   const [showDuplicatePrompt, setShowDuplicatePrompt] = useState(false);
   const [duplicateChecking, setDuplicateChecking] = useState(false);
+  const [joiningOrg, setJoiningOrg] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   const initialEmailDomain = (userEmail.split("@")[1] || "").trim();
   const isPersonal = isPersonalEmailDomain(initialEmailDomain);
@@ -668,6 +672,7 @@ function OwnerOnboardingContent() {
 
   const handleDuplicateYes = async () => {
     if (!existingOrg?._id) return;
+    setJoiningOrg(true);
     try {
       const storedUser = localStorage.getItem("yesboss_user");
       const userData = storedUser ? JSON.parse(storedUser) : {};
@@ -714,10 +719,13 @@ function OwnerOnboardingContent() {
     } catch (err) {
       console.error("Failed to join existing org:", err);
       alert("Failed to join organization. Please try again.");
+    } finally {
+      setJoiningOrg(false);
     }
   };
 
   const handleDuplicateNo = async () => {
+    setSigningOut(true);
     setShowDuplicatePrompt(false);
     setExistingOrg(null);
     localStorage.removeItem("yesboss_token");
@@ -726,8 +734,6 @@ function OwnerOnboardingContent() {
     document.cookie = "yesboss_token=; path=/; max-age=0; SameSite=Lax";
     document.cookie = "yesboss_user=; path=/; max-age=0; SameSite=Lax";
     try {
-      const { signOut: firebaseSignOut } = await import("firebase/auth");
-      const { auth } = await import("@/lib/firebase");
       await firebaseSignOut(auth);
     } catch {}
     router.push("/signup");
@@ -2505,15 +2511,25 @@ function OwnerOnboardingContent() {
             <div className="flex gap-3">
               <button
                 onClick={handleDuplicateNo}
-                className="flex-1 py-3 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer"
+                disabled={signingOut || joiningOrg}
+                className="flex-1 py-3 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                OK, signup with different email
+                {signingOut ? (
+                  <Loader2 className="w-5 h-5 animate-spin mx-auto" />
+                ) : (
+                  "OK, signup with different email"
+                )}
               </button>
               <button
                 onClick={handleDuplicateYes}
-                className="flex-1 py-3 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25"
+                disabled={joiningOrg || signingOut}
+                className="flex-1 py-3 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
-                Yes, continue
+                {joiningOrg ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  "Yes, continue"
+                )}
               </button>
             </div>
           </div>

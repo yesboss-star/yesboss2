@@ -282,6 +282,12 @@ export default function AISummaryChat() {
     useTaskStore.getState().fetchTasks(orgId);
   }, [organization?.id]);
 
+  useEffect(() => {
+    if (mentionOpen && !members?.length && organization?.id) {
+      useOrgChartStore.getState().fetchOrgMembers(organization.id);
+    }
+  }, [mentionOpen, members?.length, organization?.id]);
+
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
   useEffect(() => {
@@ -291,7 +297,7 @@ export default function AISummaryChat() {
   }, [activeSession?.id]);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    chatEndRef.current?.scrollIntoView();
   }, [messages]);
 
   const ensureSession = async () => {
@@ -1047,7 +1053,7 @@ export default function AISummaryChat() {
               onChange={(e) => {
                 const next = e.target.value;
                 setInput(next);
-                const cursor = e.target.selectionStart ?? next.length;
+                const cursor = e.target.selectionStart ?? inputRef.current?.selectionStart ?? next.length;
                 updateMentionState(next, cursor);
               }}
               onKeyDown={(e) => {
