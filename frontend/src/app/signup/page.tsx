@@ -517,11 +517,16 @@ export default function SignupPage() {
               <button
                 type="button"
                 onClick={() => {
-                  if (!otpVerified) {
+                  if (!otpVerified || otpError) {
                     setOtpModalOpen(false);
+                    setOtpVerified(false);
+                    setOtpError("");
+                    setVerificationToken(null);
+                    setOtpSent(false);
+                    setFormData((p) => ({ ...p, otp: "" }));
                   }
                 }}
-                disabled={otpVerified}
+                disabled={otpVerified && !otpError}
                 className="text-text-muted hover:text-foreground cursor-pointer disabled:opacity-30"
               >
                 <X className="w-5 h-5" />
