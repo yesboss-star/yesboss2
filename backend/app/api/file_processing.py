@@ -139,28 +139,33 @@ async def search_org_documents(
     org_id: str,
     query: str,
     limit: int = 5,
-    provider: Optional[str] = None
+    provider: Optional[str] = None,
+    user_id: Optional[str] = None,
 ):
     if not org_id or not query:
         raise HTTPException(status_code=400, detail="org_id and query are required")
     
-    results = await search_documents(org_id, query, limit, provider)
+    results = await search_documents(org_id, query, limit, provider, user_id=user_id)
     return {"results": results, "count": len(results)}
 
 
 @router.get("/document-types")
-async def get_document_types(org_id: str):
+async def get_document_types(
+    org_id: str,
+    user_id: Optional[str] = None,
+):
     from ..core.qdrant import get_qdrant_client
 
     try:
         client = get_qdrant_client()
 
         from qdrant_client.models import Filter, FieldCondition, Match
+        filter_conditions = [FieldCondition(key="org_id", match=Match(value=org_id))]
+        if user_id:
+            filter_conditions.append(FieldCondition(key="user_id", match=Match(value=user_id)))
         results = client.scroll(
             collection_name="documents",
-            scroll_filter=Filter(
-                must=[FieldCondition(key="org_id", match=Match(value=org_id))]
-            ),
+            scroll_filter=Filter(must=filter_conditions),
             limit=100,
             with_payload=True
         )
@@ -179,12 +184,13 @@ async def get_document_types(org_id: str):
 async def get_organization_document_context(
     org_id: str,
     max_docs: int = 20,
+    user_id: Optional[str] = None,
 ):
     """Return the structured context (summaries, metrics, decisions) of all
     analyzed documents for an organization. Powers dashboard widgets."""
     if not org_id:
         raise HTTPException(status_code=400, detail="org_id is required")
-    return await get_org_document_context(org_id, max_docs=max_docs)
+    return await get_org_document_context(org_id, max_docs=max_docs, user_id=user_id)
 
 
 from pydantic import BaseModel as _BaseModel
@@ -195,6 +201,7 @@ class AskDocumentsRequest(_BaseModel):
     question: str
     top_k: int = 5
     provider: Optional[str] = None
+    user_id: Optional[str] = None
 
 
 @router.post("/ask")
@@ -213,13 +220,14 @@ async def ask_documents(request: AskDocumentsRequest):
     from ..core.file_processor import get_org_document_context
     from ..core.database import get_database
 
-    overview = await get_org_document_context(request.org_id, max_docs=15)
+    overview = await get_org_document_context(request.org_id, max_docs=15, user_id=request.user_id)
 
     search_results = await search_documents(
         request.org_id,
         request.question,
         top_k=request.top_k,
         provider=request.provider,
+        user_id=request.user_id,
     )
 
     chunk_block_parts = []

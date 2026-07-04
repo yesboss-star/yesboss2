@@ -3,12 +3,13 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "@/components/DashboardLayout";
-import { Card, CardContent, CardHeader, CardTitle, Tabs, TabsList, TabsTrigger, TabsContent, Input, Label, Button } from "@/components/ui";
-import { Bell, User, Save, ArrowLeft, Volume2, Mail, Smartphone, Plug, MessageSquare, ExternalLink, X, Camera, RefreshCw, Loader2 } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle, Tabs, TabsList, TabsTrigger, TabsContent, Input, Label, Button, Badge } from "@/components/ui";
+import { Bell, User, Save, ArrowLeft, Volume2, Mail, Smartphone, Plug, MessageSquare, ExternalLink, X, Camera, RefreshCw, Loader2, Shield, Users } from "lucide-react";
 import { Avatar, DICEBEAR_STYLES } from "@/components/ui/Avatar";
 import ZohoConnectButton from "@/components/owners/ZohoConnectButton";
 import { useZohoStore } from "@/stores/zohoStore";
 import { useUIStore } from "@/stores/uiStore";
+import { useOrganizationStore } from "@/stores/organizationStore";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -445,6 +446,18 @@ export default function SettingsPage() {
                 )}
               </CardContent>
             </Card>
+
+            <Card className="mt-6">
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <Users className="w-5 h-5 text-primary" />
+                  <CardTitle>Organization Owners</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <OwnerList />
+              </CardContent>
+            </Card>
           </TabsContent>
 
           <TabsContent value="integrations">
@@ -550,5 +563,77 @@ export default function SettingsPage() {
         </Tabs>
       </div>
     </DashboardLayout>
+  );
+}
+
+interface Owner {
+  uid: string;
+  email: string;
+  full_name: string;
+  role: "primary_owner" | "co_owner";
+}
+
+function OwnerList() {
+  const [owners, setOwners] = useState<Owner[]>([]);
+  const [loading, setLoading] = useState(true);
+  const organization = useOrganizationStore((s) => s.organization);
+
+  useEffect(() => {
+    if (!organization?.id) {
+      setLoading(false);
+      return;
+    }
+    fetch(`${API_URL}/organizations/${organization.id}/owners`, {
+      headers: getAuthHeaders(),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        setOwners(data.owners || []);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [organization?.id]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="w-5 h-5 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!organization?.id) {
+    return (
+      <p className="text-sm text-text-muted text-center py-4">No organization found.</p>
+    );
+  }
+
+  if (owners.length === 0) {
+    return (
+      <p className="text-sm text-text-muted text-center py-4">No owners found.</p>
+    );
+  }
+
+  return (
+    <div className="divide-y divide-border/50">
+      {owners.map((owner) => (
+        <div key={owner.uid} className="flex items-center gap-3 py-3">
+          <Avatar
+            size="md"
+            seed={owner.email || owner.full_name}
+            fallback={owner.full_name || owner.email}
+          />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium truncate">{owner.full_name || "Unnamed"}</p>
+            <p className="text-xs text-text-muted truncate">{owner.email}</p>
+          </div>
+          <Badge
+            variant={owner.role === "primary_owner" ? "success" : "secondary"}
+          >
+            {owner.role === "primary_owner" ? "Primary Owner" : "Co-owner"}
+          </Badge>
+        </div>
+      ))}
+    </div>
   );
 }

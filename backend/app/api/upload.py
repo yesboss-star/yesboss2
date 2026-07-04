@@ -24,7 +24,8 @@ class FileResponse(BaseModel):
 async def process_upload(
     organization_id: str,
     file_type: str,
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    user_id: Optional[str] = None,
 ):
     db = get_database()
     if db is None:
@@ -47,6 +48,7 @@ async def process_upload(
         "file_path": file_path,
         "file_type": file_type,
         "organization_id": organization_id,
+        "created_by": user_id or "",
         "status": "uploaded",
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
@@ -58,7 +60,10 @@ async def process_upload(
     return {"file": file_doc, "message": "File uploaded successfully"}
 
 @router.get("")
-async def list_files(organization_id: Optional[str] = None):
+async def list_files(
+    organization_id: Optional[str] = None,
+    created_by: Optional[str] = None,
+):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -66,6 +71,8 @@ async def list_files(organization_id: Optional[str] = None):
     query = {}
     if organization_id:
         query["organization_id"] = organization_id
+    if created_by:
+        query["created_by"] = created_by
     
     files = list(db.files.find(query))
     
@@ -75,13 +82,19 @@ async def list_files(organization_id: Optional[str] = None):
     return {"files": files}
 
 @router.get("/{file_id}")
-async def get_file(file_id: str):
+async def get_file(
+    file_id: str,
+    created_by: Optional[str] = None,
+):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     from bson import ObjectId
-    file_doc = db.files.find_one({"_id": ObjectId(file_id)})
+    query: dict = {"_id": ObjectId(file_id)}
+    if created_by:
+        query["created_by"] = created_by
+    file_doc = db.files.find_one(query)
     
     if not file_doc:
         raise HTTPException(status_code=404, detail="File not found")
@@ -90,13 +103,22 @@ async def get_file(file_id: str):
     return {"file": file_doc}
 
 @router.delete("/{file_id}")
-async def delete_file(file_id: str):
+async def delete_file(
+    file_id: str,
+    created_by: Optional[str] = None,
+):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
     from bson import ObjectId
-    file_doc = db.files.find_one({"_id": ObjectId(file_id)})
+    query: dict = {"_id": ObjectId(file_id)}
+    if created_by:
+        query["created_by"] = created_by
+    file_doc = db.files.find_one(query)
+    
+    if not file_doc:
+        raise HTTPException(status_code=404, detail="File not found")
     
     if file_doc and os.path.exists(file_doc.get("file_path", "")):
         os.remove(file_doc["file_path"])

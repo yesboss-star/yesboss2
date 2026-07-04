@@ -55,6 +55,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 from .api.health import router as health_router
 from .api.auth import router as auth_router
 from .api.organizations import router as organizations_router
+from .api.owner_requests import router as owner_requests_router
 from .api.employees import router as employees_router
 from .api.upload import router as upload_router
 from .api.scrape import router as scrape_router
@@ -212,6 +213,7 @@ async def root():
 app.include_router(health_router, prefix="/api/v1", tags=["Health"])
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["Auth"])
 app.include_router(organizations_router, prefix="/api/v1/organizations", tags=["Organizations"])
+app.include_router(owner_requests_router, prefix="/api/v1", tags=["Owner Requests"])
 app.include_router(employees_router, prefix="/api/v1/employees", tags=["Employees"])
 app.include_router(upload_router, prefix="/api/v1/upload", tags=["Upload"])
 app.include_router(scrape_router, prefix="/api/v1/scrape", tags=["Scraper"])

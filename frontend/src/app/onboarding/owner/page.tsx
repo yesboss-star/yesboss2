@@ -7,6 +7,7 @@ import { auth } from "@/lib/firebase";
 import { signOut as firebaseSignOut } from "firebase/auth";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { useDocumentStore } from "@/stores/documentStore";
+import { useUIStore } from "@/stores/uiStore";
 import {
   ArrowRight,
   Building2,
@@ -277,10 +278,18 @@ function OwnerOnboardingContent() {
   const [showMicroVerticalSuggestions, setShowMicroVerticalSuggestions] = useState(false);
 
   const [existingOrg, setExistingOrg] = useState<{ _id: string; [k: string]: unknown } | null>(null);
+  const [primaryOwnerInfo, setPrimaryOwnerInfo] = useState<{ full_name: string; email: string } | null>(null);
   const [showDuplicatePrompt, setShowDuplicatePrompt] = useState(false);
   const [duplicateChecking, setDuplicateChecking] = useState(false);
   const [joiningOrg, setJoiningOrg] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [requestSent, setRequestSent] = useState(false);
+  const [requestId, setRequestId] = useState<string | null>(null);
+  const [requestStatus, setRequestStatus] = useState<string | null>(null);
+  const [checkingStatus, setCheckingStatus] = useState(false);
+  const [requestError, setRequestError] = useState("");
+  const [approveLink, setApproveLink] = useState("");
+  const [rejectLink, setRejectLink] = useState("");
 
   const initialEmailDomain = (userEmail.split("@")[1] || "").trim();
   const isPersonal = isPersonalEmailDomain(initialEmailDomain);
@@ -383,6 +392,9 @@ function OwnerOnboardingContent() {
       .then((data) => {
         if (data?.organization?._id) {
           setExistingOrg(data.organization);
+          if (data.primary_owner) {
+            setPrimaryOwnerInfo(data.primary_owner);
+          }
           setShowDuplicatePrompt(true);
         }
       })
@@ -413,6 +425,52 @@ function OwnerOnboardingContent() {
      
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgData.website_url]);
+
+  useEffect(() => {
+    if (!requestId || requestStatus === "approved" || requestStatus === "rejected") return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_URL}/owner-requests/${requestId}/status`);
+        if (res.ok) {
+          const data = await res.json();
+          setRequestStatus(data.status);
+          if (data.status === "approved") {
+            clearInterval(interval);
+            const storedUser = localStorage.getItem("yesboss_user");
+            const userData = storedUser ? JSON.parse(storedUser) : {};
+            const uid = userData?.uid || user?.uid;
+            const orgRes = await fetch(`${API_URL}/organizations/${existingOrg?._id}`);
+            if (orgRes.ok) {
+              const orgData2 = await orgRes.json();
+              const org = orgData2.organization;
+              const coOwners = org.co_owners || [];
+              const ownerRank = org.owner_id === uid ? 1 : coOwners.indexOf(uid) + 2;
+              useOrganizationStore.getState().setOrganization({
+                id: org._id, name: org.name, domain: org.domain || "",
+                industry: org.industry || "", size: org.size || "",
+                website_url: org.website_url || "",
+                createdAt: org.created_at || new Date().toISOString(),
+                owner_id: org.owner_id, co_owners: coOwners, ownerRank,
+              });
+              setOrgId(org._id);
+              setExistingOrg(null);
+              if (storedUser) {
+                const updatedUser = { ...JSON.parse(storedUser), owner_rank: ownerRank, organization_completed: true };
+                localStorage.setItem("yesboss_user", JSON.stringify(updatedUser));
+                document.cookie = `yesboss_user=${JSON.stringify(updatedUser)}; path=/; max-age=86400; SameSite=Lax`;
+              }
+              setRequestSent(false);
+              setStep("persona-time");
+            }
+          }
+        }
+      } catch {
+        // silent polling failure
+      }
+    }, 15000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestId, requestStatus]);
 
   useEffect(() => {
     // When the user enters the file-upload step, ask the AI for
@@ -724,9 +782,136 @@ function OwnerOnboardingContent() {
     }
   };
 
+  const handleRequestOwner = async () => {
+    if (!existingOrg?._id) return;
+    setJoiningOrg(true);
+    setRequestError("");
+    try {
+      const storedUser = localStorage.getItem("yesboss_user");
+      const userData = storedUser ? JSON.parse(storedUser) : {};
+      const uid = userData?.uid || user?.uid;
+      const fullName = userData?.displayName || user?.displayName || user?.email || "User";
+      const email = userData?.email || user?.email || "";
+
+      const res = await fetch(`${API_URL}/organizations/${existingOrg._id}/request-owner`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid, email, full_name: fullName }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || "Failed to send request");
+      }
+
+      const data = await res.json();
+      setRequestId(data.request_id);
+      setApproveLink(data.approve_link || "");
+      setRejectLink(data.reject_link || "");
+      setRequestSent(true);
+      setShowDuplicatePrompt(false);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Something went wrong";
+      setRequestError(message);
+    } finally {
+      setJoiningOrg(false);
+    }
+  };
+
+  const handleCheckRequestStatus = async () => {
+    if (!requestId) return;
+    setCheckingStatus(true);
+    try {
+      const res = await fetch(`${API_URL}/owner-requests/${requestId}/status`);
+      if (!res.ok) throw new Error("Failed to check status");
+      const data = await res.json();
+      setRequestStatus(data.status);
+      if (data.status === "approved") {
+        const storedUser = localStorage.getItem("yesboss_user");
+        const userData = storedUser ? JSON.parse(storedUser) : {};
+        const uid = userData?.uid || user?.uid;
+        const orgRes = await fetch(`${API_URL}/organizations/${existingOrg?._id}`);
+        if (orgRes.ok) {
+          const orgData2 = await orgRes.json();
+          const org = orgData2.organization;
+          const coOwners = org.co_owners || [];
+          const ownerRank = org.owner_id === uid ? 1 : coOwners.indexOf(uid) + 2;
+          useOrganizationStore.getState().setOrganization({
+            id: org._id,
+            name: org.name,
+            domain: org.domain || "",
+            industry: org.industry || "",
+            size: org.size || "",
+            website_url: org.website_url || "",
+            createdAt: org.created_at || new Date().toISOString(),
+            owner_id: org.owner_id,
+            co_owners: coOwners,
+            ownerRank,
+          });
+          setOrgId(org._id);
+          setExistingOrg(null);
+          if (storedUser) {
+            const updatedUser = { ...JSON.parse(storedUser), owner_rank: ownerRank, organization_completed: true };
+            localStorage.setItem("yesboss_user", JSON.stringify(updatedUser));
+            document.cookie = `yesboss_user=${JSON.stringify(updatedUser)}; path=/; max-age=86400; SameSite=Lax`;
+          }
+          setRequestSent(false);
+          setStep("persona-time");
+        }
+      }
+    } catch {
+      setRequestError("Could not check status. Try again.");
+    } finally {
+      setCheckingStatus(false);
+    }
+  };
+
+  const handleResendRequest = async () => {
+    if (!existingOrg?._id) return;
+    setJoiningOrg(true);
+    setRequestError("");
+    try {
+      const storedUser = localStorage.getItem("yesboss_user");
+      const userData = storedUser ? JSON.parse(storedUser) : {};
+      const uid = userData?.uid || user?.uid;
+      const fullName = userData?.displayName || user?.displayName || user?.email || "User";
+      const email = userData?.email || user?.email || "";
+
+      const res = await fetch(`${API_URL}/organizations/${existingOrg._id}/request-owner`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid, email, full_name: fullName }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || "Failed to resend request");
+      }
+
+      const data = await res.json();
+      setRequestId(data.request_id);
+      setApproveLink(data.approve_link || "");
+      setRejectLink(data.reject_link || "");
+      setRequestStatus("pending");
+      useUIStore.getState().addNotification({
+        type: "success", title: "Request Resent", message: "A new approval request has been sent.",
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Something went wrong";
+      setRequestError(message);
+    } finally {
+      setJoiningOrg(false);
+    }
+  };
+
   const handleDuplicateNo = async () => {
     setSigningOut(true);
     setShowDuplicatePrompt(false);
+    setPrimaryOwnerInfo(null);
+    setRequestSent(false);
+    setRequestId(null);
+    setRequestStatus(null);
+    setRequestError("");
     setExistingOrg(null);
     localStorage.removeItem("yesboss_token");
     localStorage.removeItem("yesboss_user");
@@ -1261,9 +1446,14 @@ function OwnerOnboardingContent() {
   ];
 
   const personaSteps = ["persona-time", "persona-question", "persona-more-time"];
-  const currentStepIndex = personaSteps.includes(step)
-    ? 2
-    : stepsConfig.findIndex((s) => s.id === step);
+  const displaySteps = stepsConfig.filter(
+    (s, i, arr) => arr.findIndex((t) => t.label === s.label) === i
+  );
+  const getDisplayIndex = (stepId: string) => {
+    if (personaSteps.includes(stepId)) return displaySteps.findIndex((s) => s.label === "Persona");
+    return displaySteps.findIndex((s) => s.id === stepId);
+  };
+  const currentStepIndex = getDisplayIndex(step);
 
   return (
     <div className="min-h-screen bg-background">
@@ -1289,8 +1479,9 @@ function OwnerOnboardingContent() {
       </header>
 
       <div className="max-w-7xl mx-auto px-6 py-8">
+        {!requestSent && (
         <div className="flex items-center justify-center gap-2 mb-12 overflow-x-auto">
-          {stepsConfig.map((s, i) => (
+          {displaySteps.map((s, i) => (
             <div key={s.id} className="flex items-center">
               <div
                 className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm transition-all ${
@@ -1302,7 +1493,7 @@ function OwnerOnboardingContent() {
                 <s.icon className="w-4 h-4" />
                 <span className="hidden sm:inline">{s.label}</span>
               </div>
-              {i < stepsConfig.length - 1 && (
+              {i < displaySteps.length - 1 && (
                 <div
                   className={`w-8 h-0.5 mx-2 ${
                     i < currentStepIndex ? "bg-primary" : "bg-border"
@@ -1312,7 +1503,9 @@ function OwnerOnboardingContent() {
             </div>
           ))}
         </div>
+        )}
 
+        {!requestSent && (<>
         {/* STEP 1: ORG DETAILS */}
         {step === "org-details" && (
           <div className="max-w-xl mx-auto">
@@ -2491,9 +2684,10 @@ function OwnerOnboardingContent() {
             </div>
           </div>
         )}
+        </>)}
       </div>
 
-      {showDuplicatePrompt && (
+      {showDuplicatePrompt && !requestSent && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="max-w-md w-full mx-4 glass rounded-2xl p-8 text-center">
             <div className="w-16 h-16 rounded-2xl bg-amber-500/10 flex items-center justify-center mx-auto mb-4">
@@ -2505,9 +2699,26 @@ function OwnerOnboardingContent() {
               <span className="font-semibold text-foreground">{orgData.domain}</span> is already
               registered.
             </p>
-            <p className="text-text-muted text-sm mb-6">
-              Do you want to continue as an owner of this organization?
+            <p className="text-text-muted text-sm mb-2">
+              Send a request to join as a co-owner?
             </p>
+            {primaryOwnerInfo ? (
+              <div className="flex items-center gap-3 p-3 rounded-xl bg-surface/50 border border-border mb-4 text-left">
+                <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary font-semibold text-sm">
+                  {(primaryOwnerInfo.full_name || primaryOwnerInfo.email)[0]?.toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{primaryOwnerInfo.full_name || "Primary Owner"}</p>
+                  <p className="text-xs text-text-muted truncate">{primaryOwnerInfo.email}</p>
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium whitespace-nowrap">Owner</span>
+              </div>
+            ) : (
+              <p className="text-xs text-text-muted/60 mb-4">Request will be sent to the organization owner.</p>
+            )}
+            {requestError && (
+              <p className="text-sm text-red-400 mb-4">{requestError}</p>
+            )}
             <div className="flex gap-3">
               <button
                 onClick={handleDuplicateNo}
@@ -2517,22 +2728,96 @@ function OwnerOnboardingContent() {
                 {signingOut ? (
                   <Loader2 className="w-5 h-5 animate-spin mx-auto" />
                 ) : (
-                  "OK, signup with different email"
+                  "Use different email"
                 )}
               </button>
               <button
-                onClick={handleDuplicateYes}
+                onClick={handleRequestOwner}
                 disabled={joiningOrg || signingOut}
                 className="flex-1 py-3 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {joiningOrg ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
                 ) : (
-                  "Yes, continue"
+                  "Send Request"
                 )}
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {requestSent && (
+        <div className="max-w-md mx-auto text-center py-12">
+          <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
+            <Send className="w-8 h-8 text-primary" />
+          </div>
+          <h2 className="text-xl font-bold mb-2">Request Sent</h2>
+          <p className="text-text-muted text-sm mb-2">
+            Your request to join as a co-owner has been sent to the primary owner for approval.
+          </p>
+          <p className="text-text-muted text-sm mb-6">
+            You'll receive an email once your request is approved or declined.
+          </p>
+          {requestStatus === "approved" ? (
+            <p className="text-green-400 font-medium mb-4">Approved! Redirecting...</p>
+          ) : requestStatus === "rejected" ? (
+            <p className="text-red-400 font-medium mb-4">Your request was declined.</p>
+          ) : (
+            <>
+              <p className="text-xs text-text-muted/60 mb-4">
+                Status: {requestStatus === "pending" ? "Waiting for approval..." : requestStatus || "Pending"}
+              </p>
+              {(approveLink || rejectLink) && (
+                <div className="flex gap-2 justify-center mb-6">
+                  {approveLink && (
+                    <a
+                      href={approveLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="py-2 px-4 rounded-lg bg-emerald-500/10 text-emerald-400 text-xs font-medium hover:bg-emerald-500/20 transition-colors border border-emerald-500/20"
+                    >
+                      Approve (test)
+                    </a>
+                  )}
+                  {rejectLink && (
+                    <a
+                      href={rejectLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="py-2 px-4 rounded-lg bg-red-500/10 text-red-400 text-xs font-medium hover:bg-red-500/20 transition-colors border border-red-500/20"
+                    >
+                      Reject (test)
+                    </a>
+                  )}
+                </div>
+              )}
+              <button
+                onClick={handleCheckRequestStatus}
+                disabled={checkingStatus}
+                className="py-3 px-6 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer disabled:opacity-50 flex items-center gap-2 mx-auto"
+              >
+                {checkingStatus ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  "Check Status"
+                )}
+              </button>
+              {requestError && (
+                <p className="text-xs text-red-400 mt-4">{requestError}</p>
+              )}
+              <button
+                onClick={handleResendRequest}
+                disabled={joiningOrg}
+                className="mt-3 py-2 px-4 rounded-lg glass hover:bg-surface-light text-text-muted text-xs font-medium transition-all cursor-pointer disabled:opacity-50"
+              >
+                {joiningOrg ? (
+                  <Loader2 className="w-3 h-3 animate-spin inline mr-1" />
+                ) : null}
+                Resend Request
+              </button>
+            </>
+          )}
         </div>
       )}
 

@@ -236,7 +236,7 @@ class MasterPromptEngine:
             "goals": self._build_goals_section,
             "tasks": self._build_tasks_section,
             "team": self._build_team_section,
-            "docs": self._build_documents_section,
+            "docs": lambda oid: self._build_documents_section(oid, user_id),
             "website": self._build_website_section,
             "patterns": self._build_user_patterns,
         }
@@ -266,7 +266,7 @@ class MasterPromptEngine:
             "goals": self._build_goals_section,
             "tasks": self._build_tasks_section,
             "team": self._build_team_section,
-            "docs": self._build_documents_section,
+            "docs": lambda oid: self._build_documents_section(oid, user_id),
             "website": self._build_website_section,
             "patterns": self._build_user_patterns,
         }
@@ -420,11 +420,14 @@ Domain: {org.get('domain', 'N/A')}
 
         return "===== TEAM =====\n" + "\n".join(lines) + "\n================\n"
 
-    async def _build_documents_section(self, org_id: str) -> str:
+    async def _build_documents_section(self, org_id: str, user_id: Optional[str] = None) -> str:
         if self.db is None:
             return "===== DOCUMENTS =====\nNo database connection.\n=======================\n"
+        query: dict = {"org_id": org_id}
+        if user_id:
+            query["user_id"] = user_id
         docs = list(
-            self.db.documents.find({"org_id": org_id})
+            self.db.documents.find(query)
             .sort("created_at", -1)
             .limit(5)
         )

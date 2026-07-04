@@ -157,6 +157,32 @@ def _render_otp_email(otp: str, purpose: str = "verification") -> str:
     return _TEMPLATE_HEADER.format(app_name=APP_NAME) + body + _TEMPLATE_FOOTER.format(app_name=APP_NAME)
 
 
+def _render_owner_approval(requester_name: str, requester_email: str, org_name: str, approve_link: str, reject_link: str) -> str:
+    body = f"""<h2 style="margin:0 0 8px;font-size:18px;color:#1e293b">Co-Owner Request</h2>
+      <p style="margin:0 0 4px;color:#555;line-height:1.5"><strong style="color:#6366f1">{requester_name}</strong> ({requester_email}) has requested to join <strong>{org_name}</strong> as a co-owner.</p>
+      <p style="margin:0 0 20px;color:#888;font-size:13px">Please review and approve or reject this request.</p>
+      <div style="text-align:center;margin-bottom:16px">
+        <a href="{approve_link}" style="display:inline-block;padding:12px 32px;background:#22c55e;color:white;text-decoration:none;border-radius:8px;font-size:15px;font-weight:600;margin-right:12px">Approve</a>
+        <a href="{reject_link}" style="display:inline-block;padding:12px 32px;background:#ef4444;color:white;text-decoration:none;border-radius:8px;font-size:15px;font-weight:600">Reject</a>
+      </div>
+      <p style="margin:0;color:#999;font-size:12px">This link is unique and can only be used once.</p>"""
+    return _TEMPLATE_HEADER.format(app_name=APP_NAME) + body + _TEMPLATE_FOOTER.format(app_name=APP_NAME)
+
+
+def _render_owner_request_approved(org_name: str, requester_name: str) -> str:
+    body = f"""<h2 style="margin:0 0 8px;font-size:18px;color:#1e293b">Request Approved</h2>
+      <p style="margin:0 0 16px;color:#555;line-height:1.5">Hi {requester_name}, your request to join <strong>{org_name}</strong> as a co-owner has been approved.</p>
+      <p style="margin:0 0 16px;color:#555;line-height:1.5">You can now sign in and access the organization dashboard.</p>"""
+    return _TEMPLATE_HEADER.format(app_name=APP_NAME) + body + _TEMPLATE_FOOTER.format(app_name=APP_NAME)
+
+
+def _render_owner_request_rejected(org_name: str, requester_name: str) -> str:
+    body = f"""<h2 style="margin:0 0 8px;font-size:18px;color:#1e293b">Request Declined</h2>
+      <p style="margin:0 0 16px;color:#555;line-height:1.5">Hi {requester_name}, your request to join <strong>{org_name}</strong> as a co-owner has been declined.</p>
+      <p style="margin:0 0 16px;color:#555;line-height:1.5">Please contact the organization administrator for more information.</p>"""
+    return _TEMPLATE_HEADER.format(app_name=APP_NAME) + body + _TEMPLATE_FOOTER.format(app_name=APP_NAME)
+
+
 TEMPLATE_RENDERERS = {
     "default": _render_basic,
     "otp": _render_otp_email,
@@ -165,6 +191,9 @@ TEMPLATE_RENDERERS = {
     "escalation_owner": _render_escalation_owner,
     "weekly_digest": _render_weekly_digest,
     "monthly_report": _render_monthly_report,
+    "owner_approval": _render_owner_approval,
+    "owner_request_approved": _render_owner_request_approved,
+    "owner_request_rejected": _render_owner_request_rejected,
 }
 
 
@@ -181,6 +210,24 @@ def send_notification_email(to_email: str, title: str, message: str, link: Optio
             html = renderer(items=template_data.get("items", []))
         elif template_name == "monthly_report":
             html = renderer(report_data=template_data or {})
+        elif template_name == "owner_approval":
+            html = renderer(
+                requester_name=template_data.get("requester_name", "Someone"),
+                requester_email=template_data.get("requester_email", ""),
+                org_name=template_data.get("org_name", "the organization"),
+                approve_link=template_data.get("approve_link", ""),
+                reject_link=template_data.get("reject_link", ""),
+            )
+        elif template_name == "owner_request_approved":
+            html = renderer(
+                org_name=template_data.get("org_name", "the organization"),
+                requester_name=template_data.get("requester_name", "there"),
+            )
+        elif template_name == "owner_request_rejected":
+            html = renderer(
+                org_name=template_data.get("org_name", "the organization"),
+                requester_name=template_data.get("requester_name", "there"),
+            )
         else:
             html = TEMPLATE_RENDERERS["default"](title, message, link, action_label)
     else:

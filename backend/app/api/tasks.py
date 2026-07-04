@@ -19,19 +19,15 @@ def get_user_org_id(user) -> Optional[str]:
 
 
 async def _is_org_owner(db, org_id: str, user_id: str) -> bool:
-    """Check if user_id is the primary owner or a co-owner of the org."""
+    """Check if user_id is the primary owner of the org."""
     from bson import ObjectId
     org = db.organizations.find_one(
         {"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id},
-        {"owner_id": 1, "co_owners": 1}
+        {"owner_id": 1}
     )
     if not org:
         return False
-    if org.get("owner_id") == user_id:
-        return True
-    if user_id in (org.get("co_owners") or []):
-        return True
-    return False
+    return org.get("owner_id") == user_id
 
 
 async def create_notification(user_id: str, org_id: str, type: str, title: str, message: str, link: str = None, actor_id: str = None, actor_name: str = None, metadata: dict = None, email: str = None):
@@ -280,13 +276,12 @@ async def list_tasks(
         query["escalation_level"] = escalation_level
     
     if current_user and getattr(current_user, 'id', None):
-        if not await _is_org_owner(db, org_id, current_user.id):
-            user_email = (getattr(current_user, 'email', '') or '').lower().strip()
-            query["$or"] = [
-                {"created_by": current_user.id},
-                {"assignee_email": user_email},
-                {"assigned_to": user_email},
-            ]
+        user_email = (getattr(current_user, 'email', '') or '').lower().strip()
+        query["$or"] = [
+            {"created_by": current_user.id},
+            {"assignee_email": user_email},
+            {"assigned_to": user_email},
+        ]
     
     tasks = list(db.tasks.find(query).sort("created_at", -1))
     
@@ -316,6 +311,11 @@ async def get_task(task_id: str, current_user = Depends(get_current_user_optiona
     
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    if current_user and getattr(current_user, 'id', None):
+        user_email = (getattr(current_user, 'email', '') or '').lower().strip()
+        if task.get("created_by") != current_user.id and task.get("assignee_email") != user_email and task.get("assigned_to") != user_email:
+            raise HTTPException(status_code=403, detail="Access denied")
     
     task["_id"] = str(task["_id"])
     raw = task.get("assignee_id")

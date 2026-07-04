@@ -202,7 +202,18 @@ async def get_organization_by_domain(domain: str):
         return {"organization": None, "domain": domain}
     
     org["_id"] = str(org["_id"])
-    return {"organization": org}
+
+    primary_owner = None
+    owner_id = org.get("owner_id")
+    if owner_id:
+        user_doc = db.users.find_one({"uid": owner_id}, {"full_name": 1, "email": 1})
+        if user_doc:
+            primary_owner = {
+                "full_name": user_doc.get("full_name", ""),
+                "email": user_doc.get("email", ""),
+            }
+
+    return {"organization": org, "primary_owner": primary_owner}
 
 class AddOwnerRequest(BaseModel):
     uid: str
@@ -291,6 +302,43 @@ async def generate_default_goals(
         inserted.append(goal_doc)
 
     return {"goals": inserted, "count": len(inserted)}
+
+
+@router.get("/{org_id}/owners")
+async def get_organization_owners(org_id: str):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    from bson import ObjectId
+    org = db.organizations.find_one({"_id": ObjectId(org_id)})
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    owner_ids = []
+    primary_owner_id = org.get("owner_id")
+    if primary_owner_id:
+        owner_ids.append(primary_owner_id)
+
+    co_owners = org.get("co_owners", []) or []
+    for uid in co_owners:
+        if uid not in owner_ids:
+            owner_ids.append(uid)
+
+    users = list(db.users.find({"uid": {"$in": owner_ids}}))
+    users_map = {u["uid"]: u for u in users}
+
+    owners_list = []
+    for uid in owner_ids:
+        user = users_map.get(uid, {})
+        owners_list.append({
+            "uid": uid,
+            "email": user.get("email", ""),
+            "full_name": user.get("full_name", ""),
+            "role": "primary_owner" if uid == primary_owner_id else "co_owner",
+        })
+
+    return {"owners": owners_list}
 
 
 @router.get("/{org_id}/employees")

@@ -218,18 +218,14 @@ def get_user_org_id(user) -> Optional[str]:
 
 
 async def _is_org_owner(db, org_id: str, user_id: str) -> bool:
-    """Check if user_id is the primary owner or a co-owner of the org."""
+    """Check if user_id is the primary owner of the org."""
     org = db.organizations.find_one(
         {"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id},
-        {"owner_id": 1, "co_owners": 1}
+        {"owner_id": 1}
     )
     if not org:
         return False
-    if org.get("owner_id") == user_id:
-        return True
-    if user_id in (org.get("co_owners") or []):
-        return True
-    return False
+    return org.get("owner_id") == user_id
 
 
 @router.post("")
@@ -390,13 +386,12 @@ async def list_goals(
         query["is_default"] = is_default
     
     if current_user and getattr(current_user, 'id', None):
-        if not await _is_org_owner(db, org_id, current_user.id):
-            user_email = (getattr(current_user, 'email', '') or '').lower().strip()
-            query["$or"] = [
-                {"created_by": current_user.id},
-            ]
-            if user_email:
-                query["$or"].append({"assignee_email": user_email})
+        user_email = (getattr(current_user, 'email', '') or '').lower().strip()
+        query["$or"] = [
+            {"created_by": current_user.id},
+        ]
+        if user_email:
+            query["$or"].append({"assignee_email": user_email})
     
     goals = list(db.goals.find(query).sort("created_at", -1))
 
@@ -535,7 +530,7 @@ async def get_or_generate_default_goals(
             "description": g.get("description", ""),
             "priority": g.get("priority", "medium"),
             "timeline": g.get("suggested_timeline"),
-            "department": g.get("department"),
+            "department": g.get("department") or "",
             "organization_id": org_id,
             "created_by": owner_id,
             "status": "active",
@@ -566,11 +561,9 @@ async def get_goal(goal_id: str, current_user = Depends(get_current_user_optiona
         raise HTTPException(status_code=404, detail="Goal not found")
     
     if current_user and getattr(current_user, 'id', None):
-        goal_org_id = goal.get("organization_id", "")
-        if not await _is_org_owner(db, goal_org_id, current_user.id):
-            user_email = (getattr(current_user, 'email', '') or '').lower().strip()
-            if goal.get("created_by") != current_user.id and goal.get("assignee_email") != user_email:
-                raise HTTPException(status_code=403, detail="Access denied")
+        user_email = (getattr(current_user, 'email', '') or '').lower().strip()
+        if goal.get("created_by") != current_user.id and goal.get("assignee_email") != user_email:
+            raise HTTPException(status_code=403, detail="Access denied")
     
     goal["_id"] = str(goal["_id"])
     for f in ("assignee_id", "assignee_name", "reviewer_id", "reviewer_name"):
@@ -896,7 +889,7 @@ async def review_goal(goal_id: str, request: ReviewRequest, current_user = Depen
                 "goal_title": goal.get("title"),
                 "goal_type": goal.get("goal_type"),
                 "duration": goal.get("duration"),
-                "department": goal.get("department"),
+                "department": goal.get("department") or "",
                 "priority": goal.get("priority"),
                 "industry": goal.get("industry", ""),
                 "micro_vertical": goal.get("micro_vertical", ""),

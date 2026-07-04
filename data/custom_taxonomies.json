@@ -101,6 +101,18 @@
       "uses": 1,
       "created_at": 1781279157,
       "last_used": 1781279157
+    },
+    {
+      "value": "OTT Media & Content Delivery",
+      "uses": 1,
+      "created_at": 1783157566,
+      "last_used": 1783157566
+    },
+    {
+      "value": "Live Streaming & Broadcasting",
+      "uses": 1,
+      "created_at": 1783158375,
+      "last_used": 1783158375
     }
   ],
   "micro_verticals": [
@@ -292,6 +304,20 @@
       "created_at": 1781937423,
       "last_used": 1781937423,
       "industry": "IT Services & Consulting"
+    },
+    {
+      "value": "Live Streaming Platforms",
+      "uses": 1,
+      "created_at": 1783157595,
+      "last_used": 1783157595,
+      "industry": "OTT Media & Content Delivery"
+    },
+    {
+      "value": "OTT Streaming Platforms",
+      "uses": 1,
+      "created_at": 1783158390,
+      "last_used": 1783158390,
+      "industry": "Live Streaming & Broadcasting"
     }
   ],
   "company_names": []

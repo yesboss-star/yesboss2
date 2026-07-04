@@ -1,6 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
-
+ 
 :root {
   --background: #030712;
   --foreground: #f8fafc;
@@ -16,24 +16,24 @@
   --gradient-start: #0ea5e9;
   --gradient-end: #8b5cf6;
 }
-
+ 
 [data-theme="light"] {
   --background: #ffffff;
-  --foreground: #042C53;
-  --primary: #0F6E56;
-  --primary-light: #1A8A6E;
-  --accent: #0F6E56;
-  --accent-hover: #0A5643;
+  --foreground: #2C2C2A;
+  --primary: #E42527;
+  --primary-light: #E24B4A;
+  --accent: #226DB4;
+  --accent-hover: #185FA5;
   --surface: #FAFAF8;
-  --surface-light: #F0EFEC;
+  --surface-light: #F1EFE8;
   --border: #E3E2DD;
-  --border-light: #EBEAE6;
+  --border-light: #EDEBE5;
   --text-muted: #6B6A63;
-  --gradient-start: #0F6E56;
-  --gradient-end: #042C53;
-  --heading: #042C53;
+  --gradient-start: #E42527;
+  --gradient-end: #226DB4;
+  --heading: #2C2C2A;
 }
-
+ 
 [data-theme="light"] h1,
 [data-theme="light"] h2,
 [data-theme="light"] h3,
@@ -42,7 +42,7 @@
 [data-theme="light"] h6 {
   color: var(--heading);
 }
-
+ 
 @theme {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -58,100 +58,100 @@
   --font-sans: 'Inter', var(--font-geist-sans), system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', var(--font-geist-mono), monospace;
 }
-
+ 
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--border-light) transparent;
 }
-
+ 
 html {
   scroll-behavior: smooth;
 }
-
+ 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
   overflow-x: hidden;
 }
-
+ 
 :where(.text-sm, .text-xs, .text-\[10px\], .text-\[11px\]) {
   font-weight: 500;
 }
-
+ 
 .text-xs {
   font-size: 0.8125rem;
 }
-
+ 
 .text-\[10px\],
 .text-\[11px\] {
   font-size: 0.75rem;
 }
-
+ 
 @keyframes slide-in-from-right {
   from { transform: translateX(100%); }
   to { transform: translateX(0); }
 }
-
+ 
 @keyframes float {
   0%, 100% { transform: translateY(0px); }
   50% { transform: translateY(-20px); }
 }
-
+ 
 @keyframes pulse-glow {
   0%, 100% { opacity: 0.4; }
   50% { opacity: 0.8; }
 }
-
+ 
 @keyframes gradient-shift {
   0% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }
   100% { background-position: 0% 50%; }
 }
-
+ 
 .animate-slide-in-from-right {
   animation: slide-in-from-right 0.3s ease-out;
 }
-
+ 
 .animate-float {
   animation: float 6s ease-in-out infinite;
 }
-
+ 
 .animate-pulse-glow {
   animation: pulse-glow 3s ease-in-out infinite;
 }
-
+ 
 .animate-gradient {
   background-size: 200% 200%;
   animation: gradient-shift 4s ease infinite;
 }
-
+ 
 .glass {
   background: rgba(15, 23, 42, 0.6);
   backdrop-filter: blur(20px);
   border: 1px solid rgba(30, 41, 59, 0.5);
 }
-
+ 
 .glass-light {
   background: rgba(30, 41, 59, 0.4);
   backdrop-filter: blur(12px);
   border: 1px solid rgba(51, 65, 85, 0.3);
 }
-
+ 
 [data-theme="light"] .hero-glow {
-  background: radial-gradient(circle, rgba(15, 110, 86, 0.12) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(228, 37, 39, 0.12) 0%, transparent 70%);
 }
-
+ 
 [data-theme="light"] .glass {
   background: rgba(250, 250, 248, 0.7);
   border-color: rgba(227, 226, 221, 0.6);
 }
-
+ 
 [data-theme="light"] .glass-light {
   background: rgba(250, 250, 248, 0.6);
   border-color: rgba(235, 234, 230, 0.5);
 }
-
+ 
 .gradient-text {
   background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end), var(--primary-light));
   background-size: 200% 200%;
@@ -160,7 +160,7 @@ body {
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
-
+ 
 .hero-glow {
   position: absolute;
   width: 600px;
@@ -170,21 +170,21 @@ body {
   filter: blur(60px);
   pointer-events: none;
 }
-
+ 
 .card-hover {
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
-
+ 
 .card-hover:hover {
   transform: translateY(-4px);
   box-shadow: 0 20px 40px rgba(14, 165, 233, 0.1);
   border-color: var(--primary);
 }
-
+ 
 [data-theme="light"] .card-hover:hover {
-  box-shadow: 0 20px 40px rgba(15, 110, 86, 0.12);
+  box-shadow: 0 20px 40px rgba(228, 37, 39, 0.12);
 }
-
+ 
 .claude-loader {
   width: 50px;
   aspect-ratio: 1;

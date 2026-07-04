@@ -71,6 +71,7 @@ async def generate_default_goals(
 
         for g in goals:
             g.setdefault("is_default", True)
+            g.setdefault("department", "")
 
         logger.info(f"Generated {len(goals)} default goals for {industry}/{micro_vertical}")
         return goals

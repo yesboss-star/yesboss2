@@ -294,12 +294,14 @@ async def upload_and_analyze(
 
     try:
         embeddings = await generate_embeddings(doc["chunks"])
+        user_id_val = getattr(current_user, 'id', None) or ""
         payloads = []
         for i, chunk in enumerate(doc["chunks"]):
             payloads.append({
                 "file_id": file_id,
                 "filename": file.filename,
                 "org_id": organization_id,
+                "user_id": user_id_val,
                 "chunk_index": i,
                 "chunk_text": chunk[:500],
                 "document_type": file_type,
@@ -413,10 +415,12 @@ async def upload_from_url(
         db.documents.insert_one(doc)
         try:
             embeddings = await generate_embeddings(doc["chunks"])
+            user_id_val = getattr(current_user, 'id', None) or ""
             payloads = []
             for i, chunk in enumerate(doc["chunks"]):
                 payloads.append({
                     "file_id": file_id, "filename": filename, "org_id": organization_id,
+                    "user_id": user_id_val,
                     "chunk_index": i, "chunk_text": chunk[:500],
                     "document_type": "webpage", "processed_at": datetime.utcnow().isoformat()
                 })
@@ -495,12 +499,14 @@ async def upload_from_url(
 
     try:
         embeddings = await generate_embeddings(doc["chunks"])
+        user_id_val = getattr(current_user, 'id', None) or ""
         payloads = []
         for i, chunk in enumerate(doc["chunks"]):
             payloads.append({
                 "file_id": file_id,
                 "filename": filename,
                 "org_id": organization_id,
+                "user_id": user_id_val,
                 "chunk_index": i,
                 "chunk_text": chunk[:500],
                 "document_type": file_type,
@@ -556,8 +562,16 @@ async def list_org_files(
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
 
-    uploaded_files = list(db.files.find({"organization_id": org_id}).sort("created_at", -1).limit(50))
-    processed_docs = list(db.documents.find({"org_id": org_id}).sort("created_at", -1).limit(50))
+    user_id = getattr(current_user, 'id', None) if current_user else None
+
+    files_query: dict = {"organization_id": org_id}
+    docs_query: dict = {"org_id": org_id}
+    if user_id:
+        files_query["created_by"] = user_id
+        docs_query["user_id"] = user_id
+
+    uploaded_files = list(db.files.find(files_query).sort("created_at", -1).limit(50))
+    processed_docs = list(db.documents.find(docs_query).sort("created_at", -1).limit(50))
 
     seen = set()
     all_files = []
@@ -598,10 +612,18 @@ async def get_file_detail(
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
-    doc = db.documents.find_one({"file_id": file_id})
+    user_id = getattr(current_user, 'id', None) if current_user else None
+    doc_query: dict = {"file_id": file_id}
+    if user_id:
+        doc_query["user_id"] = user_id
+
+    doc = db.documents.find_one(doc_query)
     if not doc:
         from bson import ObjectId
-        f = db.files.find_one({"_id": ObjectId(file_id) if ObjectId.is_valid(file_id) else file_id})
+        file_query: dict = {"_id": ObjectId(file_id) if ObjectId.is_valid(file_id) else file_id}
+        if user_id:
+            file_query["created_by"] = user_id
+        f = db.files.find_one(file_query)
         if f:
             return {"file": {"id": file_id, "filename": f.get("filename"), "file_type": f.get("file_type"), "source": "upload"}}
         raise HTTPException(status_code=404, detail="File not found")
@@ -629,7 +651,11 @@ async def delete_file(
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
-    doc = db.documents.find_one({"file_id": file_id})
+    user_id = getattr(current_user, 'id', None) if current_user else None
+    doc_query: dict = {"file_id": file_id}
+    if user_id:
+        doc_query["user_id"] = user_id
+    doc = db.documents.find_one(doc_query)
     if doc:
         file_path = doc.get("file_path")
         if file_path and os.path.exists(file_path):
@@ -638,7 +664,10 @@ async def delete_file(
         return {"success": True, "message": f"File '{doc.get('filename', 'unknown')}' deleted"}
 
     from bson import ObjectId
-    f = db.files.find_one({"_id": ObjectId(file_id) if ObjectId.is_valid(file_id) else file_id})
+    file_query: dict = {"_id": ObjectId(file_id) if ObjectId.is_valid(file_id) else file_id}
+    if user_id:
+        file_query["created_by"] = user_id
+    f = db.files.find_one(file_query)
     if f:
         file_path = f.get("file_path")
         if file_path and os.path.exists(file_path):
@@ -672,7 +701,11 @@ async def rename_file(
     if "/" in new_name or "\\" in new_name or "\x00" in new_name:
         raise HTTPException(status_code=400, detail="Filename contains invalid characters")
 
-    doc = db.documents.find_one({"file_id": file_id})
+    user_id = getattr(current_user, 'id', None) if current_user else None
+    doc_query: dict = {"file_id": file_id}
+    if user_id:
+        doc_query["user_id"] = user_id
+    doc = db.documents.find_one(doc_query)
     if doc:
         db.documents.update_one(
             {"file_id": file_id},
@@ -681,7 +714,10 @@ async def rename_file(
         return {"success": True, "file_id": file_id, "filename": new_name}
 
     from bson import ObjectId
-    f = db.files.find_one({"_id": ObjectId(file_id) if ObjectId.is_valid(file_id) else file_id})
+    file_query: dict = {"_id": ObjectId(file_id) if ObjectId.is_valid(file_id) else file_id}
+    if user_id:
+        file_query["created_by"] = user_id
+    f = db.files.find_one(file_query)
     if f:
         db.files.update_one(
             {"_id": f["_id"]},
@@ -701,7 +737,11 @@ async def download_file(
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
-    doc = db.documents.find_one({"file_id": file_id})
+    user_id = getattr(current_user, 'id', None) if current_user else None
+    doc_query: dict = {"file_id": file_id}
+    if user_id:
+        doc_query["user_id"] = user_id
+    doc = db.documents.find_one(doc_query)
     if doc and doc.get("file_path") and os.path.exists(doc["file_path"]):
         return FileResponse(
             doc["file_path"],
@@ -710,7 +750,10 @@ async def download_file(
         )
 
     from bson import ObjectId
-    f = db.files.find_one({"_id": ObjectId(file_id) if ObjectId.is_valid(file_id) else file_id})
+    file_query: dict = {"_id": ObjectId(file_id) if ObjectId.is_valid(file_id) else file_id}
+    if user_id:
+        file_query["created_by"] = user_id
+    f = db.files.find_one(file_query)
     if f and f.get("file_path") and os.path.exists(f["file_path"]):
         return FileResponse(
             f["file_path"],

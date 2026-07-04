@@ -308,6 +308,7 @@ async def process_file(
                     "file_id": file_id,
                     "filename": filename,
                     "org_id": org_id,
+                    "user_id": user_id,
                     "chunk_index": i,
                     "chunk_text": chunk[:500],
                     "document_type": file_type,
@@ -404,6 +405,7 @@ async def _run_deep_analysis(
 async def get_org_document_context(
     org_id: str,
     max_docs: int = 20,
+    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Return the structured context (summaries, metrics, decisions) of all
     analyzed documents for an organization. Powers dashboard widgets and the
@@ -416,8 +418,11 @@ async def get_org_document_context(
         return {"documents": [], "summary": "", "metrics": []}
 
     try:
+        query: dict = {"org_id": org_id}
+        if user_id:
+            query["user_id"] = user_id
         docs = list(
-            db.documents.find({"org_id": org_id})
+            db.documents.find(query)
             .sort("created_at", -1)
             .limit(max_docs)
         )
@@ -486,7 +491,8 @@ async def search_documents(
     org_id: str,
     query: str,
     top_k: int = 5,
-    provider: Optional[str] = None
+    provider: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     logger.info(f"Searching documents for org: {org_id}, query: {query}")
 
@@ -507,13 +513,15 @@ async def search_documents(
 
             client = get_qdrant_client()
 
+            filter_conditions = [FieldCondition(key="org_id", match=Match(value=org_id))]
+            if user_id:
+                filter_conditions.append(FieldCondition(key="user_id", match=Match(value=user_id)))
+
             results = client.search(
                 collection_name="documents",
                 query_vector=query_vector,
                 limit=top_k,
-                query_filter=Filter(
-                    must=[FieldCondition(key="org_id", match=Match(value=org_id))]
-                ),
+                query_filter=Filter(must=filter_conditions),
                 with_payload=True
             )
 
@@ -536,16 +544,20 @@ async def search_documents(
     if db is None:
         return []
     try:
+        base_query: dict = {"org_id": org_id}
+        if user_id:
+            base_query["user_id"] = user_id
         keywords = [w for w in re.findall(r"[A-Za-z0-9$%]{3,}", query) if w.lower() not in {"the","and","for","with","what","our","how","did","was","are","this","that","from"}][:8]
         if keywords:
             regex = "|".join(re.escape(k) for k in keywords)
+            base_query["text"] = {"$regex": regex, "$options": "i"}
             cursor = db.documents.find(
-                {"org_id": org_id, "text": {"$regex": regex, "$options": "i"}},
+                base_query,
                 {"filename": 1, "text": 1, "file_id": 1, "text_length": 1},
             ).limit(top_k * 3)
         else:
             cursor = db.documents.find(
-                {"org_id": org_id},
+                base_query,
                 {"filename": 1, "text": 1, "file_id": 1, "text_length": 1},
             ).limit(top_k)
 

@@ -39,7 +39,9 @@ export function NotificationToast() {
 
   useEffect(() => {
     if (uiNotifications.length === 0) return;
-    const latest = uiNotifications[0];
+    const unread = uiNotifications.filter((n) => !n.read);
+    if (unread.length === 0) return;
+    const latest = unread[0];
     if (toasts.some((t) => t.id === latest.id)) return;
     const item: ToastItem = {
       id: latest.id,
@@ -66,13 +68,13 @@ export function NotificationToast() {
   if (toasts.length === 0) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-sm">
+    <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-sm pointer-events-auto">
       {toasts.map((toast) => {
         const Icon = icons[toast.type];
         return (
           <div
             key={toast.id}
-            className={`flex items-start gap-3 p-4 rounded-xl border border-border shadow-2xl backdrop-blur-xl ${colors[toast.type]} animate-in slide-in-from-right-2 transition-all`}
+            className={`flex items-start gap-3 p-4 rounded-xl border border-border shadow-2xl backdrop-blur-xl pointer-events-auto ${colors[toast.type]} animate-in slide-in-from-right-2 transition-all`}
           >
             <Icon className={`w-5 h-5 mt-0.5 flex-shrink-0 ${textColors[toast.type]}`} />
             <div className="flex-1 min-w-0">
