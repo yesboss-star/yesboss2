@@ -165,8 +165,8 @@ export default function SignupPage() {
         body: JSON.stringify({ email: formData.contact.trim() }),
       });
       const data = await res.json();
-      if (!data.success) {
-        throw new Error(data.message || data.detail || "Could not send OTP");
+      if (!res.ok || !data.success) {
+        throw new Error(data.detail || data.message || "Could not send OTP");
       }
       setOtpSent(true);
       setResendTimer(60);

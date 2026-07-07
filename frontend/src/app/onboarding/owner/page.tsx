@@ -258,7 +258,7 @@ function OwnerOnboardingContent() {
   const [existingOrg, setExistingOrg] = useState<{ _id: string; [k: string]: unknown } | null>(null);
   const [primaryOwnerInfo, setPrimaryOwnerInfo] = useState<{ full_name: string; email: string } | null>(null);
   const [showDuplicatePrompt, setShowDuplicatePrompt] = useState(false);
-  const [duplicateChecking, setDuplicateChecking] = useState(false);
+  const [duplicateChecking, setDuplicateChecking] = useState(true);
   const [joiningOrg, setJoiningOrg] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [requestSent, setRequestSent] = useState(false);
@@ -266,8 +266,6 @@ function OwnerOnboardingContent() {
   const [requestStatus, setRequestStatus] = useState<string | null>(null);
   const [checkingStatus, setCheckingStatus] = useState(false);
   const [requestError, setRequestError] = useState("");
-  const [approveLink, setApproveLink] = useState("");
-  const [rejectLink, setRejectLink] = useState("");
 
   const initialEmailDomain = (userEmail.split("@")[1] || "").trim();
   const isPersonal = isPersonalEmailDomain(initialEmailDomain);
@@ -351,18 +349,18 @@ function OwnerOnboardingContent() {
 
   useEffect(() => {
     // Trigger domain analysis and duplicate check when user email changes.
-    // Synchronous setState here is intentional — it mirrors initial values into state.
-    /* eslint-disable react-hooks/set-state-in-effect */
-    if (!userEmail) return;
+    setDuplicateChecking(true);
+
+    if (!userEmail) { setDuplicateChecking(false); return; }
     const extractedDomain = userEmail.split("@")[1] || "";
-    if (!extractedDomain) return;
+    if (!extractedDomain) { setDuplicateChecking(false); return; }
 
     if (isPersonalEmailDomain(extractedDomain)) {
       setAutoFilledFromScan(false);
+      setDuplicateChecking(false);
       return;
     }
 
-    setDuplicateChecking(true);
     analyzeIndustryFromDomain(extractedDomain);
 
     fetch(`${API_URL}/organizations/by-domain/${encodeURIComponent(extractedDomain)}`)
@@ -378,7 +376,6 @@ function OwnerOnboardingContent() {
       })
       .catch(() => {})
       .finally(() => setDuplicateChecking(false));
-    /* eslint-enable react-hooks/set-state-in-effect */
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userEmail]);
 
@@ -762,15 +759,18 @@ function OwnerOnboardingContent() {
 
   const handleRequestOwner = async () => {
     if (!existingOrg?._id) return;
-    setJoiningOrg(true);
+    // Optimistic UI: immediately show request sent page
+    setShowDuplicatePrompt(false);
+    setRequestSent(true);
     setRequestError("");
-    try {
-      const storedUser = localStorage.getItem("yesboss_user");
-      const userData = storedUser ? JSON.parse(storedUser) : {};
-      const uid = userData?.uid || user?.uid;
-      const fullName = userData?.displayName || user?.displayName || user?.email || "User";
-      const email = userData?.email || user?.email || "";
 
+    const storedUser = localStorage.getItem("yesboss_user");
+    const userData = storedUser ? JSON.parse(storedUser) : {};
+    const uid = userData?.uid || user?.uid;
+    const fullName = userData?.displayName || user?.displayName || user?.email || "User";
+    const email = userData?.email || user?.email || "";
+
+    try {
       const res = await fetch(`${API_URL}/organizations/${existingOrg._id}/request-owner`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -784,15 +784,10 @@ function OwnerOnboardingContent() {
 
       const data = await res.json();
       setRequestId(data.request_id);
-      setApproveLink(data.approve_link || "");
-      setRejectLink(data.reject_link || "");
-      setRequestSent(true);
-      setShowDuplicatePrompt(false);
+      setRequestStatus("pending");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Something went wrong";
       setRequestError(message);
-    } finally {
-      setJoiningOrg(false);
     }
   };
 
@@ -868,8 +863,6 @@ function OwnerOnboardingContent() {
 
       const data = await res.json();
       setRequestId(data.request_id);
-      setApproveLink(data.approve_link || "");
-      setRejectLink(data.reject_link || "");
       setRequestStatus("pending");
       useUIStore.getState().addNotification({
         type: "success", title: "Request Resent", message: "A new approval request has been sent.",
@@ -913,13 +906,16 @@ function OwnerOnboardingContent() {
 
       // Check if domain is already registered before attempting creation
       const domainCheck = await fetch(`${API_URL}/organizations/by-domain/${encodeURIComponent(domain)}`);
-      const domainData = await domainCheck.json();
-      if (domainData?.organization?._id) {
-        alert(
-          `The domain "${domain}" is already registered to another company. ` +
-          "Please contact the existing owner to be added as a co-owner, or use a different email domain."
-        );
-        return;
+      if (domainCheck.ok) {
+        const domainData = await domainCheck.json();
+        if (domainData?.organization?._id) {
+          setExistingOrg(domainData.organization);
+          if (domainData.primary_owner) {
+            setPrimaryOwnerInfo(domainData.primary_owner);
+          }
+          setShowDuplicatePrompt(true);
+          return;
+        }
       }
 
       const org = await createOrganization({
@@ -945,7 +941,25 @@ function OwnerOnboardingContent() {
       setStep("file-upload");
     } catch (error: any) {
       console.error("Failed to create organization:", error);
-      if (error?.message?.includes("409") || error?.status === 409 || error?.detail?.includes("already exists")) {
+      const is409 = error?.message?.includes("409") || error?.status === 409 || error?.detail?.includes("already exists");
+      if (is409) {
+        try {
+          const domain = processDomain(orgData.domain);
+          const res = await fetch(`${API_URL}/organizations/by-domain/${encodeURIComponent(domain)}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.organization?._id) {
+              setExistingOrg(data.organization);
+              if (data.primary_owner) {
+                setPrimaryOwnerInfo(data.primary_owner);
+              }
+              setShowDuplicatePrompt(true);
+              return;
+            }
+          }
+        } catch {
+          // fallback to alert below
+        }
         alert("This company domain is already registered. Please contact the existing owner to be added as a co-owner.");
       } else {
         alert("Failed to create organization. Please try again.");
@@ -2287,32 +2301,8 @@ function OwnerOnboardingContent() {
           ) : (
             <>
               <p className="text-xs text-text-muted/60 mb-4">
-                Status: {requestStatus === "pending" ? "Waiting for approval..." : requestStatus || "Pending"}
+                Status: {requestStatus === "pending" ? "Waiting for approval..." : requestStatus || "Sending request..."}
               </p>
-              {(approveLink || rejectLink) && (
-                <div className="flex gap-2 justify-center mb-6">
-                  {approveLink && (
-                    <a
-                      href={approveLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="py-2 px-4 rounded-lg bg-emerald-500/10 text-emerald-400 text-xs font-medium hover:bg-emerald-500/20 transition-colors border border-emerald-500/20"
-                    >
-                      Approve (test)
-                    </a>
-                  )}
-                  {rejectLink && (
-                    <a
-                      href={rejectLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="py-2 px-4 rounded-lg bg-red-500/10 text-red-400 text-xs font-medium hover:bg-red-500/20 transition-colors border border-red-500/20"
-                    >
-                      Reject (test)
-                    </a>
-                  )}
-                </div>
-              )}
               <button
                 onClick={handleCheckRequestStatus}
                 disabled={checkingStatus}
@@ -2342,10 +2332,13 @@ function OwnerOnboardingContent() {
         </div>
       )}
 
-      {duplicateChecking && !showDuplicatePrompt && (
-        <div className="fixed bottom-6 right-6 glass rounded-full px-4 py-2 flex items-center gap-2 text-xs z-40">
-          <Loader2 className="w-3 h-3 animate-spin" />
-          Checking company domain...
+      {duplicateChecking && !showDuplicatePrompt && !requestSent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-md">
+          <div className="glass rounded-2xl p-8 text-center max-w-sm mx-4">
+            <Loader2 className="w-10 h-10 animate-spin mx-auto mb-4 text-primary" />
+            <h3 className="text-lg font-semibold mb-1">Scanning your domain</h3>
+            <p className="text-sm text-text-muted">Checking if your company is already registered...</p>
+          </div>
         </div>
       )}
     </div>

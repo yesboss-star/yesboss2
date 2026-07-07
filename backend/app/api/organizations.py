@@ -204,7 +204,7 @@ async def get_organization_by_domain(domain: str):
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
-    domain = domain.lower()
+    domain = domain.lower().strip()
     org = db.organizations.find_one({"domain": {"$regex": f"^{domain}$", "$options": "i"}})
     
     if not org:

@@ -262,19 +262,26 @@ async def send_otp(request: SendOTPRequest):
         })
 
         from ..core.email_service import send_otp_email, is_email_configured
-        email_sent = False
-        if is_email_configured():
-            email_sent = send_otp_email(email, otp, purpose="verification")
-            if email_sent:
-                logger.info("Signup OTP sent to %s", email)
-            else:
-                logger.warning("SMTP send failed for %s. Debug OTP: %s", email, otp)
-        else:
+        if not is_email_configured():
             logger.warning("SMTP not configured - OTP not sent to %s. Debug OTP: %s", email, otp)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Email service not configured. Please set up SMTP credentials.",
+            )
+
+        email_sent = send_otp_email(email, otp, purpose="verification")
+        if email_sent:
+            logger.info("Signup OTP sent to %s", email)
+        else:
+            logger.warning("SMTP send failed for %s. Debug OTP: %s", email, otp)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to send OTP email. Check SMTP configuration. Debug OTP: {otp}",
+            )
 
         return AuthResponse(
             success=True,
-            message="OTP sent" if email_sent else f"OTP generated (check server logs for debug code)",
+            message="OTP sent",
         )
 
     except HTTPException:
