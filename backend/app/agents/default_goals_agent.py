@@ -22,8 +22,10 @@ Each goal must have these exact fields:
   - "goal_type": "short_term" | "long_term"
   - "duration": "one_time" | "continuous"
   - "priority": "high" | "medium" | "low"
-  - "department": str (which department owns this goal)
+  - "department": str (REAL department name — one of: Sales, Marketing, Engineering, Product, Operations, Finance, Human Resources, Customer Support, Legal, R&D, Design, Supply Chain)
   - "suggested_timeline": str (e.g. "3 months", "Q3 2026", "ongoing")
+
+IMPORTANT: The "department" field MUST be a real department name from the list above. NEVER leave it empty and NEVER set it to "auto-assign" or any generic placeholder.
 
 Make each goal specific to {industry} companies in the {mv} vertical.
 Include a mix of short-term and long-term goals, and a mix of one-time and continuous goals.
@@ -40,6 +42,29 @@ Example:
     "suggested_timeline": "Q3 2026"
   }}
 ]"""
+
+
+def _infer_department(title: str, description: str = "") -> str:
+    """Infer the most likely department from goal title/description."""
+    text = (title + " " + description).lower()
+    keywords = {
+        "Sales": ["revenue", "sales", "acquisition", "pipeline", "lead", "deal", "quota", "upsell", "cross-sell", "client", "booking", "ARR", "MRR", "subscription"],
+        "Marketing": ["marketing", "campaign", "brand", "seo", "social media", "content", "lead generation", "traffic", "awareness", "promotion", "advertising", "PR", "public relations"],
+        "Engineering": ["engineering", "develop", "deploy", "code", "software", "architecture", "technical debt", "infrastructure", "devops", "CI/CD", "automation", "platform", "system", "uptime", "latency", "performance", "tech"],
+        "Product": ["product", "feature", "roadmap", "launch", "user experience", "ux", "product-market", "mvp", "backlog"],
+        "Operations": ["operation", "process", "efficiency", "logistics", "supply chain", "workflow", "optimization", "cost reduction", "waste", "downtime", "quality", "compliance", "certification", "audit", "safety", "incident"],
+        "Finance": ["finance", "revenue", "profit", "margin", "budget", "funding", "investment", "ROI", "cost", "pricing", "financial", "capital", "valuation"],
+        "Human Resources": ["hire", "recruit", "talent", "people", "employee", "team", "culture", "retention", "turnover", "training", "onboarding", "workforce", "hr", "human resource"],
+        "Customer Support": ["support", "customer satisfaction", "csat", "nps", "ticket", "response time", "resolution", "service", "retention", "churn", "help"],
+        "Legal": ["legal", "compliance", "regulatory", "patent", "ip", "intellectual property", "contract", "licensing", "soc 2", "hipaa", "gdpr", "certification"],
+        "R&D": ["research", "innovation", "patent", "prototype", "r&d", "experiment", "new technology", "ip"],
+        "Design": ["design", "ui", "user interface", "visual", "creative", "brand identity", "graphic"],
+        "Supply Chain": ["supply chain", "inventory", "procurement", "vendor", "logistics", "warehouse", "distribution", "fulfillment"],
+    }
+    for dept, words in keywords.items():
+        if any(w in text for w in words):
+            return dept
+    return "Operations"
 
 
 async def generate_default_goals(
@@ -69,9 +94,14 @@ async def generate_default_goals(
         if not isinstance(goals, list):
             raise ValueError("AI response was not a list")
 
+        valid_departments = {"Sales", "Marketing", "Engineering", "Product", "Operations", "Finance", "Human Resources", "Customer Support", "Legal", "R&D", "Design", "Supply Chain"}
+
         for g in goals:
             g.setdefault("is_default", True)
-            g.setdefault("department", "")
+            dept = (g.get("department") or "").strip()
+            if dept not in valid_departments:
+                dept = _infer_department(g.get("title", ""), g.get("description", ""))
+            g["department"] = dept
 
         logger.info(f"Generated {len(goals)} default goals for {industry}/{micro_vertical}")
         return goals

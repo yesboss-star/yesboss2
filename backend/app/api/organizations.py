@@ -43,9 +43,18 @@ async def create_organization(request: OrganizationCreate, current_user: Optiona
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     
+    domain = request.domain.lower().strip() if request.domain else ""
+    if domain:
+        existing = db.organizations.find_one({"domain": {"$regex": f"^{domain}$", "$options": "i"}})
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"An organization with domain '{domain}' already exists. Please contact the existing owner to be added as a co-owner."
+            )
+    
     org_doc = {
         "name": request.name,
-        "domain": request.domain,
+        "domain": domain,
         "website_url": request.website_url,
         "industry": request.industry,
         "industries": request.industries or ([request.industry] if request.industry else []),
@@ -79,7 +88,7 @@ async def create_organization(request: OrganizationCreate, current_user: Optiona
                     "description": g.get("description", ""),
                     "priority": g.get("priority", "medium"),
                     "timeline": g.get("suggested_timeline"),
-                    "department": g.get("department"),
+                    "department": g.get("department") or "Operations",
                     "organization_id": org_doc["_id"],
                     "created_by": owner_id,
                     "status": "active",

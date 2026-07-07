@@ -530,7 +530,7 @@ async def get_or_generate_default_goals(
             "description": g.get("description", ""),
             "priority": g.get("priority", "medium"),
             "timeline": g.get("suggested_timeline"),
-            "department": g.get("department") or "",
+            "department": g.get("department") or "Operations",
             "organization_id": org_id,
             "created_by": owner_id,
             "status": "active",

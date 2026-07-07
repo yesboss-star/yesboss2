@@ -23,11 +23,8 @@ import {
   X,
   Clock,
   ChevronDown,
-  Target,
   Plus,
   UserPlus,
-  Trash2,
-  Lightbulb,
   Search,
   TrendingUp,
   AlertTriangle,
@@ -152,19 +149,7 @@ type OnboardingStep =
   | "file-upload"
   | "persona-time"
   | "persona-question"
-  | "persona-more-time"
-  | "goals";
-
-interface OnboardingGoal {
-  id: string;
-  title: string;
-  description: string;
-  department: string;
-  priority: string;
-  assignee_name: string;
-  reviewer_name: string;
-  is_default?: boolean;
-}
+  | "persona-more-time";
 
 interface PersonaQuestion {
   question: string;
@@ -249,14 +234,7 @@ function OwnerOnboardingContent() {
   >([]);
   const [personaCustomAnswer, setPersonaCustomAnswer] = useState("");
   const [personaLoading, setPersonaLoading] = useState(false);
-  const [onboardingGoals, setOnboardingGoals] = useState<OnboardingGoal[]>([]);
-  const [goalInput, setGoalInput] = useState("");
-  const [goalDescription, setGoalDescription] = useState("");
-  const [aiGoalSuggestions, setAiGoalSuggestions] = useState<
-    { title: string; description: string; department: string; priority: string }[]
-  >([]);
-  const [goalsLoading, setGoalsLoading] = useState(false);
-  const [savingGoals, setSavingGoals] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [docTextInput, setDocTextInput] = useState("");
   const [docTextSubmitting, setDocTextSubmitting] = useState(false);
@@ -932,6 +910,18 @@ function OwnerOnboardingContent() {
 
     try {
       const domain = processDomain(orgData.domain);
+
+      // Check if domain is already registered before attempting creation
+      const domainCheck = await fetch(`${API_URL}/organizations/by-domain/${encodeURIComponent(domain)}`);
+      const domainData = await domainCheck.json();
+      if (domainData?.organization?._id) {
+        alert(
+          `The domain "${domain}" is already registered to another company. ` +
+          "Please contact the existing owner to be added as a co-owner, or use a different email domain."
+        );
+        return;
+      }
+
       const org = await createOrganization({
         name: orgData.name,
         domain,
@@ -953,9 +943,13 @@ function OwnerOnboardingContent() {
       });
 
       setStep("file-upload");
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to create organization:", error);
-      alert("Failed to create organization. Please try again.");
+      if (error?.message?.includes("409") || error?.status === 409 || error?.detail?.includes("already exists")) {
+        alert("This company domain is already registered. Please contact the existing owner to be added as a co-owner.");
+      } else {
+        alert("Failed to create organization. Please try again.");
+      }
     }
   };
 
@@ -1150,8 +1144,19 @@ function OwnerOnboardingContent() {
     }
   };
 
+  const completeOnboarding = () => {
+    const storedUser = localStorage.getItem("yesboss_user");
+    if (storedUser) {
+      const userData = JSON.parse(storedUser);
+      userData.organization_completed = true;
+      localStorage.setItem("yesboss_user", JSON.stringify(userData));
+      document.cookie = `yesboss_user=${JSON.stringify(userData)}; path=/; max-age=86400; SameSite=Lax`;
+    }
+    window.location.href = "/dashboard";
+  };
+
   const handlePersonaTimeNo = () => {
-    setStep("goals");
+    completeOnboarding();
   };
 
   const handlePersonaAnswer = async (answer: string) => {
@@ -1191,16 +1196,16 @@ function OwnerOnboardingContent() {
           setPersonaCustomAnswer("");
         } else {
           setCurrentQuestion(null);
-          setStep("goals");
+          completeOnboarding();
         }
       } else {
         setCurrentQuestion(null);
-        setStep("goals");
+        completeOnboarding();
       }
     } catch (error) {
       console.error("Failed to generate next question:", error);
       setCurrentQuestion(null);
-      setStep("goals");
+      completeOnboarding();
     } finally {
       setPersonaLoading(false);
     }
@@ -1232,205 +1237,19 @@ function OwnerOnboardingContent() {
       }
     } catch (error) {
       console.error("Failed to generate question:", error);
-      setStep("goals");
+      completeOnboarding();
     } finally {
       setPersonaLoading(false);
     }
   };
 
   const handlePersonaMoreTimeNo = () => {
-    setStep("goals");
-  };
-
-  const goalsFetchedRef = useRef(false);
-  const fetchGoalSuggestions = async () => {
-    setGoalsLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/goals/suggestions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          industry: orgData.industries[0] || "",
-          micro_vertical: orgData.micro_verticals[0] || "",
-          count: 6,
-        }),
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setAiGoalSuggestions(data.suggestions || []);
-      }
-    } catch (error) {
-      console.error("Failed to fetch goal suggestions:", error);
-    } finally {
-      setGoalsLoading(false);
-      goalsFetchedRef.current = true;
-    }
-  };
-
-  const fetchDefaultGoals = async () => {
-    if (!orgId) return;
-    try {
-      const response = await fetch(`${API_URL}/goals/defaults?organization_id=${orgId}`, {
-        headers: { "Content-Type": "application/json" },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        const defaults = (data.goals || []).map((g: { _id: string; title: string; description?: string; department?: string; priority?: string }) => ({
-          id: `default_${g._id}`,
-          title: g.title,
-          description: g.description || g.title,
-          department: g.department || "",
-          priority: g.priority || "medium",
-          assignee_name: "",
-          reviewer_name: "",
-          is_default: true,
-        }));
-        setOnboardingGoals((prev) => {
-          const existingTitles = new Set(prev.map((g) => g.title.toLowerCase().trim()));
-          const newDefaults = defaults.filter((d: { title: string }) => !existingTitles.has(d.title.toLowerCase().trim()));
-          return [...newDefaults, ...prev];
-        });
-      }
-    } catch (error) {
-      console.error("Failed to fetch default goals:", error);
-    }
+    completeOnboarding();
   };
 
   useEffect(() => {
-    if (step === "goals" && !goalsFetchedRef.current) {
-      goalsFetchedRef.current = true;
-      fetchDefaultGoals().catch(() => {});
-      fetchGoalSuggestions().catch(() => {});
-    }
-    if (step !== "goals") {
-      goalsFetchedRef.current = false;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step]);
-
-  const handleAddGoal = async () => {
-    const title = goalInput.trim();
-    const description = goalDescription.trim();
-    if (!title) return;
-    setGoalsLoading(true);
-    let department = "";
-    try {
-      const resp = await fetch(`${API_URL}/goals/analyze-department`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title,
-          description: description || title,
-          industry: orgData.industries[0] || "",
-        }),
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        department = data.department || "";
-      }
-    } catch {
-      department = "";
-    }
-    const newGoal: OnboardingGoal = {
-      id: `goal_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-      title,
-      description: description || title,
-      department,
-      priority: "medium",
-      assignee_name: "",
-      reviewer_name: "",
-    };
-    setOnboardingGoals((prev) => [...prev, newGoal]);
-    setGoalInput("");
-    setGoalDescription("");
-    setGoalsLoading(false);
-  };
-
-  const handleSuggestionClick = (suggestion: {
-    title: string;
-    description: string;
-    department: string;
-    priority: string;
-  }) => {
-    setOnboardingGoals((prev) => [
-      ...prev,
-      {
-        id: `goal_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-        title: suggestion.title,
-        description: suggestion.description,
-        department: suggestion.department,
-        priority: suggestion.priority,
-        assignee_name: "",
-        reviewer_name: "",
-      },
-    ]);
-  };
-
-  const handleRemoveGoal = (goalId: string) => {
-    setOnboardingGoals((prev) => prev.filter((g) => g.id !== goalId && !g.is_default));
-  };
-
-  const handleGoalFieldChange = (
-    goalId: string,
-    field: keyof OnboardingGoal,
-    value: string
-  ) => {
-    setOnboardingGoals((prev) =>
-      prev.map((g) => (g.id === goalId ? { ...g, [field]: value } : g))
-    );
-  };
-
-  const handleGoalsContinue = async () => {
-    setSavingGoals(true);
-    try {
-      const goalsToSave = onboardingGoals.filter((g) => g.title.trim() && !g.is_default);
-      for (const goal of goalsToSave) {
-        let dept = goal.department;
-        if (!dept) {
-          try {
-            const resp = await fetch(`${API_URL}/goals/analyze-department`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                title: goal.title,
-                description: goal.description,
-                industry: orgData.industries[0] || "",
-              }),
-            });
-            if (resp.ok) {
-              const data = await resp.json();
-              dept = data.department || "";
-            }
-          } catch {}
-        }
-        await fetch(`${API_URL}/goals`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: goal.title,
-            description: goal.description,
-            department: dept || undefined,
-            priority: goal.priority,
-            assignee_name: goal.assignee_name || undefined,
-            reviewer_name: goal.reviewer_name || undefined,
-            organization_id: orgId || undefined,
-          }),
-        });
-      }
-    } catch (error) {
-      console.error("Failed to save goals:", error);
-    } finally {
-      setSavingGoals(false);
-      const storedUser = localStorage.getItem("yesboss_user");
-      if (storedUser) {
-        const userData = JSON.parse(storedUser);
-        userData.organization_completed = true;
-        localStorage.setItem("yesboss_user", JSON.stringify(userData));
-        document.cookie = `yesboss_user=${JSON.stringify(userData)}; path=/; max-age=86400; SameSite=Lax`;
-      }
-      window.location.href = "/dashboard";
-    }
-  };
+    // Goals step removed — default goals are auto-generated by the backend on org creation
+  }, []);
 
   const removeFile = (index: number) => {
     setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
@@ -1442,7 +1261,6 @@ function OwnerOnboardingContent() {
     { id: "persona-time", label: "Persona", icon: Users },
     { id: "persona-question", label: "Persona", icon: Users },
     { id: "persona-more-time", label: "Persona", icon: Users },
-    { id: "goals", label: "Goals", icon: Target },
   ];
 
   const personaSteps = ["persona-time", "persona-question", "persona-more-time"];
@@ -2386,304 +2204,7 @@ function OwnerOnboardingContent() {
           </div>
         )}
 
-        {/* STEP 7: GOALS */}
-        {step === "goals" && (
-          <div className="max-w-2xl mx-auto">
-            <div className="text-center mb-8">
-              <div className="w-20 h-20 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-6">
-                <Target className="w-10 h-10 text-primary" />
-              </div>
-              <h1 className="text-3xl font-bold mb-2">
-                Set your <span className="gradient-text">goals</span>
-              </h1>
-              <p className="text-text-muted">
-                Define the key goals for your organization. We&apos;ll automatically suggest
-                relevant goals based on your industry and assign them to the right departments.
-              </p>
-            </div>
-
-            {/* Add Goal Form */}
-            <div className="glass rounded-xl p-5 mb-6">
-              <div className="flex flex-col gap-3">
-                <input
-                  type="text"
-                  value={goalInput}
-                  onChange={(e) => setGoalInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleAddGoal();
-                  }}
-                  placeholder="Enter a goal (e.g., Increase customer retention by 20%)"
-                  className="w-full px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
-                />
-                <div className="flex gap-3 items-center">
-                  <input
-                    type="text"
-                    value={goalDescription}
-                    onChange={(e) => setGoalDescription(e.target.value)}
-                    placeholder="Add description (optional)"
-                    className="flex-1 px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
-                  />
-                  <button
-                    onClick={handleAddGoal}
-                    disabled={!goalInput.trim()}
-                    className="px-6 py-3 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-                  >
-                    <Plus className="w-5 h-5" />
-                    Add
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* AI Suggestions */}
-            <div className="mb-6">
-              <div className="flex items-center gap-2 mb-3">
-                <Lightbulb className="w-5 h-5 text-amber-400" />
-                <h2 className="font-semibold">AI Suggestions</h2>
-                {!goalsLoading && (
-                  <button
-                    onClick={fetchGoalSuggestions}
-                    className="p-1.5 rounded-lg hover:bg-primary/10 text-primary transition-all cursor-pointer ml-auto"
-                    title="Refresh suggestions"
-                  >
-                    <svg
-                      className="w-4 h-4"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <polyline points="23 4 23 10 17 10" />
-                      <polyline points="1 20 1 14 7 14" />
-                      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-                    </svg>
-                  </button>
-                )}
-              </div>
-              {goalsLoading && (
-                <div className="flex items-center gap-2 text-text-muted py-3">
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  <span className="text-sm">Generating goal suggestions...</span>
-                </div>
-              )}
-              {!goalsLoading && aiGoalSuggestions.length > 0 && (
-                <div className="grid grid-cols-1 gap-2">
-                  {aiGoalSuggestions.map((suggestion, i) => {
-                    const alreadyAdded = onboardingGoals.some(
-                      (g) => g.title === suggestion.title
-                    );
-                    return (
-                      <button
-                        key={i}
-                        onClick={() => !alreadyAdded && handleSuggestionClick(suggestion)}
-                        disabled={alreadyAdded}
-                        className={`w-full text-left p-4 rounded-xl border transition-all cursor-pointer ${
-                          alreadyAdded
-                            ? "border-emerald-500/30 bg-emerald-500/5 opacity-60"
-                            : "glass hover:bg-primary/10 hover:border-primary border-border"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium text-sm">{suggestion.title}</div>
-                            <div className="text-xs text-text-muted mt-0.5">
-                              {suggestion.description}
-                            </div>
-                            <div className="flex items-center gap-2 mt-1.5">
-                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/15 text-primary font-medium">
-                                {suggestion.department}
-                              </span>
-                              <span
-                                className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
-                                  suggestion.priority === "high"
-                                    ? "bg-red-500/15 text-red-400"
-                                    : suggestion.priority === "medium"
-                                    ? "bg-amber-500/15 text-amber-400"
-                                    : "bg-blue-500/15 text-blue-400"
-                                }`}
-                              >
-                                {suggestion.priority}
-                              </span>
-                            </div>
-                          </div>
-                          {alreadyAdded ? (
-                            <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
-                          ) : (
-                            <Plus className="w-5 h-5 text-primary shrink-0" />
-                          )}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Added Goals */}
-            {onboardingGoals.length > 0 && (
-              <div className="space-y-3 mb-6">
-                <h2 className="font-semibold">Your Goals ({onboardingGoals.length})</h2>
-                {onboardingGoals.map((goal) => (
-                  <div
-                    key={goal.id}
-                    className="glass rounded-xl p-4 border border-border"
-                  >
-                    <div className="flex items-start justify-between gap-3 mb-3">
-                      <div className="flex-1 min-w-0">
-                        <input
-                          type="text"
-                          value={goal.title}
-                          onChange={(e) =>
-                            handleGoalFieldChange(goal.id, "title", e.target.value)
-                          }
-                          className="w-full bg-transparent font-medium text-sm border-b border-transparent hover:border-border focus:border-primary focus:outline-none transition-colors"
-                        />
-                        <input
-                          type="text"
-                          value={goal.description}
-                          onChange={(e) =>
-                            handleGoalFieldChange(goal.id, "description", e.target.value)
-                          }
-                          placeholder="Add description..."
-                          className="w-full bg-transparent text-xs text-text-muted mt-1 border-b border-transparent hover:border-border focus:border-primary focus:outline-none transition-colors"
-                        />
-                      </div>
-                      {goal.is_default ? (
-                        <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-purple-500/10 text-purple-400 border border-purple-500/20 text-xs shrink-0">
-                          <Sparkles className="w-3 h-3" />
-                          Default
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => handleRemoveGoal(goal.id)}
-                          className="p-1.5 rounded-lg hover:bg-red-500/10 text-text-muted hover:text-red-400 transition-all cursor-pointer shrink-0"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
-                      <div>
-                        <label className="text-[10px] uppercase tracking-wider text-text-muted font-medium">
-                          Department
-                        </label>
-                        <select
-                          value={goal.department}
-                          onChange={(e) =>
-                            handleGoalFieldChange(goal.id, "department", e.target.value)
-                          }
-                          className="w-full mt-1 px-2 py-1.5 rounded-lg bg-surface border border-border text-xs focus:border-primary focus:outline-none transition-colors cursor-pointer"
-                        >
-                          <option value="">Auto-assign</option>
-                          <option value="Engineering">Engineering</option>
-                          <option value="Marketing">Marketing</option>
-                          <option value="Sales">Sales</option>
-                          <option value="Operations">Operations</option>
-                          <option value="Finance">Finance</option>
-                          <option value="Human Resources">Human Resources</option>
-                          <option value="Product">Product</option>
-                          <option value="Design">Design</option>
-                          <option value="Customer Support">Customer Support</option>
-                          <option value="R&D">R&D</option>
-                          <option value="Supply Chain">Supply Chain</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-[10px] uppercase tracking-wider text-text-muted font-medium">
-                          Priority
-                        </label>
-                        <select
-                          value={goal.priority}
-                          onChange={(e) =>
-                            handleGoalFieldChange(goal.id, "priority", e.target.value)
-                          }
-                          className="w-full mt-1 px-2 py-1.5 rounded-lg bg-surface border border-border text-xs focus:border-primary focus:outline-none transition-colors cursor-pointer"
-                        >
-                          <option value="low">Low</option>
-                          <option value="medium">Medium</option>
-                          <option value="high">High</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-[10px] uppercase tracking-wider text-text-muted font-medium">
-                          Assignee
-                        </label>
-                        <div className="relative mt-1">
-                          <UserPlus className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-text-muted" />
-                          <input
-                            type="text"
-                            value={goal.assignee_name}
-                            onChange={(e) =>
-                              handleGoalFieldChange(goal.id, "assignee_name", e.target.value)
-                            }
-                            placeholder="Add person..."
-                            className="w-full pl-7 pr-2 py-1.5 rounded-lg bg-surface border border-border text-xs focus:border-primary focus:outline-none"
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="text-[10px] uppercase tracking-wider text-text-muted font-medium">
-                          Reviewer
-                        </label>
-                        <div className="relative mt-1">
-                          <UserPlus className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-text-muted" />
-                          <input
-                            type="text"
-                            value={goal.reviewer_name}
-                            onChange={(e) =>
-                              handleGoalFieldChange(goal.id, "reviewer_name", e.target.value)
-                            }
-                            placeholder="Add person..."
-                            className="w-full pl-7 pr-2 py-1.5 rounded-lg bg-surface border border-border text-xs focus:border-primary focus:outline-none"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {onboardingGoals.length === 0 && aiGoalSuggestions.length === 0 && !goalsLoading && (
-              <div className="text-center py-8">
-                <p className="text-text-muted text-sm mb-3">
-                  Add your own goals above or load AI suggestions based on your industry.
-                </p>
-              </div>
-            )}
-
-            <div className="flex gap-3">
-              <button
-                onClick={() =>
-                  setStep(
-                    personaAnswers.length > 0 ? "persona-more-time" : "persona-time"
-                  )
-                }
-                className="flex-1 py-4 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer flex items-center justify-center gap-2"
-              >
-                <ArrowLeft className="w-5 h-5" />
-                Back
-              </button>
-              <button
-                onClick={handleGoalsContinue}
-                disabled={savingGoals}
-                className="flex-1 py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                {savingGoals ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <>
-                    Continue
-                    <ArrowRight className="w-5 h-5" />
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        )}
+      {/* STEP 7: GOALS — removed; default goals auto-generated by backend on org creation */}
         </>)}
       </div>
 

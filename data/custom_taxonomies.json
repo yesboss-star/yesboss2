@@ -68,9 +68,9 @@
     },
     {
       "value": "IT Services & Consulting",
-      "uses": 3,
+      "uses": 5,
       "created_at": 1780634625,
-      "last_used": 1781948208
+      "last_used": 1783405295
     },
     {
       "value": "Computer and Related Activities",
@@ -153,9 +153,9 @@
     },
     {
       "value": "Zoho Partner Services",
-      "uses": 2,
+      "uses": 4,
       "created_at": 1780399284,
-      "last_used": 1780466408,
+      "last_used": 1783405373,
       "industry": "Enterprise Software Solutions"
     },
     {
@@ -167,16 +167,16 @@
     },
     {
       "value": "Zoho CRM Solutions",
-      "uses": 1,
+      "uses": 2,
       "created_at": 1780399290,
-      "last_used": 1780399290,
+      "last_used": 1783405381,
       "industry": "Enterprise Software Solutions"
     },
     {
       "value": "Zoho ERP Integration",
-      "uses": 1,
+      "uses": 3,
       "created_at": 1780399294,
-      "last_used": 1780399294,
+      "last_used": 1783405347,
       "industry": "Enterprise Software Solutions"
     },
     {
@@ -202,9 +202,9 @@
     },
     {
       "value": "Zoho Marketing Automation",
-      "uses": 1,
+      "uses": 2,
       "created_at": 1780399302,
-      "last_used": 1780399302,
+      "last_used": 1783403650,
       "industry": "Enterprise Software Solutions"
     },
     {
@@ -230,9 +230,9 @@
     },
     {
       "value": "Enterprise Software Implementation",
-      "uses": 3,
+      "uses": 4,
       "created_at": 1780635953,
-      "last_used": 1781948266,
+      "last_used": 1783403569,
       "industry": "IT Services & Consulting"
     },
     {
@@ -272,9 +272,9 @@
     },
     {
       "value": "Enterprise IT Consulting",
-      "uses": 2,
+      "uses": 3,
       "created_at": 1780636245,
-      "last_used": 1781948291,
+      "last_used": 1783403562,
       "industry": "IT Services & Consulting"
     },
     {
@@ -293,9 +293,9 @@
     },
     {
       "value": "ERP Implementation",
-      "uses": 1,
+      "uses": 2,
       "created_at": 1781937383,
-      "last_used": 1781937383,
+      "last_used": 1783403581,
       "industry": "IT Services & Consulting"
     },
     {
@@ -318,6 +318,34 @@
       "created_at": 1783158390,
       "last_used": 1783158390,
       "industry": "Live Streaming & Broadcasting"
+    },
+    {
+      "value": "CRM Implementation",
+      "uses": 1,
+      "created_at": 1783403610,
+      "last_used": 1783403610,
+      "industry": "IT Services & Consulting"
+    },
+    {
+      "value": "CRM Consulting",
+      "uses": 1,
+      "created_at": 1783403643,
+      "last_used": 1783403643,
+      "industry": "IT Services & Consulting"
+    },
+    {
+      "value": "IT Services",
+      "uses": 1,
+      "created_at": 1783405328,
+      "last_used": 1783405328,
+      "industry": "IT Services & Consulting"
+    },
+    {
+      "value": "IT Consulting",
+      "uses": 1,
+      "created_at": 1783405333,
+      "last_used": 1783405333,
+      "industry": "IT Services & Consulting"
     }
   ],
   "company_names": []
