@@ -4,11 +4,25 @@ import uuid
 from contextlib import asynccontextmanager
 from collections import defaultdict
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 import time
+
+
+class AdminDocsMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path in ("/api/docs", "/api/redoc", "/api/openapi.json"):
+            if settings.ENVIRONMENT == "production":
+                return JSONResponse(status_code=404, content={"detail": "Not found"})
+            admin_key = request.headers.get("X-Admin-Key")
+            if not admin_key or admin_key != settings.ADMIN_API_KEY:
+                return JSONResponse(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    content={"error": True, "detail": "Admin access required. Provide X-Admin-Key header."},
+                )
+        return await call_next(request)
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -19,8 +33,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.requests: dict = defaultdict(list)
 
     async def dispatch(self, request: Request, call_next):
-        # Skip static/health
-        if request.url.path in ("/", "/api/docs", "/api/redoc", "/api/openapi.json") or request.url.path.startswith("/api/v1/health"):
+        if request.url.path.startswith("/api/v1/health"):
             return await call_next(request)
 
         key = request.client.host if request.client else "unknown"
@@ -50,7 +63,41 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; object-src 'none'; frame-ancestors 'none'"
         return response
+
+
+class CSRFMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            origin = request.headers.get("Origin", "")
+            referer = request.headers.get("Referer", "")
+
+            cors_origins_str = getattr(settings, "CORS_ORIGINS", "")
+            allowed = []
+            if cors_origins_str:
+                allowed = [o.strip() for o in cors_origins_str.split(",") if o.strip()]
+
+            if allowed and allowed != ["*"]:
+                is_valid = False
+                for allowed_origin in allowed:
+                    if origin and origin.rstrip("/") == allowed_origin.rstrip("/"):
+                        is_valid = True
+                        break
+                    if referer and referer.startswith(allowed_origin.rstrip("/")):
+                        is_valid = True
+                        break
+                if not is_valid and not origin and not referer:
+                    is_valid = True
+
+                if not is_valid:
+                    logger.warning("CSRF check failed: method=%s path=%s origin=%s referer=%s", request.method, request.url.path, origin, referer)
+                    return JSONResponse(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        content={"error": True, "detail": "CSRF check failed. Invalid Origin or Referer."},
+                    )
+
+        return await call_next(request)
 
 from .api.health import router as health_router
 from .api.auth import router as auth_router
@@ -100,7 +147,7 @@ async def lifespan(app: FastAPI):
     connect_mongodb()
     connect_qdrant()
     connect_supabase()
-    
+
     from .core.qdrant import create_collection
     create_collection("documents", 1536)
     create_collection("conversations", 1536)
@@ -149,14 +196,20 @@ if sentry_dsn:
         logger.info("sentry-sdk not installed, skipping Sentry")
 
 app.add_middleware(RequestIDMiddleware)
+app.add_middleware(AdminDocsMiddleware)
+app.add_middleware(CSRFMiddleware)
 app.add_middleware(RateLimitMiddleware, max_requests=60, window_seconds=60)
 app.add_middleware(SecurityHeadersMiddleware)
 
-allowed_origins = getattr(settings, "CORS_ORIGINS", "*").split(",")
+cors_origins_str = getattr(settings, "CORS_ORIGINS", "")
+if cors_origins_str:
+    allowed_origins = [o.strip() for o in cors_origins_str.split(",") if o.strip()]
+else:
+    allowed_origins = ["*"] if settings.DEBUG else []
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins if allowed_origins != ["*"] else ["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],

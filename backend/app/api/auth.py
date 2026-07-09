@@ -5,6 +5,7 @@ from typing import Optional
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
 
 from ..core.firebase_admin import (
@@ -30,6 +31,21 @@ except Exception as e:
 logger = logging.getLogger("yesboss.auth")
 
 router = APIRouter()
+
+
+def _audit_log(action: str, uid: str, detail: Optional[str] = None):
+    try:
+        db = get_database()
+        if db is not None:
+            db.audit_log.insert_one({
+                "action": action,
+                "uid": uid,
+                "detail": detail,
+                "ip": None,
+                "timestamp": datetime.utcnow().isoformat(),
+            })
+    except Exception as e:
+        logger.warning("Audit log write failed: %s", str(e))
 
 
 class SignupRequest(BaseModel):
@@ -160,6 +176,7 @@ async def signup(request: SignupRequest):
                 "organization_completed": False,
             })
 
+        _audit_log("user.signup", user.uid, f"email={request.email} role={request.role}")
         logger.info("User signed up: %s (role=%s)", request.email, request.role)
 
         try:
@@ -208,6 +225,7 @@ async def login(request: LoginRequest):
         if db is not None:
             db_user = db.users.find_one({"uid": user.uid})
 
+        _audit_log("user.login", user.uid, f"email={request.email}")
         logger.info("User logged in: %s", request.email)
 
         return AuthResponse(
@@ -385,6 +403,76 @@ async def get_me(current_user = Depends(get_current_user)):
         )
 
 
+class SetSessionRequest(BaseModel):
+    id_token: str
+
+
+@router.post("/set-session")
+async def set_session(request: SetSessionRequest):
+    from ..core.firebase_admin import verify_id_token
+    from ..core.database import get_database
+
+    user = verify_id_token(request.id_token)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
+
+    _audit_log("session.create", user.uid, f"email={getattr(user, 'email', '')}")
+    claims = getattr(user, "custom_claims", {}) or {}
+    role = claims.get("role", "employee")
+
+    db = get_database()
+    db_user = None
+    if db is not None:
+        db_user = db.users.find_one({"uid": user.uid})
+
+    full_name = getattr(user, "display_name", "")
+    email = getattr(user, "email", "")
+    org_id = db_user.get("organization_id") if db_user else None
+    org_completed = db_user.get("organization_completed", False) if db_user else False
+
+    user_data = {
+        "uid": user.uid,
+        "email": email,
+        "full_name": full_name,
+        "role": role,
+        "organization_id": org_id,
+        "organization_completed": org_completed,
+    }
+
+    response = JSONResponse(content={
+        "success": True,
+        "message": "Session established",
+        "user": user_data,
+    })
+
+    response.set_cookie(
+        key="yesboss_token",
+        value=request.id_token,
+        httponly=True,
+        secure=True,
+        samesite="strict",
+        max_age=604800,
+        path="/",
+    )
+
+    return response
+
+
+class ClearSessionRequest(BaseModel):
+    uid: Optional[str] = None
+
+
+@router.post("/clear-session")
+async def clear_session():
+    response = JSONResponse(content={"success": True, "message": "Session cleared"})
+    response.delete_cookie(key="yesboss_token", path="/")
+    response.delete_cookie(key="yesboss_user", path="/")
+    return response
+
+
 @router.post("/logout", response_model=AuthResponse)
 async def logout(uid: str = None):
     try:
@@ -534,6 +622,7 @@ async def update_user_role(uid: str, role: str):
         if db is not None:
             db.users.update_one({"uid": uid}, {"$set": {"role": role}})
 
+        _audit_log("user.role_update", uid, f"new_role={role}")
         logger.info("User %s role updated to: %s", uid, role)
 
         return AuthResponse(
@@ -568,6 +657,7 @@ async def delete_firebase_user(email: str):
             db.users.delete_one({"uid": uid})
             db.organizations.delete_many({"owner_id": uid})
 
+        _audit_log("user.delete", uid, f"email={email}")
         logger.info("User deleted from Firebase and MongoDB: %s (%s)", email, uid)
 
         return AuthResponse(

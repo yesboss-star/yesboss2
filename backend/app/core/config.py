@@ -43,7 +43,7 @@ class Settings:
 
     REDIS_URL: str = os.getenv("REDIS_URL", "")
 
-    CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "*")
+    CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "")
 
     SMTP_HOST: str = os.getenv("SMTP_HOST", "")
     SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
@@ -73,6 +73,8 @@ class Settings:
     FIREBASE_CREDENTIALS_JSON: str = os.getenv("FIREBASE_CREDENTIALS_JSON", "")
 
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development").lower()
+    ADMIN_API_KEY: str = os.getenv("ADMIN_API_KEY", "")
 
     def validate(self):
         required = {

@@ -1,3 +1,6 @@
+from app.core.config import settings
+
+
 def test_health_endpoint(client):
     response = client.get("/api/v1/health")
     assert response.status_code in (200, 404)
@@ -11,11 +14,17 @@ def test_root_endpoint(client):
     assert data["status"] == "running"
 
 
-def test_docs_endpoint(client):
+def test_docs_endpoint_requires_admin_key(client):
     response = client.get("/api/docs")
+    assert response.status_code == 403
+
+    response = client.get("/api/docs", headers={"X-Admin-Key": settings.ADMIN_API_KEY or "test-key"})
     assert response.status_code in (200, 307)
 
 
-def test_openapi_schema(client):
+def test_openapi_schema_requires_admin_key(client):
     response = client.get("/api/openapi.json")
+    assert response.status_code == 403
+
+    response = client.get("/api/openapi.json", headers={"X-Admin-Key": settings.ADMIN_API_KEY or "test-key"})
     assert response.status_code in (200, 307)

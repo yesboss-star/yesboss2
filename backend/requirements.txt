@@ -37,3 +37,6 @@ google-generativeai
 reportlab
 sentry-sdk
 pywebpush
+ruff
+mypy
+pytest-cov
