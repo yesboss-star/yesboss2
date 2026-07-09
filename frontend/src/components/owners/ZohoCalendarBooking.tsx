@@ -8,17 +8,10 @@ import { useZohoStore } from "@/stores/zohoStore";
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
 function authHeaders(): Record<string, string> {
-  try {
-    const stored = localStorage.getItem("yesboss_user");
-    if (stored) {
-      const user = JSON.parse(stored);
-      const h: Record<string, string> = {};
-      if (user.uid) h["X-User-Id"] = user.uid;
-      if (user.email) h["X-User-Email"] = user.email;
-      return h;
-    }
-  } catch {}
-  return {};
+  const token = localStorage.getItem("yesboss_id_token");
+  const h: Record<string, string> = {};
+  if (token) h["Authorization"] = `Bearer ${token}`;
+  return h;
 }
 
 interface UserSuggestion {

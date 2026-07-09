@@ -51,10 +51,49 @@ def get_firebase_auth() -> firebase_admin.auth:
     return auth
 
 
-def verify_id_token(id_token: str) -> Optional[auth.UserRecord]:
+class AuthUser:
+    """Wrapper around Firebase UserRecord that provides both .uid and .id access.
+    
+    The codebase uses current_user.id in many places. Firebase UserRecord has .uid but not .id,
+    so this wrapper adds .id as an alias for .uid and keeps all other UserRecord attributes.
+    """
+    def __init__(self, record: auth.UserRecord):
+        self._record = record
+        self.uid = record.uid
+        self.id = record.uid  # Backward compatibility for current_user.id
+        self.email = record.email
+        self.display_name = record.display_name
+        self.phone_number = record.phone_number
+        self.photo_url = record.photo_url
+        self.disabled = record.disabled
+        self.email_verified = record.email_verified
+        self.provider_data = record.provider_data
+        self.custom_claims = record.custom_claims or {}
+        self.tokens_valid_after_timestamp = record.tokens_valid_after_timestamp
+        self.tenant_id = record.tenant_id
+        # user_metadata is a UserMetadata object; wrap as dict so .get('organization_id') works
+        um = record.user_metadata
+        self.user_metadata = {
+            "creation_timestamp": um.creation_timestamp,
+            "last_sign_in_timestamp": um.last_sign_in_timestamp,
+        } if um else {}
+
+    def __getattr__(self, name):
+        """Fall back to the underlying record for any attributes we don't explicitly define."""
+        return getattr(self._record, name)
+
+    def __str__(self):
+        return self.uid
+
+    def __repr__(self):
+        return f"AuthUser(uid={self.uid!r}, email={self.email!r})"
+
+
+def verify_id_token(id_token: str) -> Optional[AuthUser]:
     try:
         decoded = auth.verify_id_token(id_token, app=_firebase_app)
-        return auth.get_user(decoded["uid"], app=_firebase_app)
+        record = auth.get_user(decoded["uid"], app=_firebase_app)
+        return AuthUser(record) if record else None
     except Exception as e:
         logger.warning("Token verification failed: %s", str(e))
         return None

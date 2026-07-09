@@ -16,11 +16,11 @@ class AdminDocsMiddleware(BaseHTTPMiddleware):
         if request.url.path in ("/api/docs", "/api/redoc", "/api/openapi.json"):
             if settings.ENVIRONMENT == "production":
                 return JSONResponse(status_code=404, content={"detail": "Not found"})
-            admin_key = request.headers.get("X-Admin-Key")
+            admin_key = request.headers.get("X-Admin-Key") or request.query_params.get("admin_key")
             if not admin_key or admin_key != settings.ADMIN_API_KEY:
                 return JSONResponse(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    content={"error": True, "detail": "Admin access required. Provide X-Admin-Key header."},
+                    content={"error": True, "detail": "Admin access required. Provide X-Admin-Key header or ?admin_key= param."},
                 )
         return await call_next(request)
 

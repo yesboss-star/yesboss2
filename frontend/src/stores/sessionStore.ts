@@ -5,14 +5,8 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1
 
 function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  try {
-    const raw = localStorage.getItem("yesboss_user");
-    if (raw) {
-      const user = JSON.parse(raw);
-      if (user.uid) headers["X-User-ID"] = user.uid;
-      if (user.email) headers["X-User-Email"] = user.email;
-    }
-  } catch {}
+  const token = localStorage.getItem("yesboss_id_token");
+  if (token) headers["Authorization"] = `Bearer ${token}`;
   return headers;
 }
 

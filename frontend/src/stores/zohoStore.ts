@@ -17,17 +17,10 @@ interface ZohoState {
 }
 
 function getAuthHeaders(): Record<string, string> {
-  try {
-    const stored = localStorage.getItem("yesboss_user");
-    if (stored) {
-      const user = JSON.parse(stored);
-      const headers: Record<string, string> = {};
-      if (user.uid) headers["X-User-Id"] = user.uid;
-      if (user.email) headers["X-User-Email"] = user.email;
-      return headers;
-    }
-  } catch {}
-  return {};
+  const token = localStorage.getItem("yesboss_id_token");
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return headers;
 }
 
 export const useZohoStore = create<ZohoState>()((set, get) => ({

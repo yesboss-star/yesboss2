@@ -1,5 +1,5 @@
 import logging
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
 
@@ -9,17 +9,33 @@ logger = logging.getLogger("yesboss.auth")
 security = HTTPBearer(auto_error=False)
 
 
+def _verify_token(token: str):
+    """Verify a Firebase ID token and return the user dict, or None."""
+    try:
+        return verify_id_token(token)
+    except Exception as e:
+        logger.warning("Token verification failed: %s", e)
+        return None
+
+
 async def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    request: Request = None,
 ):
-    if not credentials:
+    token = None
+    if credentials:
+        token = credentials.credentials
+    if not token and request:
+        token = request.cookies.get("yesboss_token")
+
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    user = verify_id_token(credentials.credentials)
+    user = _verify_token(token)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -32,9 +48,16 @@ async def get_current_user(
 
 async def get_current_user_optional(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    request: Request = None,
 ):
+    token = None
     if credentials:
-        user = verify_id_token(credentials.credentials)
+        token = credentials.credentials
+    if not token and request:
+        token = request.cookies.get("yesboss_token")
+
+    if token:
+        user = _verify_token(token)
         if user:
             return user
 

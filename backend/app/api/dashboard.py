@@ -353,6 +353,9 @@ async def get_dashboard_kpi(
         member = db.org_chart_members.find_one({"organization_id": org_id, "email": user_email})
         emp_dept = member.get("department", "") if member else ""
         dept_members = db.org_chart_members.count_documents({"organization_id": org_id, "department": emp_dept}) if emp_dept else 0
+        total_members = db.org_chart_members.count_documents({"organization_id": org_id})
+        departments = db.org_chart_members.distinct("department", {"organization_id": org_id})
+        dept_count = len(departments)
     else:
         total_goals = db.goals.count_documents({"organization_id": org_id})
         active_goals = db.goals.count_documents({"organization_id": org_id, "status": "active"})

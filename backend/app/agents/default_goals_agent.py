@@ -106,8 +106,8 @@ async def generate_default_goals(
         logger.info(f"Generated {len(goals)} default goals for {industry}/{micro_vertical}")
         return goals
 
-    except (json.JSONDecodeError, ValueError) as e:
-        logger.error(f"Failed to parse AI response: {e}")
+    except Exception as e:
+        logger.error(f"AI goal generation failed: {e}. Using fallback templates.")
         return _fallback_goals(industry, micro_vertical, count)
 
 

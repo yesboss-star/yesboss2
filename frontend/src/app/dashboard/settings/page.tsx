@@ -14,12 +14,10 @@ import { useOrganizationStore } from "@/stores/organizationStore";
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
 function getAuthHeaders(): Record<string, string> {
-  const stored = localStorage.getItem("yesboss_user");
-  if (!stored) return {};
-  try {
-    const user = JSON.parse(stored);
-    return { "X-User-ID": user?.uid || "", "X-User-Email": user?.email || "" };
-  } catch { return {}; }
+  const token = localStorage.getItem("yesboss_id_token");
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return headers;
 }
 
 const NOTIF_TYPES = [

@@ -193,7 +193,17 @@ export default function DashboardPage() {
     );
   }
 
-  if (!user) return null;
+  if (!user) {
+    router.push("/login");
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-6 h-6 text-primary animate-spin" />
+          <p className="text-text-muted text-sm">Redirecting to login...</p>
+        </div>
+      </div>
+    );
+  }
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {

@@ -68,9 +68,9 @@
     },
     {
       "value": "IT Services & Consulting",
-      "uses": 6,
+      "uses": 7,
       "created_at": 1780634625,
-      "last_used": 1783419711
+      "last_used": 1783574624
     },
     {
       "value": "Computer and Related Activities",
@@ -119,6 +119,12 @@
       "uses": 1,
       "created_at": 1783419720,
       "last_used": 1783419720
+    },
+    {
+      "value": "Zoho Implementation Services",
+      "uses": 1,
+      "created_at": 1783574656,
+      "last_used": 1783574656
     }
   ],
   "micro_verticals": [
@@ -159,9 +165,9 @@
     },
     {
       "value": "Zoho Partner Services",
-      "uses": 4,
+      "uses": 5,
       "created_at": 1780399284,
-      "last_used": 1783405373,
+      "last_used": 1783574684,
       "industry": "Enterprise Software Solutions"
     },
     {
@@ -173,9 +179,9 @@
     },
     {
       "value": "Zoho CRM Solutions",
-      "uses": 2,
+      "uses": 3,
       "created_at": 1780399290,
-      "last_used": 1783405381,
+      "last_used": 1783574680,
       "industry": "Enterprise Software Solutions"
     },
     {
@@ -194,9 +200,9 @@
     },
     {
       "value": "Zoho Books Accounting",
-      "uses": 1,
+      "uses": 2,
       "created_at": 1780399299,
-      "last_used": 1780399299,
+      "last_used": 1783574689,
       "industry": "Enterprise Software Solutions"
     },
     {
@@ -365,6 +371,34 @@
       "uses": 1,
       "created_at": 1783419753,
       "last_used": 1783419753,
+      "industry": "IT Services & Consulting"
+    },
+    {
+      "value": "Tally Software Implementation",
+      "uses": 1,
+      "created_at": 1783574700,
+      "last_used": 1783574700,
+      "industry": "IT Services & Consulting"
+    },
+    {
+      "value": "Tally ERP Consulting",
+      "uses": 1,
+      "created_at": 1783574706,
+      "last_used": 1783574706,
+      "industry": "IT Services & Consulting"
+    },
+    {
+      "value": "Epicor ERP Implementation",
+      "uses": 1,
+      "created_at": 1783574730,
+      "last_used": 1783574730,
+      "industry": "IT Services & Consulting"
+    },
+    {
+      "value": "Epicor Consulting Services",
+      "uses": 1,
+      "created_at": 1783574733,
+      "last_used": 1783574733,
       "industry": "IT Services & Consulting"
     }
   ],

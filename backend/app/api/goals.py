@@ -369,6 +369,43 @@ async def list_goals(
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
     
+    # Auto-seed 5 default goals if none exist for this organization
+    total_goals = db.goals.count_documents({"organization_id": org_id})
+    if total_goals == 0:
+        try:
+            org = db.organizations.find_one({"_id": ObjectId(org_id)}) if ObjectId.is_valid(org_id) else None
+            if org:
+                from ..agents.default_goals_agent import generate_default_goals as _gen
+                industry = org.get("industry") or "General"
+                micro_vertical = org.get("micro_vertical") or ""
+                owner_id = org.get("owner_id") or (getattr(current_user, 'id', None) if current_user else None)
+                ai_goals = await _gen(industry, micro_vertical, count=5)
+                if ai_goals:
+                    now = datetime.utcnow()
+                    goal_docs = []
+                    for g in ai_goals:
+                        goal_docs.append({
+                            "title": g["title"],
+                            "description": g.get("description", ""),
+                            "priority": g.get("priority", "medium"),
+                            "timeline": g.get("suggested_timeline"),
+                            "department": g.get("department") or "Operations",
+                            "organization_id": org_id,
+                            "created_by": owner_id,
+                            "status": "active",
+                            "goal_type": g.get("goal_type", "short_term"),
+                            "duration": g.get("duration", "one_time"),
+                            "is_default": True,
+                            "industry": industry,
+                            "micro_vertical": micro_vertical,
+                            "created_at": now,
+                            "updated_at": now,
+                        })
+                    db.goals.insert_many(goal_docs)
+                    logging.getLogger("yesboss.goals").info("Auto-seeded %d default goals for org %s", len(goal_docs), org_id)
+        except Exception as e:
+            logging.getLogger("yesboss.goals").warning("Failed to auto-seed default goals for org %s: %s", org_id, e)
+    
     query = {"organization_id": org_id}
     if department:
         query["department"] = department
@@ -384,14 +421,6 @@ async def list_goals(
         query["parent_goal_id"] = parent_goal_id
     if is_default is not None:
         query["is_default"] = is_default
-    
-    if current_user and getattr(current_user, 'id', None):
-        user_email = (getattr(current_user, 'email', '') or '').lower().strip()
-        query["$or"] = [
-            {"created_by": current_user.id},
-        ]
-        if user_email:
-            query["$or"].append({"assignee_email": user_email})
     
     goals = list(db.goals.find(query).sort("created_at", -1))
 

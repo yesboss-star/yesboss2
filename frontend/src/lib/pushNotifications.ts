@@ -2,17 +2,9 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1
 
 function getAuthHeaders(): Record<string, string> {
   if (typeof window === "undefined") return {};
-  const stored = localStorage.getItem("yesboss_user");
-  if (!stored) return {};
-  try {
-    const user = JSON.parse(stored);
-    return {
-      "X-User-ID": user?.uid || "",
-      "X-User-Email": user?.email || "",
-    };
-  } catch {
-    return {};
-  }
+  const token = localStorage.getItem("yesboss_id_token");
+  if (!token) return {};
+  return { "Authorization": `Bearer ${token}` };
 }
 
 export async function registerPushNotifications(): Promise<boolean> {

@@ -77,12 +77,12 @@ export const useOrganizationStore = create<OrganizationState>()(
           const storedUser = localStorage.getItem("yesboss_user");
           const user = storedUser ? JSON.parse(storedUser) : {};
           
+          const token = localStorage.getItem("yesboss_id_token");
           const response = await fetch(`${API_URL}/organizations`, {
             method: "POST",
             headers: { 
               "Content-Type": "application/json",
-              "X-User-ID": user?.uid || "",
-              "X-User-Email": user?.email || "",
+              ...(token ? { "Authorization": `Bearer ${token}` } : {}),
             },
             body: JSON.stringify({ ...data, owner_id: user?.uid }),
           });

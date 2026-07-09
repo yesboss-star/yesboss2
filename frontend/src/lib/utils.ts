@@ -7,11 +7,12 @@ export function cn(...inputs: ClassValue[]) {
 
 export function getAuthHeaders(): Record<string, string> {
   if (typeof window === "undefined") return {};
-  const storedUser = localStorage.getItem("yesboss_user");
-  const user = storedUser ? JSON.parse(storedUser) : {};
-  return {
+  const token = localStorage.getItem("yesboss_id_token");
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    "X-User-ID": user?.uid || "",
-    "X-User-Email": user?.email || "",
   };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  return headers;
 }

@@ -28,6 +28,7 @@ async function establishSession(idToken: string) {
     const res = await fetch(`${API_URL}/auth/set-session`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify({ id_token: idToken }),
     });
     const data = await res.json();
@@ -42,6 +43,7 @@ async function clearSession() {
   try {
     await fetch(`${API_URL}/auth/clear-session`, {
       method: "POST",
+      credentials: "include",
     });
   } catch (e) {
     console.error("Session clear failed:", e);
@@ -64,6 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (result?.success) {
           localStorage.removeItem("yesboss_token");
+          localStorage.setItem("yesboss_id_token", token);
           if (result.user) {
             localStorage.setItem("yesboss_user", JSON.stringify(result.user));
           }
@@ -85,6 +88,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await firebaseSignOut(auth);
     localStorage.removeItem("yesboss_user");
     localStorage.removeItem("yesboss_role");
+    localStorage.removeItem("yesboss_id_token");
     await clearSession();
     window.location.href = "/login";
   };
