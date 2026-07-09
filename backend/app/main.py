@@ -6,23 +6,10 @@ from collections import defaultdict
 
 from fastapi import FastAPI, Request, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from starlette.middleware.base import BaseHTTPMiddleware
 import time
-
-
-class AdminDocsMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        if request.url.path in ("/api/docs", "/api/redoc", "/api/openapi.json"):
-            if settings.ENVIRONMENT == "production":
-                return JSONResponse(status_code=404, content={"detail": "Not found"})
-            admin_key = request.headers.get("X-Admin-Key") or request.query_params.get("admin_key")
-            if not admin_key or admin_key != settings.ADMIN_API_KEY:
-                return JSONResponse(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    content={"error": True, "detail": "Admin access required. Provide X-Admin-Key header or ?admin_key= param."},
-                )
-        return await call_next(request)
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -63,7 +50,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; object-src 'none'; frame-ancestors 'none'"
+
+        if request.url.path.startswith("/api/docs"):
+            response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https://fastapi.tiangolo.com; font-src 'self' data:; object-src 'none'; frame-ancestors 'none'"
+        else:
+            response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; object-src 'none'; frame-ancestors 'none'"
+
         return response
 
 
@@ -179,9 +171,9 @@ app = FastAPI(
     title="YesBoss API",
     description="AI Business Operating System - Backend API",
     version="1.0.0",
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
-    openapi_url="/api/openapi.json",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
     lifespan=lifespan,
 )
 
@@ -196,7 +188,6 @@ if sentry_dsn:
         logger.info("sentry-sdk not installed, skipping Sentry")
 
 app.add_middleware(RequestIDMiddleware)
-app.add_middleware(AdminDocsMiddleware)
 app.add_middleware(CSRFMiddleware)
 app.add_middleware(RateLimitMiddleware, max_requests=60, window_seconds=60)
 app.add_middleware(SecurityHeadersMiddleware)
@@ -261,6 +252,52 @@ async def root():
         "status": "running",
         "docs": "/api/docs",
     }
+
+
+def _require_admin(request: Request):
+    if settings.ENVIRONMENT == "production":
+        raise HTTPException(status_code=404, detail="Not found")
+    admin_key = request.headers.get("X-Admin-Key") or request.query_params.get("admin_key")
+    if not admin_key or admin_key != settings.ADMIN_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required. Provide X-Admin-Key header or ?admin_key= param.",
+        )
+
+
+@app.get("/api/openapi.json", include_in_schema=False)
+async def get_openapi(request: Request):
+    _require_admin(request)
+    return app.openapi()
+
+
+@app.get("/api/docs", include_in_schema=False)
+async def get_docs(request: Request):
+    _require_admin(request)
+    spec_url = f"/api/openapi.json?admin_key={settings.ADMIN_API_KEY}"
+    return get_swagger_ui_html(
+        openapi_url=spec_url,
+        title=app.title + " - Swagger UI",
+        oauth2_redirect_url=app.swagger_ui_oauth2_redirect_url,
+        swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
+        swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
+    )
+
+
+@app.get("/api/redoc", include_in_schema=False)
+async def get_redoc(request: Request):
+    _require_admin(request)
+    spec_url = f"/api/openapi.json?admin_key={settings.ADMIN_API_KEY}"
+    return get_redoc_html(
+        openapi_url=spec_url,
+        title=app.title + " - ReDoc",
+        redoc_js_url="https://cdn.jsdelivr.net/npm/redoc@next/bundles/redoc.standalone.js",
+    )
+
+
+@app.get("/api/v1/")
+async def api_root():
+    return {"status": "ok", "version": "1.0.0"}
 
 
 app.include_router(health_router, prefix="/api/v1", tags=["Health"])
