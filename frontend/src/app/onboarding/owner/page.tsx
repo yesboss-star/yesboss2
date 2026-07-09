@@ -367,11 +367,40 @@ function OwnerOnboardingContent() {
       .then((r) => r.json())
       .then((data) => {
         if (data?.organization?._id) {
-          setExistingOrg(data.organization);
-          if (data.primary_owner) {
-            setPrimaryOwnerInfo(data.primary_owner);
+          const org = data.organization;
+          const coOwners = org.co_owners || [];
+          const storedUser = localStorage.getItem("yesboss_user");
+          const userData = storedUser ? JSON.parse(storedUser) : {};
+          const uid = userData?.uid || user?.uid;
+          const isAlreadyCoOwner = (uid && coOwners.includes(uid)) || (userEmail && coOwners.includes(userEmail));
+          if (isAlreadyCoOwner) {
+            const ownerRank = org.owner_id === uid ? 1 : coOwners.indexOf(uid) + 2;
+            useOrganizationStore.getState().setOrganization({
+              id: org._id,
+              name: org.name,
+              domain: org.domain || "",
+              industry: org.industry || "",
+              size: org.size || "",
+              website_url: org.website_url || "",
+              createdAt: org.created_at || new Date().toISOString(),
+              owner_id: org.owner_id,
+              co_owners: coOwners,
+              ownerRank,
+            });
+            setOrgId(org._id);
+            if (storedUser) {
+              const updatedUser = { ...JSON.parse(storedUser), owner_rank: ownerRank, organization_completed: true };
+              localStorage.setItem("yesboss_user", JSON.stringify(updatedUser));
+              document.cookie = `yesboss_user=${JSON.stringify(updatedUser)}; path=/; max-age=86400; SameSite=Lax`;
+            }
+            setStep("persona-time");
+          } else {
+            setExistingOrg(org);
+            if (data.primary_owner) {
+              setPrimaryOwnerInfo(data.primary_owner);
+            }
+            setShowDuplicatePrompt(true);
           }
-          setShowDuplicatePrompt(true);
         }
       })
       .catch(() => {})
@@ -435,7 +464,8 @@ function OwnerOnboardingContent() {
                 document.cookie = `yesboss_user=${JSON.stringify(updatedUser)}; path=/; max-age=86400; SameSite=Lax`;
               }
               setRequestSent(false);
-              setStep("persona-time");
+              setShowDuplicatePrompt(false);
+              setStep("file-upload");
             }
           }
         }
@@ -829,7 +859,8 @@ function OwnerOnboardingContent() {
             document.cookie = `yesboss_user=${JSON.stringify(updatedUser)}; path=/; max-age=86400; SameSite=Lax`;
           }
           setRequestSent(false);
-          setStep("persona-time");
+          setShowDuplicatePrompt(false);
+          setStep("file-upload");
         }
       }
     } catch {
