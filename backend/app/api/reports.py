@@ -65,8 +65,53 @@ def build_report_content(db, org_id: str, request: ReportRequest) -> Dict[str, A
             departments[dept] = {"goals": 0, "tasks": 0}
         departments[dept]["tasks"] += 1
 
+    now = datetime.utcnow()
+    employee_insights = []
+    for m in members:
+        email = m.get("email", "")
+        name = m.get("full_name", email)
+        emp_tasks = [t for t in tasks if t.get("assignee_email") == email or t.get("assignee_id") == email]
+        emp_completed = len([t for t in emp_tasks if t.get("status") == "completed"])
+        emp_pending = len([t for t in emp_tasks if t.get("status") == "pending"])
+        emp_in_progress = len([t for t in emp_tasks if t.get("status") == "in_progress"])
+        emp_overdue = len([t for t in emp_tasks if t.get("due_date") and t.get("status") not in ("completed", "approved") and _is_overdue_from(t.get("due_date"), now)])
+        stuck_tasks = [t for t in emp_tasks if t.get("blocked") or (t.get("status") == "pending" and t.get("created_at") and (now - _parse_dt(t["created_at"])).days > 7)]
+        suggestion = ""
+        if emp_overdue > 0:
+            suggestion = f"Has {emp_overdue} overdue task(s) — review and reprioritize"
+        elif emp_pending > 3:
+            suggestion = f"Has {emp_pending} pending tasks — may need unblocking"
+        elif emp_completed > 0 and emp_pending == 0:
+            suggestion = "On track"
+        else:
+            suggestion = "Needs attention — low task assignment"
+        employee_insights.append({
+            "name": name,
+            "email": email,
+            "department": m.get("department", ""),
+            "completed": emp_completed,
+            "pending": emp_pending,
+            "in_progress": emp_in_progress,
+            "overdue": emp_overdue,
+            "stuck": len(stuck_tasks),
+            "suggestion": suggestion,
+        })
+
+    task_breakdown = []
+    for t in tasks[:20]:
+        assignee = t.get("assignee_email") or t.get("assignee_name") or "Unassigned"
+        created = t.get("created_at")
+        days_open = (now - _parse_dt(created)).days if created else 0
+        task_breakdown.append({
+            "title": t.get("title", "Untitled")[:60],
+            "status": t.get("status", "unknown"),
+            "assignee": assignee,
+            "priority": t.get("priority", "medium"),
+            "days_open": days_open,
+        })
+
     return {
-        "generated_at": datetime.utcnow().isoformat(),
+        "generated_at": now.isoformat(),
         "period": request.period,
         "summary": {
             "total_goals": total_goals,
@@ -82,7 +127,30 @@ def build_report_content(db, org_id: str, request: ReportRequest) -> Dict[str, A
         "departments": departments,
         "goals": [{"title": g.get("title"), "status": g.get("status"), "priority": g.get("priority"), "department": g.get("department")} for g in goals[:10]],
         "tasks": [{"title": t.get("title"), "status": t.get("status"), "priority": t.get("priority")} for t in tasks[:10]],
+        "employee_insights": employee_insights,
+        "task_breakdown": task_breakdown,
     }
+
+
+def _parse_dt(val):
+    if isinstance(val, datetime):
+        return val
+    if isinstance(val, str):
+        try:
+            return datetime.fromisoformat(val.replace("Z", ""))
+        except:
+            return datetime.utcnow()
+    return datetime.utcnow()
+
+
+def _is_overdue_from(due_date, now):
+    if not due_date:
+        return False
+    try:
+        d = _parse_dt(due_date)
+        return d < now
+    except:
+        return False
 
 def generate_pdf(content: Dict[str, Any], org_name: str = "YesBoss") -> bytes:
     buf = io.BytesIO()
@@ -236,6 +304,78 @@ def generate_pdf(content: Dict[str, Any], org_name: str = "YesBoss") -> bytes:
         ]))
         story.append(tbl)
 
+    task_breakdown = content.get("task_breakdown", [])
+    if task_breakdown:
+        story.append(Paragraph("Task Status by Assignee", section_style))
+        tb_header = [Paragraph("<b>Task</b>", cell_style), Paragraph("<b>Status</b>", cell_style), Paragraph("<b>Assignee</b>", cell_style), Paragraph("<b>Priority</b>", cell_style), Paragraph("<b>Days</b>", cell_style)]
+        tb_rows = [tb_header]
+        for t in task_breakdown:
+            tb_rows.append([
+                Paragraph(t.get("title", "-"), cell_style),
+                Paragraph(t.get("status", "-"), cell_style),
+                Paragraph(t.get("assignee", "-")[:20], cell_style),
+                Paragraph(t.get("priority", "-"), cell_style),
+                Paragraph(str(t.get("days_open", 0)), cell_style),
+            ])
+        tbl = Table(tb_rows, colWidths=[2.4*inch, 0.8*inch, 1.2*inch, 0.7*inch, 0.5*inch])
+        tbl.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTSIZE', (0, 0), (-1, -1), 7.5),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('GRID', (0, 0), (-1, -1), 0.5, border),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, light_bg]),
+        ]))
+        story.append(tbl)
+        story.append(Spacer(1, 12))
+
+    employee_insights = content.get("employee_insights", [])
+    if employee_insights:
+        story.append(Paragraph("Employee Insights", section_style))
+        ei_header = [Paragraph("<b>Employee</b>", cell_style), Paragraph("<b>Done</b>", cell_style), Paragraph("<b>Pending</b>", cell_style), Paragraph("<b>Overdue</b>", cell_style), Paragraph("<b>Stuck</b>", cell_style), Paragraph("<b>Suggestion</b>", cell_style)]
+        ei_rows = [ei_header]
+        for e in employee_insights:
+            ei_rows.append([
+                Paragraph(e.get("name", "-")[:20], cell_style),
+                Paragraph(str(e.get("completed", 0)), cell_style),
+                Paragraph(str(e.get("pending", 0)), cell_style),
+                Paragraph(str(e.get("overdue", 0)), cell_style),
+                Paragraph(str(e.get("stuck", 0)), cell_style),
+                Paragraph(e.get("suggestion", "-")[:40], cell_style),
+            ])
+        tbl = Table(ei_rows, colWidths=[1.2*inch, 0.5*inch, 0.6*inch, 0.6*inch, 0.5*inch, 2.2*inch])
+        tbl.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTSIZE', (0, 0), (-1, -1), 7.5),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('GRID', (0, 0), (-1, -1), 0.5, border),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, light_bg]),
+        ]))
+        story.append(tbl)
+        story.append(Spacer(1, 12))
+
+        overdue_emps = [e for e in employee_insights if e.get("overdue", 0) > 0]
+        stuck_emps = [e for e in employee_insights if e.get("stuck", 0) > 0]
+        action_lines = []
+        for e in overdue_emps:
+            action_lines.append(f"<b>{e['name']}</b> has {e['overdue']} overdue task(s) — schedule a review")
+        for e in stuck_emps:
+            action_lines.append(f"<b>{e['name']}</b> has {e['stuck']} stuck task(s) — assign a mentor or unblock")
+        if action_lines:
+            story.append(Paragraph("Recommended Actions", section_style))
+            for line in action_lines:
+                story.append(Paragraph(f"&bull; {line}", body_style))
+            story.append(Spacer(1, 12))
+
     story.append(Spacer(1, 30))
     story.append(Paragraph("<hr/>", body_style))
     story.append(Paragraph("This report was generated automatically by YesBoss AI Business Operating System.", footer_style))
@@ -286,6 +426,10 @@ async def generate_report(
             "generated_at": content["generated_at"],
             "summary": content["summary"],
             "departments": content["departments"],
+            "goals": content.get("goals", []),
+            "tasks": content.get("tasks", []),
+            "task_breakdown": content.get("task_breakdown", []),
+            "employee_insights": content.get("employee_insights", []),
         }
     }
 

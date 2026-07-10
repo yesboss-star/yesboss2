@@ -20,16 +20,23 @@ async def check_org_due_for_check_in(db, org) -> bool:
 
 
 async def generate_check_in(db, org_id: str, owner_id: str) -> dict:
+    now = datetime.utcnow()
     active_goals = list(db.goals.find({
         "organization_id": org_id,
         "created_by": owner_id,
         "status": "active",
+        "$or": [
+            {"next_review_at": {"$lte": now}},
+            {
+                "next_review_at": {"$exists": False},
+                "last_reviewed_at": {"$exists": False},
+            }
+        ]
     }))
 
     if not active_goals:
         return {"should_send": False, "reason": "no_active_goals"}
 
-    now = datetime.utcnow()
     goal_entries = []
     behind_count = 0
     stale_count = 0
@@ -193,6 +200,16 @@ async def store_check_in(db, check_in_data: dict) -> dict:
     return doc
 
 
+def _fallback_frequency(goal: dict) -> int:
+    gt = goal.get("goal_type", "")
+    dur = goal.get("duration", "")
+    if gt == "short_term" and dur == "one_time":
+        return 3
+    if gt == "short_term":
+        return 5
+    return 7
+
+
 async def record_check_in_response(db, check_in_id: str, org_id: str, owner_id: str, notes: list = None):
     from bson import ObjectId
     from ..core.learning import learning
@@ -229,5 +246,18 @@ async def record_check_in_response(db, check_in_id: str, org_id: str, owner_id: 
                 "triggers": [],
                 "confidence": 0.7,
             })
+
+        gid = note.get("goal_id")
+        if gid:
+            goal = db.goals.find_one({"_id": ObjectId(gid)})
+            if goal:
+                freq = goal.get("review_frequency_days") or _fallback_frequency(goal)
+                db.goals.update_one(
+                    {"_id": ObjectId(gid)},
+                    {"$set": {
+                        "last_reviewed_at": datetime.utcnow(),
+                        "next_review_at": datetime.utcnow() + timedelta(days=freq),
+                    }}
+                )
 
     return {"success": True, "check_in": str(check_in_id)}

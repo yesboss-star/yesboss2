@@ -628,6 +628,48 @@ async def send_digests():
         logger.error(f"Digest send failed: {e}")
 
 
+async def send_morning_journal_prompts():
+    try:
+        from ..core.database import get_database
+        from ..core.notification_service import create_and_deliver
+
+        db = get_database()
+        if db is None:
+            return
+
+        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        users = list(db.users.find({"organization_id": {"$ne": None}}))
+        sent = 0
+        for user in users:
+            uid = user.get("uid")
+            org_id = user.get("organization_id")
+            if not uid or not org_id:
+                continue
+            existing = db.journal_entries.find_one({
+                "user_id": uid,
+                "created_at": {"$gte": today_start},
+            })
+            if existing:
+                continue
+            try:
+                await create_and_deliver(
+                    user_id=uid,
+                    org_id=org_id,
+                    type="journal_prompt",
+                    title="Good morning!",
+                    message="Start your day with a quick journal entry. Capture your thoughts, ideas, or reflections.",
+                    link="/dashboard/ideas",
+                )
+                sent += 1
+            except Exception:
+                pass
+
+        if sent:
+            logger.info(f"Morning journal prompts sent to {sent} users")
+    except Exception as e:
+        logger.error(f"Morning journal prompt send failed: {e}")
+
+
 async def send_auto_reports():
     try:
         from ..core.database import get_database
@@ -863,6 +905,7 @@ async def check_owner_check_ins():
                 owner_ids.add(org["owner_id"])
             for co in (org.get("co_owners") or []):
                 owner_ids.add(co)
+            org_checked = False
             for owner_id in owner_ids:
                 if not owner_id:
                     continue
@@ -872,6 +915,13 @@ async def check_owner_check_ins():
                 await store_check_in(db, check_in_data)
                 await send_check_in_notification(db, check_in_data)
                 checked += 1
+                org_checked = True
+
+            if org_checked:
+                db.organizations.update_one(
+                    {"_id": org["_id"]},
+                    {"$set": {"last_check_in": datetime.utcnow()}}
+                )
 
         if checked:
             logger.info(f"Check-in reminders sent to {checked} owner(s)")
@@ -1000,6 +1050,69 @@ async def generate_weekly_owner_briefings():
         logger.error(f"Weekly briefing generation failed: {e}")
 
 
+async def send_weekly_idea_digest():
+    try:
+        from ..core.database import get_database
+        from ..core.notification_service import create_and_deliver
+
+        db = get_database()
+        if db is None:
+            return
+
+        now = datetime.utcnow()
+        week_ago = now - timedelta(days=7)
+        orgs = list(db.organizations.find({}))
+        for org in orgs:
+            org_id = str(org["_id"])
+            owner_id = org.get("owner_id")
+            if not owner_id:
+                continue
+            new_ideas = db.journal_entries.count_documents({
+                "org_id": org_id,
+                "created_at": {"$gte": week_ago},
+            })
+            total_ideas = db.journal_entries.count_documents({"org_id": org_id})
+            unworked = db.journal_entries.count_documents({
+                "org_id": org_id,
+                "$or": [
+                    {"linked_tasks": {"$exists": False}},
+                    {"linked_tasks": []},
+                    {"linked_goals": {"$exists": False}},
+                    {"linked_goals": []},
+                ],
+            })
+            await create_and_deliver(
+                user_id=owner_id,
+                org_id=org_id,
+                type="weekly_idea_digest",
+                title="Your Weekly Ideas Digest",
+                message=f"You had {new_ideas} new idea(s) this week. {total_ideas} total ideas, {unworked} still unlinked.",
+                link="/dashboard/ideas",
+            )
+            members = list(db.users.find({"organization_id": org_id, "uid": {"$ne": owner_id}}))
+            for member in members:
+                uid = member.get("uid")
+                if not uid:
+                    continue
+                member_ideas = db.journal_entries.count_documents({
+                    "org_id": org_id,
+                    "user_id": uid,
+                    "created_at": {"$gte": week_ago},
+                })
+                if member_ideas > 0:
+                    await create_and_deliver(
+                        user_id=uid,
+                        org_id=org_id,
+                        type="weekly_idea_digest",
+                        title="Your Weekly Ideas Digest",
+                        message=f"You logged {member_ideas} idea(s) this week. Keep them coming!",
+                        link="/dashboard/ideas",
+                    )
+        logger.info("Weekly idea digest sent")
+    except Exception as e:
+        logger.error(f"Weekly idea digest failed: {e}")
+
+
 async def scheduler_loop():
     logger.info("Scheduler started")
     deadline_counter = 0
@@ -1019,8 +1132,10 @@ async def scheduler_loop():
                 hour = datetime.utcnow().hour
                 if hour == 8:
                     await send_digests()
+                    await send_morning_journal_prompts()
                 if hour == 9:
                     await send_auto_reports()
+                    await send_weekly_idea_digest()
                     await record_performance_snapshots()
                     await generate_weekly_owner_briefings()
                 if hour == 3:

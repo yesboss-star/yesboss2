@@ -11,8 +11,9 @@ SYSTEM_PROMPT = """You are a work-pattern analyst. Given a task or goal descript
 1. work_category: what kind of work this is (e.g. "development", "design", "research", "meeting", "documentation", "sales", "support", "management", "planning", "marketing", "data_analysis", "testing", "deployment")
 2. complexity_level: "beginner", "intermediate", or "advanced"
 3. estimated_hours: estimated hours to complete (float, 0.5-80)
+4. review_frequency_days: how often (in days, 1-30) the goal owner should review progress. Short urgent goals need 1-3 days. Long-term strategic goals can go 7-14 days.
 
-Return ONLY valid JSON: {"work_category": "...", "complexity_level": "...", "estimated_hours": 0.0}"""
+Return ONLY valid JSON: {"work_category": "...", "complexity_level": "...", "estimated_hours": 0.0, "review_frequency_days": 3}"""
 
 
 async def analyze_content(title: str, description: str = "", provider: Optional[str] = None) -> dict:
@@ -36,11 +37,12 @@ async def analyze_content(title: str, description: str = "", provider: Optional[
                 "work_category": data.get("work_category", "general"),
                 "complexity_level": data.get("complexity_level", "intermediate"),
                 "estimated_hours": float(data.get("estimated_hours", 4)),
+                "review_frequency_days": int(data.get("review_frequency_days", 7)),
             }
     except Exception as e:
         logger.warning(f"AI analysis failed for '{title[:50]}': {e}")
 
-    return {"work_category": "general", "complexity_level": "intermediate", "estimated_hours": 4}
+    return {"work_category": "general", "complexity_level": "intermediate", "estimated_hours": 4, "review_frequency_days": 7}
 
 
 async def process_task(task_data: dict, org_id: str, provider: Optional[str] = None):
@@ -73,6 +75,7 @@ async def process_task(task_data: dict, org_id: str, provider: Optional[str] = N
 
 async def process_goal(goal_data: dict, org_id: str, provider: Optional[str] = None):
     try:
+        from bson import ObjectId
         from ..core.database import get_database
         from ..core.learning import learning
 
@@ -100,5 +103,30 @@ async def process_goal(goal_data: dict, org_id: str, provider: Optional[str] = N
             "title": goal_data.get("title", ""),
             "description": goal_data.get("description", ""),
         })
+
+        gid = goal_data.get("_id") or goal_data.get("id")
+        if gid and ObjectId.is_valid(str(gid)):
+            freq = analysis.get("review_frequency_days") or _fallback_frequency(goal_data)
+            now = datetime.utcnow()
+            db.goals.update_one(
+                {"_id": ObjectId(str(gid))},
+                {"$set": {
+                    "review_frequency_days": freq,
+                    "next_review_at": now + timedelta(days=freq),
+                    "estimated_hours": analysis["estimated_hours"],
+                    "complexity_level": analysis["complexity_level"],
+                    "work_category": analysis["work_category"],
+                }}
+            )
     except Exception as e:
         logger.warning(f"Frequency agent goal processing error: {e}")
+
+
+def _fallback_frequency(goal: dict) -> int:
+    gt = goal.get("goal_type", "")
+    dur = goal.get("duration", "")
+    if gt == "short_term" and dur == "one_time":
+        return 3
+    if gt == "short_term":
+        return 5
+    return 7

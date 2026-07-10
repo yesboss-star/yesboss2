@@ -230,6 +230,32 @@ async def generate_org_health(db: Any, org_id: str) -> Dict:
     has_manager = any(m.get("manager_email") for m in members)
     has_org_structure = team_size > 1 and has_manager
 
+    unworked_ideas = list(db.journal_entries.find({
+        "org_id": org_id,
+        "$or": [
+            {"linked_tasks": {"$exists": False}},
+            {"linked_tasks": []},
+            {"linked_goals": {"$exists": False}},
+            {"linked_goals": []},
+        ],
+    }).sort("created_at", -1).limit(20))
+
+    idea_suggestions = []
+    for idea in unworked_ideas:
+        content = idea.get("content", "")[:150]
+        goal_hints = []
+        if idea.get("ai_analysis") and idea["ai_analysis"].get("suggested_goal_titles"):
+            goal_hints = idea["ai_analysis"]["suggested_goal_titles"]
+        task_count = len(idea.get("ai_analysis", {}).get("actionable_items", [])) if idea.get("ai_analysis") else 0
+        idea_suggestions.append({
+            "id": str(idea["_id"]),
+            "content": content,
+            "type": idea.get("type", "idea"),
+            "suggested_goals": goal_hints,
+            "actionable_items_count": task_count,
+            "created_at": idea.get("created_at").isoformat() if idea.get("created_at") else "",
+        })
+
     market_alignment_score = 50.0
     if market_impact:
         impacts = market_impact.get("impacts", [])
@@ -293,6 +319,14 @@ async def generate_org_health(db: Any, org_id: str) -> Dict:
     cat_section = "[Work Categories Across Team]\n" + "\n".join(cat_lines) if cat_lines else ""
 
     ai_recommendations = ""
+    idea_summary = ""
+    if idea_suggestions:
+        idea_lines = [
+            f"  - \"{i['content'][:80]}...\" (type: {i['type']}, suggested goals: {', '.join(i['suggested_goals'][:3]) or 'none'}, {i['actionable_items_count']} actionable items)"
+            for i in idea_suggestions
+        ]
+        idea_summary = "[Unworked Ideas & Journal Entries]\n" + "\n".join(idea_lines) + "\n\n"
+
     prompt = (
         f"Organization Health Assessment\n"
         f"Health Score: {health_score}/100 ({health_label})\n"
@@ -305,7 +339,10 @@ async def generate_org_health(db: Any, org_id: str) -> Dict:
         f"{overloaded_section}\n"
         f"{best_performer_section}\n"
         f"{cat_section}\n\n"
+        f"{idea_summary}"
         f"Provide 2-3 strategic recommendations to improve organizational health. "
+        f"For each unworked idea, suggest which existing goal it relates to (if any) "
+        f"and whether it should be converted into tasks. "
         f"Reference team work patterns, overloaded employees, and top performers where relevant."
     )
     try:
@@ -336,6 +373,7 @@ async def generate_org_health(db: Any, org_id: str) -> Dict:
             "best_performers": {cat: info for cat, info in best_per_cat.items()},
         },
         "ai_recommendations": ai_recommendations,
+        "unworked_ideas": idea_suggestions,
     }
 
 

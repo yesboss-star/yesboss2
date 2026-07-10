@@ -20,6 +20,7 @@ import {
   Share2,
   Zap,
   FolderOpen,
+  Lightbulb,
 } from "lucide-react";
 import { Avatar, Badge, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui";
 import { ThemeToggleInline } from "@/components/ThemeToggleInline";
@@ -35,6 +36,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
+  { icon: Lightbulb, label: "Have an Idea", href: "/dashboard/ideas" },
   { icon: Share2, label: "Orchestration", href: "/dashboard/orchestration" },
   { icon: Zap, label: "AI Task Cascade", href: "/dashboard/task" },
   { icon: FolderOpen, label: "Uploaded Data", href: "/dashboard/data" },

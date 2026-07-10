@@ -421,7 +421,7 @@ async def set_session(request: SetSessionRequest):
 
     _audit_log("session.create", user.uid, f"email={getattr(user, 'email', '')}")
     claims = getattr(user, "custom_claims", {}) or {}
-    role = claims.get("role", "employee")
+    role = claims.get("role", "owner")
 
     db = get_database()
     db_user = None

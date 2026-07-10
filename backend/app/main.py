@@ -123,8 +123,9 @@ from .api.push_subscriptions import router as push_subscriptions_router
 from .api.zoho_auth import router as zoho_auth_router
 from .api.zoho_calendar import router as zoho_calendar_router
 from .api.smart_suggestions import router as smart_suggestions_router
+from .api.journal import router as journal_router
 from .core import settings
-from .core.database import connect_mongodb, close_mongodb
+from .core.database import connect_mongodb, close_mongodb, get_database
 from .core.qdrant import connect_qdrant, close_qdrant
 from .core.supabase_client import connect_supabase
 from .core.socket_manager import socket_manager
@@ -152,6 +153,29 @@ async def lifespan(app: FastAPI):
         logger.info("Scheduler started")
     except Exception as e:
         logger.warning(f"Scheduler not started: {e}")
+
+    try:
+        db = get_database()
+        if db is not None:
+            count = db.goals.count_documents({"status": "active", "review_frequency_days": {"$exists": False}})
+            if count:
+                db.goals.update_many(
+                    {"status": "active", "review_frequency_days": {"$exists": False}},
+                    [{"$set": {
+                        "review_frequency_days": {
+                            "$switch": {
+                                "branches": [
+                                    {"case": {"$and": [{"$eq": ["$goal_type", "short_term"]}, {"$eq": ["$duration", "one_time"]}]}, "then": 3},
+                                    {"case": {"$eq": ["$goal_type", "short_term"]}, "then": 5},
+                                ],
+                                "default": 7,
+                            }
+                        }
+                    }}]
+                )
+                logger.info("Backfilled review_frequency_days for %d existing goals", count)
+    except Exception as e:
+        logger.warning("Review frequency backfill skipped: %s", e)
 
     logger.info("All services initialized")
 
@@ -332,3 +356,4 @@ app.include_router(zoho_calendar_router, prefix="/api/v1/zoho/calendar", tags=["
 app.include_router(check_ins_router, prefix="/api/v1/organizations", tags=["Check-Ins"])
 app.include_router(smart_suggestions_router, prefix="/api/v1/smart", tags=["Smart Suggestions"])
 app.include_router(websocket_router, tags=["WebSocket"])
+app.include_router(journal_router, prefix="/api/v1/journal", tags=["Journal"])
