@@ -61,6 +61,7 @@ class Settings:
     ZOHO_MAIL_API_URL: str = os.getenv("ZOHO_MAIL_API_URL", "https://mail.zoho.com/api")
     ZOHO_CALENDAR_API_URL: str = os.getenv("ZOHO_CALENDAR_API_URL", "https://calendar.zoho.com/api/v1")
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
+    API_URL: str = os.getenv("API_URL", "http://localhost:8000/api/v1")
 
     VAPID_PUBLIC_KEY: str = os.getenv("VAPID_PUBLIC_KEY", "")
     VAPID_PRIVATE_KEY: str = os.getenv("VAPID_PRIVATE_KEY", "")
