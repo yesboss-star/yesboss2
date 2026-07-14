@@ -1,4 +1,5 @@
 import logging
+
 import httpx
 
 from ..config import settings
@@ -30,7 +31,7 @@ async def send_reminder(
         },
     }
     if assignee_email:
-        payload["text"] += f"\n\n— {assignee_email}"
+        payload["text"] = str(payload["text"]) + f"\n\n— {assignee_email}"
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:

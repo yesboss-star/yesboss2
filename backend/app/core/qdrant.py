@@ -1,12 +1,15 @@
 import logging
+from typing import Optional
+
 import numpy as np
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
+
 from .config import settings
 
 logger = logging.getLogger("yesboss.qdrant")
 
-client: QdrantClient = None
+client: Optional[QdrantClient] = None
 
 
 def get_embedding(text: str) -> list[float]:
@@ -15,7 +18,7 @@ def get_embedding(text: str) -> list[float]:
         base_url = settings.XAI_BASE_URL if settings.XAI_API_KEY else None
         if not api_key:
             return generate_fallback_embedding(text)
-        
+
         from openai import OpenAI
         client = OpenAI(api_key=api_key, base_url=base_url)
         response = client.embeddings.create(

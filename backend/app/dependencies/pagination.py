@@ -1,5 +1,5 @@
+
 from fastapi import Query
-from typing import Optional
 
 
 def pagination_params(
@@ -10,8 +10,8 @@ def pagination_params(
 
 
 def search_params(
-    search: Optional[str] = Query(None, description="Search query"),
-    sort_by: Optional[str] = Query("created_at", description="Sort field"),
+    search: str | None = Query(None, description="Search query"),
+    sort_by: str | None = Query("created_at", description="Sort field"),
     sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort order"),
 ):
     return {"search": search, "sort_by": sort_by, "sort_order": sort_order}

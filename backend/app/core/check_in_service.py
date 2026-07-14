@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from datetime import datetime, timedelta
 
@@ -6,7 +5,7 @@ logger = logging.getLogger("yesboss.check_in")
 
 async def check_org_due_for_check_in(db, org) -> bool:
     from bson import ObjectId
-    org_id = str(org["_id"]) if isinstance(org["_id"], ObjectId) else org["_id"]
+    str(org["_id"]) if isinstance(org["_id"], ObjectId) else org["_id"]
     last = org.get("last_check_in")
     frequency = org.get("check_in_frequency_days", 7)
     if not last:
@@ -172,7 +171,7 @@ async def send_check_in_notification(db, check_in_data: dict):
         user_id=owner_id,
         org_id=org_id,
         type="check_in_reminder",
-        title=f"Weekly Check-In",
+        title="Weekly Check-In",
         message=message,
         link="/dashboard?checkin=true",
     )
@@ -212,6 +211,7 @@ def _fallback_frequency(goal: dict) -> int:
 
 async def record_check_in_response(db, check_in_id: str, org_id: str, owner_id: str, notes: list = None):
     from bson import ObjectId
+
     from ..core.learning import learning
 
     check_in = db.check_ins.find_one({"_id": ObjectId(check_in_id)})

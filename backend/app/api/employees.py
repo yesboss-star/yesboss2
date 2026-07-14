@@ -1,35 +1,35 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+import os
+from datetime import datetime
+
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime
+
 from ..core.database import get_database
-import os
-import shutil
 
 router = APIRouter()
 
 class EmployeeCreate(BaseModel):
     email: str
     full_name: str
-    phone: Optional[str] = None
+    phone: str | None = None
     role: str
-    department: Optional[str] = None
-    manager_id: Optional[str] = None
+    department: str | None = None
+    manager_id: str | None = None
     organization_id: str
 
 class EmployeeUpdate(BaseModel):
-    full_name: Optional[str] = None
-    phone: Optional[str] = None
-    department: Optional[str] = None
-    manager_id: Optional[str] = None
+    full_name: str | None = None
+    phone: str | None = None
+    department: str | None = None
+    manager_id: str | None = None
 
 @router.get("")
-async def list_employees(org_id: Optional[str] = None, search: Optional[str] = None):
+async def list_employees(org_id: str | None = None, search: str | None = None):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     query = {}
     if org_id:
         query["organization_id"] = org_id
@@ -40,12 +40,12 @@ async def list_employees(org_id: Optional[str] = None, search: Optional[str] = N
             {"role": {"$regex": search, "$options": "i"}},
             {"department": {"$regex": search, "$options": "i"}},
         ]
-    
+
     employees = list(db.employees.find(query).limit(20))
-    
+
     for emp in employees:
         emp["_id"] = str(emp["_id"])
-    
+
     return {"employees": employees}
 
 @router.get("/tasks")
@@ -53,34 +53,34 @@ async def get_employee_tasks(org_id: str, email: str | None = None):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     query = {"organization_id": org_id}
     if email:
         query["$or"] = [
             {"assignee_email": email},
             {"assigned_to": email},
         ]
-    
+
     try:
         tasks = list(db.tasks.find(query).sort("due_date", 1).limit(20))
-        
+
         for task in tasks:
             task["id"] = str(task.pop("_id"))
-        
+
         pending_reviews = list(db.approval_requests.find(
             {"reviewer_email": email, "status": "pending"}
         ).limit(10))
-        
+
         for review in pending_reviews:
             review["id"] = str(review.pop("_id"))
-        
+
         team_updates = list(db.team_updates.find(
             {"organization_id": org_id}
         ).sort("created_at", -1).limit(10))
-        
+
         for update in team_updates:
             update["id"] = str(update.pop("_id"))
-        
+
         return {
             "tasks": tasks,
             "pending_reviews": pending_reviews,
@@ -94,14 +94,14 @@ async def find_employee_by_email(email: str):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     clean_email = email.lower().strip()
     employee = db.employees.find_one({"email": clean_email})
-    
+
     if employee:
         employee["_id"] = str(employee["_id"])
         return {"employee": employee}
-    
+
     org_member = db.org_chart_members.find_one({"email": clean_email})
     if org_member:
         org_member["_id"] = str(org_member["_id"])
@@ -111,7 +111,7 @@ async def find_employee_by_email(email: str):
             "department": org_member.get("department", ""),
             "role": org_member.get("role") or org_member.get("title") or "",
         }}
-    
+
     return {"employee": None}
 
 @router.get("/by-domain/{domain}")
@@ -119,12 +119,12 @@ async def find_employee_by_domain(domain: str):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     employees = list(db.employees.find({"email": {"$regex": f"@{domain}$"}}))
-    
+
     for emp in employees:
         emp["_id"] = str(emp["_id"])
-    
+
     return {"employees": employees, "domain": domain}
 
 @router.get("/{employee_id}")
@@ -132,13 +132,13 @@ async def get_employee(employee_id: str):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     from bson import ObjectId
     employee = db.employees.find_one({"_id": ObjectId(employee_id)})
-    
+
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
-    
+
     employee["_id"] = str(employee["_id"])
     return {"employee": employee}
 
@@ -147,7 +147,7 @@ async def create_employee(request: EmployeeCreate):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     emp_doc = {
         "email": request.email,
         "full_name": request.full_name,
@@ -159,10 +159,10 @@ async def create_employee(request: EmployeeCreate):
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
     }
-    
+
     result = db.employees.insert_one(emp_doc)
     emp_doc["_id"] = str(result.inserted_id)
-    
+
     return {"employee": emp_doc}
 
 @router.put("/{employee_id}")
@@ -170,19 +170,19 @@ async def update_employee(employee_id: str, request: EmployeeUpdate):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     from bson import ObjectId
     update_data = {k: v for k, v in request.model_dump().items() if v is not None}
     update_data["updated_at"] = datetime.utcnow()
-    
+
     db.employees.update_one(
         {"_id": ObjectId(employee_id)},
         {"$set": update_data}
     )
-    
+
     employee = db.employees.find_one({"_id": ObjectId(employee_id)})
     employee["_id"] = str(employee["_id"])
-    
+
     return {"employee": employee}
 
 @router.delete("/{employee_id}")
@@ -190,10 +190,10 @@ async def delete_employee(employee_id: str):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     from bson import ObjectId
     db.employees.delete_one({"_id": ObjectId(employee_id)})
-    
+
     return {"success": True, "message": "Employee deleted"}
 
 
@@ -216,12 +216,12 @@ async def save_employee_persona(request: EmployeePersonaRequest):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     if not request.email:
         raise HTTPException(status_code=400, detail="Email is required")
-    
+
     existing = db.employees.find_one({"email": request.email})
-    
+
     if existing:
         update_doc = {
             "department": request.department,
@@ -266,10 +266,10 @@ async def save_employee_persona(request: EmployeePersonaRequest):
         }
         if request.avatar_style:
             emp_doc["avatar_style"] = request.avatar_style
-        
+
         result = db.employees.insert_one(emp_doc)
         emp_doc["_id"] = str(result.inserted_id)
-        
+
         return {"employee": emp_doc, "message": "Persona saved"}
 
 

@@ -1,13 +1,14 @@
 import logging
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
-from typing import Optional
+
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+
+from ..core.database import get_database
 from ..core.file_processor import (
+    ALLOWED_EXTENSIONS,
+    get_org_document_context,
     process_file,
     search_documents,
-    get_org_document_context,
-    ALLOWED_EXTENSIONS,
 )
-from ..core.database import get_database
 
 logger = logging.getLogger("yesboss.file_processing_api")
 router = APIRouter()
@@ -41,10 +42,10 @@ async def process_uploaded_file(
     file: UploadFile = File(...),
     org_id: str = Form(...),
     user_id: str = Form(...),
-    provider: Optional[str] = Form(None),
-    company_name: Optional[str] = Form(None),
-    industry: Optional[str] = Form(None),
-    micro_vertical: Optional[str] = Form(None),
+    provider: str | None = Form(None),
+    company_name: str | None = Form(None),
+    industry: str | None = Form(None),
+    micro_vertical: str | None = Form(None),
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required")
@@ -91,10 +92,10 @@ async def batch_process_files(
     files: list[UploadFile] = File(...),
     org_id: str = Form(...),
     user_id: str = Form(...),
-    provider: Optional[str] = Form(None),
-    company_name: Optional[str] = Form(None),
-    industry: Optional[str] = Form(None),
-    micro_vertical: Optional[str] = Form(None),
+    provider: str | None = Form(None),
+    company_name: str | None = Form(None),
+    industry: str | None = Form(None),
+    micro_vertical: str | None = Form(None),
 ):
     if len(files) > 10:
         raise HTTPException(status_code=400, detail="Maximum 10 files at once")
@@ -139,12 +140,12 @@ async def search_org_documents(
     org_id: str,
     query: str,
     limit: int = 5,
-    provider: Optional[str] = None,
-    user_id: Optional[str] = None,
+    provider: str | None = None,
+    user_id: str | None = None,
 ):
     if not org_id or not query:
         raise HTTPException(status_code=400, detail="org_id and query are required")
-    
+
     results = await search_documents(org_id, query, limit, provider, user_id=user_id)
     return {"results": results, "count": len(results)}
 
@@ -152,14 +153,14 @@ async def search_org_documents(
 @router.get("/document-types")
 async def get_document_types(
     org_id: str,
-    user_id: Optional[str] = None,
+    user_id: str | None = None,
 ):
     from ..core.qdrant import get_qdrant_client
 
     try:
         client = get_qdrant_client()
 
-        from qdrant_client.models import Filter, FieldCondition, Match
+        from qdrant_client.models import FieldCondition, Filter, Match
         filter_conditions = [FieldCondition(key="org_id", match=Match(value=org_id))]
         if user_id:
             filter_conditions.append(FieldCondition(key="user_id", match=Match(value=user_id)))
@@ -184,7 +185,7 @@ async def get_document_types(
 async def get_organization_document_context(
     org_id: str,
     max_docs: int = 20,
-    user_id: Optional[str] = None,
+    user_id: str | None = None,
 ):
     """Return the structured context (summaries, metrics, decisions) of all
     analyzed documents for an organization. Powers dashboard widgets."""
@@ -200,8 +201,8 @@ class AskDocumentsRequest(_BaseModel):
     org_id: str
     question: str
     top_k: int = 5
-    provider: Optional[str] = None
-    user_id: Optional[str] = None
+    provider: str | None = None
+    user_id: str | None = None
 
 
 @router.post("/ask")
@@ -215,10 +216,10 @@ async def ask_documents(request: AskDocumentsRequest):
     if not request.org_id or not request.question:
         raise HTTPException(status_code=400, detail="org_id and question are required")
 
-    from ..core.intelligence import extract_document_insights as _unused  # noqa: F401
     from ..core.ai_client import get_ai_response
-    from ..core.file_processor import get_org_document_context
     from ..core.database import get_database
+    from ..core.file_processor import get_org_document_context
+    from ..core.intelligence import extract_document_insights as _unused  # noqa: F401
 
     overview = await get_org_document_context(request.org_id, max_docs=15, user_id=request.user_id)
 

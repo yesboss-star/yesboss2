@@ -1,7 +1,7 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from typing import Dict, Set
 import json
 import logging
+
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger("yesboss.websocket")
 
@@ -9,28 +9,28 @@ router = APIRouter()
 
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: Dict[str, Set[WebSocket]] = {}
-        self.user_connections: Dict[str, Set[WebSocket]] = {}
+        self.active_connections: dict[str, set[WebSocket]] = {}
+        self.user_connections: dict[str, set[WebSocket]] = {}
 
     async def connect(self, websocket: WebSocket, organization_id: str = None, user_id: str = None):
         await websocket.accept()
-        
+
         if organization_id:
             if organization_id not in self.active_connections:
                 self.active_connections[organization_id] = set()
             self.active_connections[organization_id].add(websocket)
-        
+
         if user_id:
             if user_id not in self.user_connections:
                 self.user_connections[user_id] = set()
             self.user_connections[user_id].add(websocket)
-        
+
         logger.info(f"WebSocket connected. Org: {organization_id}, User: {user_id}")
 
     def disconnect(self, websocket: WebSocket, organization_id: str = None, user_id: str = None):
         if organization_id and organization_id in self.active_connections:
             self.active_connections[organization_id].discard(websocket)
-        
+
         if user_id and user_id in self.user_connections:
             self.user_connections[user_id].discard(websocket)
 
@@ -65,7 +65,7 @@ async def websocket_endpoint(websocket: WebSocket, organization_id: str, user_id
             try:
                 message = json.loads(data)
                 message_type = message.get("type")
-                
+
                 if message_type == "ping":
                     await websocket.send_json({"type": "pong"})
                 elif message_type == "task_update":

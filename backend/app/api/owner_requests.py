@@ -1,13 +1,19 @@
-import uuid
 import logging
+import uuid
 from datetime import datetime
+
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import Optional
 from fastapi.responses import HTMLResponse
-from ..core.database import get_database
-from ..core.email_service import send_notification_email, send_email, _render_owner_approval, _render_owner_request_approved, _render_owner_request_rejected
+from pydantic import BaseModel
+
 from ..core.config import settings
+from ..core.database import get_database
+from ..core.email_service import (
+    _render_owner_approval,
+    _render_owner_request_approved,
+    _render_owner_request_rejected,
+    send_email,
+)
 
 logger = logging.getLogger("yesboss.owner_requests")
 router = APIRouter()
@@ -243,7 +249,7 @@ async def reject_owner_request(token: str):
         fallback_html = ""
     else:
         logger.error("Rejection email FAILED to %s", requester_email)
-        fallback_html = f'<div class="fallback">Email delivery failed. The user has been notified in-app instead.</div>'
+        fallback_html = '<div class="fallback">Email delivery failed. The user has been notified in-app instead.</div>'
 
     return HTMLResponse(
         content=_request_rejected_page.format(app_name=APP_NAME, fallback_html=fallback_html),

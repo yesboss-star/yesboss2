@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException
-from ..core.database import connect_mongodb, get_database
+from fastapi import APIRouter
+
+from ..core.database import connect_mongodb
 from ..core.qdrant import connect_qdrant, create_collection
 from ..core.supabase_client import connect_supabase
 
@@ -11,7 +12,7 @@ async def health_check():
         "status": "ok",
         "services": {}
     }
-    
+
     try:
         db = connect_mongodb()
         if db is not None:
@@ -21,7 +22,7 @@ async def health_check():
             status["services"]["mongodb"] = "not configured"
     except Exception as e:
         status["services"]["mongodb"] = f"error: {str(e)}"
-    
+
     try:
         qdrant = connect_qdrant()
         if qdrant is not None:
@@ -30,7 +31,7 @@ async def health_check():
             status["services"]["qdrant"] = "not configured"
     except Exception as e:
         status["services"]["qdrant"] = f"error: {str(e)}"
-    
+
     try:
         supabase = connect_supabase()
         if supabase is not None:
@@ -39,7 +40,7 @@ async def health_check():
             status["services"]["supabase"] = "not configured"
     except Exception as e:
         status["services"]["supabase"] = f"error: {str(e)}"
-    
+
     return status
 
 @router.post("/init-collections")
@@ -52,7 +53,7 @@ async def init_collections():
         "goals",
         "tasks"
     ]
-    
+
     results = []
     for collection in collections:
         try:
@@ -60,5 +61,5 @@ async def init_collections():
             results.append({"collection": collection, "status": "ready"})
         except Exception as e:
             results.append({"collection": collection, "status": f"error: {str(e)}"})
-    
+
     return {"collections": results}

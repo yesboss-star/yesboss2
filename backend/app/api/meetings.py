@@ -1,22 +1,23 @@
 import asyncio
 import json
-import re
 import logging
+import re
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Query
-from typing import Optional, List
-from ..core.database import get_database
-from ..dependencies.auth import get_current_user_optional
-from ..api.websocket import manager as ws_manager
-from ..core.zoho import ZohoMailTasks, ZohoOAuth
+
 from bson import ObjectId
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+
+from ..api.websocket import manager as ws_manager
+from ..core.database import get_database
+from ..core.zoho import ZohoMailTasks, ZohoOAuth
+from ..dependencies.auth import get_current_user_optional
 
 logger = logging.getLogger("yesboss.meetings")
 
 router = APIRouter()
 
 
-def resolve_mentions(text: str, db, org_id: str) -> List[str]:
+def resolve_mentions(text: str, db, org_id: str) -> list[str]:
     names = re.findall(r'@(\w[\w\s.-]+?)(?:\s|$|[,;:.!?])', text + " ")
     resolved = []
     seen = set()
@@ -189,13 +190,13 @@ TASK_SYSTEM_PROMPT = (
 )
 
 
-async def get_user_org_id(user) -> Optional[str]:
+async def get_user_org_id(user) -> str | None:
     if hasattr(user, 'user_metadata') and user.user_metadata:
         return user.user_metadata.get("organization_id")
     return None
 
 
-async def _resolve_token_for_email(db, email: str, org_id: Optional[str] = None) -> Optional[str]:
+async def _resolve_token_for_email(db, email: str, org_id: str | None = None) -> str | None:
     """Find a valid Zoho access token for a user by their email address."""
     zoauth = ZohoOAuth(db)
     # Strategy 1: direct user_id lookup (tokens stored with user_id = Firebase uid)
@@ -287,7 +288,7 @@ async def create_task_from_meeting(
     user_id: str,
     task_data: dict,
     meeting_title: str,
-    participant_list: Optional[list] = None,
+    participant_list: list | None = None,
 ):
     assignee_emails = []
     suggested = (task_data.get("suggested_assignee") or "").strip()
@@ -375,10 +376,10 @@ async def create_task_from_meeting(
 @router.post("/process")
 async def process_meeting(
     meeting_title: str = Form(...),
-    participants: Optional[str] = Form(None),
-    file: Optional[UploadFile] = File(None),
-    zoho_event_id: Optional[str] = Form(None),
-    organization_id: Optional[str] = Form(None),
+    participants: str | None = Form(None),
+    file: UploadFile | None = File(None),
+    zoho_event_id: str | None = Form(None),
+    organization_id: str | None = Form(None),
     current_user=Depends(get_current_user_optional),
 ):
     db = get_database()
@@ -556,8 +557,8 @@ async def process_meeting(
 
 @router.get("/titles")
 async def list_meeting_titles(
-    q: Optional[str] = Query(""),
-    organization_id: Optional[str] = Query(None),
+    q: str | None = Query(""),
+    organization_id: str | None = Query(None),
     limit: int = Query(10, ge=1, le=50),
     current_user=Depends(get_current_user_optional),
 ):
@@ -586,7 +587,7 @@ async def list_meeting_titles(
 @router.delete("/{meeting_id}")
 async def delete_meeting(
     meeting_id: str,
-    organization_id: Optional[str] = Query(None),
+    organization_id: str | None = Query(None),
     current_user=Depends(get_current_user_optional),
 ):
     db = get_database()
@@ -618,9 +619,9 @@ async def delete_meeting(
 
 @router.get("/history")
 async def list_meetings(
-    organization_id: Optional[str] = Query(None),
+    organization_id: str | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
-    email: Optional[str] = Query(None),
+    email: str | None = Query(None),
     current_user=Depends(get_current_user_optional),
 ):
     db = get_database()

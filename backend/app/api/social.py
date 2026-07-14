@@ -1,11 +1,12 @@
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+
 from ..core.social_detector import (
-    detect_social_presence,
-    verify_social_url,
     detect_from_company_name,
-    format_social_data
+    detect_social_presence,
+    format_social_data,
+    verify_social_url,
 )
 
 router = APIRouter()
@@ -13,7 +14,7 @@ router = APIRouter()
 
 class DetectSocialRequest(BaseModel):
     domain: str
-    company_name: Optional[str] = None
+    company_name: str | None = None
 
 
 class VerifyUrlRequest(BaseModel):
@@ -23,7 +24,7 @@ class VerifyUrlRequest(BaseModel):
 
 class CompanyNameRequest(BaseModel):
     company_name: str
-    existing_domains: Optional[list] = None
+    existing_domains: list | None = None
 
 
 @router.post("/detect")
@@ -47,7 +48,7 @@ async def detect_social_links(request: DetectSocialRequest):
 async def verify_url(request: VerifyUrlRequest):
     if not request.url or not request.platform:
         raise HTTPException(status_code=400, detail="url and platform are required")
-    
+
     result = await verify_social_url(request.url, request.platform)
     return result
 
@@ -56,13 +57,13 @@ async def verify_url(request: VerifyUrlRequest):
 async def detect_by_company_name(request: CompanyNameRequest):
     if not request.company_name:
         raise HTTPException(status_code=400, detail="company_name is required")
-    
+
     social_data = await detect_from_company_name(
         request.company_name,
         request.existing_domains
     )
     formatted = format_social_data(social_data)
-    
+
     return {
         "company_name": request.company_name,
         "social_links": formatted,
@@ -73,7 +74,7 @@ async def detect_by_company_name(request: CompanyNameRequest):
 @router.get("/platforms")
 async def get_platforms():
     from ..core.social_detector import SOCIAL_PLATFORMS
-    
+
     return {
         "platforms": [
             {

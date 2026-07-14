@@ -1,18 +1,19 @@
-import logging
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
-from pydantic import BaseModel
-from typing import Optional, List
-from datetime import datetime
-from ..core.database import get_database
-from ..dependencies.auth import get_current_user_optional
-from bson import ObjectId
 import csv
 import io
+import logging
+from datetime import datetime
+
+from bson import ObjectId
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel
+
+from ..core.database import get_database
+from ..dependencies.auth import get_current_user_optional
 
 router = APIRouter()
 logger = logging.getLogger("yesboss.org_chart")
 
-def get_user_org_id(user) -> Optional[str]:
+def get_user_org_id(user) -> str | None:
     if hasattr(user, 'user_metadata') and user.user_metadata:
         return user.user_metadata.get("organization_id")
     return None
@@ -22,19 +23,19 @@ class OrgMemberCreate(BaseModel):
     full_name: str
     role: str
     department: str
-    manager_email: Optional[str] = None
-    title: Optional[str] = None
+    manager_email: str | None = None
+    title: str | None = None
 
 class OrgMemberUpdate(BaseModel):
-    full_name: Optional[str] = None
-    role: Optional[str] = None
-    department: Optional[str] = None
-    manager_email: Optional[str] = None
-    title: Optional[str] = None
+    full_name: str | None = None
+    role: str | None = None
+    department: str | None = None
+    manager_email: str | None = None
+    title: str | None = None
 
 class BulkUploadResponse(BaseModel):
     inserted: int
-    errors: List[str]
+    errors: list[str]
 
 COLUMN_ALIASES = {
     "email": ["email", "email id", "email_id", "e-mail", "mail", "email address", "email_address"],
@@ -65,7 +66,7 @@ def normalize_columns(row: dict) -> dict:
 @router.post("/upload")
 async def upload_org_chart(
     file: UploadFile = File(...),
-    organization_id: Optional[str] = Form(None),
+    organization_id: str | None = Form(None),
     current_user = Depends(get_current_user_optional)
 ):
     db = get_database()
@@ -141,7 +142,7 @@ async def upload_org_chart(
 @router.post("/members")
 async def add_org_member(
     member: OrgMemberCreate,
-    organization_id: Optional[str] = None,
+    organization_id: str | None = None,
     current_user = Depends(get_current_user_optional)
 ):
     db = get_database()
@@ -169,7 +170,7 @@ async def add_org_member(
     return {"member": doc}
 
 @router.get("/tree")
-async def get_org_tree(organization_id: Optional[str] = None, current_user = Depends(get_current_user_optional)):
+async def get_org_tree(organization_id: str | None = None, current_user = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -245,7 +246,7 @@ async def get_org_tree(organization_id: Optional[str] = None, current_user = Dep
 @router.get("/members/search")
 async def search_org_members(
     q: str = "",
-    organization_id: Optional[str] = None,
+    organization_id: str | None = None,
     current_user = Depends(get_current_user_optional)
 ):
     db = get_database()
@@ -275,7 +276,7 @@ async def search_org_members(
     return {"members": members}
 
 @router.get("/members")
-async def list_org_members(organization_id: Optional[str] = None, current_user = Depends(get_current_user_optional)): 
+async def list_org_members(organization_id: str | None = None, current_user = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -476,7 +477,7 @@ GENERIC_TITLES = {
 @router.post("/role-register")
 async def register_custom_role(
     role: str,
-    organization_id: Optional[str] = None
+    organization_id: str | None = None
 ):
     """Save a custom role that wasn't in the common list so it appears in future suggestions."""
     db = get_database()
@@ -516,7 +517,7 @@ async def register_custom_role(
 @router.get("/role-suggestions")
 async def get_role_suggestions(
     q: str = "",
-    organization_id: Optional[str] = None,
+    organization_id: str | None = None,
     current_user = Depends(get_current_user_optional)
 ):
     db = get_database()

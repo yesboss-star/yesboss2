@@ -1,17 +1,16 @@
 import logging
-from typing import Optional, List, Dict, Any
 from datetime import datetime
+from typing import Any
 
 logger = logging.getLogger("yesboss.chatbot")
 
-from .ai_client import get_ai_response, get_chat_response
+from .ai_client import get_ai_response
 from .config import settings
 from .database import get_database
-from .qdrant import get_qdrant_client
 
 
 class OnboardingChatbot:
-    def __init__(self, provider: Optional[str] = None):
+    def __init__(self, provider: str | None = None):
         self.provider = provider or settings.DEFAULT_AI_PROVIDER
         self.questions_flow = [
             {"topic": "company_description", "question": "What does your company do? What products or services do you offer?"},
@@ -23,14 +22,14 @@ class OnboardingChatbot:
             {"topic": "decision_making", "question": "How are decisions made in your organization? Who handles what?"},
             {"topic": "growth", "question": "What does growth look like for your business? What's your expansion plan?"},
         ]
-    
-    def _get_next_question(self, answered_topics: List[str]) -> Dict[str, str]:
+
+    def _get_next_question(self, answered_topics: list[str]) -> dict[str, str]:
         for q in self.questions_flow:
             if q["topic"] not in answered_topics:
                 return q
         return {"topic": "complete", "question": "Thank you! I've learned a lot about your business. You're all set!"}
-    
-    def _build_system_prompt(self, company_profile: Dict[str, Any], answered_topics: List[str]) -> str:
+
+    def _build_system_prompt(self, company_profile: dict[str, Any], answered_topics: list[str]) -> str:
         profile_info = ""
         if company_profile:
             for key, value in company_profile.items():
@@ -54,30 +53,30 @@ Keep responses brief (2-3 sentences max). Ask one question at a time. End with a
 
 If they ask for help or advice, provide concise actionable suggestions."""
         return prompt
-    
-    async def start_conversation(self, company_profile: Optional[dict] = None) -> dict:
+
+    async def start_conversation(self, company_profile: dict | None = None) -> dict:
         first_question = self._get_next_question([])
-        
+
         return {
             "message": f"Welcome! I'm your AI Business Analyst. I'll help you build your personalized business operating system.\n\n{first_question['question']}",
             "question_type": first_question["topic"],
             "company_profile": company_profile or {},
         }
-    
+
     async def process_message(
         self,
         message: str,
         company_profile: dict,
-        answered_topics: List[str],
-        conversation_history: List[dict],
-        provider: Optional[str] = None,
+        answered_topics: list[str],
+        conversation_history: list[dict],
+        provider: str | None = None,
     ) -> dict:
         answered_topics = answered_topics or []
-        
+
         topic = answered_topics[-1] if answered_topics else "intro"
-        
+
         next_q = self._get_next_question(answered_topics)
-        
+
         if next_q["topic"] == "complete":
             return {
                 "response": "Thank you for sharing all that information! I now have a good understanding of your business. Your AI-powered workspace is ready. You can ask me anything about your business, operations, or get recommendations anytime!",
@@ -86,26 +85,26 @@ If they ask for help or advice, provide concise actionable suggestions."""
                 "updated_profile": company_profile,
                 "answered_topics": answered_topics,
             }
-        
+
         profile = company_profile.copy()
         profile[topic] = message[:200]
-        
+
         system_prompt = self._build_system_prompt(profile, answered_topics)
-        
+
         try:
             history_text = ""
             for msg in conversation_history[-4:]:
                 role = msg.get("role", "user")
                 content = msg.get("content", "")
                 history_text += f"{role}: {content}\n"
-            
+
             prompt = f"""The user just answered a question about '{topic}': "{message}"
 
 Respond naturally (2-3 sentences), acknowledge their answer, then ask this next question:
 {next_q['question']}
 
 If they ask something else, answer helpfully first, then guide back to the next question."""
-            
+
             response = await get_ai_response(
                 prompt=prompt,
                 system_prompt=system_prompt,
@@ -113,7 +112,7 @@ If they ask something else, answer helpfully first, then guide back to the next 
                 temperature=0.7,
                 max_tokens=300
             )
-            
+
             return {
                 "response": response,
                 "next_question": next_q["question"],
@@ -132,10 +131,10 @@ If they ask something else, answer helpfully first, then guide back to the next 
             }
 
 
-async def store_conversation(user_id: str, conversation_id: str, messages: List[dict], company_profile: dict):
+async def store_conversation(user_id: str, conversation_id: str, messages: list[dict], company_profile: dict):
     try:
         db = get_database()
-        
+
         doc = {
             "user_id": user_id,
             "conversation_id": conversation_id,
@@ -144,19 +143,19 @@ async def store_conversation(user_id: str, conversation_id: str, messages: List[
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow(),
         }
-        
+
         db.conversations.update_one(
             {"conversation_id": conversation_id},
             {"$set": doc},
             upsert=True
         )
-        
+
         logger.info(f"Stored conversation {conversation_id} for user {user_id}")
     except Exception as e:
         logger.error(f"Failed to store conversation: {e}")
 
 
-async def get_conversation(conversation_id: str) -> Optional[dict]:
+async def get_conversation(conversation_id: str) -> dict | None:
     try:
         db = get_database()
         conv = db.conversations.find_one({"conversation_id": conversation_id})
@@ -170,17 +169,18 @@ async def get_conversation(conversation_id: str) -> Optional[dict]:
 
 async def store_conversation_embedding(conversation_id: str, user_id: str, text: str, metadata: dict):
     try:
-        from .qdrant import get_qdrant_client, get_embedding
-        
+        from .qdrant import get_embedding, get_qdrant_client
+
         client = get_qdrant_client()
         if not client:
             return
-        
-        from qdrant_client.models import PointStruct
+
         import uuid
-        
+
+        from qdrant_client.models import PointStruct
+
         embedding = get_embedding(text)
-        
+
         point = PointStruct(
             id=str(uuid.uuid4()),
             vector=embedding,
@@ -192,12 +192,12 @@ async def store_conversation_embedding(conversation_id: str, user_id: str, text:
                 "timestamp": datetime.utcnow().isoformat()
             }
         )
-        
+
         client.upsert(
             collection_name="conversations",
             points=[point]
         )
-        
+
         logger.info(f"Stored embedding for conversation {conversation_id}")
     except Exception as e:
         logger.error(f"Failed to store embedding: {e}")

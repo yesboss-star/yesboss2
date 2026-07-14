@@ -1,18 +1,19 @@
-import logging
 import json
+import logging
 import re
-from fastapi import APIRouter, HTTPException, Depends, Query
-from typing import Optional
 from datetime import datetime, timedelta
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from ..core.ai_client import get_ai_response
 from ..core.database import get_database
 from ..dependencies.auth import get_current_user_optional
-from ..core.ai_client import get_ai_response
 
 router = APIRouter()
 logger = logging.getLogger("yesboss.market_trends")
 
 
-def get_user_org_id(user) -> Optional[str]:
+def get_user_org_id(user) -> str | None:
     if hasattr(user, 'user_metadata') and user.user_metadata:
         return user.user_metadata.get("organization_id")
     return None
@@ -32,8 +33,8 @@ def parse_articles_from_ai(response: str) -> list:
 
 @router.get("/news")
 async def get_market_news(
-    industry: Optional[str] = Query(None),
-    micro_vertical: Optional[str] = Query(None),
+    industry: str | None = Query(None),
+    micro_vertical: str | None = Query(None),
     current_user = Depends(get_current_user_optional)
 ):
     db = get_database()

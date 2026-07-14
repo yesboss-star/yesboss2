@@ -1,9 +1,11 @@
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+
 from ..core.database import get_database
-from ..dependencies.auth import get_current_user, get_current_user_optional
+from ..dependencies.auth import get_current_user_optional
 
 router = APIRouter()
 logger = logging.getLogger("yesboss.prompt")
@@ -11,15 +13,15 @@ logger = logging.getLogger("yesboss.prompt")
 
 class PromptBuildRequest(BaseModel):
     organization_id: str
-    goal_id: Optional[str] = None
-    agent_type: Optional[str] = None
-    extra_context: Optional[str] = None
+    goal_id: str | None = None
+    agent_type: str | None = None
+    extra_context: str | None = None
 
 
 class ProbeRequest(BaseModel):
     goal_title: str
     organization_id: str
-    existing_fields: Optional[Dict[str, Any]] = None
+    existing_fields: dict[str, Any] | None = None
 
 
 @router.post("/build")

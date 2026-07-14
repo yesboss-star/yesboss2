@@ -3,14 +3,14 @@ import json
 import logging
 import time
 from datetime import datetime
-from typing import Optional
-from ..core.database import get_database
+
 from ..api.websocket import manager as ws_manager
-from ..core.email_service import send_notification_email, is_email_configured
+from ..core.database import get_database
+from ..core.email_service import is_email_configured, send_notification_email
 
 logger = logging.getLogger("yesboss.notification_service")
 
-_email_rate_limit = {}  # org_id -> list of timestamps
+_email_rate_limit: dict[str, list[float]] = {}  # org_id -> list of timestamps
 
 def _check_email_rate_limit(org_id: str, max_per_hour: int = 50) -> bool:
     now = time.time()
@@ -41,7 +41,7 @@ def resolve_uid(user_id: str) -> str:
     return user_id
 
 
-def get_user_email(user_id: str) -> Optional[str]:
+def get_user_email(user_id: str) -> str | None:
     db = get_database()
     if db is None:
         logger.warning("get_user_email: no database")
@@ -145,7 +145,7 @@ async def create_and_deliver(
             ))
 
     if is_channel_enabled(prefs, "push", type):
-        asyncio.create_task(_send_push(resolved_uid, title, message, link, notif_doc.get("_id") if notif_doc else None))
+        asyncio.create_task(_send_push(resolved_uid, title, message, link, str(notif_doc.get("_id")) if notif_doc else None))
 
     return notif_doc
 
@@ -170,7 +170,7 @@ async def _send_push(user_id: str, title: str, message: str, link: str = None, n
         return
 
     try:
-        from pywebpush import webpush, WebPushException
+        from pywebpush import WebPushException, webpush
     except ImportError:
         logger.warning("pywebpush not installed — skipping push")
         return
@@ -203,7 +203,7 @@ async def send_digest(user_id: str, org_id: str, frequency: str = "daily"):
     if prefs.get("digest", {}).get("frequency") != frequency:
         return
 
-    from datetime import timedelta, timezone
+    from datetime import timedelta
     cutoff = datetime.utcnow() - timedelta(days=1 if frequency == "daily" else 7)
 
     notifications = list(

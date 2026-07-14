@@ -1,15 +1,16 @@
 import logging
-from fastapi import APIRouter, HTTPException, Depends, Query
-from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+
 from ..core.database import get_database
-from ..dependencies.auth import get_current_user_optional
 from ..core.zoho import ZohoOAuth
+from ..dependencies.auth import get_current_user_optional
 
 logger = logging.getLogger("yesboss.zoho_auth")
 router = APIRouter()
 
 
-def get_user_id(user) -> Optional[str]:
+def get_user_id(user) -> str | None:
     if user is None:
         return None
     return getattr(user, "id", None) or getattr(user, "email", None)
@@ -36,8 +37,8 @@ async def get_auth_url(
 @router.get("/callback")
 async def zoho_callback(
     code: str = Query(...),
-    state: Optional[str] = Query(None),
-    error: Optional[str] = Query(None),
+    state: str | None = Query(None),
+    error: str | None = Query(None),
 ):
     try:
         if error:

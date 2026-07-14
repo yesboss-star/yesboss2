@@ -1,6 +1,6 @@
 import logging
-from typing import Optional, List, Dict, Any, Set
 from datetime import datetime
+from typing import Any
 
 logger = logging.getLogger("yesboss.prompt_engine")
 
@@ -165,7 +165,7 @@ AGENT_TYPES = [
 ]
 
 # Map agent_type -> set of context section keys needed
-AGENT_SECTION_MAP: Dict[str, Set[str]] = {
+AGENT_SECTION_MAP: dict[str, set[str]] = {
     "business_analyst":       {"org", "goals", "tasks", "team", "docs", "website", "patterns"},
     "strategy_advisor":       {"org", "goals", "tasks", "team", "docs", "website", "patterns"},
     "task_planner":           {"org", "goals", "tasks", "team", "docs", "patterns"},
@@ -197,10 +197,10 @@ class MasterPromptEngine:
     async def build_prompt(
         self,
         org_id: str,
-        user_id: Optional[str] = None,
-        goal_id: Optional[str] = None,
-        agent_type: Optional[str] = None,
-        extra_context: Optional[str] = None,
+        user_id: str | None = None,
+        goal_id: str | None = None,
+        agent_type: str | None = None,
+        extra_context: str | None = None,
     ) -> str:
         agent_type = agent_type or "default"
         sections = await self._build_selected_context(
@@ -227,9 +227,9 @@ class MasterPromptEngine:
     async def build_selected_context(
         self,
         org_id: str,
-        sections_requested: Set[str],
-        user_id: Optional[str] = None,
-        goal_id: Optional[str] = None,
+        sections_requested: set[str],
+        user_id: str | None = None,
+        goal_id: str | None = None,
     ) -> str:
         builder = {
             "org": self._build_org_profile,
@@ -244,9 +244,9 @@ class MasterPromptEngine:
         for key, method in builder.items():
             if key in sections_requested:
                 if key in ("goals", "tasks"):
-                    result = await method(org_id, goal_id)
+                    result = await method(org_id, goal_id)  # type: ignore[call-arg]
                 elif key == "patterns":
-                    result = await method(org_id, user_id)
+                    result = await method(org_id, user_id)  # type: ignore[call-arg]
                 else:
                     result = await method(org_id)
                 if result:
@@ -256,11 +256,11 @@ class MasterPromptEngine:
     async def _build_selected_context(
         self,
         org_id: str,
-        user_id: Optional[str],
-        goal_id: Optional[str],
+        user_id: str | None,
+        goal_id: str | None,
         agent_type: str,
-    ) -> List[str]:
-        section_keys = AGENT_SECTION_MAP.get(agent_type, AGENT_SECTION_MAP["default"])
+    ) -> list[str]:
+        AGENT_SECTION_MAP.get(agent_type, AGENT_SECTION_MAP["default"])
         builder = {
             "org": self._build_org_profile,
             "goals": self._build_goals_section,
@@ -270,13 +270,13 @@ class MasterPromptEngine:
             "website": self._build_website_section,
             "patterns": self._build_user_patterns,
         }
-        sections: List[str] = []
+        sections: list[str] = []
         for key in AGENT_SECTION_MAP.get(agent_type, AGENT_SECTION_MAP["default"]):
             method = builder[key]
             if key in ("goals", "tasks"):
-                result = await method(org_id, goal_id)
+                result = await method(org_id, goal_id)  # type: ignore[call-arg]
             elif key == "patterns":
-                result = await method(org_id, user_id)
+                result = await method(org_id, user_id)  # type: ignore[call-arg]
             else:
                 result = await method(org_id)
             if result:
@@ -305,13 +305,13 @@ Website: {org.get('website_url', 'N/A')}
 Domain: {org.get('domain', 'N/A')}
 ========================\n"""
 
-    async def _build_goals_section(self, org_id: str, goal_id: Optional[str] = None) -> str:
+    async def _build_goals_section(self, org_id: str, goal_id: str | None = None) -> str:
         if self.db is None:
             return "===== GOALS =====\nNo database connection.\n==================\n"
-        query = {"organization_id": org_id}
+        query: dict[str, Any] = {"organization_id": org_id}
         if goal_id:
             from bson import ObjectId
-            query["_id"] = ObjectId(goal_id)
+            query["_id"] = ObjectId(goal_id)  # type: ignore[assignment]
 
         goals = list(self.db.goals.find(query).sort("created_at", -1).limit(20))
         if not goals:
@@ -350,7 +350,7 @@ Domain: {org.get('domain', 'N/A')}
         text = "\n".join(lines)
         return f"===== GOALS ({len(goals)} total) =====\n{text}\n=============================\n"
 
-    async def _build_tasks_section(self, org_id: str, goal_id: Optional[str] = None) -> str:
+    async def _build_tasks_section(self, org_id: str, goal_id: str | None = None) -> str:
         if self.db is None:
             return "===== TASKS =====\nNo database connection.\n==================\n"
         query = {"organization_id": org_id}
@@ -386,8 +386,8 @@ Domain: {org.get('domain', 'N/A')}
         if not members:
             return "===== TEAM =====\nNo team members found.\n===================\n"
 
-        dept_count = {}
-        names = []
+        dept_count: dict[str, int] = {}
+        names: list[str] = []
         for m in members:
             d = m.get("department", "General")
             dept_count[d] = dept_count.get(d, 0) + 1
@@ -406,7 +406,7 @@ Domain: {org.get('domain', 'N/A')}
         freqs = list(self.db.employee_frequencies.find({"org_ref": org_ref}))
         if freqs:
             lines.append("\nEmployee Work Patterns (proven categories, frequency, complexity):")
-            emp_patterns = {}
+            emp_patterns: dict[str, list[str]] = {}
             for f in freqs:
                 emp = f.get("employee_role", "unknown")
                 if emp not in emp_patterns:
@@ -420,7 +420,7 @@ Domain: {org.get('domain', 'N/A')}
 
         return "===== TEAM =====\n" + "\n".join(lines) + "\n================\n"
 
-    async def _build_documents_section(self, org_id: str, user_id: Optional[str] = None) -> str:
+    async def _build_documents_section(self, org_id: str, user_id: str | None = None) -> str:
         if self.db is None:
             return "===== DOCUMENTS =====\nNo database connection.\n=======================\n"
         query: dict = {"org_id": org_id}
@@ -454,8 +454,9 @@ Domain: {org.get('domain', 'N/A')}
 
         url = org["website_url"]
         try:
-            import httpx
             import re
+
+            import httpx
             last_err = None
             for attempt in range(2):
                 try:
@@ -486,7 +487,7 @@ Domain: {org.get('domain', 'N/A')}
             logger.warning(f"Website scrape failed for {url}: {last_err or e}")
         return ""
 
-    async def _build_user_patterns(self, org_id: str, user_id: Optional[str] = None) -> str:
+    async def _build_user_patterns(self, org_id: str, user_id: str | None = None) -> str:
         if not user_id or self.db is None:
             return "===== USER PATTERNS =====\nNo user context available.\n==========================\n"
 
@@ -550,9 +551,9 @@ Domain: {org.get('domain', 'N/A')}
         self,
         goal_title: str,
         org_id: str,
-        user_id: Optional[str] = None,
-        existing_fields: Optional[Dict[str, Any]] = None,
-    ) -> List[str]:
+        user_id: str | None = None,
+        existing_fields: dict[str, Any] | None = None,
+    ) -> list[str]:
         existing = existing_fields or {}
         questions = []
 
@@ -625,10 +626,10 @@ Domain: {org.get('domain', 'N/A')}
         self,
         org_id: str,
         user_id: str,
-        goal_title: Optional[str] = None,
-        question: Optional[str] = None,
-        breakdown: Optional[str] = None,
-        context_sections_used: Optional[List[str]] = None,
+        goal_title: str | None = None,
+        question: str | None = None,
+        breakdown: str | None = None,
+        context_sections_used: list[str] | None = None,
     ):
         if not user_id or self.db is None:
             return
@@ -687,15 +688,15 @@ Domain: {org.get('domain', 'N/A')}
     def _get_persona_instructions(self, agent_type: str) -> str:
         return PERSONA_INSTRUCTIONS.get(agent_type, PERSONA_INSTRUCTIONS["default"])
 
-    def get_agent_types(self) -> List[Dict[str, str]]:
+    def get_agent_types(self) -> list[dict[str, str]]:
         return AGENT_TYPES
 
     async def _log_prompt_usage(
         self,
         org_id: str,
         user_id: str,
-        agent_type: Optional[str],
-        sections: List[str],
+        agent_type: str | None,
+        sections: list[str],
     ):
         section_names = []
         for s in sections:

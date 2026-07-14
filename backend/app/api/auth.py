@@ -1,26 +1,25 @@
+import logging
 import re
 import secrets
-import logging
-from typing import Optional
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
 
+from ..core.database import get_database
 from ..core.firebase_admin import (
-    initialize_firebase,
     create_user,
-    get_user_by_email,
-    get_user_by_phone,
-    get_user,
-    update_user,
     delete_user,
     generate_email_verification_link,
     generate_password_reset_link,
+    get_user,
+    get_user_by_email,
+    get_user_by_phone,
+    initialize_firebase,
     set_custom_user_claims,
+    update_user,
 )
-from ..core.database import get_database
 from ..dependencies.auth import get_current_user
 
 try:
@@ -33,7 +32,7 @@ logger = logging.getLogger("yesboss.auth")
 router = APIRouter()
 
 
-def _audit_log(action: str, uid: str, detail: Optional[str] = None):
+def _audit_log(action: str, uid: str, detail: str | None = None):
     try:
         db = get_database()
         if db is not None:
@@ -52,7 +51,7 @@ class SignupRequest(BaseModel):
     email: str
     password: str
     full_name: str
-    phone: Optional[str] = None
+    phone: str | None = None
     role: str = "owner"
 
     @field_validator("role")
@@ -88,8 +87,8 @@ class LoginRequest(BaseModel):
 
 
 class SendOTPRequest(BaseModel):
-    email: Optional[str] = None
-    phone: Optional[str] = None
+    email: str | None = None
+    phone: str | None = None
 
     @field_validator("email")
     @classmethod
@@ -98,8 +97,8 @@ class SendOTPRequest(BaseModel):
 
 
 class VerifyOTPRequest(BaseModel):
-    email: Optional[str] = None
-    phone: Optional[str] = None
+    email: str | None = None
+    phone: str | None = None
     code: str
 
     @field_validator("email")
@@ -119,19 +118,19 @@ class ResetPasswordRequest(BaseModel):
 
 class UserResponse(BaseModel):
     uid: str
-    email: Optional[str] = None
-    full_name: Optional[str] = None
-    phone: Optional[str] = None
-    role: Optional[str] = None
-    organization_id: Optional[str] = None
-    created_at: Optional[str] = None
+    email: str | None = None
+    full_name: str | None = None
+    phone: str | None = None
+    role: str | None = None
+    organization_id: str | None = None
+    created_at: str | None = None
 
 
 class AuthResponse(BaseModel):
     success: bool
     message: str
-    user: Optional[UserResponse] = None
-    uid: Optional[str] = None
+    user: UserResponse | None = None
+    uid: str | None = None
 
 
 def _user_to_response(user) -> UserResponse:
@@ -180,7 +179,7 @@ async def signup(request: SignupRequest):
         logger.info("User signed up: %s (role=%s)", request.email, request.role)
 
         try:
-            verification_link = generate_email_verification_link(request.email)
+            generate_email_verification_link(request.email)
             logger.info("Verification link generated for: %s", request.email)
         except Exception as e:
             logger.warning("Could not generate verification link: %s", str(e))
@@ -279,7 +278,7 @@ async def send_otp(request: SendOTPRequest):
             "created_at": datetime.utcnow(),
         })
 
-        from ..core.email_service import send_otp_email, is_email_configured
+        from ..core.email_service import is_email_configured, send_otp_email
         if not is_email_configured():
             logger.warning("SMTP not configured - OTP not sent to %s. Debug OTP: %s", email, otp)
             raise HTTPException(
@@ -409,8 +408,8 @@ class SetSessionRequest(BaseModel):
 
 @router.post("/set-session")
 async def set_session(request: SetSessionRequest):
-    from ..core.firebase_admin import verify_id_token
     from ..core.database import get_database
+    from ..core.firebase_admin import verify_id_token
 
     user = verify_id_token(request.id_token)
     if not user:
@@ -462,7 +461,7 @@ async def set_session(request: SetSessionRequest):
 
 
 class ClearSessionRequest(BaseModel):
-    uid: Optional[str] = None
+    uid: str | None = None
 
 
 @router.post("/clear-session")
@@ -491,12 +490,12 @@ async def logout(uid: str = None):
 
 class SyncUserRequest(BaseModel):
     uid: str
-    email: Optional[str] = None
-    full_name: Optional[str] = None
-    phone: Optional[str] = None
+    email: str | None = None
+    full_name: str | None = None
+    phone: str | None = None
     role: str = "owner"
     phone_verified: bool = False
-    verification_token: Optional[str] = None
+    verification_token: str | None = None
 
 
 @router.post("/sync-user", response_model=AuthResponse)
@@ -589,7 +588,7 @@ async def reset_password(request: ResetPasswordRequest):
                 detail="User not found",
             )
 
-        reset_link = generate_password_reset_link(request.email)
+        generate_password_reset_link(request.email)
         logger.info("Password reset link sent to: %s", request.email)
 
         return AuthResponse(
@@ -681,8 +680,8 @@ async def delete_firebase_user(email: str):
 
 
 class ForgotSendOTPRequest(BaseModel):
-    email: Optional[str] = None
-    phone: Optional[str] = None
+    email: str | None = None
+    phone: str | None = None
 
     @field_validator("email")
     @classmethod
@@ -691,8 +690,8 @@ class ForgotSendOTPRequest(BaseModel):
 
 
 class ForgotVerifyOTPRequest(BaseModel):
-    email: Optional[str] = None
-    phone: Optional[str] = None
+    email: str | None = None
+    phone: str | None = None
     otp: str
 
 
@@ -712,15 +711,15 @@ class ForgotTokenResponse(BaseModel):
     success: bool
     message: str
     channel: str
-    reset_token: Optional[str] = None
-    debug_otp: Optional[str] = None
+    reset_token: str | None = None
+    debug_otp: str | None = None
 
 
 EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 PHONE_RE = re.compile(r"^\+?\d[\d\s\-()]{6,}$")
 
 
-def _detect_channel(req: ForgotSendOTPRequest) -> tuple[Optional[str], Optional[str], str]:
+def _detect_channel(req: ForgotSendOTPRequest) -> tuple[str | None, str | None, str]:
     """Returns (uid, contact, channel) where channel is 'email' or 'phone'."""
     if req.email and EMAIL_RE.match(req.email):
         user = get_user_by_email(req.email)
@@ -771,7 +770,7 @@ async def forgot_password_send_otp(request: ForgotSendOTPRequest):
         })
 
         if channel == "email":
-            from ..core.email_service import send_otp_email, is_email_configured
+            from ..core.email_service import is_email_configured, send_otp_email
             email_sent = False
             if is_email_configured():
                 email_sent = send_otp_email(contact, otp, purpose="password_reset")
@@ -782,7 +781,7 @@ async def forgot_password_send_otp(request: ForgotSendOTPRequest):
             else:
                 logger.warning("SMTP not configured - password reset OTP not sent to %s. Debug OTP: %s", contact, otp)
             try:
-                reset_link = generate_password_reset_link(contact)
+                generate_password_reset_link(contact)
                 logger.info("Password reset link also generated for: %s", contact)
             except Exception as e:
                 logger.warning("Could not generate password reset link: %s", e)

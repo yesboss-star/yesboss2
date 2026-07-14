@@ -1,30 +1,29 @@
-import os
 import json
 import logging
+import os
 from pathlib import Path
-from typing import Optional
 
 import firebase_admin
-from firebase_admin import credentials, auth
+from firebase_admin import auth, credentials
 
 logger = logging.getLogger("yesboss.firebase")
 
-_firebase_app: Optional[firebase_admin.App] = None
+_firebase_app: firebase_admin.App | None = None
 
 
-def initialize_firebase(cred_path: Optional[str] = None) -> firebase_admin.App:
+def initialize_firebase(cred_path: str | None = None) -> firebase_admin.App:
     global _firebase_app
-    
+
     if _firebase_app is not None:
         return _firebase_app
-    
+
     if cred_path is None:
         cred_path = os.getenv("FIREBASE_CREDENTIALS_PATH", "firebase-credentials.json")
-    
-    cred_path = Path(cred_path)
-    
-    if cred_path.exists():
-        cred = credentials.Certificate(str(cred_path))
+
+    cred_file = Path(cred_path)
+
+    if cred_file.exists():
+        cred = credentials.Certificate(str(cred_file))
         _firebase_app = firebase_admin.initialize_app(cred)
         logger.info("Firebase initialized with credentials file: %s", cred_path)
     else:
@@ -41,7 +40,7 @@ def initialize_firebase(cred_path: Optional[str] = None) -> firebase_admin.App:
         except Exception as e:
             logger.error("Failed to initialize Firebase: %s", str(e))
             raise
-    
+
     return _firebase_app
 
 
@@ -53,7 +52,7 @@ def get_firebase_auth() -> firebase_admin.auth:
 
 class AuthUser:
     """Wrapper around Firebase UserRecord that provides both .uid and .id access.
-    
+
     The codebase uses current_user.id in many places. Firebase UserRecord has .uid but not .id,
     so this wrapper adds .id as an alias for .uid and keeps all other UserRecord attributes.
     """
@@ -89,7 +88,7 @@ class AuthUser:
         return f"AuthUser(uid={self.uid!r}, email={self.email!r})"
 
 
-def verify_id_token(id_token: str) -> Optional[AuthUser]:
+def verify_id_token(id_token: str) -> AuthUser | None:
     try:
         decoded = auth.verify_id_token(id_token, app=_firebase_app)
         record = auth.get_user(decoded["uid"], app=_firebase_app)
@@ -99,8 +98,8 @@ def verify_id_token(id_token: str) -> Optional[AuthUser]:
         return None
 
 
-def create_user(email: str, password: str, phone: Optional[str] = None, 
-                display_name: Optional[str] = None) -> auth.UserRecord:
+def create_user(email: str, password: str, phone: str | None = None,
+                display_name: str | None = None) -> auth.UserRecord:
     fb_auth = get_firebase_auth()
     user_properties = {
         "email": email,
@@ -110,25 +109,25 @@ def create_user(email: str, password: str, phone: Optional[str] = None,
         user_properties["phone_number"] = phone
     if display_name:
         user_properties["display_name"] = display_name
-    
+
     return fb_auth.create_user(**user_properties)
 
 
-def get_user_by_email(email: str) -> Optional[auth.UserRecord]:
+def get_user_by_email(email: str) -> auth.UserRecord | None:
     try:
         return auth.get_user_by_email(email, app=_firebase_app)
     except Exception:
         return None
 
 
-def get_user_by_phone(phone: str) -> Optional[auth.UserRecord]:
+def get_user_by_phone(phone: str) -> auth.UserRecord | None:
     try:
         return auth.get_user_by_phone_number(phone, app=_firebase_app)
     except Exception:
         return None
 
 
-def get_user(uid: str) -> Optional[auth.UserRecord]:
+def get_user(uid: str) -> auth.UserRecord | None:
     try:
         return auth.get_user(uid, app=_firebase_app)
     except Exception:

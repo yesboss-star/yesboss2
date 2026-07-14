@@ -1,18 +1,20 @@
 import logging
-from fastapi import APIRouter, HTTPException, Depends, Query
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
 from datetime import datetime
+from typing import Any
+
+from bson import ObjectId
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+
+from ..core.cache import cache
 from ..core.database import get_database
 from ..dependencies.auth import get_current_user, get_current_user_optional
-from ..core.cache import cache
-from bson import ObjectId
 
 router = APIRouter()
 logger = logging.getLogger("yesboss.dashboard")
 
 
-def get_user_org_id(user) -> Optional[str]:
+def get_user_org_id(user) -> str | None:
     if hasattr(user, 'user_metadata') and user.user_metadata:
         return user.user_metadata.get("organization_id")
     return None
@@ -25,17 +27,17 @@ class InsightResponse(BaseModel):
     description: str
     priority: str
     category: str
-    action_items: Optional[List[str]] = None
-    metrics: Optional[Dict[str, Any]] = None
+    action_items: list[str] | None = None
+    metrics: dict[str, Any] | None = None
     created_at: str
 
 
 class ModuleMetrics(BaseModel):
     module: str
     title: str
-    metrics: Dict[str, Any]
-    insights: List[Dict[str, Any]]
-    trends: List[Dict[str, Any]]
+    metrics: dict[str, Any]
+    insights: list[dict[str, Any]]
+    trends: list[dict[str, Any]]
 
 
 INDUSTRY_MODULES = {
@@ -204,10 +206,10 @@ INDUSTRY_MODULES = {
 }
 
 
-def get_industry_insights(industry: str) -> List[Dict]:
+def get_industry_insights(industry: str) -> list[dict]:
     industry = industry.lower() if industry else "default"
     module_config = INDUSTRY_MODULES.get(industry, INDUSTRY_MODULES["default"])
-    
+
     insight_templates = {
         "founder": [
             {"type": "growth", "title": "Growth Opportunity", "description": "Revenue increased 23% this quarter - maintain momentum", "priority": "success"},
@@ -235,7 +237,7 @@ def get_industry_insights(industry: str) -> List[Dict]:
             {"type": "insight", "title": "Integration Health", "description": "All critical integrations operating normally", "priority": "info"},
         ]
     }
-    
+
     all_insights = []
     for module, config in module_config.items():
         module_insights = insight_templates.get(module, insight_templates["founder"])
@@ -255,56 +257,56 @@ def get_industry_insights(industry: str) -> List[Dict]:
                 "metrics": {m: 0 for m in config["metrics"][:3]},
                 "created_at": datetime.utcnow().isoformat()
             })
-    
+
     return all_insights
 
 
 @router.get("/insights")
 async def get_dashboard_insights(
-    industry: Optional[str] = Query(None),
-    module: Optional[str] = Query(None),
-    priority: Optional[str] = Query(None),
+    industry: str | None = Query(None),
+    module: str | None = Query(None),
+    priority: str | None = Query(None),
     current_user = Depends(get_current_user)
 ):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     org_id = get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
-    
+
     organization = db.organizations.find_one({"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id})
     org_industry = industry or (organization.get("industry") if organization else None)
-    
+
     insights = get_industry_insights(org_industry or "default")
-    
+
     if module:
         insights = [i for i in insights if i["category"] == module]
     if priority:
         insights = [i for i in insights if i["priority"] == priority]
-    
+
     return {"insights": insights, "count": len(insights)}
 
 
 @router.get("/modules")
 async def get_dashboard_modules(
-    industry: Optional[str] = Query(None),
+    industry: str | None = Query(None),
     current_user = Depends(get_current_user)
 ):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     org_id = get_user_org_id(current_user)
     if org_id:
         organization = db.organizations.find_one({"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id})
         org_industry = industry or (organization.get("industry") if organization else None)
     else:
         org_industry = industry
-    
+
     modules = INDUSTRY_MODULES.get(org_industry.lower() if org_industry else "default", INDUSTRY_MODULES["default"])
-    
+
     return {
         "modules": [
             {
@@ -320,8 +322,8 @@ async def get_dashboard_modules(
 
 @router.get("/kpi")
 async def get_dashboard_kpi(
-    organization_id: Optional[str] = Query(None),
-    email: Optional[str] = Query(None),
+    organization_id: str | None = Query(None),
+    email: str | None = Query(None),
     current_user = Depends(get_current_user_optional)
 ):
     db = get_database()
@@ -492,7 +494,8 @@ async def get_dashboard_kpi(
             temperature=0.3,
             max_tokens=500,
         )
-        import json, re
+        import json
+        import re
         json_match = re.search(r'\[.*\]', ai_kpis, re.DOTALL)
         if json_match:
             parsed = json.loads(json_match.group())
@@ -511,23 +514,23 @@ async def get_dashboard_kpi(
 @router.get("/metrics/{module}")
 async def get_module_metrics(
     module: str,
-    period: Optional[str] = Query("30d"),
+    period: str | None = Query("30d"),
     current_user = Depends(get_current_user)
 ):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     org_id = get_user_org_id(current_user)
     if org_id:
         organization = db.organizations.find_one({"_id": org_id})
         org_industry = organization.get("industry") if organization else None
     else:
         org_industry = None
-    
+
     industry = org_industry or "default"
     module_config = INDUSTRY_MODULES.get(industry.lower(), INDUSTRY_MODULES["default"]).get(module, {})
-    
+
     # Real metrics from DB
     total_goals = db.goals.count_documents({"organization_id": org_id})
     active_goals = db.goals.count_documents({"organization_id": org_id, "status": "active"})
@@ -537,7 +540,7 @@ async def get_module_metrics(
     in_progress_tasks = db.tasks.count_documents({"organization_id": org_id, "status": "in_progress"})
     pending_tasks = db.tasks.count_documents({"organization_id": org_id, "status": "pending"})
     total_members = db.org_chart_members.count_documents({"organization_id": org_id})
-    
+
     real_metrics = {}
     for metric in module_config.get("metrics", []):
         if metric == "revenue":
@@ -564,7 +567,7 @@ async def get_module_metrics(
             real_metrics[metric] = {"value": val, "change": "completion rate", "trend": "up" if completed_tasks > 0 else "neutral"}
         else:
             real_metrics[metric] = {"value": 0, "change": "no data", "trend": "neutral"}
-    
+
     return {
         "module": module,
         "title": module_config.get("title", module.title()),
@@ -582,18 +585,18 @@ async def get_module_trends(
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     org_id = get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
-    
+
     from datetime import timedelta
     since = datetime.utcnow() - timedelta(days=min(days, 90))
     tasks = list(db.tasks.find(
         {"organization_id": org_id, "updated_at": {"$gte": since}},
         {"updated_at": 1, "status": 1}
     ).sort("updated_at", 1))
-    
+
     task_trend = {}
     for t in tasks:
         day_key = t.get("updated_at", since).strftime("%Y-%m-%d")
@@ -604,14 +607,14 @@ async def get_module_trends(
         elif t.get("status") == "pending":
             task_trend[day_key]["pending"] += 1
         task_trend[day_key]["created"] += 1
-    
+
     trend_data = [{"date": d, "value": v["completed"], "created": v["created"], "pending": v["pending"]} for d, v in sorted(task_trend.items())]
-    
+
     if not trend_data:
         trend_data = [{"date": datetime.utcnow().strftime("%Y-%m-%d"), "value": 0, "created": 0, "pending": 0}]
-    
+
     values = [t["value"] for t in trend_data]
-    
+
     return {
         "module": module,
         "days": days,

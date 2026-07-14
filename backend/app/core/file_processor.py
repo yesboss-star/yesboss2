@@ -1,9 +1,9 @@
 import io
-import re
 import logging
+import re
 import uuid
-from typing import Optional, List, Dict, Any
 from datetime import datetime
+from typing import Any
 
 logger = logging.getLogger("yesboss.file_processor")
 
@@ -68,26 +68,26 @@ def extract_text_from_excel(file_bytes: bytes) -> str:
 
 def extract_text_from_image(file_bytes: bytes, file_type: str) -> str:
     try:
-        from PIL import Image
         import pytesseract
-        
+        from PIL import Image
+
         image = Image.open(io.BytesIO(file_bytes))
         if image.mode != "RGB":
             image = image.convert("RGB")
-        
+
         text = pytesseract.image_to_string(image)
         return text.strip()
     except Exception as e:
         logger.error(f"OCR extraction failed: {e}")
         try:
-            from transformers import pipeline
             import torch
-            
+            from transformers import pipeline
+
             if torch.cuda.is_available():
                 ocr_pipeline = pipeline("ocr", model="microsoft/trocr-base-handwritten", device=0)
             else:
                 ocr_pipeline = pipeline("ocr", model="microsoft/trocr-base-handwritten")
-            
+
             image = Image.open(io.BytesIO(file_bytes))
             result = ocr_pipeline(image)
             return result[0]["generated_text"] if result else ""
@@ -135,7 +135,7 @@ def extract_text_from_txt(file_bytes: bytes) -> str:
 def extract_text(file_bytes: bytes, filename: str) -> str:
     file_type = get_file_type(filename)
     logger.info(f"Extracting text from {filename} (type: {file_type})")
-    
+
     extractors = {
         "pdf": extract_text_from_pdf,
         "excel": extract_text_from_excel,
@@ -144,18 +144,18 @@ def extract_text(file_bytes: bytes, filename: str) -> str:
         "csv": extract_text_from_csv,
         "text": extract_text_from_txt,
     }
-    
+
     extractor = extractors.get(file_type)
     if extractor:
         return extractor(file_bytes)
-    
+
     return ""
 
 
-def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
+def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
     if not text:
         return []
-    
+
     chunks = []
     for i in range(0, len(text), chunk_size - overlap):
         chunk = text[i:i + chunk_size]
@@ -164,15 +164,15 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVE
     return chunks
 
 
-async def generate_embeddings(texts: List[str], provider: Optional[str] = None) -> List[List[float]]:
+async def generate_embeddings(texts: list[str], provider: str | None = None) -> list[list[float]]:
     from .config import settings
     resolved_provider = provider or settings.DEFAULT_AI_PROVIDER
-    
+
     embeddings = []
-    
+
     try:
         from openai import AsyncOpenAI
-        
+
         if resolved_provider == "xai":
             api_key = settings.XAI_API_KEY
             base_url = settings.XAI_BASE_URL
@@ -185,7 +185,7 @@ async def generate_embeddings(texts: List[str], provider: Optional[str] = None) 
         else:
             api_key = None
             base_url = None
-        
+
         if api_key:
             client = AsyncOpenAI(api_key=api_key, base_url=base_url)
             for text in texts:
@@ -201,20 +201,20 @@ async def generate_embeddings(texts: List[str], provider: Optional[str] = None) 
         logger.error(f"Embedding failed with {resolved_provider}: {e}")
         for text in texts:
             embeddings.append([0.0] * 1536)
-    
+
     return embeddings
 
 
 async def store_embeddings_in_qdrant(
     collection_name: str,
-    vectors: List[List[float]],
-    payloads: List[Dict]
+    vectors: list[list[float]],
+    payloads: list[dict]
 ):
     from .qdrant import get_qdrant_client
-    
+
     try:
         client = get_qdrant_client()
-        
+
         points = []
         for i, (vector, payload) in enumerate(zip(vectors, payloads)):
             points.append({
@@ -222,13 +222,13 @@ async def store_embeddings_in_qdrant(
                 "vector": vector,
                 "payload": payload
             })
-        
+
         if points:
             client.upsert(
                 collection_name=collection_name,
                 points=points
             )
-        
+
         return True
     except Exception as e:
         logger.error(f"Failed to store in Qdrant: {e}")
@@ -240,11 +240,11 @@ async def process_file(
     filename: str,
     org_id: str,
     user_id: str,
-    provider: Optional[str] = None,
+    provider: str | None = None,
     company_name: str = "",
     industry: str = "",
     micro_vertical: str = "",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     logger.info(f"Processing file: {filename} for org: {org_id}")
 
     file_id = str(uuid.uuid4())
@@ -357,8 +357,8 @@ async def _run_deep_analysis(
 ) -> None:
     """Background task: extract structured insights and write back to MongoDB."""
     try:
-        from .intelligence import extract_document_insights
         from .database import get_database
+        from .intelligence import extract_document_insights
 
         insights = await extract_document_insights(
             text=text,
@@ -405,8 +405,8 @@ async def _run_deep_analysis(
 async def get_org_document_context(
     org_id: str,
     max_docs: int = 20,
-    user_id: Optional[str] = None,
-) -> Dict[str, Any]:
+    user_id: str | None = None,
+) -> dict[str, Any]:
     """Return the structured context (summaries, metrics, decisions) of all
     analyzed documents for an organization. Powers dashboard widgets and the
     AI assistant's system prompt.
@@ -432,7 +432,7 @@ async def get_org_document_context(
 
     out_docs = []
     aggregated_metrics = []
-    category_counts: Dict[str, int] = {}
+    category_counts: dict[str, int] = {}
     summaries_for_brief: list = []
 
     for d in docs:
@@ -491,12 +491,11 @@ async def search_documents(
     org_id: str,
     query: str,
     top_k: int = 5,
-    provider: Optional[str] = None,
-    user_id: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+    provider: str | None = None,
+    user_id: str | None = None,
+) -> list[dict[str, Any]]:
     logger.info(f"Searching documents for org: {org_id}, query: {query}")
 
-    from .ai_client import get_ai_response
 
     query_vector = None
     try:
@@ -505,11 +504,12 @@ async def search_documents(
     except Exception as e:
         logger.warning(f"Embedding generation failed for search: {e}")
         query_vector = None
-    
+
     if query_vector is not None:
         try:
+            from qdrant_client.models import FieldCondition, Filter, Match
+
             from .qdrant import get_qdrant_client
-            from qdrant_client.models import Filter, FieldCondition, Match, MatchExcept
 
             client = get_qdrant_client()
 

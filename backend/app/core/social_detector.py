@@ -1,8 +1,7 @@
-import re
 import json
 import logging
-from typing import Optional
-from urllib.parse import urljoin, urlparse
+import re
+from urllib.parse import urljoin
 
 logger = logging.getLogger("yesboss.social_detector")
 
@@ -91,7 +90,7 @@ def normalize_url(url: str, platform: str) -> str:
     return url
 
 
-def extract_handle_from_url(url: str, platform: str) -> Optional[str]:
+def extract_handle_from_url(url: str, platform: str) -> str | None:
     if not url:
         return None
     if platform == "linkedin":
@@ -324,7 +323,7 @@ async def _source_beautifulsoup(domain: str, base_url: str) -> dict:
 # SOURCE 4: DuckDuckGo search
 # ============================================================
 async def _source_duckduckgo(company_name: str, domain: str) -> dict:
-    detected = {}
+    detected: dict[str, str] = {}
     if not company_name:
         return detected
     try:
@@ -390,7 +389,7 @@ def _source_common_patterns(company_name: str, domain: str) -> dict:
 # SOURCE 6: xAI Grok validation
 # ============================================================
 async def _source_ai_validation(domain: str, company_name: str, all_candidates: dict, page_content: str) -> dict:
-    validated = {}
+    validated: dict[str, str] = {}
     try:
         from .ai_client import get_ai_response
         from .prompt_engine import PERSONA_INSTRUCTIONS
@@ -498,8 +497,9 @@ async def detect_social_presence(domain: str, company_name: str = "") -> dict:
             all_sources[platform]["sources"].append(source_name)
 
     # Source 1: SearAPI
-    if settings.SEAR_API_KEY:
-        searapi = await _source_searapi(domain, base_url, settings.SEAR_API_KEY)
+    searapi_key = getattr(settings, "SEAR_API_KEY", None) or getattr(settings, "SEARAPI_API_KEY", None)
+    if searapi_key:
+        searapi = await _source_searapi(domain, base_url, searapi_key)
         for p, url in searapi.items():
             _add(p, url, "searapi")
 

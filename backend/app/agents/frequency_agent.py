@@ -1,9 +1,7 @@
-import asyncio
 import json
 import logging
 import re
 from datetime import datetime, timedelta
-from typing import Optional
 
 logger = logging.getLogger("yesboss.frequency_agent")
 
@@ -16,7 +14,7 @@ SYSTEM_PROMPT = """You are a work-pattern analyst. Given a task or goal descript
 Return ONLY valid JSON: {"work_category": "...", "complexity_level": "...", "estimated_hours": 0.0, "review_frequency_days": 3}"""
 
 
-async def analyze_content(title: str, description: str = "", provider: Optional[str] = None) -> dict:
+async def analyze_content(title: str, description: str = "", provider: str | None = None) -> dict:
     from ..core.ai_client import get_ai_response
 
     text = f"Title: {title}\nDescription: {description}" if description else f"Title: {title}"
@@ -45,7 +43,7 @@ async def analyze_content(title: str, description: str = "", provider: Optional[
     return {"work_category": "general", "complexity_level": "intermediate", "estimated_hours": 4, "review_frequency_days": 7}
 
 
-async def process_task(task_data: dict, org_id: str, provider: Optional[str] = None):
+async def process_task(task_data: dict, org_id: str, provider: str | None = None):
     try:
         from ..core.database import get_database
         from ..core.learning import learning
@@ -73,9 +71,10 @@ async def process_task(task_data: dict, org_id: str, provider: Optional[str] = N
         logger.warning(f"Frequency agent task processing error: {e}")
 
 
-async def process_goal(goal_data: dict, org_id: str, provider: Optional[str] = None):
+async def process_goal(goal_data: dict, org_id: str, provider: str | None = None):
     try:
         from bson import ObjectId
+
         from ..core.database import get_database
         from ..core.learning import learning
 

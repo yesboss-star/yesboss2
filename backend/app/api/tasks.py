@@ -1,18 +1,19 @@
 import asyncio
-from fastapi import APIRouter, HTTPException, Depends, Query
-from pydantic import BaseModel
-from typing import Optional, List, Union
 from datetime import datetime
-from ..core.database import get_database
-from ..dependencies.auth import get_current_user_optional
-from ..api.websocket import manager as ws_manager
-from ..core.zoho import ZohoMailTasks, ZohoOAuth
+
 from bson import ObjectId
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+
+from ..api.websocket import manager as ws_manager
+from ..core.database import get_database
+from ..core.zoho import ZohoMailTasks, ZohoOAuth
+from ..dependencies.auth import get_current_user_optional
 
 router = APIRouter()
 
 
-def get_user_org_id(user) -> Optional[str]:
+def get_user_org_id(user) -> str | None:
     if hasattr(user, 'user_metadata') and user.user_metadata:
         return user.user_metadata.get("organization_id")
     return None
@@ -144,27 +145,27 @@ def _normalize_assignee_ids(v):
 
 class TaskCreate(BaseModel):
     title: str
-    description: Optional[str] = None
+    description: str | None = None
     priority: str = "medium"
-    goal_id: Optional[str] = None
-    assignee_id: Optional[Union[str, List[str]]] = None
-    assignee_email: Optional[str] = None
-    department: Optional[str] = None
-    due_date: Optional[str] = None
-    dependencies: Optional[List[str]] = None
-    reviewers: Optional[List[str]] = None
+    goal_id: str | None = None
+    assignee_id: str | list[str] | None = None
+    assignee_email: str | None = None
+    department: str | None = None
+    due_date: str | None = None
+    dependencies: list[str] | None = None
+    reviewers: list[str] | None = None
 
 
 class TaskUpdate(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    priority: Optional[str] = None
-    status: Optional[str] = None
-    assignee_id: Optional[Union[str, List[str]]] = None
-    assignee_name: Optional[Union[str, List[str]]] = None
-    due_date: Optional[str] = None
-    dependencies: Optional[List[str]] = None
-    reviewers: Optional[List[str]] = None
+    title: str | None = None
+    description: str | None = None
+    priority: str | None = None
+    status: str | None = None
+    assignee_id: str | list[str] | None = None
+    assignee_name: str | list[str] | None = None
+    due_date: str | None = None
+    dependencies: list[str] | None = None
+    reviewers: list[str] | None = None
 
 
 class TaskComment(BaseModel):
@@ -172,19 +173,19 @@ class TaskComment(BaseModel):
 
 
 @router.post("")
-async def create_task(task: TaskCreate, organization_id: Optional[str] = None, current_user = Depends(get_current_user_optional)):
+async def create_task(task: TaskCreate, organization_id: str | None = None, current_user = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     org_id = organization_id or get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
-    
+
     user_id = getattr(current_user, 'id', None) or str(current_user) if current_user else None
-    
+
     assignee_ids = _normalize_assignee_ids(task.assignee_id) or []
-    
+
     task_doc = {
         "title": task.title,
         "description": task.description,
@@ -205,10 +206,10 @@ async def create_task(task: TaskCreate, organization_id: Optional[str] = None, c
         "owner_escalated": False,
         "owner_escalated_at": None,
     }
-    
+
     result = db.tasks.insert_one(task_doc)
     task_doc["_id"] = str(result.inserted_id)
-    
+
     asyncio.create_task(ws_manager.broadcast_to_organization(
         {"type": "task_created", "data": task_doc},
         org_id
@@ -230,33 +231,33 @@ async def create_task(task: TaskCreate, organization_id: Optional[str] = None, c
             actor_id=user_id,
             email=task.assignee_email,
         ))
-    
+
     from ..agents.frequency_agent import process_task as _freq_task
     asyncio.create_task(_freq_task(task_doc, org_id))
-    
+
     return {"task": task_doc}
 
 
 @router.get("")
 async def list_tasks(
-    goal_id: Optional[str] = None,
-    assignee_id: Optional[str] = None,
-    status: Optional[str] = None,
-    priority: Optional[str] = None,
-    department: Optional[str] = None,
-    organization_id: Optional[str] = None,
+    goal_id: str | None = None,
+    assignee_id: str | None = None,
+    status: str | None = None,
+    priority: str | None = None,
+    department: str | None = None,
+    organization_id: str | None = None,
     overdue: bool = Query(False),
-    escalation_level: Optional[int] = Query(None),
+    escalation_level: int | None = Query(None),
     current_user = Depends(get_current_user_optional)
 ):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     org_id = organization_id or get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
-    
+
     query = {"organization_id": org_id}
     if goal_id:
         query["goal_id"] = goal_id
@@ -274,7 +275,7 @@ async def list_tasks(
         query["department"] = department
     if escalation_level is not None:
         query["escalation_level"] = escalation_level
-    
+
     if current_user and getattr(current_user, 'id', None):
         user_email = (getattr(current_user, 'email', '') or '').lower().strip()
         query["$or"] = [
@@ -282,9 +283,9 @@ async def list_tasks(
             {"assignee_email": user_email},
             {"assigned_to": user_email},
         ]
-    
+
     tasks = list(db.tasks.find(query).sort("created_at", -1))
-    
+
     for task in tasks:
         task["_id"] = str(task["_id"])
         raw = task.get("assignee_id")
@@ -297,7 +298,7 @@ async def list_tasks(
             task["assignee_name"] = [raw_name]
         elif raw_name is None:
             task["assignee_name"] = []
-    
+
     return {"tasks": tasks}
 
 
@@ -306,9 +307,9 @@ async def get_task(task_id: str, current_user = Depends(get_current_user_optiona
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     task = db.tasks.find_one({"_id": ObjectId(task_id)})
-    
+
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
@@ -316,18 +317,18 @@ async def get_task(task_id: str, current_user = Depends(get_current_user_optiona
         user_email = (getattr(current_user, 'email', '') or '').lower().strip()
         if task.get("created_by") != current_user.id and task.get("assignee_email") != user_email and task.get("assigned_to") != user_email:
             raise HTTPException(status_code=403, detail="Access denied")
-    
+
     task["_id"] = str(task["_id"])
     raw = task.get("assignee_id")
     if isinstance(raw, str):
         task["assignee_id"] = [raw]
     elif raw is None:
         task["assignee_id"] = []
-    
+
     comments = list(db.task_comments.find({"task_id": task_id}).sort("created_at", 1))
     for comment in comments:
         comment["_id"] = str(comment["_id"])
-    
+
     return {"task": task, "comments": comments}
 
 
@@ -336,11 +337,11 @@ async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     old_obj = db.tasks.find_one({"_id": ObjectId(task_id)})
     if not old_obj:
         raise HTTPException(status_code=404, detail="Task not found")
-    
+
     org_id = old_obj.get("organization_id", "")
     if current_user and getattr(current_user, 'id', None):
         if not await _is_org_owner(db, org_id, current_user.id):
@@ -359,12 +360,12 @@ async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get
         else:
             update_data[k] = v
     update_data["updated_at"] = datetime.utcnow()
-    
+
     db.tasks.update_one(
         {"_id": ObjectId(task_id)},
         {"$set": update_data}
     )
-    
+
     task_obj = db.tasks.find_one({"_id": ObjectId(task_id)})
     task_obj["_id"] = str(task_obj["_id"])
     raw = task_obj.get("assignee_id")
@@ -377,7 +378,7 @@ async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get
         task_obj["assignee_name"] = [raw_name]
     elif raw_name is None:
         task_obj["assignee_name"] = []
-    
+
     if org_id:
         asyncio.create_task(sync_task_to_zoho(db, task_obj, org_id, old_obj))
 
@@ -418,10 +419,10 @@ async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get
                     link=f"/tasks/{task_id}",
                     email=task_obj.get("assignee_email"),
                 ))
-    
+
     from ..agents.frequency_agent import process_task as _freq_task
     asyncio.create_task(_freq_task(task_obj, org_id))
-    
+
     return {"task": task_obj}
 
 
@@ -434,14 +435,14 @@ async def delete_task(task_id: str, current_user = Depends(get_current_user_opti
     task = db.tasks.find_one({"_id": ObjectId(task_id)})
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    
+
     if current_user and getattr(current_user, 'id', None):
         t_org_id = task.get("organization_id", "")
         if not await _is_org_owner(db, t_org_id, current_user.id):
             user_email = (getattr(current_user, 'email', '') or '').lower().strip()
             if task.get("created_by") != current_user.id and task.get("assignee_email") != user_email and task.get("assigned_to") != user_email:
                 raise HTTPException(status_code=403, detail="Access denied")
-    
+
     if task:
         raw_assignees = task.get("assignee_id", [])
         if isinstance(raw_assignees, str):
@@ -464,10 +465,10 @@ async def delete_task(task_id: str, current_user = Depends(get_current_user_opti
                 metadata={"task_id": task_id},
                 email=assignee_email,
             ))
-    
+
     db.tasks.delete_one({"_id": ObjectId(task_id)})
     db.task_comments.delete_many({"task_id": task_id})
-    
+
     return {"success": True, "message": "Task deleted"}
 
 
@@ -476,14 +477,14 @@ async def add_comment(task_id: str, comment: TaskComment, current_user = Depends
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     task = db.tasks.find_one({"_id": ObjectId(task_id)})
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    
+
     user_id = getattr(current_user, 'id', None) or str(current_user) if current_user else None
     user_email = getattr(current_user, 'email', None) or ""
-    
+
     comment_doc = {
         "task_id": task_id,
         "content": comment.content,
@@ -491,10 +492,10 @@ async def add_comment(task_id: str, comment: TaskComment, current_user = Depends
         "user_email": user_email,
         "created_at": datetime.utcnow(),
     }
-    
+
     result = db.task_comments.insert_one(comment_doc)
     comment_doc["_id"] = str(result.inserted_id)
-    
+
     return {"comment": comment_doc}
 
 
@@ -503,18 +504,18 @@ async def approve_task(task_id: str, current_user = Depends(get_current_user_opt
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     task = db.tasks.find_one({"_id": ObjectId(task_id)})
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    
+
     user_id = getattr(current_user, 'id', None) or str(current_user) if current_user else None
-    
+
     db.tasks.update_one(
         {"_id": ObjectId(task_id)},
         {"$set": {"status": "approved", "approved_by": user_id, "updated_at": datetime.utcnow()}}
     )
-    
+
     task_obj = db.tasks.find_one({"_id": ObjectId(task_id)})
     task_obj["_id"] = str(task_obj["_id"])
     raw = task_obj.get("assignee_id")
@@ -541,10 +542,10 @@ async def approve_task(task_id: str, current_user = Depends(get_current_user_opt
                 link=f"/tasks/{task_id}",
                 email=task_obj.get("assignee_email"),
             ))
-    
+
     from ..agents.frequency_agent import process_task as _freq_task
     asyncio.create_task(_freq_task(task_obj, org_id))
-    
+
     return {"task": task_obj}
 
 
@@ -553,16 +554,16 @@ async def complete_task(task_id: str, current_user = Depends(get_current_user_op
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     task = db.tasks.find_one({"_id": ObjectId(task_id)})
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    
+
     db.tasks.update_one(
         {"_id": ObjectId(task_id)},
         {"$set": {"status": "completed", "completed_at": datetime.utcnow(), "updated_at": datetime.utcnow()}}
     )
-    
+
     task_obj = db.tasks.find_one({"_id": ObjectId(task_id)})
     task_obj["_id"] = str(task_obj["_id"])
     raw = task_obj.get("assignee_id")
@@ -589,8 +590,8 @@ async def complete_task(task_id: str, current_user = Depends(get_current_user_op
                 message=f"Task '{task_obj.get('title')}' has been marked complete",
                 link=f"/tasks/{task_id}",
             ))
-    
+
     from ..agents.frequency_agent import process_task as _freq_task
     asyncio.create_task(_freq_task(task_obj, org_id))
-    
+
     return {"task": task_obj}

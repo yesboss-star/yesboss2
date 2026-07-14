@@ -1,17 +1,18 @@
 import asyncio
-from fastapi import APIRouter, HTTPException, Depends, Query
-from pydantic import BaseModel
-from typing import Optional, List
 from datetime import datetime
-from ..core.database import get_database
-from ..dependencies.auth import get_current_user, get_current_user_optional
-from ..api.websocket import manager as ws_manager
+
 from bson import ObjectId
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+
+from ..api.websocket import manager as ws_manager
+from ..core.database import get_database
+from ..dependencies.auth import get_current_user_optional
 
 router = APIRouter()
 
 
-def get_user_org_id(user) -> Optional[str]:
+def get_user_org_id(user) -> str | None:
     if hasattr(user, 'user_metadata') and user.user_metadata:
         return user.user_metadata.get("organization_id")
     return None
@@ -23,14 +24,14 @@ class NotificationCreate(BaseModel):
     message: str
     user_id: str
     organization_id: str
-    link: Optional[str] = None
-    actor_id: Optional[str] = None
-    actor_name: Optional[str] = None
-    metadata: Optional[dict] = None
+    link: str | None = None
+    actor_id: str | None = None
+    actor_name: str | None = None
+    metadata: dict | None = None
 
 
 class NotificationUpdate(BaseModel):
-    read: Optional[bool] = None
+    read: bool | None = None
 
 
 @router.post("")
@@ -66,10 +67,10 @@ async def create_notification(notification: NotificationCreate, current_user = D
 
 @router.get("")
 async def list_notifications(
-    read: Optional[bool] = None,
-    type: Optional[str] = None,
+    read: bool | None = None,
+    type: str | None = None,
     limit: int = Query(default=50, le=100),
-    organization_id: Optional[str] = None,
+    organization_id: str | None = None,
     current_user = Depends(get_current_user_optional)
 ):
     db = get_database()
@@ -147,7 +148,7 @@ async def mark_notification_read(notification_id: str, current_user = Depends(ge
 
 
 @router.post("/mark-all-read")
-async def mark_all_notifications_read(organization_id: Optional[str] = None, current_user = Depends(get_current_user_optional)):
+async def mark_all_notifications_read(organization_id: str | None = None, current_user = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")

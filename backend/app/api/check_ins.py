@@ -1,16 +1,23 @@
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
-from typing import Optional
 from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+
+from ..core.check_in_service import (
+    check_org_due_for_check_in,
+    generate_check_in,
+    record_check_in_response,
+    send_check_in_notification,
+    store_check_in,
+)
 from ..core.database import get_database
-from ..core.check_in_service import check_org_due_for_check_in, generate_check_in, send_check_in_notification, store_check_in, record_check_in_response
 from ..dependencies.auth import get_current_user_optional
 
 router = APIRouter()
 
 class CheckInNote(BaseModel):
     goal_id: str
-    note: Optional[str] = None
+    note: str | None = None
     action_taken: str = "none"
 
 class CheckInResponse(BaseModel):

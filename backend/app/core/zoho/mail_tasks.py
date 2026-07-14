@@ -1,6 +1,6 @@
 import logging
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 import httpx
 
 from ..config import settings
@@ -16,7 +16,7 @@ class ZohoMailTasks:
 
     # ── Group management ────────────────────────────────────────────
 
-    async def ensure_group(self, org_name: str, owner_token: str) -> Optional[int]:
+    async def ensure_group(self, org_name: str, owner_token: str) -> int | None:
         try:
             async with httpx.AsyncClient(timeout=15) as client:
                 resp = await client.get(
@@ -50,9 +50,9 @@ class ZohoMailTasks:
         self,
         owner_token: str,
         zgid: int,
-        task_data: Dict[str, Any],
-        assignee_zoho_id: Optional[int] = None,
-    ) -> Optional[int]:
+        task_data: dict[str, Any],
+        assignee_zoho_id: int | None = None,
+    ) -> int | None:
         payload = {
             "title": task_data.get("title", "Untitled"),
             "description": task_data.get("description") or "",
@@ -90,8 +90,8 @@ class ZohoMailTasks:
     async def create_personal_task(
         self,
         user_token: str,
-        task_data: Dict[str, Any],
-    ) -> Optional[int]:
+        task_data: dict[str, Any],
+    ) -> int | None:
         payload = {
             "title": task_data.get("title", "Untitled"),
             "description": task_data.get("description") or "",
@@ -130,9 +130,9 @@ class ZohoMailTasks:
         self,
         token: str,
         task_id: int,
-        updates: Dict[str, Any],
+        updates: dict[str, Any],
         is_group: bool = False,
-        zgid: Optional[int] = None,
+        zgid: int | None = None,
     ) -> bool:
         payload = {}
         if "title" in updates:
@@ -186,7 +186,7 @@ class ZohoMailTasks:
         token: str,
         task_id: int,
         is_group: bool = False,
-        zgid: Optional[int] = None,
+        zgid: int | None = None,
     ) -> bool:
         url = f"{settings.ZOHO_MAIL_API_URL}/tasks/me/{task_id}"
         if is_group and zgid:
@@ -206,8 +206,8 @@ class ZohoMailTasks:
     # ── Read tasks (for sync) ───────────────────────────────────────
 
     async def list_personal_tasks(
-        self, user_token: str, since: Optional[str] = None
-    ) -> List[Dict]:
+        self, user_token: str, since: str | None = None
+    ) -> list[dict]:
         tasks = []
         from_val = 0
         limit = 499
@@ -240,8 +240,8 @@ class ZohoMailTasks:
         return tasks
 
     async def list_assigned_tasks(
-        self, user_token: str, since: Optional[str] = None
-    ) -> List[Dict]:
+        self, user_token: str, since: str | None = None
+    ) -> list[dict]:
         tasks = []
         try:
             async with httpx.AsyncClient(timeout=30) as client:
@@ -263,7 +263,7 @@ class ZohoMailTasks:
 
     # ── Helpers ─────────────────────────────────────────────────────
 
-    async def get_zoho_user_id(self, token: str) -> Optional[int]:
+    async def get_zoho_user_id(self, token: str) -> int | None:
         try:
             async with httpx.AsyncClient(timeout=15) as client:
                 resp = await client.get(
@@ -293,7 +293,7 @@ class ZohoMailTasks:
         return "pending"
 
     @staticmethod
-    def parse_zoho_date(date_str: str) -> Optional[str]:
+    def parse_zoho_date(date_str: str) -> str | None:
         if not date_str:
             return None
         try:

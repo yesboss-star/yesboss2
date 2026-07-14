@@ -1,7 +1,7 @@
 import json
 import logging
-from typing import Optional, List, Dict
 from datetime import datetime
+
 from ..core.ai_client import get_ai_response
 from ..core.database import get_database
 
@@ -32,7 +32,7 @@ Rules:
 - Be concise and practical"""
 
 
-async def analyze_entry(entry_id: str, content: str, entry_type: str, org_id: str) -> Optional[Dict]:
+async def analyze_entry(entry_id: str, content: str, entry_type: str, org_id: str) -> dict | None:
     try:
         prompt = f"Type: {entry_type}\n\nContent: {content}"
         response = await get_ai_response(prompt, SYSTEM_PROMPT)
@@ -52,7 +52,7 @@ async def analyze_entry(entry_id: str, content: str, entry_type: str, org_id: st
         from bson import ObjectId
         db = get_database()
         if db is not None:
-            update: Dict = {"ai_analysis": result, "updated_at": datetime.utcnow()}
+            update: dict = {"ai_analysis": result, "updated_at": datetime.utcnow()}
 
             goal_ids = []
             suggested_titles = analysis.get("suggested_goal_titles", [])

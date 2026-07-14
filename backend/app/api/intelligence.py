@@ -1,16 +1,18 @@
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+
 from ..core.intelligence import (
-    analyze_company_from_email,
     analyze_company_from_domain,
-    enrich_profile_with_ai,
+    analyze_company_from_email,
     build_pre_org_profile,
+    enrich_profile_with_ai,
+    suggest_growth_documents,
     suggest_industries,
     suggest_micro_verticals,
-    suggest_growth_documents,
 )
-from ..core.taxonomy_store import save_custom as save_custom_taxonomy, get_custom_matches
+from ..core.taxonomy_store import get_custom_matches
+from ..core.taxonomy_store import save_custom as save_custom_taxonomy
 
 router = APIRouter()
 
@@ -18,18 +20,18 @@ router = APIRouter()
 class AnalyzeFromEmailRequest(BaseModel):
     email: str
     enrich_with_ai: bool = False
-    ai_provider: Optional[str] = None
+    ai_provider: str | None = None
 
 
 class AnalyzeFromDomainRequest(BaseModel):
     domain: str
     enrich_with_ai: bool = False
-    ai_provider: Optional[str] = None
+    ai_provider: str | None = None
 
 
 class SuggestRequest(BaseModel):
     query: str = ""
-    industry: Optional[str] = None
+    industry: str | None = None
     type: str = "industries"
     limit: int = 8
 
@@ -38,12 +40,12 @@ class SuggestRequest(BaseModel):
 async def analyze_from_email(request: AnalyzeFromEmailRequest):
     if not request.email or "@" not in request.email:
         raise HTTPException(status_code=400, detail="Valid email is required")
-    
+
     profile = await analyze_company_from_email(request.email)
-    
+
     if request.enrich_with_ai:
         profile = await enrich_profile_with_ai(profile, request.ai_provider)
-    
+
     return {"profile": profile}
 
 
@@ -51,24 +53,24 @@ async def analyze_from_email(request: AnalyzeFromEmailRequest):
 async def analyze_from_domain(request: AnalyzeFromDomainRequest):
     if not request.domain:
         raise HTTPException(status_code=400, detail="Domain is required")
-    
+
     domain = request.domain.replace("https://", "").replace("http://", "").split("/")[0]
     profile = await analyze_company_from_domain(domain)
-    
+
     if request.enrich_with_ai:
         profile = await enrich_profile_with_ai(profile, request.ai_provider)
-    
+
     return {"profile": profile}
 
 
 @router.get("/profile/{domain}")
-async def get_profile(domain: str, enrich: bool = False, provider: Optional[str] = None):
+async def get_profile(domain: str, enrich: bool = False, provider: str | None = None):
     domain = domain.replace("https://", "").replace("http://", "").split("/")[0]
     profile = await build_pre_org_profile(domain)
-    
+
     if enrich:
         profile = await enrich_profile_with_ai(profile, provider)
-    
+
     return {"profile": profile}
 
 
@@ -76,9 +78,9 @@ async def get_profile(domain: str, enrich: bool = False, provider: Optional[str]
 async def search_company(request: AnalyzeFromEmailRequest):
     if not request.email or len(request.email) < 2:
         raise HTTPException(status_code=400, detail="Company name must be at least 2 characters")
-    
+
     from ..core.intelligence import search_company_info
-    
+
     try:
         result = await search_company_info(request.email)
         return result
@@ -133,7 +135,7 @@ async def suggest_taxonomy(request: SuggestRequest):
 class SaveCustomTaxonomyRequest(BaseModel):
     type: str
     value: str
-    industry: Optional[str] = None
+    industry: str | None = None
 
 
 @router.post("/taxonomy/save")
@@ -161,7 +163,7 @@ async def save_custom(request: SaveCustomTaxonomyRequest):
 
 class SuggestCompanyNamesRequest(BaseModel):
     query: str = ""
-    industry: Optional[str] = None
+    industry: str | None = None
     limit: int = 20
 
 
@@ -212,9 +214,8 @@ DEPARTMENTS_BY_INDUSTRY = {
 
 @router.post("/department-suggestions")
 async def get_department_suggestions(request: DepartmentSuggestionsRequest):
-    domain = ""
     if request.email and "@" in request.email:
-        domain = request.email.split("@")[1]
+        request.email.split("@")[1]
 
     industry = request.industry or "default"
     industry_key = next((k for k in DEPARTMENTS_BY_INDUSTRY.keys() if k in industry.lower()), "default")
@@ -241,12 +242,12 @@ async def get_department_suggestions(request: DepartmentSuggestionsRequest):
 
 
 class DocumentSuggestionsRequest(BaseModel):
-    domain: Optional[str] = None
-    company_name: Optional[str] = None
-    industry: Optional[str] = None
-    micro_vertical: Optional[str] = None
-    size: Optional[str] = None
-    existing_documents: Optional[list] = None
+    domain: str | None = None
+    company_name: str | None = None
+    industry: str | None = None
+    micro_vertical: str | None = None
+    size: str | None = None
+    existing_documents: list | None = None
     count: int = 10
 
 

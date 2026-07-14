@@ -1,7 +1,8 @@
-import logging
 import hashlib
+import logging
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any
+
 from ..core.database import get_database
 from ..core.qdrant import get_qdrant_client
 
@@ -59,10 +60,10 @@ class ContinuousLearning:
                 return
 
             text = f"Workflow: {workflow.get('workflow_type')}, Steps: {workflow.get('steps')}, Outcome: {workflow.get('outcome')}"
-            
+
             from ..core.qdrant import get_embedding
             embedding = get_embedding(text)
-            
+
             qdrant.upsert(
                 collection_name="workflows",
                 points=[{
@@ -472,25 +473,6 @@ class ContinuousLearning:
         except Exception as e:
             logger.error(f"Error getting industry recommendations: {e}")
             return {"recommendations": [], "error": str(e)}
-        db = self._get_db()
-        if db is None:
-            return []
-
-        try:
-            query = {"organization_id": organization_id}
-            if pattern_type:
-                query["pattern_type"] = pattern_type
-
-            patterns = list(db.learning_patterns.find(query).sort("frequency", -1).limit(50))
-
-            for p in patterns:
-                p["_id"] = str(p["_id"])
-
-            return patterns
-        except Exception as e:
-            logger.error(f"Error getting patterns: {e}")
-            return []
-
 
     def record_performance_snapshot(self, organization_id: str) -> dict:
         """Weekly snapshot of per-employee avg completion hours for trend tracking."""
@@ -502,7 +484,7 @@ class ContinuousLearning:
             freqs = list(db.employee_frequencies.find({"org_ref": org_ref}))
             if not freqs:
                 return {"success": False, "message": "No frequency data"}
-            snapshot = {
+            snapshot: dict[str, Any] = {
                 "organization_id": organization_id,
                 "week_start": datetime.utcnow().isoformat(),
                 "employees": [],
@@ -546,7 +528,7 @@ class ContinuousLearning:
             freqs = list(db.employee_frequencies.find({"org_ref": org_ref}))
             if not freqs:
                 return {"employees": []}
-            weekly_capacity = {}
+            weekly_capacity: dict[str, dict[str, Any]] = {}
             for f in freqs:
                 emp = f.get("employee_role", "")
                 if emp not in weekly_capacity:

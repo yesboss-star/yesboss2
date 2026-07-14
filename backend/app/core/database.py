@@ -1,12 +1,15 @@
 import logging
+from typing import Optional
+
 from pymongo import MongoClient
 from pymongo.database import Database
+
 from .config import settings
 
 logger = logging.getLogger("yesboss.database")
 
-client: MongoClient = None
-db: Database = None
+client: Optional[MongoClient] = None
+db: Optional[Database] = None
 
 
 def _patch_dns_resolver():
@@ -36,9 +39,9 @@ def connect_mongodb():
         # Patch the DNS resolver before any SRV lookups (many home routers
         # don't handle SRV records that mongodb+srv:// requires)
         _patch_dns_resolver()
-        
+
         mongo_uri = settings.MONGODB_URI
-        
+
         try:
             from certifi import where as certifi_where
             tls_ca = certifi_where()
@@ -54,14 +57,14 @@ def connect_mongodb():
             tlsAllowInvalidHostnames=True,
             tlsCAFile=tls_ca,
         )
-        
+
         client.admin.command("ping")
-        
+
         if "kf8ash8.mongodb.net" in mongo_uri:
             db = client["yesboss_db"]
         else:
             db = client.get_default_database()
-        
+
         _ensure_collections(db)
         logger.info("MongoDB connected to %s", db.name)
         return db
@@ -77,7 +80,7 @@ def _ensure_collections(db: Database):
         if col not in collections:
             db.create_collection(col)
             logger.info("Created collection: %s", col)
-    
+
     _ensure_indexes(db)
 
 
@@ -85,12 +88,12 @@ def _ensure_indexes(db: Database):
     try:
         db.organizations.create_index("domain")
         db.organizations.create_index("industry")
-        
+
         db.employees.create_index("email")
         db.employees.create_index("organization_id")
         db.employees.create_index("department")
         db.employees.create_index([("organization_id", 1), ("department", 1)])
-        
+
         db.tasks.create_index("organization_id")
         db.tasks.create_index("assignee_email")
         db.tasks.create_index("status")
@@ -99,14 +102,14 @@ def _ensure_indexes(db: Database):
         db.tasks.create_index([("organization_id", 1), ("due_date", 1)])
         db.tasks.create_index("escalation_level")
         db.tasks.create_index([("organization_id", 1), ("escalation_level", 1)])
-        
+
         db.goals.create_index("organization_id")
         db.goals.create_index("department")
         db.goals.create_index("parent_goal_id")
         db.goals.create_index([("organization_id", 1), ("created_by", 1)])
         db.goals.create_index([("organization_id", 1), ("goal_type", 1)])
         db.goals.create_index([("organization_id", 1), ("is_default", 1)])
-        
+
         db.workflows.create_index("organization_id")
         db.workflows.create_index([("organization_id", 1), ("created_at", -1)])
 

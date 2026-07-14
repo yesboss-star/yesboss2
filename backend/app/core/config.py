@@ -1,6 +1,7 @@
-import os
 import logging
+import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 env_name = os.getenv("ENVIRONMENT", "development")

@@ -1,6 +1,6 @@
 import logging
 import re
-from typing import Optional
+from typing import Any
 
 logger = logging.getLogger("yesboss.intelligence")
 
@@ -53,7 +53,7 @@ def _derive_company_name_from_domain(domain: str) -> str:
         "the", "my", "our", "pro", "smart", "next", "open", "meta", "neo",
         "cloud", "data", "deep", "auto", "bio", "eco", "fin", "edge", "quantum",
     ]
-    all_hints = set(common_suffixes + common_prefixes)
+    set(common_suffixes + common_prefixes)
 
     final_words: list[str] = []
     for w in words:
@@ -84,9 +84,11 @@ def _derive_company_name_from_domain(domain: str) -> str:
 async def analyze_company_from_domain(domain: str) -> dict:
     logger.info("Analyzing domain: %s", domain)
 
+    import json
+    import re
+
     from .ai_client import get_ai_response
     from .scraper import scrape_company_data
-    import json, re
 
     derived_name = _derive_company_name_from_domain(domain)
 
@@ -98,7 +100,7 @@ async def analyze_company_from_domain(domain: str) -> dict:
 
     company_name = derived_name
     industry = ""
-    micro_verticals = []
+    micro_verticals: list[str] = []
     description = ""
     website_url = ""
     confidence = 0.1 if derived_name else 0.0
@@ -220,7 +222,7 @@ Rules:
     }
 
 
-async def enrich_profile_with_ai(profile: dict, provider: Optional[str] = None) -> dict:
+async def enrich_profile_with_ai(profile: dict, provider: str | None = None) -> dict:
     logger.info("Enriching profile with %s", provider)
     profile["enriched"] = True
     profile["ai_provider"] = provider
@@ -375,7 +377,7 @@ async def generate_goal_suggestions(industry: str, micro_vertical: str, count: i
                 return parsed[:count]
             if isinstance(parsed, dict):
                 return (parsed.get("goals") or parsed.get("suggestions") or [])[:count]
-        except:
+        except Exception:
             pass
         goal_re = re.findall(r'"title"\s*:\s*"([^"]+)"', response)
         dept_re = re.findall(r'"department"\s*:\s*"([^"]+)"', response)
@@ -400,9 +402,10 @@ async def suggest_industries(query: str, limit: int = 50) -> list:
     requested by the caller; the function does not silently truncate below it.
     """
     logger.info("Suggesting industries for query: %s", query)
-    from .ai_client import get_ai_response
     import json
     import re
+
+    from .ai_client import get_ai_response
 
     try:
         if not query or len(query.strip()) < 1:
@@ -464,9 +467,10 @@ async def suggest_micro_verticals(query: str, industry: str = "", limit: int = 5
     caller; the function does not silently truncate below it.
     """
     logger.info("Suggesting micro-verticals for query=%s industry=%s", query, industry)
-    from .ai_client import get_ai_response
     import json
     import re
+
+    from .ai_client import get_ai_response
 
     try:
         if not query or len(query.strip()) < 1:
@@ -530,9 +534,10 @@ async def suggest_company_names(query: str, industry: str = "", limit: int = 20)
     company names. Returns [] on failure — never falls back to a hardcoded list.
     """
     logger.info("Suggesting company names for query=%s industry=%s", query, industry)
-    from .ai_client import get_ai_response
     import json
     import re
+
+    from .ai_client import get_ai_response
 
     try:
         if not query or len(query.strip()) < 1:
@@ -585,11 +590,11 @@ No markdown, no explanation, no commentary."""
 
 async def search_company_info(company_name: str) -> dict:
     logger.info("Searching for company: %s", company_name)
-    
+
+
     from .ai_client import get_ai_response
     from .scraper import scrape_company_data
-    import re
-    
+
     try:
         ai_prompt = f"""You are a company research assistant. Find information about: "{company_name}"
 
@@ -624,12 +629,12 @@ If you cannot find verified information:
             temperature=0.1,
             max_tokens=600
         )
-        
+
         logger.info(f"Company search raw response: {response}")
-        
+
         import json
-        result = {"name": company_name, "found": False}
-        
+        result: dict[str, Any] = {"name": company_name, "found": False}
+
         try:
             json_str = response.strip()
             if '{' in json_str and '}' in json_str:
@@ -640,13 +645,13 @@ If you cannot find verified information:
         except json.JSONDecodeError:
             logger.warning("Failed to parse JSON from company search")
             result = {"name": company_name, "found": False}
-        
+
         if result.get("found") and result.get("domain"):
             try:
                 domain_clean = result.get("domain", "").replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0]
                 if domain_clean and "." in domain_clean:
                     scraped_data = await scrape_company_data(domain_clean)
-                    
+
                     if scraped_data.get("description"):
                         result["description"] = scraped_data["description"]
                     if scraped_data.get("social_links"):
@@ -659,17 +664,17 @@ If you cannot find verified information:
                         result["micro_vertical"] = scraped_data["micro_vertical"]
             except Exception as e:
                 logger.warning(f"Scraping failed: {e}")
-        
+
         micro_verticals = result.get("micro_verticals", [])
         if not isinstance(micro_verticals, list) and result.get("micro_vertical"):
             micro_verticals = [result["micro_vertical"]]
         if isinstance(micro_verticals, list) and len(micro_verticals) > 0:
             result["micro_verticals"] = micro_verticals
             result["micro_vertical"] = micro_verticals[0]
-        
+
         logger.info(f"Company search result: {result}")
         return result
-        
+
     except Exception as e:
         logger.error(f"Error searching company: {e}")
         return {
@@ -702,10 +707,11 @@ async def extract_document_insights(
             "qa_pairs": [],
         }
 
-    from .ai_client import get_ai_response
-    from .prompt_engine import PERSONA_INSTRUCTIONS
     import json
     import re
+
+    from .ai_client import get_ai_response
+    from .prompt_engine import PERSONA_INSTRUCTIONS
 
     snippet = text.strip()[:max_chars]
     context_line = ""
@@ -847,16 +853,17 @@ async def suggest_growth_documents(
     industry: str = "",
     micro_vertical: str = "",
     size: str = "",
-    existing_documents: Optional[list] = None,
+    existing_documents: list | None = None,
     count: int = 10,
 ) -> dict:
     """Suggest documents that will help this specific business grow.
     Returns business context summary + categorized document suggestions.
     """
-    from .ai_client import get_ai_response
-    from .prompt_engine import PERSONA_INSTRUCTIONS
     import json
     import re
+
+    from .ai_client import get_ai_response
+    from .prompt_engine import PERSONA_INSTRUCTIONS
 
     existing = existing_documents or []
     existing_titles = []

@@ -84,8 +84,8 @@ async def check_mom_reminders(db):
 async def check_deadline_reminders():
     try:
         from ..core.database import get_database
-        from ..core.notification_service import create_and_deliver
         from ..core.email_service import send_notification_email
+        from ..core.notification_service import create_and_deliver
 
         db = get_database()
         if db is None:
@@ -94,7 +94,7 @@ async def check_deadline_reminders():
         now = datetime.utcnow()
         tomorrow = now + timedelta(days=1)
         in_3_days = now + timedelta(days=3)
-        yesterday = now - timedelta(days=1)
+        now - timedelta(days=1)
         days_3_ago = now - timedelta(days=3)
         days_7_ago = now - timedelta(days=7)
 
@@ -128,7 +128,7 @@ async def check_deadline_reminders():
                     user_id=mgr,
                     org_id=task.get("organization_id", ""),
                     type="task_deadline",
-                    title=f"Team member's task due tomorrow",
+                    title="Team member's task due tomorrow",
                     message=f"'{task.get('title')}' assigned to {assignee_id} is due tomorrow",
                     link=f"/tasks/{task.get('_id')}",
                     metadata={"task_id": str(task.get("_id", "")), "assignee": assignee_id},
@@ -173,7 +173,7 @@ async def check_deadline_reminders():
                     user_id=mgr,
                     org_id=task.get("organization_id", ""),
                     type="task_deadline",
-                    title=f"Team member's task due in 3 days",
+                    title="Team member's task due in 3 days",
                     message=f"'{task.get('title')}' assigned to {assignee_id} is due in 3 days",
                     link=f"/tasks/{task.get('_id')}",
                     metadata={"task_id": str(task.get("_id", "")), "assignee": assignee_id},
@@ -213,7 +213,7 @@ async def check_deadline_reminders():
                     user_id=mgr,
                     org_id=task.get("organization_id", ""),
                     type="task_deadline",
-                    title=f"Task Overdue — team member",
+                    title="Task Overdue — team member",
                     message=f"'{task.get('title')}' assigned to {assignee_id} is overdue!",
                     link=f"/tasks/{task.get('_id')}",
                     metadata={"task_id": str(task.get("_id", "")), "assignee": assignee_id},
@@ -350,8 +350,8 @@ async def check_deadline_reminders():
 
 async def check_goal_deadlines(db):
     try:
-        from ..core.notification_service import create_and_deliver
         from ..core.email_service import send_notification_email
+        from ..core.notification_service import create_and_deliver
         from ..core.zoho.taz import send_task_reminder as taz_remind
 
         now = datetime.utcnow()
@@ -673,8 +673,8 @@ async def send_morning_journal_prompts():
 async def send_auto_reports():
     try:
         from ..core.database import get_database
-        from ..core.report_generator import generate_employee_report, generate_org_health
         from ..core.notification_service import create_and_deliver
+        from ..core.report_generator import generate_employee_report, generate_org_health
 
         db = get_database()
         if db is None:
@@ -747,10 +747,10 @@ async def send_auto_reports():
 
 async def sync_zoho_tasks():
     try:
+        from datetime import datetime
+
         from ..core.database import get_database
         from ..core.zoho import ZohoMailTasks, ZohoOAuth
-        from ..api.tasks import sync_task_to_zoho
-        from datetime import datetime
 
         db = get_database()
         if db is None:
@@ -830,9 +830,10 @@ async def sync_zoho_tasks():
 
 async def sync_zoho_calendar():
     try:
+        from datetime import datetime, timedelta
+
         from ..core.database import get_database
         from ..core.zoho import ZohoCalendar, ZohoOAuth
-        from datetime import datetime, timedelta
 
         db = get_database()
         if db is None:
@@ -886,8 +887,13 @@ async def sync_zoho_calendar():
 
 async def check_owner_check_ins():
     try:
+        from ..core.check_in_service import (
+            check_org_due_for_check_in,
+            generate_check_in,
+            send_check_in_notification,
+            store_check_in,
+        )
         from ..core.database import get_database
-        from ..core.check_in_service import check_org_due_for_check_in, generate_check_in, send_check_in_notification, store_check_in
 
         db = get_database()
         if db is None:

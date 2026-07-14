@@ -1,12 +1,12 @@
-import logging
 import json
+import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("yesboss.market_impact")
 
 
-async def analyze_market_impact(db: Any, org_id: str) -> Dict:
+async def analyze_market_impact(db: Any, org_id: str) -> dict:
     org = None
     try:
         from bson import ObjectId
@@ -19,7 +19,7 @@ async def analyze_market_impact(db: Any, org_id: str) -> Dict:
     industry = org.get("industry", "")
     micro_vertical = org.get("micro_vertical", "")
 
-    trends = list(db.market_trends.find({"organization_id": org_id}).sort("published_at", -1).limit(10))
+    trends: list[dict[str, Any]] = list(db.market_trends.find({"organization_id": org_id}).sort("published_at", -1).limit(10))
     if not trends:
         from ..core.ai_client import get_ai_response
         prompt = (
@@ -70,7 +70,7 @@ Return ONLY a valid JSON array. No markdown."""
         "Only return valid JSON, no markdown."
     )
 
-    result_data = {"impacts": [], "summary": "Market impact analysis unavailable."}
+    result_data: dict[str, Any] = {"impacts": [], "summary": "Market impact analysis unavailable."}
     try:
         response = await get_ai_response(prompt, temperature=0.4, max_tokens=2500)
         response = response.strip()
@@ -110,7 +110,7 @@ Return ONLY a valid JSON array. No markdown."""
     return doc
 
 
-async def get_investment_recommendations(db: Any, org_id: str) -> Dict:
+async def get_investment_recommendations(db: Any, org_id: str) -> dict:
     impact = db.market_impacts.find_one({"organization_id": org_id})
     if not impact:
         impact = await analyze_market_impact(db, org_id)
@@ -122,8 +122,9 @@ async def get_investment_recommendations(db: Any, org_id: str) -> Dict:
     except Exception:
         org = db.organizations.find_one({"owner_id": org_id})
 
-    from ..core.ai_client import get_ai_response
     import json
+
+    from ..core.ai_client import get_ai_response
 
     impacts_text = ""
     for imp in impact.get("impacts", []):

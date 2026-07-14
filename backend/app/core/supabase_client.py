@@ -1,5 +1,7 @@
 import logging
+
 from supabase import create_client
+
 from .config import settings
 
 logger = logging.getLogger("yesboss.supabase")

@@ -1,14 +1,14 @@
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+
 from ..agents.expert_agents import (
-    get_expert_agent,
     FinanceAgent,
-    OperationsAgent,
-    WorkflowAgent,
     ForecastingAgent,
-    IndustryIntelligenceAgent,
-    OrgUnderstandingAgent
+    OperationsAgent,
+    OrgUnderstandingAgent,
+    WorkflowAgent,
+    get_expert_agent,
 )
 
 router = APIRouter()
@@ -17,40 +17,40 @@ router = APIRouter()
 class ExpertQueryRequest(BaseModel):
     agent_type: str
     query: str
-    company_context: Optional[dict] = None
-    provider: Optional[str] = None
+    company_context: dict | None = None
+    provider: str | None = None
 
 
 class WorkflowCreateRequest(BaseModel):
     workflow_type: str
-    context: Optional[dict] = None
-    provider: Optional[str] = None
+    context: dict | None = None
+    provider: str | None = None
 
 
 class ForecastRequest(BaseModel):
     metric: str
-    historical_data: Optional[list] = None
-    context: Optional[dict] = None
-    provider: Optional[str] = None
+    historical_data: list | None = None
+    context: dict | None = None
+    provider: str | None = None
 
 
 @router.post("/query")
 async def query_expert_agent(request: ExpertQueryRequest):
     valid_types = ["finance", "operations", "workflow", "forecasting", "industry_intelligence", "org_understanding"]
-    
+
     if request.agent_type.lower() not in valid_types:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid agent_type. Must be one of: {', '.join(valid_types)}"
         )
-    
+
     try:
         agent = get_expert_agent(request.agent_type, request.provider)
-        
+
         result = await agent.analyze(request.query, request.company_context)
-        
+
         return result
-    
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -90,7 +90,7 @@ async def list_agent_types():
 
 
 @router.get("/finance/health/{org_id}")
-async def analyze_financial_health(org_id: str, provider: Optional[str] = None):
+async def analyze_financial_health(org_id: str, provider: str | None = None):
     try:
         agent = FinanceAgent(provider=provider)
         result = await agent.analyze_financial_health(org_id)
@@ -100,7 +100,7 @@ async def analyze_financial_health(org_id: str, provider: Optional[str] = None):
 
 
 @router.get("/operations/analysis/{org_id}")
-async def analyze_operations(org_id: str, provider: Optional[str] = None):
+async def analyze_operations(org_id: str, provider: str | None = None):
     try:
         agent = OperationsAgent(provider=provider)
         result = await agent.analyze_operations(org_id)
@@ -110,7 +110,7 @@ async def analyze_operations(org_id: str, provider: Optional[str] = None):
 
 
 @router.get("/organization/analysis/{org_id}")
-async def analyze_organization(org_id: str, provider: Optional[str] = None):
+async def analyze_organization(org_id: str, provider: str | None = None):
     try:
         agent = OrgUnderstandingAgent(provider=provider)
         result = await agent.analyze_organization(org_id)

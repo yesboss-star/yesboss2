@@ -10,7 +10,6 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger("yesboss.taxonomy")
 
@@ -53,7 +52,7 @@ def _save(data: dict) -> None:
         logger.warning("Failed to save taxonomy store: %s", e)
 
 
-def save_custom(taxonomy_type: str, value: str, context: Optional[dict] = None) -> dict:
+def save_custom(taxonomy_type: str, value: str, context: dict | None = None) -> dict:
     """Save a user-typed custom value into the taxonomy store.
 
     Returns {"saved": True, "value": ..., "type": ...} or {"saved": False, "error": ...}.

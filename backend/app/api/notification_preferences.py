@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException, Depends
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+
 from ..core.database import get_database
-from ..dependencies.auth import get_current_user, get_current_user_optional
+from ..dependencies.auth import get_current_user_optional
 
 router = APIRouter()
 
@@ -43,11 +44,11 @@ DEFAULT_PREFERENCES = {
 
 
 class NotificationPreferencesUpdate(BaseModel):
-    email: Optional[dict] = None
-    push: Optional[dict] = None
-    in_app: Optional[dict] = None
-    sound: Optional[bool] = None
-    digest: Optional[dict] = None
+    email: dict | None = None
+    push: dict | None = None
+    in_app: dict | None = None
+    sound: bool | None = None
+    digest: dict | None = None
 
 
 def get_preferences_collection():

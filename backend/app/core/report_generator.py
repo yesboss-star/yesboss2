@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime, timedelta
-from typing import Optional, Any, Dict, List
+from typing import Any
+
 from .ai_client import get_ai_response
 
 logger = logging.getLogger("yesboss.report_generator")
@@ -11,7 +12,7 @@ async def generate_employee_report(
     org_id: str,
     employee_email: str,
     period: str = "weekly"
-) -> Dict:
+) -> dict:
     cutoff = _get_period_cutoff(period)
 
     tasks = list(db.tasks.find({
@@ -120,8 +121,8 @@ async def generate_employee_report(
             comparison_lines.append(f"  - {cat}: {emp_avg:.1f}h (vs org avg {org_avg:.1f}h) — on par")
 
     ai_feedback = ""
-    work_patterns_section = f"[Work Patterns]\n" + "\n".join(work_patterns) if work_patterns else ""
-    comparison_section = f"[Org Comparison]\n" + "\n".join(comparison_lines) if comparison_lines else ""
+    work_patterns_section = "[Work Patterns]\n" + "\n".join(work_patterns) if work_patterns else ""
+    comparison_section = "[Org Comparison]\n" + "\n".join(comparison_lines) if comparison_lines else ""
     prompt = (
         f"Employee Performance Report for {period} period.\n"
         f"Name: {employee_name}\n"
@@ -181,7 +182,7 @@ async def generate_employee_report(
     }
 
 
-async def generate_org_health(db: Any, org_id: str) -> Dict:
+async def generate_org_health(db: Any, org_id: str) -> dict:
     now = datetime.utcnow()
     goals = list(db.goals.find({"organization_id": org_id}))
     tasks = list(db.tasks.find({"organization_id": org_id}))
@@ -197,7 +198,7 @@ async def generate_org_health(db: Any, org_id: str) -> Dict:
 
     total_tasks = len(tasks)
     completed_tasks = len([t for t in tasks if t.get("status") == "completed"])
-    pending_tasks = len([t for t in tasks if t.get("status") == "pending"])
+    len([t for t in tasks if t.get("status") == "pending"])
     overdue_tasks = len([t for t in tasks if t.get("due_date") and t.get("status") not in ("completed", "approved") and _is_overdue(t.get("due_date"))])
     escalated_tasks = len([t for t in tasks if t.get("escalation_level", 0) > 0])
     task_completion_rate = round((completed_tasks / total_tasks * 100), 1) if total_tasks > 0 else 0.0
@@ -290,14 +291,14 @@ async def generate_org_health(db: Any, org_id: str) -> Dict:
     org_ref = hashlib.sha256(org_id.encode()).hexdigest()[:16]
     org_freqs = list(db.employee_frequencies.find({"org_ref": org_ref}))
     team_patterns = []
-    emp_cats = {}
+    emp_cats: dict[str, list[str]] = {}
     for f in org_freqs:
         emp = f.get("employee_role", "unknown")
         if emp not in emp_cats:
             emp_cats[emp] = []
         emp_cats[emp].append(f.get("work_category", "general"))
     overloaded = []
-    best_per_cat = {}
+    best_per_cat: dict[str, dict[str, Any]] = {}
     for f in org_freqs:
         emp = f.get("employee_role", "")
         cat = f.get("work_category", "")
@@ -308,10 +309,10 @@ async def generate_org_health(db: Any, org_id: str) -> Dict:
         if len(cats) > 4:
             overloaded.append(emp)
             team_patterns.append(f"{emp}: multi-category ({', '.join(cats[:5])})")
-    overloaded_section = f"[Overloaded Employees]\n" + "\n".join(f"  - {e}" for e in overloaded) if overloaded else ""
+    overloaded_section = "[Overloaded Employees]\n" + "\n".join(f"  - {e}" for e in overloaded) if overloaded else ""
     best_performer_lines = [f"  - {cat}: {info['email']} (~{info['hours']:.1f}h)" for cat, info in sorted(best_per_cat.items())]
     best_performer_section = "[Best Performer per Category]\n" + "\n".join(best_performer_lines) if best_performer_lines else ""
-    category_summary = {}
+    category_summary: dict[str, int] = {}
     for f in org_freqs:
         cat = f.get("work_category", "general")
         category_summary[cat] = category_summary.get(cat, 0) + 1

@@ -2,7 +2,8 @@
 
 import json
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Any
+
 from ..core.ai_client import get_ai_response
 
 logger = logging.getLogger("yesboss.default_goals_agent")
@@ -69,10 +70,10 @@ def _infer_department(title: str, description: str = "") -> str:
 
 async def generate_default_goals(
     industry: str,
-    micro_vertical: Optional[str] = None,
+    micro_vertical: str | None = None,
     count: int = 5,
-    provider: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+    provider: str | None = None,
+) -> list[dict[str, Any]]:
     """Generate default goals for an organization using AI."""
     prompt = _build_prompt(industry, micro_vertical, count)
 
@@ -111,7 +112,7 @@ async def generate_default_goals(
         return _fallback_goals(industry, micro_vertical, count)
 
 
-def _fallback_goals(industry: str, micro_vertical: str, count: int = 5) -> List[Dict[str, Any]]:
+def _fallback_goals(industry: str, micro_vertical: str, count: int = 5) -> list[dict[str, Any]]:
     """Fallback goals when AI fails — template-based for common industries."""
     templates = {
         "saas": [
@@ -241,9 +242,9 @@ def _fallback_goals(industry: str, micro_vertical: str, count: int = 5) -> List[
             return templates[key][:count]
 
     return [
-        {"title": f"Increase revenue by 20% in the next quarter", "description": f"Drive growth through targeted sales and marketing initiatives for the {industry} vertical.", "goal_type": "short_term", "duration": "one_time", "priority": "high", "department": "Sales", "suggested_timeline": "Q3 2026", "is_default": True},
-        {"title": f"Build a strong team culture and processes", "description": "Establish regular team meetings, OKR tracking, and performance reviews.", "goal_type": "long_term", "duration": "continuous", "priority": "medium", "department": "Human Resources", "suggested_timeline": "ongoing", "is_default": True},
-        {"title": f"Improve customer satisfaction score", "description": "Implement feedback surveys, reduce response times, and enhance product based on user input.", "goal_type": "short_term", "duration": "continuous", "priority": "medium", "department": "Customer Support", "suggested_timeline": "ongoing", "is_default": True},
+        {"title": "Increase revenue by 20% in the next quarter", "description": f"Drive growth through targeted sales and marketing initiatives for the {industry} vertical.", "goal_type": "short_term", "duration": "one_time", "priority": "high", "department": "Sales", "suggested_timeline": "Q3 2026", "is_default": True},
+        {"title": "Build a strong team culture and processes", "description": "Establish regular team meetings, OKR tracking, and performance reviews.", "goal_type": "long_term", "duration": "continuous", "priority": "medium", "department": "Human Resources", "suggested_timeline": "ongoing", "is_default": True},
+        {"title": "Improve customer satisfaction score", "description": "Implement feedback surveys, reduce response times, and enhance product based on user input.", "goal_type": "short_term", "duration": "continuous", "priority": "medium", "department": "Customer Support", "suggested_timeline": "ongoing", "is_default": True},
         {"title": f"Develop thought leadership in {industry}", "description": "Publish whitepapers, speak at conferences, and build brand authority in the industry.", "goal_type": "long_term", "duration": "continuous", "priority": "low", "department": "Marketing", "suggested_timeline": "ongoing", "is_default": True},
-        {"title": f"Streamline internal operations and reduce costs", "description": "Audit current operational expenses and implement automation where possible.", "goal_type": "short_term", "duration": "one_time", "priority": "medium", "department": "Operations", "suggested_timeline": "3 months", "is_default": True},
+        {"title": "Streamline internal operations and reduce costs", "description": "Audit current operational expenses and implement automation where possible.", "goal_type": "short_term", "duration": "one_time", "priority": "medium", "department": "Operations", "suggested_timeline": "3 months", "is_default": True},
     ][:count]

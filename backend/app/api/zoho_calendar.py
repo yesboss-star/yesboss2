@@ -1,21 +1,23 @@
 import asyncio
 import logging
 import re
-from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException, Depends, Query
+from datetime import datetime
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from typing import Optional, List, Any, Dict
-from ..core.database import get_database
-from ..dependencies.auth import get_current_user_optional
-from ..core.zoho import ZohoCalendar, ZohoOAuth
+
 from ..api.websocket import manager as ws_manager
+from ..core.database import get_database
 from ..core.notification_service import create_and_deliver
+from ..core.zoho import ZohoCalendar, ZohoOAuth
+from ..dependencies.auth import get_current_user_optional
 
 logger = logging.getLogger("yesboss.zoho_calendar")
 router = APIRouter()
 
 
-def get_user_id(user) -> Optional[str]:
+def get_user_id(user) -> str | None:
     if user is None:
         return None
     return getattr(user, "id", None) or getattr(user, "email", None)
@@ -28,9 +30,9 @@ def get_user_email(user) -> str:
 
 
 class BookEventRequest(BaseModel):
-    attendees: List[dict]
+    attendees: list[dict]
     title: str
-    description: Optional[str] = ""
+    description: str | None = ""
     start: str
     end: str
     timezone: str = "Asia/Kolkata"
@@ -38,8 +40,8 @@ class BookEventRequest(BaseModel):
 
 @router.get("/events")
 async def get_calendar_events(
-    from_date: Optional[str] = Query(None, alias="from"),
-    to_date: Optional[str] = Query(None),
+    from_date: str | None = Query(None, alias="from"),
+    to_date: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     current_user=Depends(get_current_user_optional),
 ):
@@ -57,7 +59,7 @@ async def get_calendar_events(
         if token_doc:
             org_id = token_doc.get("org_id")
 
-    query: Dict[str, Any] = {}
+    query: dict[str, Any] = {}
     if org_id:
         query["organization_id"] = org_id
     else:
@@ -95,7 +97,7 @@ async def search_users(
         org_id = token_doc.get("org_id")
 
     ql = re.escape(q.strip())
-    query: Dict[str, Any] = {}
+    query: dict[str, Any] = {}
     if org_id:
         query["organization_id"] = org_id
     query["$or"] = [
@@ -103,7 +105,7 @@ async def search_users(
         {"email": {"$regex": ql, "$options": "i"}},
     ]
 
-    results: List[Dict] = []
+    results: list[dict] = []
     seen_emails: set = set()
 
     employees = list(db.employees.find(query).limit(limit))
@@ -119,7 +121,7 @@ async def search_users(
             })
 
     if len(results) < limit:
-        owner_query: Dict[str, Any] = {}
+        owner_query: dict[str, Any] = {}
         if org_id:
             owner_query["_id"] = org_id
         else:
@@ -192,8 +194,8 @@ async def check_freebusy(
                 except Exception:
                     pass
 
-    req_start = datetime.strptime(f"{date} {from_time}", "%Y-%m-%d %H:%M")
-    req_end = datetime.strptime(f"{date} {to_time}", "%Y-%m-%d %H:%M")
+    datetime.strptime(f"{date} {from_time}", "%Y-%m-%d %H:%M")
+    datetime.strptime(f"{date} {to_time}", "%Y-%m-%d %H:%M")
 
     conflict = False
     for busy in all_busy:

@@ -1,15 +1,15 @@
 import asyncio
 import logging
-import uuid
-from contextlib import asynccontextmanager
-from collections import defaultdict
-
-from fastapi import FastAPI, Request, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, HTMLResponse
-from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
-from starlette.middleware.base import BaseHTTPMiddleware
 import time
+import uuid
+from collections import defaultdict
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -91,44 +91,43 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
         return await call_next(request)
 
-from .api.health import router as health_router
-from .api.auth import router as auth_router
-from .api.organizations import router as organizations_router
-from .api.owner_requests import router as owner_requests_router
-from .api.employees import router as employees_router
-from .api.upload import router as upload_router
-from .api.scrape import router as scrape_router
-from .api.intelligence import router as intelligence_router
-from .api.master_agent import router as agent_router
-from .api.expert_agents import router as expert_agents_router
-from .api.chatbot import router as chatbot_router
-from .api.file_processing import router as file_processing_router
-from .api.social import router as social_router
-from .api.goals import router as goals_router
-from .api.tasks import router as tasks_router
-from .api.dashboard import router as dashboard_router
-from .api.strategy_chat import router as strategy_chat_router
-from .api.learning import router as learning_router
-from .api.websocket import router as websocket_router
-from .api.org_chart import router as org_chart_router
-from .api.reports import router as reports_router
-from .api.market_trends import router as market_trends_router
-from .api.prompt import router as prompt_router
 from .api.assistant import router as assistant_router
-from .api.notifications import router as notifications_router
+from .api.auth import router as auth_router
+from .api.chatbot import router as chatbot_router
 from .api.check_ins import router as check_ins_router
+from .api.dashboard import router as dashboard_router
+from .api.employees import router as employees_router
+from .api.expert_agents import router as expert_agents_router
+from .api.file_processing import router as file_processing_router
+from .api.goals import router as goals_router
+from .api.health import router as health_router
+from .api.intelligence import router as intelligence_router
+from .api.journal import router as journal_router
+from .api.learning import router as learning_router
+from .api.market_trends import router as market_trends_router
+from .api.master_agent import router as agent_router
 from .api.meetings import router as meetings_router
 from .api.notification_preferences import router as notification_preferences_router
+from .api.notifications import router as notifications_router
+from .api.org_chart import router as org_chart_router
+from .api.organizations import router as organizations_router
+from .api.owner_requests import router as owner_requests_router
+from .api.prompt import router as prompt_router
 from .api.push_subscriptions import router as push_subscriptions_router
+from .api.reports import router as reports_router
+from .api.scrape import router as scrape_router
+from .api.smart_suggestions import router as smart_suggestions_router
+from .api.social import router as social_router
+from .api.strategy_chat import router as strategy_chat_router
+from .api.tasks import router as tasks_router
+from .api.upload import router as upload_router
+from .api.websocket import router as websocket_router
 from .api.zoho_auth import router as zoho_auth_router
 from .api.zoho_calendar import router as zoho_calendar_router
-from .api.smart_suggestions import router as smart_suggestions_router
-from .api.journal import router as journal_router
 from .core import settings
-from .core.database import connect_mongodb, close_mongodb, get_database
-from .core.qdrant import connect_qdrant, close_qdrant
+from .core.database import close_mongodb, connect_mongodb, get_database
+from .core.qdrant import close_qdrant, connect_qdrant
 from .core.supabase_client import connect_supabase
-from .core.socket_manager import socket_manager
 
 logger = logging.getLogger("yesboss.api")
 

@@ -1,9 +1,8 @@
-import json
 import logging
 import secrets
-import time
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any
+
 import httpx
 
 from ..config import settings
@@ -36,7 +35,7 @@ class ZohoOAuth:
 
     # ── Public helpers ──────────────────────────────────────────────
 
-    def get_auth_url(self, state: Optional[str] = None) -> str:
+    def get_auth_url(self, state: str | None = None) -> str:
         state = state or secrets.token_urlsafe(32)
         params = (
             f"client_id={_ZOHO_CLIENT_ID}"
@@ -51,7 +50,7 @@ class ZohoOAuth:
         logger.info("Zoho auth URL: %s", url)
         return url
 
-    async def _post_token(self, data: Dict[str, str]) -> Optional[Dict[str, Any]]:
+    async def _post_token(self, data: dict[str, str]) -> dict[str, Any] | None:
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.post(
@@ -71,7 +70,7 @@ class ZohoOAuth:
             logger.error("Zoho token request error: %s", e)
             return None
 
-    async def exchange_code(self, code: str) -> Optional[Dict[str, Any]]:
+    async def exchange_code(self, code: str) -> dict[str, Any] | None:
         return await self._post_token({
             "code": code,
             "client_id": _ZOHO_CLIENT_ID,
@@ -80,7 +79,7 @@ class ZohoOAuth:
             "grant_type": "authorization_code",
         })
 
-    async def refresh_access_token(self, refresh_token: str) -> Optional[Dict[str, Any]]:
+    async def refresh_access_token(self, refresh_token: str) -> dict[str, Any] | None:
         return await self._post_token({
             "refresh_token": refresh_token,
             "client_id": _ZOHO_CLIENT_ID,
@@ -90,7 +89,7 @@ class ZohoOAuth:
 
     # ── Token storage helpers ───────────────────────────────────────
 
-    async def save_token(self, user_id: str, org_id: str, token_data: Dict[str, Any], zoho_mail_id: str = "", email: str = "") -> bool:
+    async def save_token(self, user_id: str, org_id: str, token_data: dict[str, Any], zoho_mail_id: str = "", email: str = "") -> bool:
         if self.db is None:
             logger.warning("No database available for token storage")
             return False
@@ -123,7 +122,7 @@ class ZohoOAuth:
             logger.error("Failed to save Zoho token: %s", e)
             return False
 
-    async def get_token(self, user_id: str) -> Optional[Dict[str, Any]]:
+    async def get_token(self, user_id: str) -> dict[str, Any] | None:
         if self.db is None:
             return None
         try:
@@ -135,7 +134,7 @@ class ZohoOAuth:
             logger.error("Failed to get Zoho token: %s", e)
             return None
 
-    async def get_valid_token(self, user_id: str) -> Optional[str]:
+    async def get_valid_token(self, user_id: str) -> str | None:
         doc = await self.get_token(user_id)
         if not doc:
             logger.warning("get_valid_token: no token doc found for user_id=%s", user_id)
@@ -189,7 +188,7 @@ class ZohoOAuth:
             logger.error("Failed to disconnect Zoho: %s", e)
             return False
 
-    async def get_connected_users(self, org_id: Optional[str] = None) -> list:
+    async def get_connected_users(self, org_id: str | None = None) -> list:
         if self.db is None:
             return []
         query = {}

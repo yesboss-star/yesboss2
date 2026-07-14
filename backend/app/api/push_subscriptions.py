@@ -1,12 +1,11 @@
-import asyncio
-import json
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import Optional
-from ..core.database import get_database
-from ..dependencies.auth import get_current_user, get_current_user_optional
+
 from ..core.config import settings
+from ..core.database import get_database
+from ..dependencies.auth import get_current_user_optional
 
 logger = logging.getLogger("yesboss.push")
 
@@ -16,7 +15,7 @@ router = APIRouter()
 class PushSubscriptionCreate(BaseModel):
     endpoint: str
     keys: dict
-    user_agent: Optional[str] = None
+    user_agent: str | None = None
 
 
 class PushSubscriptionUnsubscribe(BaseModel):

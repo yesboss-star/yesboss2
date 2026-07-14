@@ -1,12 +1,12 @@
 import hashlib
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List
-from ..core.database import get_database
-from ..core.ai_client import get_ai_response
-from ..dependencies.auth import get_current_user_optional
+
 from ..agents.frequency_agent import analyze_content
+from ..core.database import get_database
+from ..dependencies.auth import get_current_user_optional
 
 logger = logging.getLogger("yesboss.smart_suggestions")
 router = APIRouter()
@@ -19,9 +19,9 @@ def _get_org_ref(org_id: str) -> str:
 @router.post("/suggest-assignees")
 async def suggest_assignees(
     title: str,
-    description: Optional[str] = "",
-    department: Optional[str] = None,
-    organization_id: Optional[str] = None,
+    description: str | None = "",
+    department: str | None = None,
+    organization_id: str | None = None,
     current_user = Depends(get_current_user_optional),
 ):
     db = get_database()
@@ -103,7 +103,7 @@ async def suggest_assignees(
 
 class DeadlineSuggestionRequest(BaseModel):
     title: str
-    description: Optional[str] = ""
+    description: str | None = ""
 
 
 @router.post("/suggest-deadline")

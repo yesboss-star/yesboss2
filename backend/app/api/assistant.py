@@ -14,10 +14,10 @@ import logging
 import re
 import uuid
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Any
 
 from bson import ObjectId
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from ..core.ai_client import get_ai_response
@@ -40,60 +40,60 @@ router = APIRouter()
 
 
 class ChatContext(BaseModel):
-    user_email: Optional[str] = None
-    organization_id: Optional[str] = None
-    organization_name: Optional[str] = None
-    document_summary: Optional[str] = ""
-    role: Optional[str] = "owner"
+    user_email: str | None = None
+    organization_id: str | None = None
+    organization_name: str | None = None
+    document_summary: str | None = ""
+    role: str | None = "owner"
 
 
 class IntentRequest(BaseModel):
     message: str
-    context: Optional[ChatContext] = None
-    conversation_history: Optional[List[Dict[str, str]]] = None
+    context: ChatContext | None = None
+    conversation_history: list[dict[str, str]] | None = None
 
 
 class CounterQuestionRequest(BaseModel):
     message: str
     intent: str  # "action" | "delegate" | "goal_creation" | "hiring" | "task_creation"
-    gathered: Dict[str, Any] = Field(default_factory=dict)
-    missing: Optional[List[str]] = None
-    context: Optional[ChatContext] = None
+    gathered: dict[str, Any] = Field(default_factory=dict)
+    missing: list[str] | None = None
+    context: ChatContext | None = None
 
 
 class CounterQuestionResponse(BaseModel):
     question: str
     field_id: str
     field_type: str = "text"  # text | select | person | number | date
-    options: Optional[List[Dict[str, str]]] = None
-    emoji: Optional[str] = None
-    progress: Optional[str] = None  # e.g. "Step 1 of 3"
+    options: list[dict[str, str]] | None = None
+    emoji: str | None = None
+    progress: str | None = None  # e.g. "Step 1 of 3"
 
 
 class ChatRequest(BaseModel):
     message: str
-    context: Optional[ChatContext] = None
-    conversation_history: Optional[List[Dict[str, str]]] = None
-    provider: Optional[str] = None
+    context: ChatContext | None = None
+    conversation_history: list[dict[str, str]] | None = None
+    provider: str | None = None
 
 
 class DelegateRequest(BaseModel):
     title: str
-    description: Optional[str] = None
-    assignee_id: Optional[str] = None  # employee _id OR email
-    assignee_name: Optional[str] = None
+    description: str | None = None
+    assignee_id: str | None = None  # employee _id OR email
+    assignee_name: str | None = None
     priority: str = "medium"
-    timeline: Optional[str] = None
-    due_date: Optional[str] = None
-    department: Optional[str] = None
-    context: Optional[ChatContext] = None
+    timeline: str | None = None
+    due_date: str | None = None
+    department: str | None = None
+    context: ChatContext | None = None
     create_tasks: bool = True
     task_count: int = 3
 
 
 class PersonSearchRequest(BaseModel):
     query: str
-    organization_id: Optional[str] = None
+    organization_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +132,7 @@ ACTION_KEYWORDS = re.compile(
 )
 
 
-def _heuristic_intent(text: str) -> Dict[str, Any]:
+def _heuristic_intent(text: str) -> dict[str, Any]:
     """Fast, rule-based intent hint used as a fallback when the LLM call fails."""
     has_delegate = bool(DELEGATION_KEYWORDS.search(text))
     has_action = bool(ACTION_KEYWORDS.search(text))
@@ -212,7 +212,7 @@ PRIORITY_OPTIONS = [
 ]
 
 
-def _next_field(intent: str, gathered: Dict[str, Any]):
+def _next_field(intent: str, gathered: dict[str, Any]):
     fields = DELEGATE_FIELDS if intent == "delegate" else ACTION_FIELDS
     for fid, q, ftype, emoji in fields:
         if not gathered.get(fid):
@@ -220,7 +220,7 @@ def _next_field(intent: str, gathered: Dict[str, Any]):
     return None, None, None, None
 
 
-def _detect_priority_from_text(text: str) -> Optional[str]:
+def _detect_priority_from_text(text: str) -> str | None:
     t = text.lower()
     if any(w in t for w in ("urgent", "asap", "drop everything", "critical", "tomorrow", "today", "🔥", "right now")):
         return "high"
@@ -231,7 +231,7 @@ def _detect_priority_from_text(text: str) -> Optional[str]:
     return None
 
 
-def _parse_smart_assignment(text: str) -> Dict[str, Any]:
+def _parse_smart_assignment(text: str) -> dict[str, Any]:
     """Extract structured fields from a free-form user reply.
 
     Examples:
@@ -241,7 +241,7 @@ def _parse_smart_assignment(text: str) -> Dict[str, Any]:
       "friday" / "in 2 weeks" → due_date / timeline
       "Sarah" / "sarah@company.com" → assignee_name
     """
-    out: Dict[str, Any] = {}
+    out: dict[str, Any] = {}
     t = text.strip()
     if not t:
         return out
@@ -417,7 +417,7 @@ async def search_people(request: PersonSearchRequest):
         raise HTTPException(status_code=400, detail="organization_id is required")
 
     q = (request.query or "").strip()
-    query: Dict[str, Any] = {"organization_id": org_id}
+    query: dict[str, Any] = {"organization_id": org_id}
     if q:
         ql = re.escape(q)
         query["$or"] = [
@@ -448,7 +448,7 @@ async def search_people(request: PersonSearchRequest):
 # ---------------------------------------------------------------------------
 
 
-def _resolve_assignee(db, org_id: str, assignee_id: Optional[str], assignee_name: Optional[str]):
+def _resolve_assignee(db, org_id: str, assignee_id: str | None, assignee_name: str | None):
     if assignee_id:
         try:
             emp = db.employees.find_one({"_id": ObjectId(assignee_id), "organization_id": org_id})
@@ -547,7 +547,7 @@ async def delegate_task(request: DelegateRequest):
     task_doc["_id"] = task_id
 
     # 3) Optional sub-tasks (AI-generated)
-    sub_tasks: List[Dict[str, Any]] = []
+    sub_tasks: list[dict[str, Any]] = []
     if request.create_tasks:
         try:
             from ..core.intelligence import generate_tasks_from_goal
@@ -699,7 +699,7 @@ For "company" answers also include:
 Respond with ONLY valid JSON. No markdown, no commentary."""
 
 
-def resolve_mentions(text: str, db, org_id: str) -> List[str]:
+def resolve_mentions(text: str, db, org_id: str) -> list[str]:
     if not text:
         return []
     names = re.findall(r'@(\w[\w\s.-]+?)(?:\s|$|[,;:.!?])', text + " ")
@@ -719,7 +719,7 @@ def resolve_mentions(text: str, db, org_id: str) -> List[str]:
     return list(set(resolved))
 
 
-async def handle_meeting_booking(booking_params: dict, db, org_id: str, user_id: str) -> Dict[str, Any]:
+async def handle_meeting_booking(booking_params: dict, db, org_id: str, user_id: str) -> dict[str, Any]:
     """Handle meeting booking: resolve attendees, check freebusy, book."""
     import re as _re
     from datetime import datetime, timedelta
@@ -930,12 +930,12 @@ async def handle_meeting_booking(booking_params: dict, db, org_id: str, user_id:
     }
 
 
-async def _gather_org_snapshot(db, org_id: str) -> Dict[str, Any]:
+async def _gather_org_snapshot(db, org_id: str) -> dict[str, Any]:
     """Collect a small JSON snapshot of everything we know about the org."""
     if db is None or not org_id:
         return {}
 
-    snap: Dict[str, Any] = {}
+    snap: dict[str, Any] = {}
 
     try:
         try:
@@ -994,7 +994,7 @@ async def _gather_org_snapshot(db, org_id: str) -> Dict[str, Any]:
 
     try:
         employees = list(db.employees.find({"organization_id": org_id}).limit(100))
-        depts: Dict[str, int] = {}
+        depts: dict[str, int] = {}
         for e in employees:
             d = e.get("department") or "Unassigned"
             depts[d] = depts.get(d, 0) + 1
@@ -1024,7 +1024,7 @@ async def _gather_org_snapshot(db, org_id: str) -> Dict[str, Any]:
 
 class DiagnoseRequest(BaseModel):
     message: str
-    context: Optional[ChatContext] = None
+    context: ChatContext | None = None
 
 
 @router.post("/diagnose-data")
@@ -1175,7 +1175,7 @@ async def assistant_chat(request: ChatRequest):
     ) if history else "(no prior messages)"
 
     # --- Step 1: Diagnose data ---
-    diagnosis: Optional[Dict[str, Any]] = None
+    diagnosis: dict[str, Any] | None = None
     if org_id:
         try:
             diagnosis = await diagnose_data(DiagnoseRequest(message=text, context=context))
@@ -1214,7 +1214,7 @@ async def assistant_chat(request: ChatRequest):
 
     # --- Step 3: Build the rich context for the deep answer ---
     db = get_database()
-    snap: Dict[str, Any] = {}
+    snap: dict[str, Any] = {}
     if db is not None and org_id:
         try:
             snap = await _gather_org_snapshot(db, org_id)
@@ -1393,7 +1393,7 @@ async def assistant_chat(request: ChatRequest):
         }
 
 
-async def _async_snapshot(db, org_id: str) -> Dict[str, Any]:
+async def _async_snapshot(db, org_id: str) -> dict[str, Any]:
     """Async wrapper around the snapshot collector (kept for symmetry)."""
     return await _gather_org_snapshot(db, org_id)
 
@@ -1502,10 +1502,10 @@ For delegation (when user wants to assign a task to someone AND you have enough 
 
 class AskRequest(BaseModel):
     message: str
-    session_id: Optional[str] = None
-    session_context: Optional[Dict[str, str]] = None
-    context: Optional[ChatContext] = None
-    conversation_history: Optional[List[Dict[str, str]]] = None
+    session_id: str | None = None
+    session_context: dict[str, str] | None = None
+    context: ChatContext | None = None
+    conversation_history: list[dict[str, str]] | None = None
 
 
 class BookingSlot(BaseModel):
@@ -1513,22 +1513,22 @@ class BookingSlot(BaseModel):
     end: str
 
 class BookingParams(BaseModel):
-    attendee_emails: List[str] = []
-    date: Optional[str] = None
+    attendee_emails: list[str] = []
+    date: str | None = None
     duration_minutes: int = 60
-    title: Optional[str] = None
-    description: Optional[str] = None
-    preferred_time: Optional[str] = None
-    available_slots: Optional[List[BookingSlot]] = None
-    booking_result: Optional[Dict[str, Any]] = None
+    title: str | None = None
+    description: str | None = None
+    preferred_time: str | None = None
+    available_slots: list[BookingSlot] | None = None
+    booking_result: dict[str, Any] | None = None
 
 class AskResponse(BaseModel):
     type: str  # "question" | "answer" | "meeting_booking"
-    question: Optional[Dict[str, Any]] = None
-    answer: Optional[str] = None
-    follow_up: Optional[str] = None
-    session_id: Optional[str] = None
-    booking_params: Optional[BookingParams] = None
+    question: dict[str, Any] | None = None
+    answer: str | None = None
+    follow_up: str | None = None
+    session_id: str | None = None
+    booking_params: BookingParams | None = None
 
 
 @router.post("/ask", response_model=AskResponse)
@@ -1543,7 +1543,7 @@ async def smart_ask(request: AskRequest):
     db = get_database()
 
     session_context = dict(request.session_context or {})
-    snap: Dict[str, Any] = {}
+    snap: dict[str, Any] = {}
     if db is not None and org_id:
         try:
             snap = await _gather_org_snapshot(db, org_id)
@@ -1686,7 +1686,7 @@ async def smart_ask(request: AskRequest):
                     bp["attendee_names"] = [m.get("full_name", m["email"]) for m in members]
 
             try:
-                booking_result = await handle_meeting_booking(bp, db, org_id, ctx.user_email or user_id)
+                booking_result = await handle_meeting_booking(bp, db, org_id, ctx.user_email or "")
                 if booking_result.get("error"):
                     return AskResponse(
                         type="answer",
@@ -1726,7 +1726,7 @@ async def smart_ask(request: AskRequest):
                         s_t = f"{s[8:10]}:{s[10:12]}" if len(s) >= 12 else s
                         e_t = f"{e[8:10]}:{e[10:12]}" if len(e) >= 12 else e
                         slot_lines.append(f"- {s_t} – {e_t}")
-                    answer_text = booking_result.get("message", f"Available slots:") + "\n" + "\n".join(slot_lines[:5])
+                    answer_text = booking_result.get("message", "Available slots:") + "\n" + "\n".join(slot_lines[:5])
                     if len(slots) > 5:
                         answer_text += f"\n... and {len(slots) - 5} more"
 
@@ -1786,12 +1786,12 @@ async def smart_ask(request: AskRequest):
 
 class SessionCreateRequest(BaseModel):
     organization_id: str
-    title: Optional[str] = None
+    title: str | None = None
 
 
 class SessionUpdateRequest(BaseModel):
-    title: Optional[str] = None
-    context: Optional[Dict[str, str]] = None
+    title: str | None = None
+    context: dict[str, str] | None = None
 
 
 @router.post("/sessions")
@@ -1834,9 +1834,9 @@ async def list_sessions(organization_id: str, current_user = Depends(get_current
     return {"sessions": sessions}
 
 
-def _get_session_or_404(db, session_id: str, user_id: Optional[str] = None):
+def _get_session_or_404(db, session_id: str, user_id: str | None = None):
     try:
-        query: Dict[str, Any] = {"_id": ObjectId(session_id)}
+        query: dict[str, Any] = {"_id": ObjectId(session_id)}
         if user_id:
             query["user_id"] = user_id
         s = db.assistant_sessions.find_one(query)
@@ -1895,7 +1895,7 @@ async def delete_session(session_id: str, current_user = Depends(get_current_use
 
 
 class AddMessageRequest(BaseModel):
-    message: Dict[str, Any]
+    message: dict[str, Any]
 
 
 @router.post("/sessions/{session_id}/messages")

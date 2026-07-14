@@ -1,10 +1,11 @@
-import smtplib
-import re
 import logging
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import re
+import smtplib
+from collections.abc import Callable
 from email.header import Header
-from typing import Optional
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
 from .config import settings
 
 logger = logging.getLogger("yesboss.email")
@@ -20,7 +21,7 @@ def is_email_configured() -> bool:
     return bool(SMTP_HOST and SMTP_USER and SMTP_PASS)
 
 
-def send_email(to_email: str, subject: str, html_body: str, text_body: Optional[str] = None) -> bool:
+def send_email(to_email: str, subject: str, html_body: str, text_body: str | None = None) -> bool:
     if not is_email_configured():
         logger.warning("SMTP not configured - skipping email")
         return False
@@ -30,7 +31,7 @@ def send_email(to_email: str, subject: str, html_body: str, text_body: Optional[
         msg = MIMEMultipart("alternative")
         msg["From"] = SMTP_FROM
         msg["To"] = to_email
-        msg["Subject"] = Header(subject, "utf-8")
+        msg["Subject"] = Header(subject, "utf-8")  # type: ignore[assignment]
         msg.attach(MIMEText(text_body or "", "plain"))
         msg.attach(MIMEText(html_body, "html"))
 
@@ -76,7 +77,7 @@ _TEMPLATE_FOOTER = """      <p style="margin-top:24px;font-size:12px;color:#999"
 </html>"""
 
 
-def _render_basic(title: str, message: str, link: str = None, action_label: str = None) -> str:
+def _render_basic(title: str, message: str, link: str | None = None, action_label: str | None = None) -> str:
     body = f"""<h2 style="margin:0 0 8px;font-size:18px">{title}</h2>
       <p style="margin:0 0 16px;color:#555;line-height:1.5">{message}</p>"""
     if link:
@@ -84,7 +85,7 @@ def _render_basic(title: str, message: str, link: str = None, action_label: str 
     return _TEMPLATE_HEADER.format(app_name=APP_NAME) + body + _TEMPLATE_FOOTER.format(app_name=APP_NAME)
 
 
-def _render_task_deadline_reminder(task_name: str, due_date: str, link: str = None) -> str:
+def _render_task_deadline_reminder(task_name: str, due_date: str, link: str | None = None) -> str:
     body = f"""<h2 style="margin:0 0 8px;font-size:18px;color:#1e293b">Task Due Soon</h2>
       <p style="margin:0 0 4px;color:#555;line-height:1.5">Your task <strong style="color:#6366f1">{task_name}</strong> is due on <strong>{due_date}</strong>.</p>
       <p style="margin:0 0 16px;color:#888;font-size:13px">Please ensure it's completed on time to keep the team on track.</p>"""
@@ -93,7 +94,7 @@ def _render_task_deadline_reminder(task_name: str, due_date: str, link: str = No
     return _TEMPLATE_HEADER.format(app_name=APP_NAME) + body + _TEMPLATE_FOOTER.format(app_name=APP_NAME)
 
 
-def _render_task_overdue(task_name: str, link: str = None) -> str:
+def _render_task_overdue(task_name: str, link: str | None = None) -> str:
     body = f"""<h2 style="margin:0 0 8px;font-size:18px;color:#dc2626">Task Overdue</h2>
       <p style="margin:0 0 4px;color:#555;line-height:1.5">Task <strong style="color:#dc2626">{task_name}</strong> is now overdue.</p>
       <p style="margin:0 0 16px;color:#888;font-size:13px">This task has passed its deadline. If unresolved, this will be escalated to the organization owner.</p>"""
@@ -102,7 +103,7 @@ def _render_task_overdue(task_name: str, link: str = None) -> str:
     return _TEMPLATE_HEADER.format(app_name=APP_NAME) + body + _TEMPLATE_FOOTER.format(app_name=APP_NAME)
 
 
-def _render_escalation_owner(task_name: str, assignee: str, days_overdue: int, link: str = None) -> str:
+def _render_escalation_owner(task_name: str, assignee: str, days_overdue: int, link: str | None = None) -> str:
     body = f"""<h2 style="margin:0 0 8px;font-size:18px;color:#dc2626">Escalation - Task Overdue</h2>
       <p style="margin:0 0 4px;color:#555;line-height:1.5">Task <strong style="color:#dc2626">{task_name}</strong> assigned to <strong>{assignee}</strong> is <strong>{days_overdue} day(s)</strong> overdue.</p>
       <p style="margin:0 0 16px;color:#888;font-size:13px">This task has been escalated to you as the organization owner. Please review and take necessary action.</p>"""
@@ -183,7 +184,7 @@ def _render_owner_request_rejected(org_name: str, requester_name: str) -> str:
     return _TEMPLATE_HEADER.format(app_name=APP_NAME) + body + _TEMPLATE_FOOTER.format(app_name=APP_NAME)
 
 
-TEMPLATE_RENDERERS = {
+TEMPLATE_RENDERERS: dict[str, Callable[..., str]] = {
     "default": _render_basic,
     "otp": _render_otp_email,
     "task_deadline_reminder": _render_task_deadline_reminder,
@@ -197,36 +198,37 @@ TEMPLATE_RENDERERS = {
 }
 
 
-def send_notification_email(to_email: str, title: str, message: str, link: Optional[str] = None, action_label: Optional[str] = None, template_name: str = "default", template_data: Optional[dict] = None):
+def send_notification_email(to_email: str, title: str, message: str, link: str | None = None, action_label: str | None = None, template_name: str = "default", template_data: dict | None = None):
     if template_name and template_name in TEMPLATE_RENDERERS:
         renderer = TEMPLATE_RENDERERS[template_name]
+        td = template_data or {}
         if template_name == "task_deadline_reminder":
-            html = renderer(task_name=template_data.get("task_name", message), due_date=template_data.get("due_date", ""), link=link)
+            html = renderer(task_name=td.get("task_name", message), due_date=td.get("due_date", ""), link=link)
         elif template_name == "task_overdue":
-            html = renderer(task_name=template_data.get("task_name", message), link=link)
+            html = renderer(task_name=td.get("task_name", message), link=link)
         elif template_name == "escalation_owner":
-            html = renderer(task_name=template_data.get("task_name", message), assignee=template_data.get("assignee", "Unknown"), days_overdue=template_data.get("days_overdue", 0), link=link)
+            html = renderer(task_name=td.get("task_name", message), assignee=td.get("assignee", "Unknown"), days_overdue=td.get("days_overdue", 0), link=link)
         elif template_name == "weekly_digest":
-            html = renderer(items=template_data.get("items", []))
+            html = renderer(items=td.get("items", []))
         elif template_name == "monthly_report":
-            html = renderer(report_data=template_data or {})
+            html = renderer(report_data=td or {})
         elif template_name == "owner_approval":
             html = renderer(
-                requester_name=template_data.get("requester_name", "Someone"),
-                requester_email=template_data.get("requester_email", ""),
-                org_name=template_data.get("org_name", "the organization"),
-                approve_link=template_data.get("approve_link", ""),
-                reject_link=template_data.get("reject_link", ""),
+                requester_name=td.get("requester_name", "Someone"),
+                requester_email=td.get("requester_email", ""),
+                org_name=td.get("org_name", "the organization"),
+                approve_link=td.get("approve_link", ""),
+                reject_link=td.get("reject_link", ""),
             )
         elif template_name == "owner_request_approved":
             html = renderer(
-                org_name=template_data.get("org_name", "the organization"),
-                requester_name=template_data.get("requester_name", "there"),
+                org_name=td.get("org_name", "the organization"),
+                requester_name=td.get("requester_name", "there"),
             )
         elif template_name == "owner_request_rejected":
             html = renderer(
-                org_name=template_data.get("org_name", "the organization"),
-                requester_name=template_data.get("requester_name", "there"),
+                org_name=td.get("org_name", "the organization"),
+                requester_name=td.get("requester_name", "there"),
             )
         else:
             html = TEMPLATE_RENDERERS["default"](title, message, link, action_label)

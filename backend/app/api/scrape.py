@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
 from ..core.scraper import scrape_company, scrape_with_firecrawl
 from ..core.social_detector import detect_social_presence
 
@@ -24,16 +25,16 @@ class ScrapeResponse(BaseModel):
 async def scrape_website(request: ScrapeRequest):
     if not request.domain:
         raise HTTPException(status_code=400, detail="Domain is required")
-    
+
     domain = request.domain.replace("https://", "").replace("http://", "").split("/")[0]
-    
+
     if request.use_firecrawl:
         result = await scrape_with_firecrawl(domain)
     else:
         result = await scrape_company(domain)
-    
+
     social_links = result.get("social_links", {})
-    
+
     if not social_links:
         try:
             detected = await detect_social_presence(domain)
@@ -42,9 +43,9 @@ async def scrape_website(request: ScrapeRequest):
                     social_links[platform] = data["url"]
         except Exception:
             pass
-    
+
     result["social_links"] = social_links
-    
+
     return ScrapeResponse(**result)
 
 

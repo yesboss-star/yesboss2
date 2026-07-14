@@ -1,29 +1,30 @@
+import uuid
+from datetime import datetime
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime
-import uuid
-from ..core.chatbot import OnboardingChatbot, store_conversation, get_conversation, store_conversation_embedding
+
+from ..core.chatbot import OnboardingChatbot, get_conversation, store_conversation, store_conversation_embedding
 
 router = APIRouter()
 
 
 class EmployeePersonaQuestionRequest(BaseModel):
-    department: Optional[str] = ""
-    role: Optional[str] = ""
-    manager_name: Optional[str] = ""
-    organization_name: Optional[str] = ""
-    previous_answers: Optional[list[dict]] = []
+    department: str | None = ""
+    role: str | None = ""
+    manager_name: str | None = ""
+    organization_name: str | None = ""
+    previous_answers: list[dict] | None = []
     question_count: int = 0
     more_time_agreed: bool = False
-    provider: Optional[str] = None
+    provider: str | None = None
 
 
 @router.post("/employee-persona/generate-question")
 async def generate_employee_persona_question(request: EmployeePersonaQuestionRequest):
     from ..core.ai_client import get_ai_response
-    from ..core.prompt_engine import MasterPromptEngine
     from ..core.database import get_database
+    from ..core.prompt_engine import MasterPromptEngine
 
     num_answers = len(request.previous_answers or [])
 
@@ -115,7 +116,6 @@ Rules:
         )
 
         import json
-        import re
 
         json_str = response.strip()
         if '{' in json_str and '}' in json_str:
@@ -140,7 +140,7 @@ Rules:
             "need_more_time": need_more,
             "question_number": num_answers + 1
         }
-    except Exception as e:
+    except Exception:
         fallback_questions = [
             {
                 "question": "How do you prefer to receive feedback on your work?",
@@ -186,38 +186,38 @@ Rules:
 
 class StartChatRequest(BaseModel):
     user_id: str
-    company_profile: Optional[dict] = None
-    provider: Optional[str] = None
+    company_profile: dict | None = None
+    provider: str | None = None
 
 
 class ChatMessageRequest(BaseModel):
     user_id: str
     conversation_id: str
     message: str
-    company_profile: Optional[dict] = None
-    answered_topics: Optional[list[str]] = None
-    conversation_history: Optional[list[dict]] = None
-    provider: Optional[str] = None
+    company_profile: dict | None = None
+    answered_topics: list[str] | None = None
+    conversation_history: list[dict] | None = None
+    provider: str | None = None
 
 
 class ChatResponse(BaseModel):
     response: str
-    next_question: Optional[str]
+    next_question: str | None
     is_continuing: bool
     updated_profile: dict
-    answered_topics: Optional[list[str]] = None
+    answered_topics: list[str] | None = None
 
 
 @router.post("/start")
 async def start_conversation(request: StartChatRequest):
     if not request.user_id:
         raise HTTPException(status_code=400, detail="user_id is required")
-    
+
     chatbot = OnboardingChatbot(provider=request.provider)
     result = await chatbot.start_conversation(request.company_profile)
-    
+
     conversation_id = str(uuid.uuid4())
-    
+
     conversation_doc = {
         "user_id": request.user_id,
         "conversation_id": conversation_id,
@@ -225,21 +225,21 @@ async def start_conversation(request: StartChatRequest):
         "company_profile": result.get("company_profile", {}),
         "created_at": datetime.utcnow()
     }
-    
+
     await store_conversation(
         request.user_id,
         conversation_id,
         conversation_doc["messages"],
         result.get("company_profile", {})
     )
-    
+
     await store_conversation_embedding(
         conversation_id,
         request.user_id,
         result["message"],
         {"type": "intro"}
     )
-    
+
     return {
         "conversation_id": conversation_id,
         "message": result["message"],
@@ -252,9 +252,9 @@ async def start_conversation(request: StartChatRequest):
 async def send_message(request: ChatMessageRequest):
     if not all([request.user_id, request.conversation_id, request.message]):
         raise HTTPException(status_code=400, detail="user_id, conversation_id, and message are required")
-    
+
     chatbot = OnboardingChatbot(provider=request.provider)
-    
+
     result = await chatbot.process_message(
         message=request.message,
         company_profile=request.company_profile or {},
@@ -262,28 +262,28 @@ async def send_message(request: ChatMessageRequest):
         conversation_history=request.conversation_history or [],
         provider=request.provider
     )
-    
+
     conversation = await get_conversation(request.conversation_id)
-    
+
     if conversation:
         messages = conversation.get("messages", [])
         messages.append({"role": "user", "content": request.message, "timestamp": datetime.utcnow().isoformat()})
         messages.append({"role": "assistant", "content": result["response"], "timestamp": datetime.utcnow().isoformat()})
-        
+
         await store_conversation(
             request.user_id,
             request.conversation_id,
             messages,
             result.get("updated_profile", {})
         )
-        
+
         await store_conversation_embedding(
             request.conversation_id,
             request.user_id,
             request.message + " | " + result["response"],
             {"type": "conversation"}
         )
-    
+
     return ChatResponse(**result)
 
 
@@ -298,42 +298,42 @@ async def get_conversation_by_id(conversation_id: str):
 @router.get("/user/{user_id}")
 async def get_user_conversations(user_id: str):
     from ..core.database import get_database
-    
+
     db = get_database()
-    
+
     try:
         conversations = list(db.conversations.find(
             {"user_id": user_id},
             {"messages": 0}
         ).sort("created_at", -1).limit(20))
-        
+
         for conv in conversations:
             conv["_id"] = str(conv["_id"])
-            
+
         return {"conversations": conversations}
-    except Exception as e:
+    except Exception:
         return {"conversations": []}
 
 
 class PersonaQuestionsRequest(BaseModel):
-    department: Optional[str] = None
-    role: Optional[str] = None
-    manager_name: Optional[str] = None
-    organization_name: Optional[str] = None
+    department: str | None = None
+    role: str | None = None
+    manager_name: str | None = None
+    organization_name: str | None = None
 
 
 class PersonaQuestionGenerateRequest(BaseModel):
-    org_name: Optional[str] = ""
-    industry: Optional[str] = ""
-    micro_vertical: Optional[str] = ""
-    company_size: Optional[str] = ""
-    domain: Optional[str] = ""
-    website_content: Optional[str] = ""
-    uploaded_files_summary: Optional[str] = ""
-    social_links: Optional[dict] = {}
-    previous_answers: Optional[list[dict]] = []
+    org_name: str | None = ""
+    industry: str | None = ""
+    micro_vertical: str | None = ""
+    company_size: str | None = ""
+    domain: str | None = ""
+    website_content: str | None = ""
+    uploaded_files_summary: str | None = ""
+    social_links: dict | None = {}
+    previous_answers: list[dict] | None = []
     question_count: int = 0
-    provider: Optional[str] = None
+    provider: str | None = None
 
 
 @router.post("/persona/generate-question")
@@ -399,7 +399,7 @@ Rules:
 - need_more_time: true if the company context is very limited and you'll need deeper exploration"""
     else:
         answers_text = "\n".join([f"Q: {a.get('question', '')}\nA: {a.get('answer', '')}" for a in request.previous_answers[-5:]])
-        
+
         prompt = f"""{engine_context}
 
 CONVERSATION SO FAR:
@@ -425,7 +425,7 @@ Rules:
 - need_more_time: true only if you genuinely still lack enough understanding of this person. false once you have a solid picture.
 - Decide dynamically how many more questions are needed — there is no fixed limit
 - Keep it conversational, never robotic"""
-    
+
     try:
         response = await get_ai_response(
             prompt=prompt,
@@ -434,18 +434,17 @@ Rules:
             temperature=0.8,
             max_tokens=400
         )
-        
+
         import json
-        import re
-        
+
         json_str = response.strip()
         if '{' in json_str and '}' in json_str:
             start = json_str.find('{')
             end = json_str.rfind('}') + 1
             json_str = json_str[start:end]
-            
+
         data = json.loads(json_str)
-        
+
         return {
             "question": data.get("question", "What matters most to you in how you lead your team?"),
             "options": data.get("options", ["Empowering others to decide", "Setting clear direction myself", "Collaborative decision-making"]),
@@ -453,7 +452,7 @@ Rules:
             "need_more_time": data.get("need_more_time", False),
             "question_number": num_answers + 1
         }
-    except Exception as e:
+    except Exception:
         fallback_questions = [
             {
                 "question": "What matters most to you in how you lead your team?",
@@ -486,6 +485,6 @@ Rules:
                 "need_more_time": False,
             },
         ]
-        
+
         idx = min(num_answers, len(fallback_questions) - 1)
         return {**fallback_questions[idx], "question_number": num_answers + 1}

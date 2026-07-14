@@ -1,48 +1,48 @@
 import asyncio
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
-from typing import Optional
 from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+
 from ..core.database import get_database
-from ..core.supabase_client import get_supabase
-from ..dependencies.auth import get_current_user, get_current_user_optional
+from ..dependencies.auth import get_current_user_optional
 
 router = APIRouter()
 
 class OrganizationCreate(BaseModel):
     name: str
-    domain: Optional[str] = None
-    website_url: Optional[str] = None
-    industry: Optional[str] = None
-    industries: Optional[list] = None
-    micro_vertical: Optional[str] = ""
-    micro_verticals: Optional[list] = None
-    size: Optional[str] = None
-    owner_id: Optional[str] = None
-    co_owners: Optional[list] = []
-    social_links: Optional[dict] = None
-    persona_answers: Optional[list] = None
-    check_in_frequency_days: Optional[int] = 7
+    domain: str | None = None
+    website_url: str | None = None
+    industry: str | None = None
+    industries: list | None = None
+    micro_vertical: str | None = ""
+    micro_verticals: list | None = None
+    size: str | None = None
+    owner_id: str | None = None
+    co_owners: list | None = []
+    social_links: dict | None = None
+    persona_answers: list | None = None
+    check_in_frequency_days: int | None = 7
 
 class OrganizationUpdate(BaseModel):
-    name: Optional[str] = None
-    domain: Optional[str] = None
-    website_url: Optional[str] = None
-    industry: Optional[str] = None
-    industries: Optional[list] = None
-    micro_vertical: Optional[str] = None
-    micro_verticals: Optional[list] = None
-    size: Optional[str] = None
-    social_links: Optional[dict] = None
-    persona_answers: Optional[list] = None
-    check_in_frequency_days: Optional[int] = None
+    name: str | None = None
+    domain: str | None = None
+    website_url: str | None = None
+    industry: str | None = None
+    industries: list | None = None
+    micro_vertical: str | None = None
+    micro_verticals: list | None = None
+    size: str | None = None
+    social_links: dict | None = None
+    persona_answers: list | None = None
+    check_in_frequency_days: int | None = None
 
 @router.post("")
-async def create_organization(request: OrganizationCreate, current_user: Optional[dict] = Depends(get_current_user_optional)):
+async def create_organization(request: OrganizationCreate, current_user: dict | None = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     domain = request.domain.lower().strip() if request.domain else ""
     if domain:
         existing = db.organizations.find_one({"domain": {"$regex": f"^{domain}$", "$options": "i"}})
@@ -51,7 +51,7 @@ async def create_organization(request: OrganizationCreate, current_user: Optiona
                 status_code=409,
                 detail=f"An organization with domain '{domain}' already exists. Please contact the existing owner to be added as a co-owner."
             )
-    
+
     org_doc = {
         "name": request.name,
         "domain": domain,
@@ -70,7 +70,7 @@ async def create_organization(request: OrganizationCreate, current_user: Optiona
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
     }
-    
+
     result = db.organizations.insert_one(org_doc)
     org_doc["_id"] = str(result.inserted_id)
 
@@ -106,7 +106,7 @@ async def create_organization(request: OrganizationCreate, current_user: Optiona
             logger.warning(f"Failed to generate default goals: {e}")
 
     asyncio.create_task(_gen_defaults())
-    
+
     return {"organization": org_doc}
 
 @router.get("/me")
@@ -145,13 +145,13 @@ async def get_organization(org_id: str):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     from bson import ObjectId
     org = db.organizations.find_one({"_id": ObjectId(org_id)})
-    
+
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
-    
+
     org["_id"] = str(org["_id"])
     return {"organization": org}
 
@@ -160,28 +160,28 @@ async def update_organization(org_id: str, request: OrganizationUpdate):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     from bson import ObjectId
     update_data = {k: v for k, v in request.model_dump().items() if v is not None}
     update_data["updated_at"] = datetime.utcnow()
-    
+
     db.organizations.update_one(
         {"_id": ObjectId(org_id)},
         {"$set": update_data}
     )
-    
+
     org = db.organizations.find_one({"_id": ObjectId(org_id)})
     org["_id"] = str(org["_id"])
-    
+
     return {"organization": org}
 
 
 @router.get("")
-async def list_organizations(search: Optional[str] = None, limit: int = 20):
+async def list_organizations(search: str | None = None, limit: int = 20):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     query = {}
     if search:
         query["$or"] = [
@@ -189,12 +189,12 @@ async def list_organizations(search: Optional[str] = None, limit: int = 20):
             {"domain": {"$regex": search, "$options": "i"}},
             {"industry": {"$regex": search, "$options": "i"}},
         ]
-    
+
     organizations = list(db.organizations.find(query).limit(limit))
-    
+
     for org in organizations:
         org["_id"] = str(org["_id"])
-    
+
     return {"organizations": organizations}
 
 
@@ -203,13 +203,13 @@ async def get_organization_by_domain(domain: str):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     domain = domain.lower().strip()
     org = db.organizations.find_one({"domain": {"$regex": f"^{domain}$", "$options": "i"}})
-    
+
     if not org:
         return {"organization": None, "domain": domain}
-    
+
     org["_id"] = str(org["_id"])
 
     primary_owner = None
@@ -232,12 +232,12 @@ async def add_owner(org_id: str, request: AddOwnerRequest):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     from bson import ObjectId
     org = db.organizations.find_one({"_id": ObjectId(org_id)})
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
-    
+
     existing_co_owners = org.get("co_owners", []) or []
     if request.uid not in existing_co_owners and request.uid != org.get("owner_id"):
         existing_co_owners.append(request.uid)
@@ -245,17 +245,17 @@ async def add_owner(org_id: str, request: AddOwnerRequest):
             {"_id": ObjectId(org_id)},
             {"$set": {"co_owners": existing_co_owners, "updated_at": datetime.utcnow()}}
         )
-    
+
     org = db.organizations.find_one({"_id": ObjectId(org_id)})
     org["_id"] = str(org["_id"])
     return {"organization": org}
 
 class GenerateDefaultGoalsRequest(BaseModel):
-    industry: Optional[str] = None
-    micro_vertical: Optional[str] = None
+    industry: str | None = None
+    micro_vertical: str | None = None
     count: int = 5
-    owner_id: Optional[str] = None
-    provider: Optional[str] = None
+    owner_id: str | None = None
+    provider: str | None = None
 
 
 @router.post("/{org_id}/generate-default-goals")
@@ -265,6 +265,7 @@ async def generate_default_goals(
     current_user = Depends(get_current_user_optional)
 ):
     from bson import ObjectId
+
     from ..agents.default_goals_agent import generate_default_goals as _gen_goals
 
     db = get_database()
@@ -355,13 +356,12 @@ async def get_organization_employees(org_id: str):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
-    from bson import ObjectId
+
     employees = list(db.employees.find({"organization_id": org_id}))
-    
+
     for emp in employees:
         emp["_id"] = str(emp["_id"])
-    
+
     return {"employees": employees}
 
 @router.delete("/{org_id}")
@@ -369,8 +369,8 @@ async def delete_organization(org_id: str):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
-    
+
     from bson import ObjectId
     db.organizations.delete_one({"_id": ObjectId(org_id)})
-    
+
     return {"success": True, "message": "Organization deleted"}

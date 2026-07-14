@@ -1,10 +1,12 @@
 import logging
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, HTTPException, Depends, Query, Body
+from typing import Any
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
+
 from ..core.database import get_database
-from ..dependencies.auth import get_current_user, get_current_user_optional
+from ..dependencies.auth import get_current_user
 
 logger = logging.getLogger("yesboss.journal")
 router = APIRouter()
@@ -13,13 +15,13 @@ router = APIRouter()
 class JournalEntryCreate(BaseModel):
     content: str
     type: str = "idea"
-    mood: Optional[str] = None
+    mood: str | None = None
 
 
 class JournalEntryUpdate(BaseModel):
-    content: Optional[str] = None
-    type: Optional[str] = None
-    mood: Optional[str] = None
+    content: str | None = None
+    type: str | None = None
+    mood: str | None = None
 
 
 @router.post("")
@@ -55,8 +57,9 @@ async def create_journal_entry(
     entry["_id"] = str(result.inserted_id)
 
     try:
-        from ..agents.journal_agent import analyze_entry
         import asyncio
+
+        from ..agents.journal_agent import analyze_entry
         asyncio.create_task(analyze_entry(
             entry_id=str(result.inserted_id),
             content=data.content,
@@ -73,7 +76,7 @@ async def create_journal_entry(
 async def list_journal_entries(
     current_user=Depends(get_current_user),
     org_id: str = Query(None, alias="organization_id"),
-    type: Optional[str] = None,
+    type: str | None = None,
     limit: int = Query(50, ge=1, le=200),
     skip: int = Query(0, ge=0),
 ):
@@ -85,7 +88,7 @@ async def list_journal_entries(
     if not resolved_org:
         raise HTTPException(status_code=400, detail="Organization ID required")
 
-    query: Dict[str, Any] = {"org_id": resolved_org}
+    query: dict[str, Any] = {"org_id": resolved_org}
     if type:
         query["type"] = type
 
@@ -125,7 +128,7 @@ async def update_journal_entry(
         raise HTTPException(status_code=500, detail="Database not configured")
 
     from bson import ObjectId
-    update: Dict[str, Any] = {"updated_at": datetime.utcnow()}
+    update: dict[str, Any] = {"updated_at": datetime.utcnow()}
     if data.content is not None:
         update["content"] = data.content
     if data.type is not None:
@@ -268,10 +271,10 @@ async def get_mood_trends(
     cutoff = datetime.utcnow() - timedelta(days=days)
     entries = list(db.journal_entries.find({
         "org_id": resolved_org,
-        "mood": {"$ne": None, "$ne": ""},
+        "mood": {"$nin": [None, ""]},
         "created_at": {"$gte": cutoff},
     }).sort("created_at", 1))
-    daily: Dict[str, Dict[str, int]] = {}
+    daily: dict[str, dict[str, int]] = {}
     for e in entries:
         day = e["created_at"].strftime("%Y-%m-%d") if hasattr(e["created_at"], "strftime") else str(e["created_at"])[:10]
         mood = e["mood"]

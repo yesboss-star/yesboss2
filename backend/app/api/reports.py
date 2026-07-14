@@ -1,22 +1,24 @@
+import io
 import logging
-from fastapi import APIRouter, HTTPException, Depends, Query
+from datetime import datetime
+from typing import Any
+
+from bson import ObjectId
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
-from datetime import datetime, timedelta
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
 from ..core.database import get_database
 from ..dependencies.auth import get_current_user, get_current_user_optional
-from bson import ObjectId
-from reportlab.lib.pagesizes import letter, A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib import colors
-from reportlab.lib.units import inch
-import io
 
 router = APIRouter()
 logger = logging.getLogger("yesboss.reports")
 
-def get_user_org_id(user) -> Optional[str]:
+def get_user_org_id(user) -> str | None:
     if hasattr(user, 'user_metadata') and user.user_metadata:
         return user.user_metadata.get("organization_id")
     return None
@@ -36,10 +38,10 @@ async def _is_org_owner(db, org_id: str, user_id: str) -> bool:
 
 class ReportRequest(BaseModel):
     period: str = "weekly"
-    sections: Optional[List[str]] = None
-    organization_id: Optional[str] = None
+    sections: list[str] | None = None
+    organization_id: str | None = None
 
-def build_report_content(db, org_id: str, request: ReportRequest) -> Dict[str, Any]:
+def build_report_content(db, org_id: str, request: ReportRequest) -> dict[str, Any]:
     goals = list(db.goals.find({"organization_id": org_id}).sort("created_at", -1))
     tasks = list(db.tasks.find({"organization_id": org_id}).sort("created_at", -1))
     members = list(db.org_chart_members.find({"organization_id": org_id}))
@@ -138,7 +140,7 @@ def _parse_dt(val):
     if isinstance(val, str):
         try:
             return datetime.fromisoformat(val.replace("Z", ""))
-        except:
+        except Exception:
             return datetime.utcnow()
     return datetime.utcnow()
 
@@ -149,10 +151,10 @@ def _is_overdue_from(due_date, now):
     try:
         d = _parse_dt(due_date)
         return d < now
-    except:
+    except Exception:
         return False
 
-def generate_pdf(content: Dict[str, Any], org_name: str = "YesBoss") -> bytes:
+def generate_pdf(content: dict[str, Any], org_name: str = "YesBoss") -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
@@ -446,7 +448,7 @@ async def list_reports(current_user = Depends(get_current_user)):
     query = {"organization_id": org_id}
     if current_user and getattr(current_user, 'id', None):
         query["created_by"] = current_user.id
-    
+
     reports = list(db.reports.find(query).sort("created_at", -1).limit(20))
     for r in reports:
         r["_id"] = str(r["_id"])
@@ -532,11 +534,11 @@ async def get_org_health(
     return {"health": health}
 
 
-def generate_docx(content: Dict[str, Any], org_name: str = "YesBoss") -> bytes:
+def generate_docx(content: dict[str, Any], org_name: str = "YesBoss") -> bytes:
     from docx import Document
-    from docx.shared import Inches, Pt, RGBColor
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.enum.table import WD_TABLE_ALIGNMENT
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt
 
     doc = Document()
 

@@ -1,13 +1,13 @@
 import logging
-import json
-from typing import Optional, List, Dict, Any
+from typing import Any
+
 from .config import settings
 
 logger = logging.getLogger("yesboss.ai_client")
 
 
 class AIClient:
-    def __init__(self, provider: Optional[str] = None):
+    def __init__(self, provider: str | None = None):
         self.provider = provider or settings.DEFAULT_AI_PROVIDER
         self._client = None
 
@@ -33,11 +33,11 @@ class AIClient:
 
     async def chat_complete(
         self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
+        messages: list[dict[str, str]],
+        model: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 2000,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if self.provider == "xai":
             return await self._xai_complete(messages, model or settings.XAI_MODEL, temperature, max_tokens)
         elif self.provider == "gemini":
@@ -53,11 +53,11 @@ class AIClient:
 
     async def _xai_complete(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         model: str = "grok-3",
         temperature: float = 0.7,
         max_tokens: int = 2000,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         client = self._get_xai_client()
 
         response = await client.chat.completions.create(
@@ -76,11 +76,11 @@ class AIClient:
 
     async def _gemini_complete(
         self,
-        messages: List[Dict[str, str]],
-        model: str = "gemini-2.5-flash",
+        messages: list[dict[str, str]],
+        model: str | None = "gemini-2.5-flash",
         temperature: float = 0.7,
         max_tokens: int = 2000,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if not settings.GEMINI_API_KEY:
             raise ValueError("GEMINI_API_KEY not configured")
 
@@ -138,13 +138,13 @@ class AIClient:
 
     async def _openai_complete(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         model: str = "gpt-4o",
         temperature: float = 0.7,
         max_tokens: int = 2000,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         client = self._get_openai_client()
-        
+
         response = await client.chat.completions.create(
             model=model,
             messages=messages,
@@ -161,17 +161,17 @@ class AIClient:
 
     async def _anthropic_complete(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         model: str = "claude-sonnet-4-20250514",
         temperature: float = 0.7,
         max_tokens: int = 2000,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if not settings.ANTHROPIC_API_KEY:
             raise ValueError("ANTHROPIC_API_KEY not configured")
 
         try:
             import httpx
-            
+
             url = "https://api.anthropic.com/v1/messages"
             headers = {
                 "x-api-key": settings.ANTHROPIC_API_KEY,
@@ -207,11 +207,11 @@ class AIClient:
 
     async def _qwen_complete(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         model: str = "qwen2.5:14b",
         temperature: float = 0.7,
         max_tokens: int = 2000,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if not settings.QWEN_API_KEY:
             raise ValueError("QWEN_API_KEY not configured")
 
@@ -250,8 +250,8 @@ class AIClient:
 async def get_ai_response(
     prompt: str,
     system_prompt: str = "You are a helpful AI assistant.",
-    provider: Optional[str] = None,
-    model: Optional[str] = None,
+    provider: str | None = None,
+    model: str | None = None,
     temperature: float = 0.7,
     max_tokens: int = 2000,
 ) -> str:
@@ -266,9 +266,9 @@ async def get_ai_response(
 
 
 async def get_chat_response(
-    messages: List[Dict[str, str]],
-    provider: Optional[str] = None,
-    model: Optional[str] = None,
+    messages: list[dict[str, str]],
+    provider: str | None = None,
+    model: str | None = None,
     temperature: float = 0.7,
     max_tokens: int = 2000,
 ) -> str:

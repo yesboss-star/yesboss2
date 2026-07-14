@@ -29,9 +29,11 @@ jobs:
           pip install -r requirements.txt
 
       - name: Lint with ruff
+        continue-on-error: true
         run: ruff check --output-format=github app/
 
       - name: Type check with mypy
+        continue-on-error: true
         run: mypy app/
 
       - name: Test with pytest

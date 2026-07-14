@@ -1,23 +1,24 @@
 import asyncio
 import logging
-import urllib.parse
 import os
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
+from datetime import datetime
+from typing import Any
+
+from bson import ObjectId
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
-from datetime import datetime
+
+from ..core.ai_client import get_ai_response, get_chat_response
 from ..core.database import get_database
-from ..dependencies.auth import get_current_user, get_current_user_optional
-from ..core.ai_client import get_chat_response, get_ai_response
 from ..core.file_processor import ALLOWED_EXTENSIONS
-from bson import ObjectId
+from ..dependencies.auth import get_current_user_optional
 
 router = APIRouter()
 logger = logging.getLogger("yesboss.strategy_chat")
 
 
-def get_user_org_id(user) -> Optional[str]:
+def get_user_org_id(user) -> str | None:
     if hasattr(user, 'user_metadata') and user.user_metadata:
         return user.user_metadata.get("organization_id")
     return None
@@ -26,27 +27,27 @@ def get_user_org_id(user) -> Optional[str]:
 class Message(BaseModel):
     role: str
     content: str
-    timestamp: Optional[str] = None
+    timestamp: str | None = None
 
 
 class ChatRequest(BaseModel):
     message: str
-    context: Optional[Dict[str, Any]] = None
-    history: Optional[List[Message]] = None
-    organization_id: Optional[str] = None
+    context: dict[str, Any] | None = None
+    history: list[Message] | None = None
+    organization_id: str | None = None
 
 
 class ExpertResponse(BaseModel):
     expert: str
     response: str
     confidence: float
-    sources: Optional[List[str]] = None
+    sources: list[str] | None = None
 
 
 class ExecutiveResponse(BaseModel):
     message: str
-    expert_responses: List[ExpertResponse]
-    action_items: Optional[List[str]] = None
+    expert_responses: list[ExpertResponse]
+    action_items: list[str] | None = None
     timestamp: str
 
 
@@ -253,8 +254,9 @@ async def upload_and_analyze(
     if len(contents) > 25 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 25MB)")
 
-    from ..core.file_processor import extract_text, chunk_text, generate_embeddings, store_embeddings_in_qdrant
     import uuid
+
+    from ..core.file_processor import chunk_text, extract_text, generate_embeddings, store_embeddings_in_qdrant
 
     text = extract_text(contents, file.filename)
     if not text:
@@ -363,10 +365,12 @@ async def upload_from_url(
     if len(contents) > 25 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 25MB)")
 
-    import re, uuid
-    from urllib.parse import unquote
-    from ..core.file_processor import extract_text, chunk_text, generate_embeddings, store_embeddings_in_qdrant
     import mimetypes
+    import re
+    import uuid
+    from urllib.parse import unquote
+
+    from ..core.file_processor import chunk_text, extract_text, generate_embeddings, store_embeddings_in_qdrant
 
     is_html = "html" in content_type
     ext_map = {
@@ -551,7 +555,7 @@ async def get_experts():
 
 @router.get("/files")
 async def list_org_files(
-    organization_id: Optional[str] = None,
+    organization_id: str | None = None,
     current_user = Depends(get_current_user_optional)
 ):
     db = get_database()
@@ -644,7 +648,7 @@ async def get_file_detail(
 @router.delete("/files/{file_id}")
 async def delete_file(
     file_id: str,
-    organization_id: Optional[str] = None,
+    organization_id: str | None = None,
     current_user = Depends(get_current_user_optional)
 ):
     db = get_database()
@@ -775,7 +779,7 @@ async def download_file(
 
 @router.get("/history")
 async def get_chat_history(
-    organization_id: Optional[str] = None,
+    organization_id: str | None = None,
     limit: int = 20,
     current_user = Depends(get_current_user_optional)
 ):
@@ -800,7 +804,7 @@ async def get_chat_history(
 @router.post("/history")
 async def save_chat_message(
     message: Message,
-    organization_id: Optional[str] = None,
+    organization_id: str | None = None,
     current_user = Depends(get_current_user_optional)
 ):
     db = get_database()
@@ -833,18 +837,18 @@ async def save_chat_message(
 
 class AskRequest(BaseModel):
     message: str
-    organization_id: Optional[str] = None
-    session_id: Optional[str] = None
-    conversation_history: Optional[List[Dict[str, Any]]] = None
+    organization_id: str | None = None
+    session_id: str | None = None
+    conversation_history: list[dict[str, Any]] | None = None
 
 
 class AskResponse(BaseModel):
     type: str  # "answer" | "question" | "delegate" | "meeting"
-    response: Optional[str] = None
-    question: Optional[Dict[str, Any]] = None
-    delegate: Optional[Dict[str, Any]] = None
-    meeting: Optional[Dict[str, Any]] = None
-    session_id: Optional[str] = None
+    response: str | None = None
+    question: dict[str, Any] | None = None
+    delegate: dict[str, Any] | None = None
+    meeting: dict[str, Any] | None = None
+    session_id: str | None = None
 
 
 @router.post("/ask", response_model=AskResponse)
@@ -860,8 +864,9 @@ async def unified_ask(request: AskRequest, current_user = Depends(get_current_us
     user_id = getattr(current_user, 'id', None) if current_user else None
 
     try:
+        from ..api.assistant import AskRequest as AssistantAskReq
+        from ..api.assistant import ChatContext
         from ..api.assistant import smart_ask as _assistant_ask
-        from ..api.assistant import AskRequest as AssistantAskReq, ChatContext
 
         ctx = ChatContext(organization_id=org_id)
         if user_id:
@@ -916,7 +921,7 @@ async def unified_ask(request: AskRequest, current_user = Depends(get_current_us
 
 class PersonSearchRequest(BaseModel):
     query: str
-    organization_id: Optional[str] = None
+    organization_id: str | None = None
 
 
 @router.post("/people/search")
@@ -955,12 +960,12 @@ async def search_people(request: PersonSearchRequest, current_user = Depends(get
 
 class DelegateRequest(BaseModel):
     goal_title: str
-    goal_description: Optional[str] = None
+    goal_description: str | None = None
     assignee_email: str
     priority: str = "medium"
-    due_date: Optional[str] = None
-    department: Optional[str] = None
-    organization_id: Optional[str] = None
+    due_date: str | None = None
+    department: str | None = None
+    organization_id: str | None = None
 
 
 @router.post("/delegate")
@@ -1049,13 +1054,13 @@ async def delegate_task(request: DelegateRequest, current_user = Depends(get_cur
 # ---------------------------------------------------------------------------
 
 class SessionCreate(BaseModel):
-    title: Optional[str] = None
-    organization_id: Optional[str] = None
+    title: str | None = None
+    organization_id: str | None = None
 
 
 class SessionUpdate(BaseModel):
-    title: Optional[str] = None
-    context: Optional[Dict[str, Any]] = None
+    title: str | None = None
+    context: dict[str, Any] | None = None
 
 
 @router.post("/sessions")
@@ -1087,7 +1092,7 @@ async def create_session(request: SessionCreate, current_user = Depends(get_curr
 
 
 @router.get("/sessions")
-async def list_sessions(organization_id: Optional[str] = None, current_user = Depends(get_current_user_optional)):
+async def list_sessions(organization_id: str | None = None, current_user = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")

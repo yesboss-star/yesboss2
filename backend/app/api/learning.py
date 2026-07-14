@@ -1,6 +1,7 @@
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+
 from ..core.learning import learning
 
 router = APIRouter()
@@ -10,9 +11,9 @@ class WorkflowRecord(BaseModel):
     organization_id: str
     type: str
     steps: list[str] = []
-    duration: Optional[int] = None
+    duration: int | None = None
     outcome: str = "unknown"
-    efficiency_score: Optional[float] = None
+    efficiency_score: float | None = None
     metadata: dict = {}
 
 
@@ -21,14 +22,14 @@ class TaskOutcomeRecord(BaseModel):
     task_id: str
     title: str
     status: str
-    completed_at: Optional[str] = None
-    duration_hours: Optional[float] = None
-    priority: Optional[str] = None
-    assignee_id: Optional[str] = None
-    department: Optional[str] = None
+    completed_at: str | None = None
+    duration_hours: float | None = None
+    priority: str | None = None
+    assignee_id: str | None = None
+    department: str | None = None
     was_delayed: bool = False
-    delay_reason: Optional[str] = None
-    quality_score: Optional[float] = None
+    delay_reason: str | None = None
+    quality_score: float | None = None
 
 
 class BottleneckRecord(BaseModel):
@@ -38,16 +39,16 @@ class BottleneckRecord(BaseModel):
     affected_workflows: list[str] = []
     impact_score: float = 0
     frequency: int = 1
-    department: Optional[str] = None
+    department: str | None = None
     status: str = "open"
-    suggested_fix: Optional[str] = None
+    suggested_fix: str | None = None
 
 
 class PatternRecord(BaseModel):
     organization_id: str
     type: str
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     frequency: int = 1
     context: dict = {}
     triggers: list[str] = []
@@ -57,20 +58,20 @@ class PatternRecord(BaseModel):
 class GoalOutcomeRecord(BaseModel):
     organization_id: str
     goal_id: str
-    goal_type: Optional[str] = None
-    duration: Optional[str] = None
-    department: Optional[str] = None
-    priority: Optional[str] = None
+    goal_type: str | None = None
+    duration: str | None = None
+    department: str | None = None
+    priority: str | None = None
     industry: str = ""
     micro_vertical: str = ""
     status: str = ""
     completion_reviewed: bool = False
-    actual_duration_days: Optional[float] = None
-    estimated_duration_days: Optional[float] = None
+    actual_duration_days: float | None = None
+    estimated_duration_days: float | None = None
     was_delayed: bool = False
-    delay_reason: Optional[str] = None
-    created_at: Optional[str] = None
-    completed_at: Optional[str] = None
+    delay_reason: str | None = None
+    created_at: str | None = None
+    completed_at: str | None = None
 
 
 @router.post("/workflow")
@@ -116,14 +117,15 @@ async def get_bottlenecks(organization_id: str):
 
 
 @router.get("/patterns/{organization_id}")
-async def get_patterns(organization_id: str, pattern_type: Optional[str] = None):
+async def get_patterns(organization_id: str, pattern_type: str | None = None):
     return {"patterns": learning.get_patterns(organization_id, pattern_type)}
 
 
 @router.get("/frequencies/{organization_id}")
 async def get_employee_frequencies(organization_id: str):
-    from ..core.database import get_database
     import hashlib
+
+    from ..core.database import get_database
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -143,12 +145,12 @@ async def record_goal_outcome(request: GoalOutcomeRecord):
 
 
 @router.post("/aggregate-industry-patterns")
-async def trigger_aggregation(industry: Optional[str] = None, micro_vertical: Optional[str] = None):
+async def trigger_aggregation(industry: str | None = None, micro_vertical: str | None = None):
     return learning.aggregate_industry_patterns(industry, micro_vertical)
 
 
 @router.get("/industry-recommendations")
-async def get_recommendations(industry: str, micro_vertical: Optional[str] = None):
+async def get_recommendations(industry: str, micro_vertical: str | None = None):
     return learning.get_industry_recommendations(industry, micro_vertical)
 
 
@@ -158,7 +160,7 @@ async def get_workload_analysis(organization_id: str):
 
 
 @router.get("/estimate-deadline/{organization_id}")
-async def estimate_deadline(organization_id: str, work_category: Optional[str] = None):
+async def estimate_deadline(organization_id: str, work_category: str | None = None):
     return learning.estimate_deadline(organization_id, work_category)
 
 

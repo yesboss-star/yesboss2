@@ -1,7 +1,8 @@
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
-from ..agents.master_agent import run_master_agent, get_initial_state
+
+from ..agents.master_agent import get_initial_state, run_master_agent
 
 router = APIRouter()
 
@@ -9,14 +10,14 @@ router = APIRouter()
 class InitializeAgentRequest(BaseModel):
     user_id: str
     company_profile: dict = None
-    provider: Optional[str] = None
+    provider: str | None = None
 
 
 class ChatRequest(BaseModel):
     user_id: str
     message: str
     company_profile: dict = None
-    provider: Optional[str] = None
+    provider: str | None = None
 
 
 class AgentResponse(BaseModel):
@@ -32,13 +33,13 @@ class AgentResponse(BaseModel):
 async def initialize_agent(request: InitializeAgentRequest):
     if not request.user_id:
         raise HTTPException(status_code=400, detail="user_id is required")
-    
+
     result = await run_master_agent(
         user_id=request.user_id,
         company_profile=request.company_profile,
         provider=request.provider
     )
-    
+
     return AgentResponse(**result)
 
 
@@ -46,14 +47,14 @@ async def initialize_agent(request: InitializeAgentRequest):
 async def chat_with_agent(request: ChatRequest):
     if not request.user_id or not request.message:
         raise HTTPException(status_code=400, detail="user_id and message are required")
-    
+
     result = await run_master_agent(
         user_id=request.user_id,
         company_profile=request.company_profile,
         chat_message=request.message,
         provider=request.provider
     )
-    
+
     return AgentResponse(**result)
 
 

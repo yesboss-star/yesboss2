@@ -1,44 +1,45 @@
-from pydantic import BaseModel
-from typing import Optional
 from datetime import datetime
+
+from pydantic import BaseModel
+
 
 class OrganizationCreate(BaseModel):
     name: str
-    domain: Optional[str] = None
-    industry: Optional[str] = None
-    size: Optional[str] = None
-    micro_vertical: Optional[str] = None
+    domain: str | None = None
+    industry: str | None = None
+    size: str | None = None
+    micro_vertical: str | None = None
 
 class OrganizationResponse(BaseModel):
     id: str
     name: str
-    domain: Optional[str]
-    industry: Optional[str]
-    size: Optional[str]
-    micro_vertical: Optional[str] = None
+    domain: str | None
+    industry: str | None
+    size: str | None
+    micro_vertical: str | None = None
     created_at: datetime
 
 class EmployeeResponse(BaseModel):
     id: str
     email: str
     full_name: str
-    phone: Optional[str]
+    phone: str | None
     role: str
-    department: Optional[str]
-    manager_id: Optional[str]
+    department: str | None
+    manager_id: str | None
     organization_id: str
     created_at: datetime
 
 class EmployeeCreate(BaseModel):
     email: str
     full_name: str
-    phone: Optional[str] = None
+    phone: str | None = None
     role: str
-    department: Optional[str] = None
-    manager_id: Optional[str] = None
+    department: str | None = None
+    manager_id: str | None = None
 
 class EmployeeUpdate(BaseModel):
-    full_name: Optional[str] = None
-    phone: Optional[str] = None
-    department: Optional[str] = None
-    manager_id: Optional[str] = None
+    full_name: str | None = None
+    phone: str | None = None
+    department: str | None = None
+    manager_id: str | None = None

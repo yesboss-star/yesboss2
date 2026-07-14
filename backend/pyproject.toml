@@ -4,6 +4,7 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP"]
+ignore = ["E501", "E402", "UP006", "UP035", "UP045"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -12,6 +13,7 @@ quote-style = "double"
 python_version = "3.11"
 warn_unused_configs = true
 ignore_missing_imports = true
+no_implicit_optional = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

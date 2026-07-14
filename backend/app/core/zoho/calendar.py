@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List, Optional
+
 import httpx
 
 from ..config import settings
@@ -9,7 +9,7 @@ logger = logging.getLogger("yesboss.zoho.calendar")
 
 class ZohoCalendar:
     @staticmethod
-    async def list_calendars(user_token: str) -> List[Dict]:
+    async def list_calendars(user_token: str) -> list[dict]:
         url = f"{settings.ZOHO_CALENDAR_API_URL}/calendars"
         try:
             async with httpx.AsyncClient(timeout=15) as client:
@@ -35,7 +35,7 @@ class ZohoCalendar:
         return []
 
     @staticmethod
-    async def get_default_calendar_uid(user_token: str) -> Optional[str]:
+    async def get_default_calendar_uid(user_token: str) -> str | None:
         calendars = await ZohoCalendar.list_calendars(user_token)
         logger.info("get_default_calendar_uid: found %s calendars", len(calendars))
         for cal in calendars:
@@ -53,7 +53,7 @@ class ZohoCalendar:
     @staticmethod
     async def get_events(
         user_token: str, calendar_uid: str, range_start: str, range_end: str
-    ) -> List[Dict]:
+    ) -> list[dict]:
         import json
         range_param = json.dumps({"start": range_start, "end": range_end})
         try:
@@ -73,7 +73,7 @@ class ZohoCalendar:
     @staticmethod
     async def check_freebusy(
         user_token: str, email: str, start: str, end: str
-    ) -> List[Dict]:
+    ) -> list[dict]:
         url = f"{settings.ZOHO_CALENDAR_API_URL}/calendars/freebusy"
         try:
             async with httpx.AsyncClient(timeout=15) as client:
@@ -106,8 +106,8 @@ class ZohoCalendar:
         start_dt: str,
         end_dt: str,
         timezone: str,
-        attendees: List[Dict[str, str]],
-    ) -> Optional[str]:
+        attendees: list[dict[str, str]],
+    ) -> str | None:
         import json
         eventdata = {
             "title": title,
