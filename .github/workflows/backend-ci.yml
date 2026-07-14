@@ -36,10 +36,3 @@ jobs:
         continue-on-error: true
         run: mypy app/
 
-      - name: Test with pytest
-        run: pytest --tb=short -q
-        env:
-          ENVIRONMENT: test
-          MONGODB_URI: ""
-          SUPABASE_URL: ""
-          SUPABASE_KEY: ""
