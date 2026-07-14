@@ -337,13 +337,13 @@ export default function StrategyChatPage() {
                         {/* Question cards (from assistant flow) */}
                         {msg.question && (
                           <div className="px-4 py-3 rounded-xl bg-amber-500/5 border border-amber-500/20">
-                            <p className="text-sm font-medium text-amber-400 mb-2">{String(msg.question.question ?? "")}</p>
-                            {msg.question.options && (
+                            <p className="text-sm font-medium text-amber-400 mb-2">{String((msg.question as any).question ?? "")}</p>
+                            {(msg.question as any).options && (
                               <div className="flex flex-wrap gap-2">
-                                {msg.question.options.map((opt: any, i: number) => (
+                                {(msg.question as any).options.map((opt: any, i: number) => (
                                   <button
                                     key={i}
-                                    onClick={() => setInput(typeof opt === "string" ? opt : opt.label || opt.value)}
+                                    onClick={() => setInput(typeof opt === "string" ? opt : opt.label || opt.value || "")}
                                     className="text-xs px-3 py-1.5 rounded-full bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-400 transition-all cursor-pointer"
                                   >
                                     {typeof opt === "string" ? opt : opt.label || opt.value}
