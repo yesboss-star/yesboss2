@@ -37,7 +37,7 @@ services:
       # Firebase credentials (place this file on the VM)
       - ./backend/firebase-credentials.json:/app/firebase-credentials.json:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/"]
       interval: 30s
       timeout: 10s
       retries: 3
