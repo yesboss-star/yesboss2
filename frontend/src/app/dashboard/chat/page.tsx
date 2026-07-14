@@ -337,7 +337,7 @@ export default function StrategyChatPage() {
                         {/* Question cards (from assistant flow) */}
                         {msg.question && (
                           <div className="px-4 py-3 rounded-xl bg-amber-500/5 border border-amber-500/20">
-                            <p className="text-sm font-medium text-amber-400 mb-2">{msg.question.question}</p>
+                            <p className="text-sm font-medium text-amber-400 mb-2">{String(msg.question.question ?? "")}</p>
                             {msg.question.options && (
                               <div className="flex flex-wrap gap-2">
                                 {msg.question.options.map((opt: any, i: number) => (

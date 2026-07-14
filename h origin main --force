@@ -1,0 +1,73 @@
+* [33mddae986[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m K- test2
+* [33m5b6a238[m KRISHA: cleaned old code
+[31m|[m * [33m534f493[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m KRISHA: cleaned old code
+[31m|[m[31m/[m  
+* [33mcb0e8be[m KRISHA: implemented journaling + audio , linked goals and solved errors of emp/owner confilcts , resolved db
+* [33m79a0cf2[m Prince----resolving the co-wner page issue and bugs with real time interaction
+* [33m2f953f1[m Prince----resolev the swagger backend issue
+* [33ma974175[m KRISHA- chnges in goals and owner flow
+* [33m244c4df[m Prince--Adding security which affecting
+* [33m4c7740f[m Prince--resolev the SMTP issue,resolve owner/emplyee onborading side and evrything should be fast
+* [33m4357b22[m KRISHA- corrected owner flow as per MOM
+* [33md86033f[m KRISHA- updated owner onboarding flow and enabled emails for co owner authentication
+* [33m3b7d41c[m deploy: prepare for Vercel + Render deployment
+* [33m0010f68[m KRISHA- ai business analytics is connected with zoho correctly
+* [33m27aef05[m Prince--employee flow  + dashboard setting + profile avatar
+* [33m7487d9e[m KRISHA- emp onboarding auto filling
+* [33m348197a[m KRISHA- emp dashboard bug resolved
+* [33m3ac4e2f[m Prince--signup otp + feedback + employee flow report+manger
+* [33m0ff0c44[m KRISHA- emp flow is chnged + settings are chnged
+* [33mc9b63f3[m KRISHA - the chat is now per user + color theme is chnaged for white mode
+* [33m40c0542[m Prince-- filtering and enchancing
+* [33mfd1226a[m Prince-- modifying goal pipeline + notification
+* [33mf0044bd[m KRISHA - continous learning on each step
+* [33m10a237b[m Prince- sorting filter added in ai task cascade
+* [33mda91bf8[m KRISHA- task+goals-> todos zoho
+* [33m18f65c8[m KRISHA- the tasks and goals emails are sent to the users
+* [33m3f29665[m KRISHA- goals and subgoals + deadlines + suggestions
+* [33m816559a[m Prince--pikachu for md,zohocredintial in to com
+* [33mdd19edc[m KRISHA- follow ups and connected to taz
+* [33mdff7eab[m KRISHA - tasks upladated on zoho todo
+* [33m1aa4f1e[m KRISHA- zoho integrated - calneder and mail and remainders are sent on taz cliq as well
+* [33me8e25fe[m KRISHA- zoho integration implementated + all notifications done + phase g completed
+* [33m8558043[m KRISHA - zoho mail implemented
+* [33mf40e87c[m Prince-- yesbossv2 which notification,reminder,integrate with zoho
+* [33m453a75a[m KRISHA- goal refinement chat is working great now
+* [33me85084c[m KRISHA- refinement chat ai ba chnges
+* [33mc7b0d59[m Prince --adding goal,task,name,reviwer,multiple add,etc
+* [33m814ed92[m KRISHA- ai ba realtime working
+* [33m9ba770b[m prince-- scroll,logo new modification
+* [33mf5b5649[m created emp flow - krisha
+* [33ma0bfd53[m Prince--white tooglle color perfect
+* [33mbbec240[m updates in ai ba + removed  market trends - krisha
+* [33mb443aa4[m prince-- notification,feature,deadline,mail,popup
+* [33m936cb68[m removed second sidebar , changes ai ba- krisha
+* [33m66ec58f[m Prince--add notification,setting,report,lots of feature
+* [33mda32be9[m docx resolved - krisha
+* [33ma993c10[m reali time working ai ba - krisha
+* [33mc2de21a[m chnages in kpi cards , market trends ,ai docs suggestion , text document entry , dashboard chnages , profile section added , dasrk - light mode added : KRISHA
+* [33m524267a[m ai nalyse is working correctly on org url , social presence and document uploading and context creation and storing it in mongo and quadrant
+* [33mdc772db[m backend port chng ,loading time removed , unncessary timing removed - krisha
+* [33m7b5465c[m dashborad - updated - krisha
+* [33m7f4246a[m prince- dashboard--> kpi,ai business chat,matrket,weeekly report,goalsrevenue risk  done
+* [33mc2735c0[m duplicate owner onboarding - same org chart - krisha
+* [33m2219b3d[m signout + login redirection - krisha
+* [33mc9887c3[m completed - tasks + orchestration - krisha
+* [33m91574d0[m dashboard update -krisha
+* [33mfc6c440[m prince upadted goals compnay persona evrything
+* [33m6a9c6c0[m neww login
+* [33m93d8310[m fix: switch AI from Gemini to Ollama qwen2.5:0.5b, fix persona questions, optimize prompts for speed
+* [33m0aa79f1[m rerouting
+* [33ma2e0253[m rerouting
+* [33m593661e[m Prince -->  resolving issue identtify db creation of db.md
+* [33m7294907[m make persona interface with proper understandable also created md to quick overview--Prince
+* [33mc1905a4[m update onboarding owner page
+* [33mb939a23[m feat: industry-based document suggestions + social media autofill
+* [33m9a03f84[m Update onboard-org-test.md with dropdown fixes and testing checklist
+* [33md63f9fb[m Fix onboarding: dropdown selection and database TLS
+* [33m9f06655[m indrustru adding chips for remive and add by testing same as microvertical
+* [33mc106203[m fix: auto-sync script encoding issue
+* [33m0f06e77[m feat: Enhanced onboarding with AI company detection
+* [33m9608ac7[m feat: Add auto-sync script for team collaboration
+* [33me7942bb[m update code
+* [33m851eff7[m initial commit

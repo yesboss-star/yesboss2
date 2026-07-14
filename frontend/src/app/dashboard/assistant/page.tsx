@@ -53,7 +53,7 @@ function BookingCard({ params, onBook }: { params: BookingParams; onBook: (time:
         </div>
         <p className="text-sm text-foreground font-medium">{r?.title || "Meeting"}</p>
         <p className="text-xs text-text-muted">
-          {r?.start?.slice(8, 14) || ""} – {r?.end?.slice(8, 14) || ""}
+          {(r?.start as string)?.slice(8, 14) || ""} – {(r?.end as string)?.slice(8, 14) || ""}
         </p>
         <p className="text-xs text-text-muted">
           {r?.attendees?.length || 0} attendee(s)
