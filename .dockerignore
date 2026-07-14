@@ -1,0 +1,56 @@
+# ── Git ──
+.git
+.gitignore
+
+# ── Python ──
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+backend/venv
+backend/.venv
+backend/.mypy_cache
+backend/.pytest_cache
+backend/.coverage
+backend/htmlcov
+backend/uvicorn.out
+backend/uvicorn.err
+backend/uvicorn.pid
+
+# ── Node ──
+frontend/node_modules
+frontend/.next
+
+# ── IDE & OS ──
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# ── Uploads & logs ──
+uploads
+backend/uploads
+*.log
+logs
+
+# ── Docs & misc (not needed in image) ──
+*.md
+*.docx
+*.pdf
+*.png
+!backend/requirements.txt
+!backend/runtime.txt
+data
+ignore
+pikachu
+scripts
+
+# ── Test data ──
+backend/tests
+backend/d*.json
+backend/e2e*.json
+backend/test_*.json
+backend/reset_body.json
+backend/conftest.py
+backend/seed_test_data.py
+

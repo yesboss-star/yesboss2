@@ -8,6 +8,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -18,21 +19,34 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: vpsuser
           key: ${{ secrets.SSH_KEY }}
+          command_timeout: 30m
           script: |
+            set -e
+
+            echo "=== Deploying YesBoss ==="
+
+            # Navigate to project
             cd ~/yesboss2
-            git pull
 
-            cd backend
-            source venv/bin/activate
-            pip install -r requirements.txt
-            deactivate
-            cd ..
-            ENVIRONMENT=production pm2 restart yesboss-backend
+            # Pull latest code
+            echo "[1/4] Pulling latest code..."
+            git pull origin main
 
-            cd frontend
-            npm install
-            npm run build
-            cd ..
-            pm2 restart yesboss-frontend
+            # Ensure uploads directory exists on data disk
+            sudo mkdir -p /u01/docker-data/uploads
 
-            pm2 save
+            # Build and start container
+            echo "[2/4] Building Docker image..."
+            docker compose build --no-cache
+
+            echo "[3/4] Starting container..."
+            docker compose up -d
+
+            # Cleanup old images
+            echo "[4/4] Cleaning up..."
+            docker image prune -f
+
+            echo "=== Deployment complete ==="
+            echo "Frontend: http://52.140.177.20:3000"
+            echo "Backend:  http://52.140.177.20:8000"
+            docker compose ps
