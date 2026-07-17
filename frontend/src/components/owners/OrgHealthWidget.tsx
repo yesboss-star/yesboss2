@@ -2,9 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, Badge } from "@/components/ui";
-import { Activity, TrendingUp, Loader2 } from "lucide-react";
+import { Activity, TrendingUp, Loader2, ChevronDown, ChevronRight } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+
+const renderMarkdownBold = (text: string) => {
+  return text.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+};
 
 interface OrgHealthData {
   health_score: number;
@@ -15,6 +19,7 @@ interface OrgHealthData {
 export default function OrgHealthWidget({ orgId, compact }: { orgId?: string; compact?: boolean }) {
   const [health, setHealth] = useState<OrgHealthData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     if (!orgId) return;
@@ -51,8 +56,11 @@ export default function OrgHealthWidget({ orgId, compact }: { orgId?: string; co
   if (compact) {
     return (
       <Card className={colors.border}>
-        <CardContent className="p-4">
-          <div className="flex items-center gap-3">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="w-full flex items-center justify-between p-4 cursor-pointer hover:bg-surface/50 transition-colors text-left"
+        >
+          <div className="flex items-center gap-3 flex-1 min-w-0">
             <div className="relative w-16 h-16 flex-shrink-0">
               <svg className="w-16 h-16 -rotate-90" viewBox="0 0 80 80">
                 <circle cx="40" cy="40" r="36" fill="none" stroke="#1e293b" strokeWidth="6" />
@@ -70,51 +78,79 @@ export default function OrgHealthWidget({ orgId, compact }: { orgId?: string; co
                   {health.health_label}
                 </Badge>
               </div>
-              <p className="text-xs text-text-muted mt-1 line-clamp-2">{health.ai_recommendations}</p>
             </div>
           </div>
-        </CardContent>
+          {expanded ? <ChevronDown className="w-4 h-4 text-text-muted flex-shrink-0" /> : <ChevronRight className="w-4 h-4 text-text-muted flex-shrink-0" />}
+        </button>
+        {expanded && (
+          <div className="px-4 pb-4 space-y-1.5">
+            {health.ai_recommendations.split("\n").filter(Boolean).map((point, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-primary/60 mt-1.5 flex-shrink-0" />
+                <p className="text-xs text-text-muted leading-relaxed" dangerouslySetInnerHTML={{ __html: renderMarkdownBold(point) }} />
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
     );
   }
 
   return (
     <Card className={colors.border}>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Activity className={`w-5 h-5 ${colors.text}`} />
-            <CardTitle>Organization Health</CardTitle>
-          </div>
-          <Badge className={`text-xs ${colors.bg} ${colors.text} ${colors.border}`}>
-            {health.health_label}
-          </Badge>
-        </div>
-        <CardDescription>AI-driven health assessment of your organization</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="flex items-center gap-6 mb-6">
-          <div className="relative w-24 h-24 flex-shrink-0">
-            <svg className="w-24 h-24 -rotate-90" viewBox="0 0 80 80">
-              <circle cx="40" cy="40" r="36" fill="none" stroke="#1e293b" strokeWidth="6" />
-              <circle cx="40" cy="40" r="36" fill="none" className={colors.ring} strokeWidth="6" strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={dashOffset} />
-            </svg>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className={`text-2xl font-bold ${colors.text}`}>{health.health_score}</span>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full cursor-pointer text-left"
+      >
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Activity className={`w-5 h-5 ${colors.text}`} />
+              <CardTitle>Organization Health</CardTitle>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge className={`text-xs ${colors.bg} ${colors.text} ${colors.border}`}>
+                {health.health_label}
+              </Badge>
+              {expanded ? <ChevronDown className="w-4 h-4 text-text-muted" /> : <ChevronRight className="w-4 h-4 text-text-muted" />}
             </div>
           </div>
-          <div className="flex-1">
-            {health.ai_recommendations && (
-              <div className="p-3 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 border border-primary/20">
-                <div className="flex items-start gap-2">
-                  <TrendingUp className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
-                  <p className="text-xs text-text-muted leading-relaxed whitespace-pre-wrap">{health.ai_recommendations}</p>
-                </div>
+          <CardDescription>AI-driven health assessment of your organization</CardDescription>
+        </CardHeader>
+      </button>
+      {expanded && (
+        <CardContent>
+          <div className="flex items-center gap-6 mb-6">
+            <div className="relative w-24 h-24 flex-shrink-0">
+              <svg className="w-24 h-24 -rotate-90" viewBox="0 0 80 80">
+                <circle cx="40" cy="40" r="36" fill="none" stroke="#1e293b" strokeWidth="6" />
+                <circle cx="40" cy="40" r="36" fill="none" className={colors.ring} strokeWidth="6" strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={dashOffset} />
+              </svg>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className={`text-2xl font-bold ${colors.text}`}>{health.health_score}</span>
               </div>
-            )}
+            </div>
+            <div className="flex-1">
+              {health.ai_recommendations && (
+                <div className="p-3 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 border border-primary/20">
+                  <div className="flex items-start gap-2 mb-2">
+                    <TrendingUp className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                    <span className="text-xs font-semibold text-foreground">Recommendations</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {health.ai_recommendations.split("\n").filter(Boolean).map((point, i) => (
+                      <div key={i} className="flex items-start gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-primary/60 mt-1.5 flex-shrink-0" />
+                <p className="text-xs text-text-muted leading-relaxed" dangerouslySetInnerHTML={{ __html: renderMarkdownBold(point) }} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      </CardContent>
+        </CardContent>
+      )}
     </Card>
   );
 }

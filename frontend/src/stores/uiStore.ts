@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
 interface Notification {
   id: string;
@@ -35,7 +36,9 @@ interface UIState {
   setCommandPaletteOpen: (open: boolean) => void;
 }
 
-export const useUIStore = create<UIState>()((set) => ({
+export const useUIStore = create<UIState>()(
+  persist(
+    (set) => ({
   sidebarOpen: true,
   mobileSidebarOpen: false,
   theme: "dark",
@@ -90,4 +93,10 @@ export const useUIStore = create<UIState>()((set) => ({
   setActiveModal: (modal) => set({ activeModal: modal }),
   setSearchOpen: (open) => set({ searchOpen: open }),
   setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
-}));
+    }),
+    {
+      name: "yesboss-ui",
+      partialize: (state) => ({ theme: state.theme }),
+    }
+  )
+);

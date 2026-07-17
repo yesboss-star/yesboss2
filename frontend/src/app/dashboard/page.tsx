@@ -63,6 +63,10 @@ export default function DashboardPage() {
   const { organization, setOrganization, fetchOrganizationByEmail } = useOrganizationStore();
   const { goals, fetchGoals } = useGoalStore();
   const [showGoalModal, setShowGoalModal] = useState(false);
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
   
   const [assignedTasks, setAssignedTasks] = useState<Task[]>([]);
   const [pendingReviews, setPendingReviews] = useState<PendingReview[]>([]);

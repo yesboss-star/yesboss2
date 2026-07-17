@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -51,7 +51,7 @@ async def create_notification(notification: NotificationCreate, current_user = D
         "actor_name": notification.actor_name,
         "metadata": notification.metadata or {},
         "read": False,
-        "created_at": datetime.utcnow(),
+        "created_at": datetime.now(timezone.utc),
     }
 
     result = db.notifications.insert_one(notif_doc)

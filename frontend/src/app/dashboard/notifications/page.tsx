@@ -23,7 +23,7 @@ const typeColors: Record<string, string> = {
 };
 
 function formatDate(dateStr: string): string {
-  const date = new Date(dateStr);
+  const date = new Date(dateStr.endsWith("Z") || dateStr.endsWith("+00:00") ? dateStr : dateStr + "Z");
   const now = new Date();
   const diff = now.getTime() - date.getTime();
   const mins = Math.floor(diff / 60000);
@@ -39,7 +39,7 @@ function formatDate(dateStr: string): string {
 function groupByDate(notifications: Notification[]): Record<string, Notification[]> {
   const groups: Record<string, Notification[]> = {};
   for (const n of notifications) {
-    const date = new Date(n.created_at);
+    const date = new Date(n.created_at.endsWith("Z") || n.created_at.endsWith("+00:00") ? n.created_at : n.created_at + "Z");
     const today = new Date();
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);

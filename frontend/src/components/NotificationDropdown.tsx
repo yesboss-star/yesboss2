@@ -36,7 +36,7 @@ const typeColors: Record<string, string> = {
 
 function timeAgo(dateStr: string): string {
   const now = Date.now();
-  const date = new Date(dateStr).getTime();
+  const date = new Date(dateStr.endsWith("Z") || dateStr.endsWith("+00:00") ? dateStr : dateStr + "Z").getTime();
   const diff = now - date;
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return "just now";

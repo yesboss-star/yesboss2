@@ -225,6 +225,8 @@ export default function AISummaryChat() {
   const [questionCount, setQuestionCount] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const isFirstRender = useRef(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const mentionListRef = useRef<HTMLDivElement>(null);
@@ -297,7 +299,14 @@ export default function AISummaryChat() {
   }, [activeSession?.id]);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView();
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    const container = chatEndRef.current?.parentElement;
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+    }
   }, [messages]);
 
   const ensureSession = async () => {

@@ -2441,7 +2441,7 @@ function MarketTrendsSection() {
   }, [organization?.industry, organization?.micro_vertical, fetchTrends]);
 
   const getTimeAgo = (dateStr: string) => {
-    const diff = Date.now() - new Date(dateStr).getTime();
+    const diff = Date.now() - new Date(dateStr.endsWith("Z") || dateStr.endsWith("+00:00") ? dateStr : dateStr + "Z").getTime();
     const hours = Math.floor(diff / 3600000);
     if (hours < 1) return "Just now";
     if (hours < 24) return `${hours}h ago`;
@@ -2996,7 +2996,7 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+    <div className="space-y-6 animate-in fade-in duration-300">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-foreground to-primary bg-clip-text text-transparent">
@@ -3093,7 +3093,9 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
       {adaptation.showGrokInsights && (
         <div className="space-y-6">
           <OrgHealthWidget orgId={orgId} compact />
-          <AISummaryChat />
+          <div className="h-[600px]">
+            <AISummaryChat />
+          </div>
           <MarketImpactCard orgId={orgId} />
           <WeeklyReportGenerator />
         </div>
