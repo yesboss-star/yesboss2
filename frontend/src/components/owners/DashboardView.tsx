@@ -9,7 +9,7 @@ import { useTaskStore } from "@/stores/taskStore";
 import { useOrgChartStore } from "@/stores/orgChartStore";
 import { useMarketTrendsStore } from "@/stores/marketTrendsStore";
 import { useReportStore } from "@/stores/reportStore";
-import { useAIDashboardAdaptation, type OrgStage } from "@/hooks/useAIDashboardAdaptation";
+import { useAIDashboardAdaptation } from "@/hooks/useAIDashboardAdaptation";
 
 import {
   Sparkles, Flag, Calendar, Clock, CheckCircle, AlertCircle, ChevronDown,
@@ -17,7 +17,7 @@ import {
   FileText, Download, Loader2, Newspaper, ExternalLink,
   BarChart3, Target, Zap, Activity, ChevronRight,
   AlertTriangle, Info, Users, User, FileSpreadsheet,
-  PieChart as PieChartIcon, Link2, X, Building2, Network,
+  PieChart as PieChartIcon, Link2, X, Network,
   Briefcase, Search, RefreshCw, Upload, Trash2, GitBranch, Plus, List, ArrowLeft,
 } from "lucide-react";
 import {
@@ -39,6 +39,7 @@ import OrgHealthWidget from "@/components/owners/OrgHealthWidget";
 import MarketImpactCard from "@/components/owners/MarketImpactCard";
 import CheckInModal from "@/components/owners/CheckInModal";
 import IndustryBenchmarksCard from "@/components/owners/IndustryBenchmarksCard";
+import CollapsibleSection from "@/components/owners/CollapsibleSection";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -2524,6 +2525,39 @@ function MarketTrendsSection() {
   );
 }
 
+function DataChartsSection() {
+  const { goals } = useGoalStore();
+  const [expanded, setExpanded] = useState(false);
+  const activeCount = goals.filter(g => g.status === "active").length;
+
+  return (
+    <div className="rounded-xl overflow-hidden border border-border/50">
+      <div className="flex items-center gap-3 px-4 py-3 bg-card">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex items-center gap-3 flex-1 cursor-pointer text-left bg-transparent border-0 p-0"
+        >
+          {expanded ? (
+            <ChevronDown className="w-5 h-5 text-text-muted flex-shrink-0" />
+          ) : (
+            <ChevronRight className="w-5 h-5 text-text-muted flex-shrink-0" />
+          )}
+          <BarChart3 className="w-5 h-5 text-primary flex-shrink-0" />
+          <span className="text-base font-semibold flex-1 truncate">AI Business Analytics</span>
+        </button>
+        {!expanded && activeCount > 0 && (
+          <Badge variant="default" className="text-xs flex-shrink-0">{activeCount} active</Badge>
+        )}
+      </div>
+      {expanded && (
+        <div className="border-t border-border/50 bg-card">
+          <DataCharts goals={goals} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DataCharts({ goals, tasks }: { goals: any[]; tasks?: any[] }) {
   const [chartTasks, setChartTasks] = useState<any[]>([]);
   const { organization } = useOrganizationStore();
@@ -2952,18 +2986,9 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
     {
       key: "org_chart",
       title: "Build your org chart",
-      description: "Add members and reporting lines to power your goals",
+      description: "Add members, roles, and departments to build your team",
       icon: Network,
       accent: "from-emerald-500/20 to-teal-500/20",
-      isDone: memberCount > 0,
-      onClick: () => router.push("/dashboard/orchestration"),
-    },
-    {
-      key: "team_structure",
-      title: "Define team structure",
-      description: "Set up roles, departments, and reporting relationships",
-      icon: Building2,
-      accent: "from-amber-500/20 to-orange-500/20",
       isDone: memberCount > 0,
       onClick: () => router.push("/dashboard/orchestration"),
     },
@@ -2985,15 +3010,19 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
   }, [adaptation.stage, getAISummary]);
 
   const activeGoalCount = goals.filter(g => g.status === "active").length;
+  const urgentGoals = goals.filter(g => g.priority === "urgent").length;
+  const meetingCount = meetingHistory.length;
 
-  const getStageLabel = (stage: OrgStage) => {
-    switch (stage) {
-      case "new": return "Getting Started";
-      case "onboarding": return "Building Foundation";
-      case "growing": return "Growth Mode";
-      case "established": return "Executive View";
-    }
-  };
+  const goalsBadge = urgentGoals > 0
+    ? `${urgentGoals} urgent`
+    : activeGoalCount > 0
+      ? `${activeGoalCount} active`
+      : undefined;
+  const meetingsBadge = meetingCount > 0 ? `${meetingCount} meetings` : undefined;
+
+  const goalsExpanded = urgentGoals > 0 || activeGoalCount === 0;
+  const analyticsExpanded = false;
+  const meetingsExpanded = meetingCount > 0;
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
@@ -3009,16 +3038,6 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setShowCheckInModal(true)}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-all cursor-pointer"
-          >
-            <Clock className="w-3.5 h-3.5" />
-            Check-In
-          </button>
-          <span className="text-[10px] font-medium px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">
-            {getStageLabel(adaptation.stage)}
-          </span>
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
             <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span className="text-xs text-emerald-400">Live</span>
@@ -3084,104 +3103,40 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
         </Card>
       )}
 
-      <KPISuggestionsCard />
+      {adaptation.showGrokInsights && <OrgHealthWidget orgId={orgId} compact />}
 
-      <GoalSection />
+      <CollapsibleSection title="Goals Pipeline" icon={Target} badge={goalsBadge} badgeVariant={urgentGoals > 0 ? "warning" : "default"} defaultExpanded={goalsExpanded}>
+        <GoalSection />
+      </CollapsibleSection>
 
-      {adaptation.showExecutiveKPIs && <DataCharts goals={goals} />}
+      {adaptation.showExecutiveKPIs && <DataChartsSection />}
 
-      {adaptation.showGrokInsights && (
-        <div className="space-y-6">
-          <OrgHealthWidget orgId={orgId} compact />
-          <div className="h-[600px]">
-            <AISummaryChat />
-          </div>
-          <MarketImpactCard orgId={orgId} />
-          <WeeklyReportGenerator />
-        </div>
-      )}
+      <CollapsibleSection title="AI KPI Advisor" icon={BarChart3} defaultExpanded={false}>
+        <KPISuggestionsCard />
+      </CollapsibleSection>
 
-      {adaptation.showRevenueRisk && (
-        <>
-          <RevenueRiskRadar />
-          <IndustryBenchmarksCard industry={organization?.industry || ""} microVertical={organization?.micro_vertical} />
-        </>
-      )}
+      {adaptation.showGrokInsights && <WeeklyReportGenerator />}
 
-      {escalatedTasks.length > 0 && (
-        <Card className="border-rose-500/20 bg-gradient-to-br from-rose-500/5 to-transparent">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5 text-rose-400" />
-                <CardTitle>Escalations</CardTitle>
-              </div>
-              <Badge variant="warning" className="text-xs">{escalatedTasks.length} escalated</Badge>
-            </div>
-            <CardDescription>Tasks escalated to owner — overdue 3+ days</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {escalationsLoading ? (
-              <div className="flex items-center justify-center py-4">
-                <Loader2 className="w-5 h-5 animate-spin text-primary" />
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {escalatedTasks.slice(0, 5).map((task: any) => {
-                  const dueStr = task.due_date || "";
-                  const daysOverdue = dueStr
-                    ? Math.floor((Date.now() - new Date(dueStr).getTime()) / 86400000)
-                    : 0;
-                  const assignee = task.assignee_email || (task.assignee_id?.[0] || "Unassigned");
-                  return (
-                    <div key={task._id} className="flex items-center gap-3 p-3 rounded-xl bg-surface border border-rose-500/10">
-                      <div className="w-8 h-8 rounded-lg bg-rose-500/10 flex items-center justify-center flex-shrink-0">
-                        <AlertCircle className="w-4 h-4 text-rose-400" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{task.title}</p>
-                        <p className="text-xs text-text-muted">
-                          {assignee} · {daysOverdue}d overdue
-                        </p>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="cursor-pointer flex-shrink-0"
-                        onClick={() => router.push(`/dashboard/tasks/${task._id}`)}
-                      >
-                        View
-                      </Button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Upload className="w-5 h-5 text-primary" />
-              <CardTitle>Meeting Notes</CardTitle>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button size="sm" variant="primary" onClick={() => setShowMeetingModal(true)} className="cursor-pointer">
-                <Upload className="w-4 h-4" />
-                Upload Meeting
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => setShowBookingModal(true)} className="cursor-pointer">
-                <Calendar className="w-4 h-4" />
-                Book Meeting
-              </Button>
-            </div>
-          </div>
-          <CardDescription>Upload meeting notes to auto-create tasks via AI</CardDescription>
-        </CardHeader>
-        <CardContent>
+      <CollapsibleSection
+        title="Meeting Notes"
+        icon={Upload}
+        badge={meetingsBadge}
+        defaultExpanded={meetingsExpanded}
+        actions={
+          <>
+            <Button size="sm" variant="primary" onClick={() => setShowMeetingModal(true)} className="cursor-pointer">
+              <Upload className="w-4 h-4" />
+              Upload Meeting
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setShowBookingModal(true)} className="cursor-pointer">
+              <Calendar className="w-4 h-4" />
+              Book Meeting
+            </Button>
+          </>
+        }
+      >
+        <div className="p-6">
+          <CardDescription className="mb-4">Upload meeting notes to auto-create tasks via AI</CardDescription>
           {meetingHistoryLoading ? (
             <div className="flex items-center justify-center py-4">
               <Loader2 className="w-5 h-5 animate-spin text-primary" />
@@ -3254,8 +3209,78 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
               </div>
             );
           })()}
-        </CardContent>
-      </Card>
+        </div>
+      </CollapsibleSection>
+
+      <CollapsibleSection title="Market Impact" icon={TrendingUp} defaultExpanded={false}>
+        <MarketImpactCard orgId={orgId} />
+      </CollapsibleSection>
+
+      {adaptation.showGrokInsights && (
+        <div className="h-[600px]">
+          <AISummaryChat />
+        </div>
+      )}
+
+      {adaptation.showRevenueRisk && (
+        <>
+          <RevenueRiskRadar />
+          <IndustryBenchmarksCard industry={organization?.industry || ""} microVertical={organization?.micro_vertical} />
+        </>
+      )}
+
+      {escalatedTasks.length > 0 && (
+        <Card className="border-rose-500/20 bg-gradient-to-br from-rose-500/5 to-transparent">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-rose-400" />
+                <CardTitle>Escalations</CardTitle>
+              </div>
+              <Badge variant="warning" className="text-xs">{escalatedTasks.length} escalated</Badge>
+            </div>
+            <CardDescription>Tasks escalated to owner — overdue 3+ days</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {escalationsLoading ? (
+              <div className="flex items-center justify-center py-4">
+                <Loader2 className="w-5 h-5 animate-spin text-primary" />
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {escalatedTasks.slice(0, 5).map((task: any) => {
+                  const dueStr = task.due_date || "";
+                  const daysOverdue = dueStr
+                    ? Math.floor((Date.now() - new Date(dueStr).getTime()) / 86400000)
+                    : 0;
+                  const assignee = task.assignee_email || (task.assignee_id?.[0] || "Unassigned");
+                  return (
+                    <div key={task._id} className="flex items-center gap-3 p-3 rounded-xl bg-surface border border-rose-500/10">
+                      <div className="w-8 h-8 rounded-lg bg-rose-500/10 flex items-center justify-center flex-shrink-0">
+                        <AlertCircle className="w-4 h-4 text-rose-400" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{task.title}</p>
+                        <p className="text-xs text-text-muted">
+                          {assignee} · {daysOverdue}d overdue
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="cursor-pointer flex-shrink-0"
+                        onClick={() => router.push(`/dashboard/tasks/${task._id}`)}
+                      >
+                        View
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <MeetingUploadModal
         open={showMeetingModal}

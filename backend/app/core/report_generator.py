@@ -257,7 +257,7 @@ async def generate_org_health(db: Any, org_id: str) -> dict:
             "created_at": idea.get("created_at").isoformat() if idea.get("created_at") else "",
         })
 
-    market_alignment_score = 50.0
+    market_alignment_score = 0.0
     if market_impact:
         impacts = market_impact.get("impacts", [])
         high_count = len([i for i in impacts if i.get("impact_level") == "high"])
@@ -270,19 +270,19 @@ async def generate_org_health(db: Any, org_id: str) -> dict:
 
     goal_score = min(goal_completion_rate, 100) * 0.20
     task_score = min(task_completion_rate, 100) * 0.20
-    quality_score = (avg_quality_score / 5.0) * 100 * 0.12 if avg_quality_score > 0 else 12.0
+    quality_score = (avg_quality_score / 5.0) * 100 * 0.12 if avg_quality_score > 0 else 0.0
     structure_score = 100.0 if has_org_structure else 40.0
     structure_weight = 0.08
     market_weight = 0.10
     bottleneck_penalty = min(len(bottlenecks) * 5, 25)
     escalated_penalty = min(escalated_tasks * 3, 20)
     overdue_penalty = min(overdue_tasks * 2, 15)
-    health_score_raw = goal_score + task_score + quality_score + (structure_score * structure_weight) + (market_alignment_score * market_weight)
+    health_score_raw = (goal_score + task_score + quality_score + (structure_score * structure_weight) + (market_alignment_score * market_weight)) / 0.70
     health_score = round(max(0, min(100, health_score_raw - bottleneck_penalty - overdue_penalty - escalated_penalty)), 1)
 
-    if health_score >= 80:
+    if health_score >= 60:
         health_label = "Healthy"
-    elif health_score >= 50:
+    elif health_score >= 30:
         health_label = "Needs Attention"
     else:
         health_label = "At Risk"

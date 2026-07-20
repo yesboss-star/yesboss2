@@ -1,10 +1,31 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, Badge } from "@/components/ui";
-import { Activity, TrendingUp, Loader2, ChevronDown, ChevronRight } from "lucide-react";
+import { Activity, TrendingUp, Loader2, ChevronDown, ChevronRight, Plus, Check } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+
+interface RecItem {
+  title: string;
+  body: string;
+}
+
+function splitItems(text: string): string[] {
+  const parts = text.split(/\n(?=\d+\.\s)/);
+  if (parts.length <= 1) return [];
+  return parts.slice(1).map((p) => p.trim());
+}
+
+function extractTitle(block: string): string {
+  const m = block.match(/^\d+\.\s+(.+)/);
+  if (!m) return block;
+  return m[1].trim();
+}
+
+function stripNumber(block: string): string {
+  return block.replace(/^\d+\.\s+/, "");
+}
 
 const renderMarkdownBold = (text: string) => {
   return text.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
@@ -20,6 +41,43 @@ export default function OrgHealthWidget({ orgId, compact }: { orgId?: string; co
   const [health, setHealth] = useState<OrgHealthData | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
+  const [creating, setCreating] = useState<Set<number>>(new Set());
+  const [created, setCreated] = useState<Set<number>>(new Set());
+
+  const blocks = useMemo(() => {
+    const text = health?.ai_recommendations;
+    if (!text) return [];
+    return splitItems(text);
+  }, [health?.ai_recommendations]);
+
+  const createTask = useCallback(async (idx: number) => {
+    const block = blocks[idx];
+    if (!block) return;
+    setCreating(prev => new Set(prev).add(idx));
+    try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const token = localStorage.getItem("yesboss_id_token");
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      await fetch(`${API_URL}/tasks?organization_id=${orgId}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          title: extractTitle(block),
+          description: stripNumber(block),
+          priority: "medium",
+        }),
+      });
+      setCreated(prev => new Set(prev).add(idx));
+    } catch {
+      // silently fail
+    } finally {
+      setCreating(prev => {
+        const next = new Set(prev);
+        next.delete(idx);
+        return next;
+      });
+    }
+  }, [orgId, blocks]);
 
   useEffect(() => {
     if (!orgId) return;
@@ -53,6 +111,89 @@ export default function OrgHealthWidget({ orgId, compact }: { orgId?: string; co
   const circumference = 2 * Math.PI * 36;
   const dashOffset = circumference - (health.health_score / 100) * circumference;
 
+  const renderBlocks = () => {
+    if (blocks.length > 0) {
+      return (
+        <div className="space-y-3">
+          {blocks.map((block, i) => {
+            const isCreating = creating.has(i);
+            const isCreated = created.has(i);
+            const title = extractTitle(block);
+            const body = stripNumber(block);
+            return (
+              <div key={i} className="p-3 rounded-lg bg-white/5 border border-white/10">
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <p className="text-xs font-semibold text-foreground" dangerouslySetInnerHTML={{ __html: renderMarkdownBold(title) }} />
+                  <button
+                    onClick={() => createTask(i)}
+                    disabled={isCreating || isCreated}
+                    className={`flex-shrink-0 flex items-center gap-1.5 transition-colors cursor-pointer text-xs font-semibold whitespace-nowrap px-3 py-1.5 rounded-lg ${
+                      isCreated
+                        ? "bg-emerald-500 text-white"
+                        : "bg-primary text-white hover:bg-primary/80"
+                    }`}
+                  >
+                    {isCreating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : isCreated ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                    {isCreated ? "Task Created" : "Add as Task"}
+                  </button>
+                </div>
+                <p className="text-[11px] text-text-muted leading-relaxed whitespace-pre-line" dangerouslySetInnerHTML={{ __html: renderMarkdownBold(body) }} />
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+    const lines = health?.ai_recommendations?.split("\n").filter(Boolean) || [];
+    return (
+      <div className="space-y-2">
+        {lines.map((point, i) => {
+          const isCreating = creating.has(i);
+          const isCreated = created.has(i);
+          return (
+            <div key={i} className="flex items-start gap-2 group">
+              <div className="w-1.5 h-1.5 rounded-full bg-primary/60 mt-1.5 flex-shrink-0" />
+              <p className="text-xs text-text-muted leading-relaxed flex-1" dangerouslySetInnerHTML={{ __html: renderMarkdownBold(point) }} />
+              <button
+                onClick={() => {
+                  setCreating(prev => new Set(prev).add(i));
+                  (async () => {
+                    try {
+                      const headers: Record<string, string> = { "Content-Type": "application/json" };
+                      const token = localStorage.getItem("yesboss_id_token");
+                      if (token) headers["Authorization"] = `Bearer ${token}`;
+                      await fetch(`${API_URL}/tasks?organization_id=${orgId}`, {
+                        method: "POST",
+                        headers,
+                        body: JSON.stringify({ title: point.replace(/\*\*/g, "").trim(), priority: "medium" }),
+                      });
+                      setCreated(prev => new Set(prev).add(i));
+                    } catch {} finally {
+                      setCreating(prev => {
+                        const next = new Set(prev);
+                        next.delete(i);
+                        return next;
+                      });
+                    }
+                  })();
+                }}
+                disabled={isCreating || isCreated}
+                className={`flex-shrink-0 flex items-center gap-1 transition-colors cursor-pointer text-xs font-semibold whitespace-nowrap px-2.5 py-1 rounded-lg ${
+                  isCreated
+                    ? "bg-emerald-500 text-white"
+                    : "bg-primary text-white hover:bg-primary/80"
+                }`}
+              >
+                {isCreating ? <Loader2 className="w-3 h-3 animate-spin" /> : isCreated ? <Check className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
+                {isCreated ? "Done" : "Task"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   if (compact) {
     return (
       <Card className={colors.border}>
@@ -82,26 +223,14 @@ export default function OrgHealthWidget({ orgId, compact }: { orgId?: string; co
           </div>
           {expanded ? <ChevronDown className="w-4 h-4 text-text-muted flex-shrink-0" /> : <ChevronRight className="w-4 h-4 text-text-muted flex-shrink-0" />}
         </button>
-        {expanded && (
-          <div className="px-4 pb-4 space-y-1.5">
-            {health.ai_recommendations.split("\n").filter(Boolean).map((point, i) => (
-              <div key={i} className="flex items-start gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-primary/60 mt-1.5 flex-shrink-0" />
-                <p className="text-xs text-text-muted leading-relaxed" dangerouslySetInnerHTML={{ __html: renderMarkdownBold(point) }} />
-              </div>
-            ))}
-          </div>
-        )}
+        {expanded && <div className="px-4 pb-4">{renderBlocks()}</div>}
       </Card>
     );
   }
 
   return (
     <Card className={colors.border}>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full cursor-pointer text-left"
-      >
+      <button onClick={() => setExpanded(!expanded)} className="w-full cursor-pointer text-left">
         <CardHeader>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -131,22 +260,13 @@ export default function OrgHealthWidget({ orgId, compact }: { orgId?: string; co
               </div>
             </div>
             <div className="flex-1">
-              {health.ai_recommendations && (
-                <div className="p-3 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 border border-primary/20">
-                  <div className="flex items-start gap-2 mb-2">
-                    <TrendingUp className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
-                    <span className="text-xs font-semibold text-foreground">Recommendations</span>
-                  </div>
-                  <div className="space-y-1.5">
-                    {health.ai_recommendations.split("\n").filter(Boolean).map((point, i) => (
-                      <div key={i} className="flex items-start gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-primary/60 mt-1.5 flex-shrink-0" />
-                <p className="text-xs text-text-muted leading-relaxed" dangerouslySetInnerHTML={{ __html: renderMarkdownBold(point) }} />
-                      </div>
-                    ))}
-                  </div>
+              <div className="p-3 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 border border-primary/20">
+                <div className="flex items-start gap-2 mb-3">
+                  <TrendingUp className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                  <span className="text-xs font-semibold text-foreground">Recommendations</span>
                 </div>
-              )}
+                {renderBlocks()}
+              </div>
             </div>
           </div>
         </CardContent>
