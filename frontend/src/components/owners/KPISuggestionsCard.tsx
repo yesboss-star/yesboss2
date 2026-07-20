@@ -21,6 +21,10 @@ import {
   Upload,
   ArrowRight,
   AlertCircle,
+  Users,
+  Activity,
+  FileUp,
+  Database,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent, Button, Badge } from "@/components/ui";
 import { useKPIStore, type KPISuggestion, type KPISource, type AcceptedKPI } from "@/stores/kpiStore";
@@ -103,6 +107,8 @@ function buildSuggestionPrompt(args: {
   existingKpiKeys: string[];
   triggerDetail?: string;
   triggerSource?: KPISource;
+  focusKpi?: string;
+  focusKpiTitle?: string;
 }) {
   const {
     orgName,
@@ -118,6 +124,8 @@ function buildSuggestionPrompt(args: {
     existingKpiKeys,
     triggerDetail,
     triggerSource,
+    focusKpi,
+    focusKpiTitle,
   } = args;
 
   const ctxLines = [
@@ -130,6 +138,9 @@ function buildSuggestionPrompt(args: {
   ];
   if (triggerDetail) {
     ctxLines.push(`Recent event: ${triggerSource || "ai"} — ${triggerDetail}`);
+  }
+  if (focusKpi && focusKpiTitle) {
+    ctxLines.push(`focus_kpi: The user uploaded data specifically to track "${focusKpiTitle}" (${focusKpi}). If the new document data supports this KPI, PRIORITIZE suggesting it.`);
   }
   if (existingKpiKeys.length) {
     ctxLines.push(`Already tracked KPIs (do NOT repeat): ${existingKpiKeys.join(", ")}`);
@@ -147,7 +158,9 @@ Step 2 — OUTPUT a single JSON object (no prose, no markdown) with this exact s
   "data_needs": [
     { "type": "revenue" | "customers" | "sales" | "operations" | "team" | "goals" | "tasks" | "documents" | "financials",
       "label": "<short human label, max 40 chars>",
-      "description": "<1 sentence telling the user exactly what to upload or add, max 120 chars>"
+      "description": "<1 sentence telling the user exactly what to upload or add, max 120 chars>",
+      "suggested_kpi": "<snake_case kpi key this data would unlock, e.g. revenue_growth_rate>",
+      "suggested_kpi_title": "<human readable KPI title this data unlocks, max 40 chars, e.g. Revenue Growth Rate>"
     }
   ],
   "kpis": [
@@ -163,10 +176,12 @@ Step 2 — OUTPUT a single JSON object (no prose, no markdown) with this exact s
 }
 
 Rules:
-- If data_sufficient is false, return an EMPTY kpis array and populate data_needs with the 2-4 most impactful missing data sources (e.g. "Upload revenue/sales reports", "Add customer count or churn data", "Define at least 1 strategic goal").
+- If data_sufficient is false, return an EMPTY kpis array and populate data_needs with the 2-4 most impactful missing data sources.
+- For each data_needs item, specify what specific KPI it would unlock. Example: uploading revenue data → suggested_kpi: "revenue_growth_rate", suggested_kpi_title: "Revenue Growth Rate". Be specific to this business's actual industry and context.
 - If data_sufficient is true, return 2-3 NEW KPIs in the kpis array and leave data_needs as an empty array.
 - Each KPI must be specific, measurable, and meaningful for a ${industry || "general"} business at this stage. No generic vanity metrics.
 - Do NOT repeat keys from: ${existingKpiKeys.length ? existingKpiKeys.join(", ") : "(none yet)"}.
+- If the trigger includes a "focus_kpi" context, the user uploaded data specifically to track that KPI. Analyze the new document data and if it supports that KPI, PRIORITIZE suggesting it.
 
 Context:
 ${ctxLines.join("\n")}`;
@@ -176,6 +191,8 @@ interface DataNeed {
   type: string;
   label: string;
   description: string;
+  suggested_kpi?: string;
+  suggested_kpi_title?: string;
 }
 
 interface ParsedKpiResponse {
@@ -209,6 +226,8 @@ function parseAiSuggestions(raw: string): ParsedKpiResponse | null {
           type: String(d.type || "documents"),
           label: String(d.label || "More data").slice(0, 60),
           description: String(d.description || "").slice(0, 200),
+          suggested_kpi: typeof d.suggested_kpi === "string" ? d.suggested_kpi : undefined,
+          suggested_kpi_title: typeof d.suggested_kpi_title === "string" ? d.suggested_kpi_title : undefined,
         })),
       kpis: kpisRaw.filter((k: unknown): k is Record<string, unknown> => !!k && typeof k === "object"),
     };
@@ -382,6 +401,7 @@ export default function KPISuggestionsCard() {
   const [dataSufficient, setDataSufficient] = useState<boolean | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialSuggestDone = useRef(false);
+  const pendingUploadKpiRef = useRef<{ kpi?: string; kpiTitle?: string }>({});
 
   const goalCount = useMemo(() => goals.filter((g) => g.status !== "cancelled").length, [goals]);
   const activeGoals = useMemo(() => goals.filter((g) => g.status === "active").length, [goals]);
@@ -393,7 +413,7 @@ export default function KPISuggestionsCard() {
   const orgMicroVertical = organization?.micro_vertical;
 
   const fetchSuggestions = useCallback(
-    async (trigger?: { source: KPISource; detail?: string }) => {
+    async (trigger?: { source: KPISource; detail?: string; suggestedKpi?: string; suggestedKpiTitle?: string }) => {
       if (!orgId || suggesting) return;
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(async () => {
@@ -416,7 +436,7 @@ export default function KPISuggestionsCard() {
             taskCount: tasks.length,
             completedTasks: tasks.filter((t) => t.status === "completed").length,
             memberCount: members.length,
-            documentCount: 0,
+            documentCount: docCount,
             existingKpiKeys: [
               ...acceptedKeys,
               "goals_active",
@@ -430,6 +450,8 @@ export default function KPISuggestionsCard() {
             ],
             triggerDetail: trigger?.detail,
             triggerSource: trigger?.source,
+            focusKpi: trigger?.suggestedKpi,
+            focusKpiTitle: trigger?.suggestedKpiTitle,
           });
 
           const res = await fetch(`${API_URL}/strategy-chat/chat`, {
@@ -530,20 +552,69 @@ export default function KPISuggestionsCard() {
   useEffect(() => {
     if (!orgId) return;
     fetchValues();
+    const interval = setInterval(fetchValues, 30000);
+    return () => clearInterval(interval);
   }, [orgId, fetchValues]);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const readinessChecks = useMemo(() => {
+    const docCount = Number(values.documents?.value || 0);
+    return [
+      { key: "org_chart", label: "Org chart", met: members.length > 0, detail: members.length > 0 ? `${members.length} team members` : "No team members yet", icon: Users },
+      { key: "goals", label: "Goals defined", met: goalCount >= 1, detail: goalCount > 0 ? `${goalCount} goals (${activeGoals} active)` : "No goals yet", icon: Target },
+      { key: "tasks", label: "Tasks created", met: tasks.length > 0, detail: tasks.length > 0 ? `${tasks.length} tasks` : "No tasks yet", icon: Activity },
+      { key: "documents", label: "Uploaded data", met: docCount > 0, detail: docCount > 0 ? `${docCount} document(s)` : "No documents uploaded", icon: FileText },
+      { key: "industry", label: "Industry info", met: !!orgIndustry, detail: orgIndustry || "Not configured", icon: Database },
+    ];
+  }, [members, goalCount, activeGoals, tasks, values, orgIndustry]);
+
+  const docCount = Number(values.documents?.value || 0);
+  const docCountRef = useRef(docCount);
+  docCountRef.current = docCount;
+  const readinessMet = useMemo(() => readinessChecks.filter(c => c.met).length, [readinessChecks]);
+  const readyForSuggestions = docCount > 0;
+
+  const handleFileUpload = useCallback(async (file: File) => {
+    if (!orgId) return;
+    setUploading(true);
+    const { kpi, kpiTitle } = pendingUploadKpiRef.current;
+    pendingUploadKpiRef.current = {};
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("organization_id", orgId);
+      await fetch(`${API_URL}/strategy-chat/upload-and-analyze`, {
+        method: "POST",
+        body: formData,
+      });
+      window.dispatchEvent(new CustomEvent("kpi-document-uploaded", {
+        detail: {
+          filename: file.name,
+          suggested_kpi: kpi,
+          suggested_kpi_title: kpiTitle,
+        },
+      }));
+      await fetchValues();
+    } catch {
+      // silent
+    } finally {
+      setUploading(false);
+    }
+  }, [orgId, fetchValues]);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const f = e.dataTransfer.files[0];
+    if (f) handleFileUpload(f);
+  }, [handleFileUpload]);
 
   useEffect(() => {
     if (!orgId) return;
     if (initialSuggestDone.current) return;
-    if (acceptedKPIs.length > 0 || suggestions.length > 0) {
-      initialSuggestDone.current = true;
-      return;
-    }
     initialSuggestDone.current = true;
-    if (shouldSuggestNow(orgId, SUGGEST_INTERVAL_MS)) {
-      fetchSuggestions();
-    }
-  }, [orgId, acceptedKPIs.length, suggestions.length, shouldSuggestNow, fetchSuggestions]);
+  }, [orgId]);
 
   useEffect(() => {
     if (!orgId) return;
@@ -553,10 +624,13 @@ export default function KPISuggestionsCard() {
       fetchSuggestions({
         source: "document",
         detail: detail?.filename || "New document uploaded & analyzed",
+        suggestedKpi: detail?.suggested_kpi,
+        suggestedKpiTitle: detail?.suggested_kpi_title,
       });
     };
 
     const onGoalChanged = (e: Event) => {
+      if (docCountRef.current === 0) return;
       const detail = (e as CustomEvent).detail || {};
       fetchSuggestions({
         source: detail?.source || "goal",
@@ -610,7 +684,7 @@ export default function KPISuggestionsCard() {
 
   if (!orgId) return null;
 
-  const hasContent = suggestions.length > 0 || acceptedKPIs.length > 0;
+  const hasContent = acceptedKPIs.length > 0 || (readyForSuggestions && suggestions.length > 0);
   const visibleSuggestions = suggestions.slice(0, 4);
 
   return (
@@ -632,74 +706,97 @@ export default function KPISuggestionsCard() {
                 Live
               </Badge>
             )}
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => fetchSuggestions()}
-              disabled={suggesting}
-              className="h-7 px-2 text-[11px] text-text-muted"
-              title="Ask AI for fresh KPI suggestions"
-            >
-              {suggesting ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-              Refresh suggestions
-            </Button>
-            {suggestions.length > 0 && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setShowSuggestions((v) => !v)}
-                className="h-7 px-2 text-[11px] text-text-muted"
-              >
-                {showSuggestions ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                {showSuggestions ? "Hide" : "Show"} suggestions ({suggestions.length})
-              </Button>
+            {hasContent && (
+              <>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => fetchSuggestions()}
+                  disabled={suggesting}
+                  className="h-7 px-2 text-[11px] text-text-muted"
+                  title="Ask AI for fresh KPI suggestions"
+                >
+                  {suggesting ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                  Refresh suggestions
+                </Button>
+                {suggestions.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setShowSuggestions((v) => !v)}
+                    className="h-7 px-2 text-[11px] text-text-muted"
+                  >
+                    {showSuggestions ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                    {showSuggestions ? "Hide" : "Show"} suggestions ({suggestions.length})
+                  </Button>
+                )}
+              </>
             )}
           </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
         {dataSufficient === false && dataNeeds.length > 0 && (
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-3">
+          <div className="space-y-3">
             <div className="flex items-start gap-3">
               <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center flex-shrink-0">
                 <AlertCircle className="w-4 h-4 text-amber-400" />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-foreground">
-                  More data needed for KPI suggestions
+                  Upload data to unlock specific KPIs
                 </p>
                 {dataAnalysis && (
                   <p className="text-[11px] text-text-muted mt-0.5">{dataAnalysis}</p>
                 )}
               </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {dataNeeds.map((need, i) => (
                 <div
                   key={i}
-                  className="flex items-start gap-2 p-2.5 rounded-lg bg-surface/60 border border-border/40"
+                  className="rounded-xl border border-border/50 bg-surface/30 p-4 space-y-3"
                 >
-                  <FileText className="w-3.5 h-3.5 text-amber-400 mt-0.5 flex-shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-xs font-medium text-foreground leading-tight">{need.label}</p>
-                    <p className="text-[11px] text-text-muted leading-snug mt-0.5">
-                      {need.description}
-                    </p>
-                  </div>
+                  {need.suggested_kpi_title ? (
+                    <div className="flex items-start gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary/10 to-purple-500/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
+                        <Target className="w-4 h-4 text-primary" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-text-muted/70 font-medium uppercase tracking-wider">To track</p>
+                        <p className="text-sm font-semibold text-foreground leading-tight mt-0.5">
+                          {need.suggested_kpi_title}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                      <p className="text-sm font-semibold text-foreground">{need.label}</p>
+                    </div>
+                  )}
+                  <p className="text-[11px] text-text-muted leading-snug">
+                    {need.description}
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      if (need.suggested_kpi) {
+                        pendingUploadKpiRef.current = { kpi: need.suggested_kpi, kpiTitle: need.suggested_kpi_title };
+                      }
+                      fileInputRef.current?.click();
+                    }}
+                    disabled={uploading}
+                    className="h-7 px-2.5 text-[10px] w-full"
+                  >
+                    {uploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+                    {uploading ? "Uploading..." : "Upload file to track this KPI"}
+                  </Button>
                 </div>
               ))}
             </div>
-            <div className="flex items-center gap-2 flex-wrap pt-1">
-              <Button
-                size="sm"
-                variant="default"
-                onClick={() => router.push("/dashboard/data")}
-                className="h-7 px-2.5 text-[11px]"
-              >
-                <Upload className="w-3 h-3" />
-                Upload a document
-                <ArrowRight className="w-3 h-3" />
-              </Button>
+            <div className="flex items-center gap-2 pt-1">
               <Button
                 size="sm"
                 variant="ghost"
@@ -741,23 +838,24 @@ export default function KPISuggestionsCard() {
         )}
 
         {acceptedKPIs.length > 0 && (
-          <div className="space-y-2.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <BarChart3 className="w-3.5 h-3.5 text-primary" />
-                  <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">
-                    Your live KPIs
-                  </p>
-                </div>
-                <button
-                  onClick={fetchValues}
-                  disabled={valuesLoading}
-                  className="p-1 rounded-lg hover:bg-surface-light text-text-muted hover:text-foreground transition-colors cursor-pointer disabled:opacity-50"
-                  title="Refresh KPI values"
-                >
-                  <RefreshCw className={`w-3 h-3 ${valuesLoading ? "animate-spin" : ""}`} />
-                </button>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <BarChart3 className="w-3.5 h-3.5 text-primary" />
+                <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">
+                  Live KPIs
+                </p>
+                <span className="text-[10px] text-text-muted/60">({acceptedKPIs.length})</span>
               </div>
+              <button
+                onClick={fetchValues}
+                disabled={valuesLoading}
+                className="p-1 rounded-lg hover:bg-surface-light text-text-muted hover:text-foreground transition-colors cursor-pointer disabled:opacity-50"
+                title="Refresh KPI values"
+              >
+                <RefreshCw className={`w-3 h-3 ${valuesLoading ? "animate-spin" : ""}`} />
+              </button>
+            </div>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
               {acceptedKPIs.map((kpi) => (
                 <AcceptedKPITile
@@ -775,34 +873,116 @@ export default function KPISuggestionsCard() {
                 Added! Looking for related KPIs you might also want to track…
               </p>
             )}
+            {valuesLoading && (
+              <div className="flex items-center gap-2 text-[10px] text-text-muted/60 py-1">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Refreshing values...
+              </div>
+            )}
           </div>
         )}
 
-        {!hasContent && (
+        {!hasContent && !suggesting && dataNeeds.length === 0 && (
+          <div className="space-y-4">
+            {/* Upload prompt — primary action */}
+            <div
+              onDrop={handleDrop}
+              onDragOver={(e) => e.preventDefault()}
+              className="flex flex-col items-center justify-center py-10 px-6 text-center rounded-xl border-2 border-dashed border-border/60 bg-surface/40 hover:border-primary/40 transition-colors cursor-pointer"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary/10 to-purple-500/10 border border-primary/20 flex items-center justify-center mb-4">
+                {uploading ? (
+                  <Loader2 className="w-6 h-6 text-primary animate-spin" />
+                ) : (
+                  <Upload className="w-6 h-6 text-primary/60" />
+                )}
+              </div>
+              <p className="text-sm font-semibold mb-1">
+                {docCount > 0 ? "Upload more data" : "Upload your business data"}
+              </p>
+              <p className="text-xs text-text-muted/80 max-w-sm mb-4">
+                Drop a CSV, PDF, or Excel file with your sales, revenue, or operational data.
+                The AI will analyze it and recommend KPIs tailored to your actual numbers.
+              </p>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.docx,.txt,.csv,.xlsx,.xls,.png,.jpg,.jpeg"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleFileUpload(f);
+                }}
+              />
+              <Button
+                size="sm"
+                variant={docCount > 0 ? "default" : "outline"}
+                onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                disabled={uploading}
+                className="h-8 px-4 text-xs"
+              >
+                {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileUp className="w-3.5 h-3.5" />}
+                {uploading ? "Uploading..." : docCount > 0 ? "Add another file" : "Select a file"}
+              </Button>
+            </div>
+
+            {/* After upload: generate button */}
+            {docCount > 0 && (
+              <div className="flex flex-col items-center gap-3 p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+                <p className="text-xs text-emerald-400 flex items-center gap-1.5">
+                  <Check className="w-3.5 h-3.5" />
+                  {docCount} file{docCount !== 1 ? "s" : ""} uploaded
+                </p>
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={() => fetchSuggestions()}
+                  disabled={suggesting}
+                  className="h-9 px-4 text-xs font-semibold"
+                >
+                  {suggesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                  {suggesting ? "Generating..." : "Generate KPI Suggestions"}
+                </Button>
+              </div>
+            )}
+
+            {/* Data Readiness — compact badges */}
+            <div className="rounded-xl border border-border/50 bg-surface/30 p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <Database className="w-3.5 h-3.5 text-primary" />
+                <span className="text-[10px] font-semibold text-text-muted uppercase tracking-wider">Data Readiness</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {readinessChecks.map((check) => (
+                  <span
+                    key={check.key}
+                    className={`inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-full border ${
+                      check.met
+                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                        : "bg-amber-500/5 text-text-muted/60 border-border/40"
+                    }`}
+                  >
+                    {check.met
+                      ? <Check className="w-2.5 h-2.5" />
+                      : <div className="w-1.5 h-1.5 rounded-full bg-amber-400/60" />}
+                    {check.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!hasContent && suggesting && (
           <div className="flex flex-col items-center justify-center py-8 px-4 text-center rounded-xl border border-dashed border-border/60 bg-surface/40">
             <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary/10 to-purple-500/10 border border-primary/20 flex items-center justify-center mb-3">
-              {suggesting ? (
-                <Loader2 className="w-5 h-5 text-primary animate-spin" />
-              ) : (
-                <BarChart3 className="w-5 h-5 text-primary/60" />
-              )}
+              <Loader2 className="w-5 h-5 text-primary animate-spin" />
             </div>
-            <p className="text-sm font-semibold mb-1">No KPIs tracked yet</p>
-            <p className="text-xs text-text-muted/80 max-w-md mb-3">
-              {goalCount > 0 || tasks.length > 0 || members.length > 0
-                ? "Ask the AI to suggest KPIs tailored to your goals, team, and uploaded documents."
-                : "Create a goal, add team members, or upload a document first — then the AI can suggest KPIs that actually matter for your business."}
+            <p className="text-sm font-semibold mb-1">Analyzing your data...</p>
+            <p className="text-xs text-text-muted/80 max-w-md">
+              The AI is reviewing your organization data to suggest the most relevant KPIs.
             </p>
-            <Button
-              size="sm"
-              variant="default"
-              onClick={() => fetchSuggestions()}
-              disabled={suggesting}
-              className="h-8 px-3 text-xs"
-            >
-              {suggesting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
-              Suggest KPIs for me
-            </Button>
           </div>
         )}
 

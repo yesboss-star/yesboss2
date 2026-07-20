@@ -374,6 +374,7 @@ async def get_dashboard_kpi(
 
     completion_rate = round((completed_tasks / total_tasks * 100) if total_tasks > 0 else 0, 1)
     total_files = db.files.count_documents({"organization_id": org_id})
+    total_docs = db.documents.count_documents({"org_id": org_id})
 
     kpi_response = {}
 
@@ -428,10 +429,11 @@ async def get_dashboard_kpi(
         "icon": "Activity"
     }
 
-    if total_files > 0:
+    total_uploaded = total_files + total_docs
+    if total_uploaded > 0:
         kpi_response["documents"] = {
-            "value": total_files,
-            "formatted": str(total_files),
+            "value": total_uploaded,
+            "formatted": str(total_uploaded),
             "change": "Uploaded",
             "trend": "neutral",
             "label": "Documents Analyzed",

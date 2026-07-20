@@ -180,7 +180,7 @@ AGENT_SECTION_MAP: dict[str, set[str]] = {
     "expert_industry_intelligence": {"org", "website", "patterns"},
     "expert_org_understanding":     {"org", "goals", "tasks", "team", "patterns"},
     "market_analyst":         {"org", "website"},
-    "kpi_analyst":            {"org", "goals", "tasks", "team"},
+    "kpi_analyst":            {"org", "goals", "tasks", "team", "docs"},
     "social_verifier":        {"org", "website"},
     "company_analyst":        set(),
     "goal_suggester":         set(),
