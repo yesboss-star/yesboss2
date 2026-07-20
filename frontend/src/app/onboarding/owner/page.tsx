@@ -146,18 +146,12 @@ const deriveCompanyNameFromDomain = (domain: string): string => {
 
 type OnboardingStep =
   | "org-details"
-  | "file-upload"
-  | "persona-time"
-  | "persona-question"
-  | "persona-more-time";
+  | "file-upload";
 
-interface PersonaQuestion {
-  question: string;
-  options: string[];
-  time_estimate: number;
-  ask_more_time: boolean;
-  need_more_time?: boolean;
-  question_number: number;
+interface BusinessContext {
+  stage: string;
+  business_model: string;
+  summary: string;
 }
 
 export default function OwnerOnboarding() {
@@ -226,14 +220,6 @@ function OwnerOnboardingContent() {
       summary?: string;
     }[]
   >([]);
-
-  const [personaTimeEstimate, setPersonaTimeEstimate] = useState(3);
-  const [currentQuestion, setCurrentQuestion] = useState<PersonaQuestion | null>(null);
-  const [personaAnswers, setPersonaAnswers] = useState<
-    { question: string; answer: string }[]
-  >([]);
-  const [personaCustomAnswer, setPersonaCustomAnswer] = useState("");
-  const [personaLoading, setPersonaLoading] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [docTextInput, setDocTextInput] = useState("");
@@ -393,7 +379,7 @@ function OwnerOnboardingContent() {
               localStorage.setItem("yesboss_user", JSON.stringify(updatedUser));
               document.cookie = `yesboss_user=${JSON.stringify(updatedUser)}; path=/; max-age=86400; SameSite=Lax`;
             }
-            setStep("persona-time");
+            router.push("/dashboard");
           } else {
             setExistingOrg(org);
             if (data.primary_owner) {
@@ -778,7 +764,7 @@ function OwnerOnboardingContent() {
         document.cookie = `yesboss_user=${JSON.stringify(updatedUser)}; path=/; max-age=86400; SameSite=Lax`;
       }
 
-      setStep("persona-time");
+      router.push("/dashboard");
     } catch (err) {
       console.error("Failed to join existing org:", err);
       alert("Failed to join organization. Please try again.");
@@ -1149,149 +1135,6 @@ function OwnerOnboardingContent() {
     }
   };
 
-  const handlePersonaTimeYes = async () => {
-    setPersonaLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/chatbot/persona/generate-question`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          org_name: orgData.name,
-          industry: orgData.industries[0] || "",
-          micro_vertical: orgData.micro_verticals[0] || "",
-          company_size: orgData.size,
-          domain: orgData.domain,
-          social_links: {},
-          previous_answers: personaAnswers,
-          question_count: personaAnswers.length,
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setPersonaTimeEstimate(data.time_estimate || 3);
-        setCurrentQuestion(data);
-        setPersonaCustomAnswer("");
-        setStep("persona-question");
-      }
-    } catch (error) {
-      console.error("Failed to generate persona question:", error);
-      setCurrentQuestion({
-        question: "What are your top business priorities this quarter?",
-        options: ["Growth and revenue", "Operational efficiency", "Team and culture"],
-        time_estimate: 3,
-        ask_more_time: false,
-        question_number: 1,
-      });
-      setStep("persona-question");
-    } finally {
-      setPersonaLoading(false);
-    }
-  };
-
-  const completeOnboarding = () => {
-    const storedUser = localStorage.getItem("yesboss_user");
-    if (storedUser) {
-      const userData = JSON.parse(storedUser);
-      userData.organization_completed = true;
-      localStorage.setItem("yesboss_user", JSON.stringify(userData));
-      document.cookie = `yesboss_user=${JSON.stringify(userData)}; path=/; max-age=86400; SameSite=Lax`;
-    }
-    window.location.href = "/dashboard";
-  };
-
-  const handlePersonaTimeNo = () => {
-    completeOnboarding();
-  };
-
-  const handlePersonaAnswer = async (answer: string) => {
-    if (!currentQuestion) return;
-
-    const newAnswer = { question: currentQuestion.question, answer };
-    const updatedAnswers = [...personaAnswers, newAnswer];
-    setPersonaAnswers(updatedAnswers);
-    setPersonaCustomAnswer("");
-
-    if (currentQuestion.need_more_time) {
-      setStep("persona-more-time");
-      return;
-    }
-
-    setPersonaLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/chatbot/persona/generate-question`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          org_name: orgData.name,
-          industry: orgData.industries[0] || "",
-          micro_vertical: orgData.micro_verticals[0] || "",
-          company_size: orgData.size,
-          domain: orgData.domain,
-          social_links: {},
-          previous_answers: updatedAnswers,
-          question_count: updatedAnswers.length,
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.question) {
-          setCurrentQuestion(data);
-          setPersonaCustomAnswer("");
-        } else {
-          setCurrentQuestion(null);
-          completeOnboarding();
-        }
-      } else {
-        setCurrentQuestion(null);
-        completeOnboarding();
-      }
-    } catch (error) {
-      console.error("Failed to generate next question:", error);
-      setCurrentQuestion(null);
-      completeOnboarding();
-    } finally {
-      setPersonaLoading(false);
-    }
-  };
-
-  const handlePersonaMoreTimeYes = async () => {
-    setPersonaLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/chatbot/persona/generate-question`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          org_name: orgData.name,
-          industry: orgData.industries[0] || "",
-          micro_vertical: orgData.micro_verticals[0] || "",
-          company_size: orgData.size,
-          domain: orgData.domain,
-          social_links: {},
-          previous_answers: personaAnswers,
-          question_count: personaAnswers.length,
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setCurrentQuestion(data);
-        setPersonaCustomAnswer("");
-        setStep("persona-question");
-      }
-    } catch (error) {
-      console.error("Failed to generate question:", error);
-      completeOnboarding();
-    } finally {
-      setPersonaLoading(false);
-    }
-  };
-
-  const handlePersonaMoreTimeNo = () => {
-    completeOnboarding();
-  };
-
   useEffect(() => {
     // Goals step removed — default goals are auto-generated by the backend on org creation
   }, []);
@@ -1303,20 +1146,8 @@ function OwnerOnboardingContent() {
   const stepsConfig = [
     { id: "org-details", label: "Company", icon: Building2 },
     { id: "file-upload", label: "Documents", icon: Upload },
-    { id: "persona-time", label: "Persona", icon: Users },
-    { id: "persona-question", label: "Persona", icon: Users },
-    { id: "persona-more-time", label: "Persona", icon: Users },
   ];
-
-  const personaSteps = ["persona-time", "persona-question", "persona-more-time"];
-  const displaySteps = stepsConfig.filter(
-    (s, i, arr) => arr.findIndex((t) => t.label === s.label) === i
-  );
-  const getDisplayIndex = (stepId: string) => {
-    if (personaSteps.includes(stepId)) return displaySteps.findIndex((s) => s.label === "Persona");
-    return displaySteps.findIndex((s) => s.id === stepId);
-  };
-  const currentStepIndex = getDisplayIndex(step);
+  const currentStepIndex = stepsConfig.findIndex((s) => s.id === step);
 
   return (
     <div className="min-h-screen bg-background">
@@ -1344,7 +1175,7 @@ function OwnerOnboardingContent() {
       <div className="max-w-7xl mx-auto px-6 py-8">
         {!requestSent && (
         <div className="flex items-center justify-center gap-2 mb-12 overflow-x-auto">
-          {displaySteps.map((s, i) => (
+          {stepsConfig.map((s, i) => (
             <div key={s.id} className="flex items-center">
               <div
                 className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm transition-all ${
@@ -1356,7 +1187,7 @@ function OwnerOnboardingContent() {
                 <s.icon className="w-4 h-4" />
                 <span className="hidden sm:inline">{s.label}</span>
               </div>
-              {i < displaySteps.length - 1 && (
+              {i < stepsConfig.length - 1 && (
                 <div
                   className={`w-8 h-0.5 mx-2 ${
                     i < currentStepIndex ? "bg-primary" : "bg-border"
@@ -2077,7 +1908,7 @@ function OwnerOnboardingContent() {
                 Back
               </button>
               <button
-                onClick={() => setStep("persona-time")}
+                onClick={() => router.push("/dashboard")}
                 className="flex-1 py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 flex items-center justify-center gap-2"
               >
                 Continue
@@ -2087,169 +1918,7 @@ function OwnerOnboardingContent() {
           </div>
         )}
 
-        {/* STEP 3: PERSONA TIME */}
-        {step === "persona-time" && (
-          <div className="max-w-xl mx-auto text-center">
-            <div className="mb-8">
-              <div className="w-20 h-20 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-6">
-                <Clock className="w-10 h-10 text-primary" />
-              </div>
-              <h1 className="text-3xl font-bold mb-2">
-                We need <span className="gradient-text">~{personaTimeEstimate} minutes</span>
-              </h1>
-              <p className="text-text-muted">
-                Based on our analysis of {orgData.name || "your company"}, a few questions will
-                help us understand your leadership style and priorities. This data will personalize
-                your dashboard.
-              </p>
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={handlePersonaTimeNo}
-                className="flex-1 py-4 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer"
-              >
-                No, thanks
-              </button>
-              <button
-                onClick={handlePersonaTimeYes}
-                disabled={personaLoading}
-                className="flex-1 py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                {personaLoading ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <>
-                    Yes, let&apos;s go
-                    <ArrowRight className="w-5 h-5" />
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* STEP 5: PERSONA QUESTION */}
-        {step === "persona-question" && currentQuestion && (
-          <div className="max-w-xl mx-auto">
-            <div className="text-center mb-8">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-sm mb-4">
-                <Sparkles className="w-4 h-4" />
-                Question {currentQuestion.question_number}
-              </div>
-              <h1 className="text-2xl font-bold mb-2">{currentQuestion.question}</h1>
-            </div>
-
-            <div className="space-y-3 mb-8">
-              {currentQuestion.options.map((option, i) => (
-                <button
-                  key={i}
-                  onClick={() => handlePersonaAnswer(option)}
-                  className="w-full p-4 rounded-xl glass hover:bg-primary/10 hover:border-primary text-left transition-all cursor-pointer border border-transparent"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary font-medium text-sm">
-                      {i + 1}
-                    </div>
-                    <span className="font-medium">{option}</span>
-                  </div>
-                </button>
-              ))}
-
-              <div className="relative">
-                <input
-                  type="text"
-                  value={personaCustomAnswer}
-                  onChange={(e) => setPersonaCustomAnswer(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && personaCustomAnswer.trim()) {
-                      handlePersonaAnswer(personaCustomAnswer.trim());
-                    }
-                  }}
-                  placeholder="Or write your own answer..."
-                  className="w-full px-4 py-4 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
-                />
-                <button
-                  onClick={() => {
-                    if (personaCustomAnswer.trim()) {
-                      handlePersonaAnswer(personaCustomAnswer.trim());
-                    }
-                  }}
-                  disabled={!personaCustomAnswer.trim()}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-2 rounded-lg bg-primary hover:bg-primary-light text-white text-sm font-medium transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Send className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={() => setStep("file-upload")}
-                className="flex-1 py-4 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer flex items-center justify-center gap-2"
-              >
-                <ArrowLeft className="w-5 h-5" />
-                Back
-              </button>
-              <button
-                onClick={handlePersonaTimeNo}
-                className="flex-1 py-4 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer"
-              >
-                Skip to dashboard
-              </button>
-            </div>
-          </div>
-        )}
-
-        {step === "persona-question" && personaLoading && (
-          <div className="max-w-xl mx-auto text-center">
-            <Loader2 className="w-10 h-10 animate-spin mx-auto mb-4 text-primary" />
-            <p className="text-text-muted">Generating next question...</p>
-          </div>
-        )}
-
-        {/* STEP 6: PERSONA MORE TIME */}
-        {step === "persona-more-time" && (
-          <div className="max-w-xl mx-auto text-center">
-            <div className="mb-8">
-              <div className="w-20 h-20 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-6">
-                <Clock className="w-10 h-10 text-primary" />
-              </div>
-              <h1 className="text-3xl font-bold mb-2">
-                Do you have <span className="gradient-text">more time</span>?
-              </h1>
-              <p className="text-text-muted">
-                We&apos;ve learned a lot so far! Would you like to answer a few more questions to
-                help YesBoss understand your company even better?
-              </p>
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={handlePersonaMoreTimeNo}
-                className="flex-1 py-4 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer"
-              >
-                No, thanks
-              </button>
-              <button
-                onClick={handlePersonaMoreTimeYes}
-                disabled={personaLoading}
-                className="flex-1 py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                {personaLoading ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <>
-                    Yes, continue
-                    <ArrowRight className="w-5 h-5" />
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        )}
-
-      {/* STEP 7: GOALS — removed; default goals auto-generated by backend on org creation */}
+      {/* GOALS step removed — default goals auto-generated by backend on org creation */}
         </>)}
       </div>
 

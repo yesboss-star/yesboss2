@@ -27,7 +27,7 @@ const GENERIC_TITLES = new Set([
   "worker", "personnel", "new hire",
 ]);
 
-type EmployeeStep = "department" | "org-detect" | "manager" | "persona";
+type EmployeeStep = "department" | "org-detect" | "manager";
 
 interface Employee {
   _id: string;
@@ -88,7 +88,6 @@ export default function EmployeeOnboarding() {
     { id: "org-detect", label: "Organization", icon: Building2 },
     { id: "department", label: "Department", icon: User },
     { id: "manager", label: "Reporting", icon: Users },
-    { id: "persona", label: "AI Persona", icon: MessageSquare },
   ];
 
   const currentStepIndex = steps.findIndex((s) => s.id === step);
@@ -510,11 +509,7 @@ export default function EmployeeOnboarding() {
     }
   }, [step, empData.orgId, managerAutoFetched]);
 
-  useEffect(() => {
-    if (step === "persona" && personaAnswers.length === 0 && !currentQuestion && !personaLoading) {
-      generateNextQuestion([]);
-    }
-  }, [step]);
+
 
   return (
     <div className="min-h-screen bg-background">
@@ -935,163 +930,11 @@ export default function EmployeeOnboarding() {
               <button
                 onClick={() => {
                   setEmpData({ ...empData, subordinates: selectedSubordinates.map((s) => s._id) });
-                  setStep("persona");
+                  router.push("/dashboard");
                 }}
                 className="flex-1 py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 flex items-center justify-center gap-2"
               >
                 Continue
-                <ArrowRight className="w-5 h-5" />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {step === "persona" && (
-          <div className="max-w-2xl mx-auto">
-            <div className="text-center mb-8">
-              <h1 className="text-3xl font-bold mb-2">
-                Meet your <span className="gradient-text">AI Assistant</span>
-              </h1>
-              <p className="text-text-muted">
-                Your AI assistant will learn your work style and preferences.
-                Answer a few questions to personalize your experience.
-              </p>
-            </div>
-
-            <div className="glass rounded-2xl overflow-hidden mb-6">
-              <div className="p-6 space-y-4 max-h-96 overflow-y-auto">
-                {personaAnswers.length === 0 && personaLoading && (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="w-6 h-6 animate-spin text-primary" />
-                    <span className="ml-2 text-text-muted">Getting to know you...</span>
-                  </div>
-                )}
-
-                {personaAnswers.map((qa, i) => (
-                  <div key={i} className="space-y-2">
-                    <div className="flex justify-end">
-                      <div className="bg-primary/20 rounded-lg px-4 py-2 text-sm max-w-md">
-                        {qa.answer}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-
-                {showMoreTime && (
-                  <div className="text-center py-6">
-                    <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
-                      <Sparkles className="w-8 h-8 text-primary" />
-                    </div>
-                    <h3 className="text-lg font-semibold mb-2">Want to share more?</h3>
-                    <p className="text-sm text-text-muted mb-6 max-w-sm mx-auto">
-                      We&apos;ve learned a lot so far! Would you like to answer a few more questions to help your AI assistant understand you even better?
-                    </p>
-                    <div className="flex gap-3 justify-center">
-                      <button
-                        onClick={handleMoreTimeSkip}
-                        disabled={isRedirecting}
-                        className="px-6 py-3 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer"
-                      >
-                        No, I&apos;m good
-                      </button>
-                      <button
-                        onClick={handleMoreTimeContinue}
-                        disabled={personaLoading}
-                        className="px-6 py-3 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer flex items-center gap-2"
-                      >
-                        {personaLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                        Yes, let&apos;s continue
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {currentQuestion && !showMoreTime && (
-                  <div className="space-y-4">
-                    <div className="flex gap-3">
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center flex-shrink-0">
-                        <span className="text-xs text-white font-bold">AI</span>
-                      </div>
-                      <div className="flex-1">
-                        <div className="glass-light rounded-lg px-4 py-3 text-sm mb-3">
-                          <div className="text-xs text-primary font-medium mb-1">
-                            Question {currentQuestion.question_number}
-                          </div>
-                          {currentQuestion.question}
-                        </div>
-                        <div className="space-y-2">
-                          {currentQuestion.options.map((opt, idx) => (
-                            <button
-                              key={idx}
-                              onClick={() => handlePersonaAnswer(opt)}
-                              disabled={personaLoading}
-                              className="w-full text-left px-4 py-3 rounded-xl border border-border hover:border-primary hover:bg-primary/5 transition-all text-sm cursor-pointer disabled:opacity-50"
-                            >
-                              {opt}
-                            </button>
-                          ))}
-                          {!showCustomInput ? (
-                            <button
-                              onClick={() => setShowCustomInput(true)}
-                              className="w-full text-center px-4 py-2 text-sm text-text-muted hover:text-foreground transition-colors cursor-pointer"
-                            >
-                              Or write your own answer...
-                            </button>
-                          ) : (
-                            <div className="flex gap-2">
-                              <input
-                                type="text"
-                                value={customAnswer}
-                                onChange={(e) => setCustomAnswer(e.target.value)}
-                                onKeyDown={(e) => e.key === "Enter" && customAnswer.trim() && handlePersonaAnswer(customAnswer)}
-                                placeholder="Type your answer..."
-                                disabled={personaLoading}
-                                className="flex-1 px-4 py-2.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm"
-                              />
-                              <button
-                                onClick={() => customAnswer.trim() && handlePersonaAnswer(customAnswer)}
-                                disabled={personaLoading || !customAnswer.trim()}
-                                className="px-4 py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-white text-sm font-medium transition-all cursor-pointer disabled:opacity-50"
-                              >
-                                Send
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {personaLoading && currentQuestion && !showMoreTime && (
-                  <div className="flex gap-3">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center flex-shrink-0">
-                      <span className="text-xs text-white font-bold">AI</span>
-                    </div>
-                    <div className="glass-light rounded-lg px-4 py-2 text-sm flex items-center gap-2">
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span className="text-text-muted">Thinking...</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={() => setStep("manager")}
-                className="flex-1 py-4 rounded-xl glass hover:bg-surface-light text-foreground font-medium transition-all cursor-pointer flex items-center justify-center gap-2"
-              >
-                <ArrowLeft className="w-5 h-5" />
-                Back
-              </button>
-              <button
-                onClick={goToDashboard}
-                disabled={isRedirecting}
-                className="flex-1 py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                {isRedirecting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                Complete Setup
                 <ArrowRight className="w-5 h-5" />
               </button>
             </div>
