@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/contexts/AuthContext";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, Tabs, TabsList, TabsTrigger, TabsContent, Input, Label, Button, Badge } from "@/components/ui";
 import { Bell, User, Save, ArrowLeft, Volume2, Mail, Smartphone, Plug, MessageSquare, ExternalLink, X, Camera, RefreshCw, Loader2, Shield, Users } from "lucide-react";
@@ -86,7 +87,13 @@ export default function SettingsPage() {
       if (userEmail) {
         fetch(`${API_URL}/employees/avatar/${encodeURIComponent(userEmail)}`)
           .then((r) => r.ok ? r.blob() : null)
-          .then((blob) => blob ? setAvatarUrl(URL.createObjectURL(blob)) : null)
+          .then((blob) => {
+            if (blob) {
+              const blobUrl = URL.createObjectURL(blob);
+              setAvatarUrl(blobUrl);
+              useOrganizationStore.getState().setAvatarUrl(blobUrl);
+            }
+          })
           .catch(() => {});
       }
     }).catch(() => {
@@ -154,7 +161,11 @@ export default function SettingsPage() {
       const res = await fetch(`${API_URL}/employees/avatar`, { method: "POST", body: formData });
       if (res.ok) {
         const data = await res.json();
-        setAvatarUrl(`${API_URL}${data.avatar_url}`);
+        const url = `${API_URL}${data.avatar_url}`;
+        const blob = await fetch(url).then((r) => r.blob());
+        const blobUrl = URL.createObjectURL(blob);
+        setAvatarUrl(blobUrl);
+        useOrganizationStore.getState().setAvatarUrl(blobUrl);
         useUIStore.getState().addNotification({ type: "success", title: "Avatar Updated", message: "Your profile picture has been updated." });
       } else {
         throw new Error("Upload failed");
@@ -169,11 +180,13 @@ export default function SettingsPage() {
 
   const handleRemoveAvatar = async () => {
     setAvatarUrl(null);
+    useOrganizationStore.getState().setAvatarUrl(undefined);
     useUIStore.getState().addNotification({ type: "success", title: "Avatar Removed", message: "Character avatar will be shown." });
   };
 
   const handleStyleChange = async (style: string) => {
     setDicebearStyle(style);
+    useOrganizationStore.getState().setAvatarStyle(style);
     setShowStylePicker(false);
     setAvatarUrl(null);
     try {
@@ -352,7 +365,7 @@ export default function SettingsPage() {
                         />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h2 className="text-xl font-bold truncate">{profile.fullName || "User"}</h2>
+                        <h2 className="text-xl font-bold truncate">{profile.fullName || profile.email.split("@")[0] || "User"}</h2>
                         <p className="text-sm text-text-muted truncate">{profile.role || profile.email}</p>
                         <p className="text-xs text-text-muted/60 mt-1">Click avatar to change character style</p>
                       </div>
@@ -396,12 +409,12 @@ export default function SettingsPage() {
                     )}
 
                     <div className="grid grid-cols-2 gap-4">
-                      <div><Label>Full Name</Label><Input value={profile.fullName} onChange={(e) => setProfile({...profile, fullName: e.target.value})} /></div>
+                      <div><Label>Full Name</Label><Input value={profile.fullName} placeholder={profile.email.split("@")[0]} onChange={(e) => setProfile({...profile, fullName: e.target.value})} /></div>
                       <div><Label>Email</Label><Input value={profile.email} onChange={(e) => setProfile({...profile, email: e.target.value})} /></div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
-                      <div><Label>Department</Label><Input value={profile.department} onChange={(e) => setProfile({...profile, department: e.target.value})} /></div>
-                      <div><Label>Role / Title</Label><Input value={profile.role} onChange={(e) => setProfile({...profile, role: e.target.value})} /></div>
+                      <div><Label>Department</Label><Input value={profile.department} placeholder="e.g. Engineering" onChange={(e) => setProfile({...profile, department: e.target.value})} /></div>
+                      <div><Label>Role / Title</Label><Input value={profile.role} placeholder="e.g. Software Engineer" onChange={(e) => setProfile({...profile, role: e.target.value})} /></div>
                     </div>
 
                     <div className="flex justify-end pt-2 border-t border-border/50">
@@ -421,6 +434,7 @@ export default function SettingsPage() {
                               }),
                             });
                             if (res.ok) {
+                              useOrganizationStore.getState().setAvatarStyle(dicebearStyle);
                               useUIStore.getState().addNotification({
                                 type: "success", title: "Profile Updated", message: "Your profile has been saved.",
                               });
@@ -575,6 +589,10 @@ function OwnerList() {
   const [owners, setOwners] = useState<Owner[]>([]);
   const [loading, setLoading] = useState(true);
   const organization = useOrganizationStore((s) => s.organization);
+  const { user } = useAuth();
+  const currentUserEmail = user?.email;
+  const avatarUrl = useOrganizationStore((s) => s.avatarUrl);
+  const avatarStyle = useOrganizationStore((s) => s.avatarStyle) || "lorelei";
 
   useEffect(() => {
     if (!organization?.id) {
@@ -614,24 +632,29 @@ function OwnerList() {
 
   return (
     <div className="divide-y divide-border/50">
-      {owners.map((owner) => (
-        <div key={owner.uid} className="flex items-center gap-3 py-3">
-          <Avatar
-            size="md"
-            seed={owner.email || owner.full_name}
-            fallback={owner.full_name || owner.email}
-          />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{owner.full_name || "Unnamed"}</p>
-            <p className="text-xs text-text-muted truncate">{owner.email}</p>
+      {owners.map((owner) => {
+        const isCurrentUser = owner.email === currentUserEmail;
+        return (
+          <div key={owner.uid} className="flex items-center gap-3 py-3">
+            <Avatar
+              size="md"
+              src={isCurrentUser ? avatarUrl : undefined}
+              seed={owner.email || owner.full_name}
+              dicebearStyle={isCurrentUser ? avatarStyle : undefined}
+              fallback={owner.full_name || owner.email}
+            />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate">{owner.full_name || owner.email.split("@")[0]}</p>
+              <p className="text-xs text-text-muted truncate">{owner.email}</p>
+            </div>
+            <Badge
+              variant={owner.role === "primary_owner" ? "success" : "secondary"}
+            >
+              {owner.role === "primary_owner" ? "Primary Owner" : "Co-owner"}
+            </Badge>
           </div>
-          <Badge
-            variant={owner.role === "primary_owner" ? "success" : "secondary"}
-          >
-            {owner.role === "primary_owner" ? "Primary Owner" : "Co-owner"}
-          </Badge>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

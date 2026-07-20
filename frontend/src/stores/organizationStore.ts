@@ -36,6 +36,8 @@ interface OrganizationState {
   loading: boolean;
   error: string | null;
   socialLinks: SocialLinks;
+  avatarUrl?: string;
+  avatarStyle: string;
   setOrganization: (org: Organization) => void;
   setOrganizations: (orgs: Organization[]) => void;
   updateOrganization: (updates: Partial<Organization>) => void;
@@ -43,6 +45,8 @@ interface OrganizationState {
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setSocialLinks: (links: SocialLinks) => void;
+  setAvatarUrl: (url: string | undefined) => void;
+  setAvatarStyle: (style: string) => void;
   createOrganization: (data: { name: string; domain: string; industry: string; industries?: string[]; size: string; micro_vertical?: string; micro_verticals?: string[]; website_url?: string }) => Promise<Organization>;
   updateSocialLinks: (orgId: string, links: SocialLinks) => Promise<void>;
   detectSocialPresence: (domain: string, company_name?: string) => Promise<SocialLinks>;
@@ -57,6 +61,8 @@ export const useOrganizationStore = create<OrganizationState>()(
       loading: false,
       error: null,
       socialLinks: {},
+      avatarUrl: undefined,
+      avatarStyle: "lorelei",
 
       setOrganization: (org) => set({ organization: org, error: null }),
       setOrganizations: (orgs) => set({ organizations: orgs }),
@@ -70,6 +76,8 @@ export const useOrganizationStore = create<OrganizationState>()(
       setLoading: (loading) => set({ loading }),
       setError: (error) => set({ error }),
       setSocialLinks: (links) => set({ socialLinks: links }),
+      setAvatarUrl: (url) => set({ avatarUrl: url }),
+      setAvatarStyle: (style) => set({ avatarStyle: style }),
 
       createOrganization: async (data) => {
         set({ loading: true, error: null });

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useGoalStore } from "@/stores/goalStore";
 import { useOrgChartStore } from "@/stores/orgChartStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
-import { X, Loader2, Sparkles, Calendar, Users, Flag, CheckCircle2, ChevronDown, Check, GitBranch, Clock } from "lucide-react";
+import { X, Loader2, Sparkles, Calendar, Users, Flag, CheckCircle2, ChevronDown, Check, GitBranch, Clock, ArrowLeft } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 const DEPARTMENTS = ["Engineering", "Marketing", "Sales", "Operations", "Finance", "Human Resources", "Product", "Design", "Customer Support", "R&D", "Supply Chain", "Legal"];
@@ -111,9 +111,10 @@ function PersonMultiSelect({ label, valueIds, valueNames, members, filterDept, o
 interface GoalModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onBack?: () => void;
 }
 
-export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
+export default function GoalModal({ isOpen, onClose, onBack }: GoalModalProps) {
   const { createGoal, loading } = useGoalStore();
   const { organization } = useOrganizationStore();
   const { members, fetchOrgMembers } = useOrgChartStore();
@@ -373,9 +374,16 @@ export default function GoalModal({ isOpen, onClose }: GoalModalProps) {
               <p className="text-sm text-text-muted">AI auto-detects department &amp; suggests assignees</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-surface transition-colors cursor-pointer">
-            <X className="w-5 h-5 text-text-muted" />
-          </button>
+          <div className="flex items-center gap-2">
+            {onBack && (
+              <button type="button" onClick={onBack} className="p-2 rounded-lg hover:bg-surface transition-colors cursor-pointer">
+                <ArrowLeft className="w-5 h-5 text-text-muted" />
+              </button>
+            )}
+            <button type="button" onClick={onClose} className="p-2 rounded-lg hover:bg-surface transition-colors cursor-pointer">
+              <X className="w-5 h-5 text-text-muted" />
+            </button>
+          </div>
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-5 max-h-[70vh] overflow-y-auto">

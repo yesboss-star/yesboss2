@@ -6,7 +6,7 @@ import { useGoalStore } from "@/stores/goalStore";
 import { useOrgChartStore } from "@/stores/orgChartStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { useAuth } from "@/contexts/AuthContext";
-import { X, Loader2, Sparkles, Calendar, Users, Flag, CheckSquare, ChevronDown, Check, Clock, AlertTriangle, Zap } from "lucide-react";
+import { X, Loader2, Sparkles, Calendar, Users, Flag, CheckSquare, ChevronDown, Check, Clock, AlertTriangle, Zap, ArrowLeft } from "lucide-react";
 
 function PersonMultiSelect({ label, valueIds, valueNames, members, filterDept, onChange }: {
   label: string;
@@ -111,9 +111,10 @@ interface TaskModalProps {
   isOpen: boolean;
   onClose: () => void;
   goalId?: string;
+  onBack?: () => void;
 }
 
-export default function TaskModal({ isOpen, onClose, goalId }: TaskModalProps) {
+export default function TaskModal({ isOpen, onClose, goalId, onBack }: TaskModalProps) {
   const { createTask, loading, fetchSuggestions, fetchDeadlineSuggestion, fetchWorkloadCheck } = useTaskStore();
   const { goals } = useGoalStore();
   const { organization } = useOrganizationStore();
@@ -276,9 +277,16 @@ export default function TaskModal({ isOpen, onClose, goalId }: TaskModalProps) {
               <p className="text-sm text-text-muted">Assign tasks across your organization</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-surface transition-colors cursor-pointer">
-            <X className="w-5 h-5 text-text-muted" />
-          </button>
+          <div className="flex items-center gap-2">
+            {onBack && (
+              <button type="button" onClick={onBack} className="p-2 rounded-lg hover:bg-surface transition-colors cursor-pointer">
+                <ArrowLeft className="w-5 h-5 text-text-muted" />
+              </button>
+            )}
+            <button onClick={onClose} className="p-2 rounded-lg hover:bg-surface transition-colors cursor-pointer">
+              <X className="w-5 h-5 text-text-muted" />
+            </button>
+          </div>
         </div>
 
         <form onSubmit={handleSubmit} className="flex">
