@@ -341,10 +341,14 @@ async def generate_org_health(db: Any, org_id: str) -> dict:
         f"{best_performer_section}\n"
         f"{cat_section}\n\n"
         f"{idea_summary}"
-        f"Provide 2-3 strategic recommendations to improve organizational health. "
+        f"Start with a brief 1-sentence diagnosis of why the health score is what it is. "
+        f"Then provide 2-3 strategic recommendations to improve organizational health. "
         f"For each unworked idea, suggest which existing goal it relates to (if any) "
         f"and whether it should be converted into tasks. "
-        f"Reference team work patterns, overloaded employees, and top performers where relevant."
+        f"Reference team work patterns, overloaded employees, and top performers where relevant. "
+        f"Use simple, clear language — avoid jargon. "
+        f"Keep each recommendation short and precise (2-3 sentences max). "
+        f"Format each recommendation as: **N.** **Short title** — 1-2 sentence explanation."
     )
     try:
         ai_recommendations = await get_ai_response(prompt)
