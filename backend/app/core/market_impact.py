@@ -6,7 +6,7 @@ from typing import Any
 logger = logging.getLogger("yesboss.market_impact")
 
 
-async def analyze_market_impact(db: Any, org_id: str) -> dict:
+async def analyze_market_impact(db: Any, org_id: str, refresh_trends: bool = False) -> dict:
     org = None
     try:
         from bson import ObjectId
@@ -18,6 +18,19 @@ async def analyze_market_impact(db: Any, org_id: str) -> dict:
 
     industry = org.get("industry", "")
     micro_vertical = org.get("micro_vertical", "")
+
+    if refresh_trends:
+        try:
+            from ..api.market_trends import fetch_google_news
+            fresh = await fetch_google_news(industry, micro_vertical)
+            if fresh:
+                db.market_trends.delete_many({"organization_id": org_id})
+                for article in fresh:
+                    article["organization_id"] = org_id
+                    article["created_at"] = datetime.utcnow()
+                    db.market_trends.insert_one(article)
+        except Exception as e:
+            logger.warning(f"Failed to refresh market trends: {e}")
 
     trends: list[dict[str, Any]] = list(db.market_trends.find({"organization_id": org_id}).sort("published_at", -1).limit(10))
     if not trends:
@@ -87,10 +100,12 @@ Return ONLY a valid JSON array. No markdown."""
         trend = next((t for t in trends if t.get("title") == imp.get("title")), {})
         imp["growth_impact"] = trend.get("growth_impact", "")
         imp["category"] = trend.get("category", [])
+        imp["url"] = trend.get("url", "")
 
+    now = datetime.utcnow()
     doc = {
         "organization_id": org_id,
-        "generated_at": datetime.utcnow(),
+        "generated_at": now,
         "industry": industry,
         "micro_vertical": micro_vertical,
         "impacts": result_data["impacts"],
@@ -101,6 +116,9 @@ Return ONLY a valid JSON array. No markdown."""
     try:
         existing = db.market_impacts.find_one({"organization_id": org_id})
         if existing:
+            existing["_id"] = str(existing["_id"])
+            existing["snapshot_date"] = existing.get("generated_at", now)
+            db.market_impact_history.insert_one(existing)
             db.market_impacts.update_one({"_id": existing["_id"]}, {"$set": doc})
         else:
             db.market_impacts.insert_one(doc)

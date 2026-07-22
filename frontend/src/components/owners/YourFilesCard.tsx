@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Badge } from "@/components/ui";
 import {
@@ -79,6 +79,10 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
       .catch(() => setLoading(false));
   }, [organization]);
 
+  useEffect(() => {
+    if (organization?.id) loadFiles();
+  }, [organization?.id, loadFiles]);
+
   const handleDelete = async (fileId: string) => {
     if (!confirm("Delete this file? This cannot be undone.")) return;
     setDeleting(fileId);
@@ -145,8 +149,20 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
               loadFiles();
               onFilesChanged?.();
               if (typeof window !== "undefined") {
+                const detail: Record<string, string> = { filename: file.name };
+                try {
+                  const pending = sessionStorage.getItem("pendingKpiContext");
+                  if (pending) {
+                    const ctx = JSON.parse(pending);
+                    if (ctx.kpi) {
+                      detail.suggested_kpi = ctx.kpi;
+                      detail.suggested_kpi_title = ctx.kpiTitle || ctx.kpi;
+                    }
+                    sessionStorage.removeItem("pendingKpiContext");
+                  }
+                } catch {}
                 window.dispatchEvent(
-                  new CustomEvent("kpi-document-uploaded", { detail: { filename: file.name } })
+                  new CustomEvent("kpi-document-uploaded", { detail })
                 );
               }
             }

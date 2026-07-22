@@ -15,6 +15,8 @@ export interface KPISuggestion {
   category?: string;
   icon?: string;
   priority: "high" | "medium" | "low";
+  value?: number | string;
+  formatted?: string;
   createdAt: number;
 }
 
@@ -24,15 +26,28 @@ export interface AcceptedKPI {
   title: string;
   category?: string;
   icon?: string;
+  value?: string | number;
+  formatted?: string;
   triggerSource?: KPISource;
   triggerDetail?: string;
   acceptedAt: number;
+}
+
+export interface DataNeed {
+  type: string;
+  label: string;
+  description: string;
+  suggested_kpi?: string;
+  suggested_kpi_title?: string;
 }
 
 interface KPIState {
   suggestionsByOrg: Record<string, KPISuggestion[]>;
   acceptedByOrg: Record<string, AcceptedKPI[]>;
   dismissedByOrg: Record<string, string[]>;
+  dataNeedsByOrg: Record<string, DataNeed[]>;
+  dataSufficientByOrg: Record<string, boolean | null>;
+  dataAnalysisByOrg: Record<string, string>;
   lastShownAt: Record<string, number>;
   addSuggestions: (orgId: string, suggestions: KPISuggestion[]) => void;
   acceptSuggestion: (orgId: string, suggestionId: string) => AcceptedKPI | null;
@@ -42,6 +57,9 @@ interface KPIState {
     data: { title: string; key?: string; category?: string; icon?: string; source?: KPISource; sourceDetail?: string }
   ) => AcceptedKPI | null;
   removeKPI: (orgId: string, kpiId: string) => void;
+  setDataNeeds: (orgId: string, needs: DataNeed[]) => void;
+  setDataSufficient: (orgId: string, sufficient: boolean | null) => void;
+  setDataAnalysis: (orgId: string, analysis: string) => void;
   shouldSuggestNow: (orgId: string, intervalMs?: number) => boolean;
   markShown: (orgId: string) => void;
   clearForOrg: (orgId: string) => void;
@@ -53,6 +71,9 @@ export const useKPIStore = create<KPIState>()(
       suggestionsByOrg: {},
       acceptedByOrg: {},
       dismissedByOrg: {},
+      dataNeedsByOrg: {},
+      dataSufficientByOrg: {},
+      dataAnalysisByOrg: {},
       lastShownAt: {},
 
       addSuggestions: (orgId, suggestions) => {
@@ -98,6 +119,8 @@ export const useKPIStore = create<KPIState>()(
           title: suggestion.title,
           category: suggestion.category,
           icon: suggestion.icon,
+          value: suggestion.value,
+          formatted: suggestion.formatted,
           triggerSource: suggestion.source,
           triggerDetail: suggestion.sourceDetail,
           acceptedAt: Date.now(),
@@ -184,6 +207,24 @@ export const useKPIStore = create<KPIState>()(
         }));
       },
 
+      setDataNeeds: (orgId, needs) => {
+        set((state) => ({
+          dataNeedsByOrg: { ...state.dataNeedsByOrg, [orgId]: needs },
+        }));
+      },
+
+      setDataSufficient: (orgId, sufficient) => {
+        set((state) => ({
+          dataSufficientByOrg: { ...state.dataSufficientByOrg, [orgId]: sufficient },
+        }));
+      },
+
+      setDataAnalysis: (orgId, analysis) => {
+        set((state) => ({
+          dataAnalysisByOrg: { ...state.dataAnalysisByOrg, [orgId]: analysis },
+        }));
+      },
+
       shouldSuggestNow: (orgId, intervalMs = 5 * 60 * 1000) => {
         const last = get().lastShownAt[orgId];
         if (!last) return true;
@@ -202,6 +243,9 @@ export const useKPIStore = create<KPIState>()(
           delete next.suggestionsByOrg[orgId];
           delete next.acceptedByOrg[orgId];
           delete next.dismissedByOrg[orgId];
+          delete next.dataNeedsByOrg[orgId];
+          delete next.dataSufficientByOrg[orgId];
+          delete next.dataAnalysisByOrg[orgId];
           delete next.lastShownAt[orgId];
           return next;
         });

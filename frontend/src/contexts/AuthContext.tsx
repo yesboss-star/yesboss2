@@ -25,28 +25,35 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1
 
 async function establishSession(idToken: string) {
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
     const res = await fetch(`${API_URL}/auth/set-session`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
+      signal: controller.signal,
       body: JSON.stringify({ id_token: idToken }),
     });
+    clearTimeout(timeout);
     const data = await res.json();
     return data;
-  } catch (e) {
-    console.error("Session establishment failed:", e);
+  } catch {
     return null;
   }
 }
 
 async function clearSession() {
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
     await fetch(`${API_URL}/auth/clear-session`, {
       method: "POST",
       credentials: "include",
+      signal: controller.signal,
     });
-  } catch (e) {
-    console.error("Session clear failed:", e);
+    clearTimeout(timeout);
+  } catch {
+    // Expected — backend may not be running during sign-out
   }
 }
 
@@ -72,6 +79,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
           setRole(result.user?.role || "owner");
           setLastLoginAt(new Date().toISOString());
+        } else {
+          // Backend unreachable — fall back to cached role
+          localStorage.setItem("yesboss_id_token", token);
+          const cached = localStorage.getItem("yesboss_role");
+          setRole(cached === "owner" || cached === "employee" ? cached : "owner");
         }
       } else {
         await clearSession();

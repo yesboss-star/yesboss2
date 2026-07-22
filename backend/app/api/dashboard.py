@@ -1,4 +1,8 @@
+import hashlib
+import json
 import logging
+import re
+import time
 from datetime import datetime
 from typing import Any
 
@@ -12,6 +16,12 @@ from ..dependencies.auth import get_current_user, get_current_user_optional
 
 router = APIRouter()
 logger = logging.getLogger("yesboss.dashboard")
+
+# Dedicated long-lived cache for AI-extracted KPI values
+# Key: f"{org_id}:{accepted_kpis_hash}", Value: (timestamp, kpi_values_dict)
+# TTL: 600s (10 min) to avoid calling AI on every 30s refresh
+_ai_kpi_cache: dict[str, tuple[float, dict]] = {}
+_AI_KPI_CACHE_TTL = 600
 
 
 def get_user_org_id(user) -> str | None:
@@ -324,6 +334,7 @@ async def get_dashboard_modules(
 async def get_dashboard_kpi(
     organization_id: str | None = Query(None),
     email: str | None = Query(None),
+    accepted_kpis: str | None = Query(None),
     current_user = Depends(get_current_user_optional)
 ):
     db = get_database()
@@ -474,41 +485,78 @@ async def get_dashboard_kpi(
         "icon": "Users"
     }
 
-    try:
-        from ..core.ai_client import get_ai_response
-        from ..core.prompt_engine import PERSONA_INSTRUCTIONS
-        kpi_persona = PERSONA_INSTRUCTIONS.get("kpi_analyst", "You are a business analytics expert. Return ONLY valid JSON.")
-        ai_prompt = (
-            f"Given a business in the {org_industry} industry"
-            + (f" ({org_micro_vertical})" if org_micro_vertical else "")
-            + f" with {total_goals} goals ({active_goals} active, {completed_goals} completed), {total_tasks} tasks ({in_progress_tasks} in progress, {completed_tasks} completed), "
-            f"{total_members} team members in {dept_count} departments, "
-            f"and a {completion_rate}% task completion rate, suggest 1-2 additional KPIs that would be "
-            f"most relevant for this business. Return ONLY a JSON array of objects with keys: 'key' (snake_case), "
-            f"'label' (display name), 'formatted' (string value), 'change' (trend description), "
-            f"'trend' ('up'/'down'/'neutral'), 'description', 'icon' (lucide icon name). "
-            f"Keep it concise - only suggest KPIs that make sense for {org_industry}."
-        )
-        ai_kpis = await get_ai_response(
-            prompt=ai_prompt,
-            system_prompt=kpi_persona,
-            provider="xai",
-            temperature=0.3,
-            max_tokens=500,
-        )
-        import json
-        import re
-        json_match = re.search(r'\[.*\]', ai_kpis, re.DOTALL)
-        if json_match:
-            parsed = json.loads(json_match.group())
+    accepted_kpi_list = []
+    if accepted_kpis:
+        try:
+            parsed = json.loads(accepted_kpis)
             if isinstance(parsed, list):
                 for item in parsed:
                     if isinstance(item, dict) and "key" in item:
-                        kpi_response[item["key"]] = item
-    except Exception as e:
-        logger.warning(f"AI KPI suggestion failed: {e}")
+                        accepted_kpi_list.append(item)
+        except (json.JSONDecodeError, TypeError):
+            pass
 
-    cache.set("kpi", {"org_id": org_id}, kpi_response)
+    if accepted_kpi_list and total_uploaded > 0:
+        missing_kpis = [k for k in accepted_kpi_list if k["key"] not in kpi_response]
+        if missing_kpis:
+            ai_cache_key = f"{org_id}:{hashlib.md5(accepted_kpis.encode()).hexdigest()}"
+            now = time.time()
+            cached_ai = _ai_kpi_cache.get(ai_cache_key)
+            if cached_ai and (now - cached_ai[0]) < _AI_KPI_CACHE_TTL:
+                kpi_response.update(cached_ai[1])
+            else:
+                try:
+                    from ..core.ai_client import get_ai_response
+                    from ..core.prompt_engine import PERSONA_INSTRUCTIONS
+                    kpi_persona = PERSONA_INSTRUCTIONS.get("kpi_analyst", "You are a business analytics expert. Return ONLY valid JSON.")
+
+                    doc_previews = []
+                    docs = list(db.documents.find({"org_id": org_id}).sort("created_at", -1).limit(5))
+                    for d in docs:
+                        preview = (d.get("text", "") or "")[:5000]
+                        doc_previews.append(f"{d.get('filename', 'unknown')}: {preview}")
+                    doc_context = "\n".join(doc_previews) if doc_previews else "No document content available."
+
+                    kpi_descriptions = "\n".join(f'- {k["key"]} ({k.get("title", k["key"])})' for k in missing_kpis)
+                    ai_prompt = (
+                        f"Organization in the {org_industry} industry"
+                        + (f" ({org_micro_vertical})" if org_micro_vertical else "")
+                        + f".\n\nUploaded document content:\n{doc_context}\n\n"
+                        "The user has accepted the following KPIs and needs current values computed from their uploaded data:\n"
+                        + kpi_descriptions
+                        + "\n\nFor each KPI listed above, extract the most current value from the uploaded document content. "
+                        "Return ONLY a JSON object where keys are the KPI key names and values are objects with: "
+                        "'value' (number or string), 'formatted' (string for display, e.g. '$1.2M', '450 customers', '23%'), "
+                        "'change' (trend description), 'trend' ('up'/'down'/'neutral'), "
+                        "'label' (human-readable display name), 'description' (short detail), 'icon' (lucide icon name: TrendingUp, BarChart3, Target, DollarSign, Users, Activity, Zap, Flag, FileText). "
+                        "If a KPI cannot be computed from available data, set value to null and formatted to 'Data pending — upload more data'."
+                    )
+                    ai_result = await get_ai_response(
+                        prompt=ai_prompt,
+                        system_prompt=kpi_persona,
+                        provider="xai",
+                        temperature=0.3,
+                        max_tokens=1000,
+                    )
+                    json_match = re.search(r'\{.*\}', ai_result, re.DOTALL)
+                    if json_match:
+                        parsed_json = json.loads(json_match.group())
+                        if isinstance(parsed_json, dict):
+                            needed_keys = {k["key"] for k in missing_kpis}
+                            ai_values = {}
+                            for key, val in parsed_json.items():
+                                if isinstance(val, dict) and key in needed_keys:
+                                    kpi_response[key] = val
+                                    ai_values[key] = val
+                            if ai_values:
+                                _ai_kpi_cache[ai_cache_key] = (now, ai_values)
+                except Exception as e:
+                    logger.warning(f"AI accepted KPI value extraction failed: {e}")
+
+    cache_key_data = {"org_id": org_id}
+    if accepted_kpis:
+        cache_key_data["accepted_kpis"] = accepted_kpis
+    cache.set("kpi", cache_key_data, kpi_response)
 
     return kpi_response
 
@@ -628,3 +676,22 @@ async def get_module_trends(
             "change": round(values[-1] - values[0], 1) if len(values) > 1 else 0
         }
     }
+
+
+@router.get("/document-count")
+async def get_document_count(
+    organization_id: str | None = Query(None),
+    current_user = Depends(get_current_user_optional)
+):
+    db = get_database()
+    if db is None:
+        return {"count": 0}
+    org_id = organization_id or get_user_org_id(current_user)
+    if not org_id:
+        return {"count": 0}
+    try:
+        total_files = db.files.count_documents({"organization_id": org_id})
+        total_docs = db.documents.count_documents({"org_id": org_id})
+        return {"count": total_files + total_docs}
+    except Exception:
+        return {"count": 0}

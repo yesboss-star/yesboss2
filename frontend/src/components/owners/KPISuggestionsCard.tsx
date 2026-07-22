@@ -23,7 +23,6 @@ import {
   AlertCircle,
   Users,
   Activity,
-  FileUp,
   Database,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent, Button, Badge } from "@/components/ui";
@@ -36,8 +35,7 @@ import { useOrgChartStore } from "@/stores/orgChartStore";
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
 const SUGGEST_INTERVAL_MS = 5 * 60 * 1000;
-const SUGGEST_DEBOUNCE_MS = 4 * 1000;
-const EMPTY_ARRAY: never[] = [];
+
 
 type IconName = string;
 type LucideIcon = typeof Sparkles;
@@ -148,7 +146,9 @@ function buildSuggestionPrompt(args: {
 
   return `You are a KPI strategist for an executive dashboard.
 
-Step 1 — ANALYZE the available data below. Decide whether the data is SUFFICIENT to recommend meaningful, measurable KPIs for a ${industry || "general"} business at this stage. To be sufficient you need AT LEAST 3 of: industry known, meaningful goals, real tasks, a team, OR uploaded documents describing financials / customers / sales / operations.
+Step 1 — ANALYZE the DOCUMENTS section of the context block above. Scan all document content thoroughly, including row-level data (invoice line items, opportunity rows, etc.), column headers, and any numbers present. The data likely contains transactional details with embedded numeric values. Extract the meaningful KPIs from whatever data exists — even row-level transactional data contains revenue, sales amounts, customer names, and deal values you can aggregate.
+
+Set data_sufficient to true if documents exist and contain any numeric or financial data at all (including invoice amounts, opportunity sizes, line-item totals, quantities, dates, customer names). Only set data_sufficient to false if every document is completely empty or contains zero numbers.
 
 Step 2 — OUTPUT a single JSON object (no prose, no markdown) with this exact shape:
 
@@ -167,6 +167,8 @@ Step 2 — OUTPUT a single JSON object (no prose, no markdown) with this exact s
     {
       "key": "<snake_case unique id, e.g. customer_churn_rate>",
       "title": "<short display name, max 40 chars>",
+      "value": "<current numeric value extracted from documents, e.g. 12 or '450' or '$1.2M'>",
+      "formatted": "<human-readable display string, e.g. '12 contracts' or '$1.2M revenue' or '23% rate'>",
       "category": "<one of: revenue, growth, operations, finance, sales, team, customer, product>",
       "icon": "<lucide icon name: TrendingUp, BarChart3, Target, DollarSign, Users, Activity, Zap, Flag, FileText>",
       "priority": "<high if critical, else medium>",
@@ -280,6 +282,9 @@ function KPISuggestionCard({
             )}
           </div>
           <p className="text-sm font-semibold text-foreground leading-tight">{suggestion.title}</p>
+          {suggestion.formatted && (
+            <p className="text-lg font-bold text-foreground mt-0.5">{suggestion.formatted}</p>
+          )}
           {suggestion.sourceDetail && (
             <p className="text-[10px] text-text-muted/70 mt-1 truncate">↳ {suggestion.sourceDetail}</p>
           )}
@@ -310,61 +315,6 @@ function KPISuggestionCard({
   );
 }
 
-function AcceptedKPITile({
-  kpi,
-  value,
-  onRemove,
-  refreshing,
-}: {
-  kpi: AcceptedKPI;
-  value?: KPIValue;
-  onRemove: () => void;
-  refreshing?: boolean;
-}) {
-  const trend = value?.trend;
-  const trendColor =
-    trend === "up" ? "text-emerald-400" : trend === "down" ? "text-rose-400" : "text-text-muted";
-
-  return (
-    <div className="group relative p-4 rounded-2xl bg-gradient-to-br from-surface to-surface-light border border-border/50 hover:border-primary/30 transition-all">
-      <button
-        onClick={onRemove}
-        className="absolute top-2 right-2 p-1 rounded-md text-text-muted opacity-0 group-hover:opacity-100 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
-        aria-label="Remove KPI"
-        title="Remove"
-      >
-        <X className="w-3 h-3" />
-      </button>
-      <div className="flex items-start justify-between mb-2 pr-5">
-        <div className="w-8 h-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center">
-          <KpiIcon name={kpi.icon || value?.icon} className="w-4 h-4 text-primary" />
-        </div>
-        {refreshing ? (
-          <Loader2 className="w-3 h-3 text-text-muted animate-spin" />
-        ) : trend === "up" ? (
-          <TrendingUp className={`w-3.5 h-3.5 ${trendColor}`} />
-        ) : trend === "down" ? (
-          <TrendingDown className={`w-3.5 h-3.5 ${trendColor}`} />
-        ) : trend ? (
-          <Minus className={`w-3.5 h-3.5 ${trendColor}`} />
-        ) : null}
-      </div>
-      <p className="text-[10px] uppercase tracking-wider text-text-muted/80 font-medium truncate">
-        {kpi.title}
-      </p>
-      <p className="text-xl font-bold text-foreground mt-0.5 truncate">
-        {value?.formatted || "—"}
-      </p>
-      {value?.change && (
-        <p className="text-[10px] text-text-muted mt-1 truncate">{value.change}</p>
-      )}
-      {kpi.category && (
-        <Badge variant="outline" className="text-[9px] mt-2 capitalize">{kpi.category}</Badge>
-      )}
-    </div>
-  );
-}
-
 export default function KPISuggestionsCard() {
   const { organization } = useOrganizationStore();
   const { goals } = useGoalStore();
@@ -375,49 +325,70 @@ export default function KPISuggestionsCard() {
   const orgId = organization?.id;
   const suggestionsByOrg = useKPIStore((s) => s.suggestionsByOrg);
   const acceptedByOrg = useKPIStore((s) => s.acceptedByOrg);
-  const suggestions = useMemo(
-    () => (orgId ? suggestionsByOrg[orgId] || EMPTY_ARRAY : EMPTY_ARRAY),
+  const suggestions = useMemo<KPISuggestion[]>(
+    () => (orgId ? suggestionsByOrg[orgId] || [] : []),
     [suggestionsByOrg, orgId]
   );
-  const acceptedKPIs = useMemo(
-    () => (orgId ? acceptedByOrg[orgId] || EMPTY_ARRAY : EMPTY_ARRAY),
+  const acceptedKPIs = useMemo<AcceptedKPI[]>(
+    () => (orgId ? acceptedByOrg[orgId] || [] : []),
     [acceptedByOrg, orgId]
   );
   const addSuggestions = useKPIStore((s) => s.addSuggestions);
   const acceptSuggestion = useKPIStore((s) => s.acceptSuggestion);
   const dismissSuggestion = useKPIStore((s) => s.dismissSuggestion);
-  const removeKPI = useKPIStore((s) => s.removeKPI);
   const shouldSuggestNow = useKPIStore((s) => s.shouldSuggestNow);
   const markShown = useKPIStore((s) => s.markShown);
+  const setDataNeeds = useKPIStore((s) => s.setDataNeeds);
+  const setDataSufficient = useKPIStore((s) => s.setDataSufficient);
+  const setDataAnalysis = useKPIStore((s) => s.setDataAnalysis);
+  const storeDataNeeds = useKPIStore((s) => orgId ? s.dataNeedsByOrg[orgId] : undefined);
+  const storeDataSufficient = useKPIStore((s) => orgId ? s.dataSufficientByOrg[orgId] : undefined);
+  const storeDataAnalysis = useKPIStore((s) => orgId ? s.dataAnalysisByOrg[orgId] : undefined);
 
   const [values, setValues] = useState<Record<string, KPIValue>>({});
   const [valuesLoading, setValuesLoading] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const [showSuggestions, setShowSuggestions] = useState(true);
   const [busySuggestionId, setBusySuggestionId] = useState<string | null>(null);
   const [justAddedKey, setJustAddedKey] = useState<string | null>(null);
-  const [dataNeeds, setDataNeeds] = useState<DataNeed[]>([]);
-  const [dataAnalysis, setDataAnalysis] = useState<string>("");
-  const [dataSufficient, setDataSufficient] = useState<boolean | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+  const abortRef = useRef<AbortController | null>(null);
   const initialSuggestDone = useRef(false);
   const pendingUploadKpiRef = useRef<{ kpi?: string; kpiTitle?: string }>({});
+
+  useEffect(() => {
+    if (!suggesting) { setElapsed(0); return; }
+    const id = setInterval(() => setElapsed((e) => e + 1), 1000);
+    return () => clearInterval(id);
+  }, [suggesting]);
 
   const goalCount = useMemo(() => goals.filter((g) => g.status !== "cancelled").length, [goals]);
   const activeGoals = useMemo(() => goals.filter((g) => g.status === "active").length, [goals]);
   const completedGoals = useMemo(() => goals.filter((g) => g.status === "completed").length, [goals]);
 
-  const acceptedKeys = useMemo(() => acceptedKPIs.map((k) => k.key), [acceptedKPIs]);
+  const acceptedKeys = useMemo<string[]>(() => acceptedKPIs.map((k) => k.key), [acceptedKPIs]);
   const orgName = organization?.name;
   const orgIndustry = organization?.industry;
   const orgMicroVertical = organization?.micro_vertical;
 
   const fetchSuggestions = useCallback(
     async (trigger?: { source: KPISource; detail?: string; suggestedKpi?: string; suggestedKpiTitle?: string }) => {
-      if (!orgId || suggesting) return;
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(async () => {
+
+      abortRef.current?.abort();
+      abortRef.current = new AbortController();
+      const cancelSignal = abortRef.current.signal;
+
+      const doFetch = async () => {
+        const id = useOrganizationStore.getState().organization?.id;
+        if (!id) { return; }
         setSuggesting(true);
+        const safetyTimer = setTimeout(() => {
+          if (mountedRef.current) setSuggesting(false);
+        }, 30000);
+        let fetchTimeout: ReturnType<typeof setTimeout> | undefined;
         try {
           const completionRate =
             tasks.length > 0
@@ -454,12 +425,14 @@ export default function KPISuggestionsCard() {
             focusKpiTitle: trigger?.suggestedKpiTitle,
           });
 
+          fetchTimeout = setTimeout(() => abortRef.current?.abort(), 90000);
           const res = await fetch(`${API_URL}/strategy-chat/chat`, {
+            signal: cancelSignal,
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               message: prompt,
-              organization_id: orgId,
+              organization_id: id,
               context: {
                 organization: orgName,
                 industry: orgIndustry,
@@ -475,18 +448,29 @@ export default function KPISuggestionsCard() {
             }),
           });
 
-          if (!res.ok) return;
+          if (!res.ok) {
+            console.warn(`[KPI] API returned ${res.status}`);
+            return;
+          }
           const data = await res.json();
-          const parsed = parseAiSuggestions(data.message || "");
-          if (!parsed) return;
+          const rawMsg = data.message || "";
+          const parsed = parseAiSuggestions(rawMsg);
+          if (!parsed) {
+            console.warn("[KPI] parseAiSuggestions returned null, raw:", rawMsg.slice(0, 500));
+            return;
+          }
 
-          setDataSufficient(parsed.data_sufficient);
-          setDataAnalysis(parsed.data_analysis);
-          setDataNeeds(parsed.data_needs);
+          if (id) {
+            setDataSufficient(id, parsed.data_sufficient);
+            setDataAnalysis(id, parsed.data_analysis);
+            setDataNeeds(id, parsed.data_needs);
+          }
 
           if (!parsed.data_sufficient || parsed.kpis.length === 0) {
-            addSuggestions(orgId, []);
-            markShown(orgId);
+            if (!parsed.data_sufficient) console.warn("[KPI] AI says data insufficient:", parsed.data_analysis);
+            else console.warn("[KPI] AI returned 0 KPIs");
+            addSuggestions(id, []);
+            markShown(id);
             return;
           }
 
@@ -494,7 +478,7 @@ export default function KPISuggestionsCard() {
             .filter((p) => p && typeof p.key === "string" && typeof p.title === "string")
             .slice(0, 3)
             .map((p) => ({
-              id: `sug-${orgId}-${p.key}-${Date.now()}`,
+              id: `sug-${id}-${p.key}-${Date.now()}`,
               key: String(p.key).toLowerCase().replace(/\s+/g, "_"),
               title: String(p.title).slice(0, 80),
               rationale: String(p.rationale || p.why || "Recommended based on your business context.").slice(0, 200),
@@ -503,23 +487,36 @@ export default function KPISuggestionsCard() {
               category: typeof p.category === "string" ? p.category : undefined,
               icon: typeof p.icon === "string" ? p.icon : undefined,
               priority: (["high", "medium", "low"].includes(String(p.priority)) ? p.priority : "medium") as "high" | "medium" | "low",
+              value: typeof p.value === "number" || typeof p.value === "string" ? p.value : undefined,
+              formatted: p.formatted ? String(p.formatted).slice(0, 60) : undefined,
               createdAt: Date.now(),
             }));
 
           if (mapped.length > 0) {
-            addSuggestions(orgId, mapped);
-            markShown(orgId);
+            addSuggestions(id, mapped);
+            markShown(id);
           }
-        } catch {
-          // silent
+        } catch (err) {
+          const isAbort = err instanceof DOMException && (err.name === "AbortError" || err.name === "TimeoutError");
+          if (isAbort) {
+            console.warn("[KPI] fetch suggestions request aborted/timeout");
+          } else {
+            console.warn("[KPI] fetchSuggestions error:", err);
+          }
         } finally {
+          clearTimeout(safetyTimer);
+          clearTimeout(fetchTimeout);
           setSuggesting(false);
         }
-      }, trigger ? 200 : SUGGEST_DEBOUNCE_MS);
+      };
+
+      if (trigger) {
+        debounceRef.current = setTimeout(doFetch, 200);
+      } else {
+        doFetch();
+      }
     },
     [
-      orgId,
-      suggesting,
       orgName,
       orgIndustry,
       orgMicroVertical,
@@ -538,12 +535,20 @@ export default function KPISuggestionsCard() {
     if (!orgId) return;
     setValuesLoading(true);
     try {
-      const res = await fetch(`${API_URL}/dashboard/kpi?organization_id=${orgId}`);
-      if (!res.ok) return;
+      const accepted = useKPIStore.getState().acceptedByOrg[orgId] || [];
+      let url = `${API_URL}/dashboard/kpi?organization_id=${encodeURIComponent(orgId)}`;
+      if (accepted.length > 0) {
+        url += `&accepted_kpis=${encodeURIComponent(JSON.stringify(accepted.map(k => ({ key: k.key, title: k.title }))))}`;
+      }
+      const res = await fetch(url);
+      if (!res.ok) {
+        console.warn(`[KPI] fetchValues API returned ${res.status}`);
+        return;
+      }
       const data = await res.json();
       setValues(data || {});
-    } catch {
-      // silent
+    } catch (err) {
+      console.warn("[KPI] fetchValues error:", err);
     } finally {
       setValuesLoading(false);
     }
@@ -570,7 +575,16 @@ export default function KPISuggestionsCard() {
     ];
   }, [members, goalCount, activeGoals, tasks, values, orgIndustry]);
 
-  const docCount = Number(values.documents?.value || 0);
+  const [fallbackDocCount, setFallbackDocCount] = useState<number | null>(null);
+  useEffect(() => {
+    if (!orgId) return;
+    fetch(`${API_URL}/dashboard/document-count?organization_id=${encodeURIComponent(orgId)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d && typeof d.count === "number") setFallbackDocCount(d.count); })
+      .catch(() => {});
+  }, [orgId]);
+
+  const docCount = Number(values.documents?.value ?? fallbackDocCount ?? 0);
   const docCountRef = useRef(docCount);
   docCountRef.current = docCount;
   const readinessMet = useMemo(() => readinessChecks.filter(c => c.met).length, [readinessChecks]);
@@ -615,6 +629,13 @@ export default function KPISuggestionsCard() {
     if (initialSuggestDone.current) return;
     initialSuggestDone.current = true;
   }, [orgId]);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!orgId) return;
@@ -706,37 +727,33 @@ export default function KPISuggestionsCard() {
                 Live
               </Badge>
             )}
-            {hasContent && (
-              <>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => fetchSuggestions()}
-                  disabled={suggesting}
-                  className="h-7 px-2 text-[11px] text-text-muted"
-                  title="Ask AI for fresh KPI suggestions"
-                >
-                  {suggesting ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                  Refresh suggestions
-                </Button>
-                {suggestions.length > 0 && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setShowSuggestions((v) => !v)}
-                    className="h-7 px-2 text-[11px] text-text-muted"
-                  >
-                    {showSuggestions ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                    {showSuggestions ? "Hide" : "Show"} suggestions ({suggestions.length})
-                  </Button>
-                )}
-              </>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => fetchSuggestions()}
+              disabled={false}
+              className="h-7 px-2 text-[11px] text-text-muted"
+              title="Ask AI for fresh KPI suggestions"
+            >
+              {suggesting ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+              {suggesting ? `AI analyzing... ${elapsed}s` : "Refresh suggestions"}
+            </Button>
+            {hasContent && suggestions.length > 0 && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setShowSuggestions((v) => !v)}
+                className="h-7 px-2 text-[11px] text-text-muted"
+              >
+                {showSuggestions ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                {showSuggestions ? "Hide" : "Show"} suggestions ({suggestions.length})
+              </Button>
             )}
           </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {dataSufficient === false && dataNeeds.length > 0 && (
+        {storeDataSufficient === false && storeDataNeeds && storeDataNeeds.length > 0 && (
           <div className="space-y-3">
             <div className="flex items-start gap-3">
               <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center flex-shrink-0">
@@ -746,13 +763,13 @@ export default function KPISuggestionsCard() {
                 <p className="text-sm font-semibold text-foreground">
                   Upload data to unlock specific KPIs
                 </p>
-                {dataAnalysis && (
-                  <p className="text-[11px] text-text-muted mt-0.5">{dataAnalysis}</p>
+                {storeDataAnalysis && (
+                  <p className="text-[11px] text-text-muted mt-0.5">{storeDataAnalysis}</p>
                 )}
               </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {dataNeeds.map((need, i) => (
+              {storeDataNeeds.map((need, i) => (
                 <div
                   key={i}
                   className="rounded-xl border border-border/50 bg-surface/30 p-4 space-y-3"
@@ -783,15 +800,19 @@ export default function KPISuggestionsCard() {
                     variant="outline"
                     onClick={() => {
                       if (need.suggested_kpi) {
-                        pendingUploadKpiRef.current = { kpi: need.suggested_kpi, kpiTitle: need.suggested_kpi_title };
+                        try {
+                          sessionStorage.setItem("pendingKpiContext", JSON.stringify({
+                            kpi: need.suggested_kpi,
+                            kpiTitle: need.suggested_kpi_title || need.suggested_kpi,
+                          }));
+                        } catch {}
                       }
-                      fileInputRef.current?.click();
+                      router.push("/dashboard/data");
                     }}
-                    disabled={uploading}
                     className="h-7 px-2.5 text-[10px] w-full"
                   >
-                    {uploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
-                    {uploading ? "Uploading..." : "Upload file to track this KPI"}
+                    <Upload className="w-3 h-3" />
+                    Upload file to track this KPI
                   </Button>
                 </div>
               ))}
@@ -801,7 +822,7 @@ export default function KPISuggestionsCard() {
                 size="sm"
                 variant="ghost"
                 onClick={() => fetchSuggestions()}
-                disabled={suggesting}
+                disabled={false}
                 className="h-7 px-2 text-[11px] text-text-muted"
               >
                 {suggesting ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
@@ -837,140 +858,45 @@ export default function KPISuggestionsCard() {
           </div>
         )}
 
-        {acceptedKPIs.length > 0 && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <BarChart3 className="w-3.5 h-3.5 text-primary" />
-                <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">
-                  Live KPIs
+        {!hasContent && !suggesting && (!storeDataNeeds || storeDataNeeds.length === 0) && (
+          <div className="flex flex-col items-center justify-center py-10 px-6 text-center rounded-xl border border-dashed border-border/60 bg-surface/40">
+            {docCount === 0 ? (
+              <>
+                <BarChart3 className="w-10 h-10 text-primary/40 mb-4" />
+                <p className="text-sm font-semibold mb-1">Upload data to get KPI suggestions</p>
+                <p className="text-xs text-text-muted/80 max-w-sm mb-4">
+                  Upload your business data (CSV, PDF, Excel) in the Data section first.
+                  The AI will analyze it and recommend KPIs tailored to your actual numbers.
                 </p>
-                <span className="text-[10px] text-text-muted/60">({acceptedKPIs.length})</span>
-              </div>
-              <button
-                onClick={fetchValues}
-                disabled={valuesLoading}
-                className="p-1 rounded-lg hover:bg-surface-light text-text-muted hover:text-foreground transition-colors cursor-pointer disabled:opacity-50"
-                title="Refresh KPI values"
-              >
-                <RefreshCw className={`w-3 h-3 ${valuesLoading ? "animate-spin" : ""}`} />
-              </button>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-              {acceptedKPIs.map((kpi) => (
-                <AcceptedKPITile
-                  key={kpi.id}
-                  kpi={kpi}
-                  value={values[kpi.key]}
-                  refreshing={valuesLoading}
-                  onRemove={() => removeKPI(orgId, kpi.id)}
-                />
-              ))}
-            </div>
-            {justAddedKey && (
-              <p className="text-[10px] text-emerald-400 flex items-center gap-1">
-                <Check className="w-3 h-3" />
-                Added! Looking for related KPIs you might also want to track…
-              </p>
-            )}
-            {valuesLoading && (
-              <div className="flex items-center gap-2 text-[10px] text-text-muted/60 py-1">
-                <Loader2 className="w-3 h-3 animate-spin" />
-                Refreshing values...
-              </div>
-            )}
-          </div>
-        )}
-
-        {!hasContent && !suggesting && dataNeeds.length === 0 && (
-          <div className="space-y-4">
-            {/* Upload prompt — primary action */}
-            <div
-              onDrop={handleDrop}
-              onDragOver={(e) => e.preventDefault()}
-              className="flex flex-col items-center justify-center py-10 px-6 text-center rounded-xl border-2 border-dashed border-border/60 bg-surface/40 hover:border-primary/40 transition-colors cursor-pointer"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary/10 to-purple-500/10 border border-primary/20 flex items-center justify-center mb-4">
-                {uploading ? (
-                  <Loader2 className="w-6 h-6 text-primary animate-spin" />
-                ) : (
-                  <Upload className="w-6 h-6 text-primary/60" />
-                )}
-              </div>
-              <p className="text-sm font-semibold mb-1">
-                {docCount > 0 ? "Upload more data" : "Upload your business data"}
-              </p>
-              <p className="text-xs text-text-muted/80 max-w-sm mb-4">
-                Drop a CSV, PDF, or Excel file with your sales, revenue, or operational data.
-                The AI will analyze it and recommend KPIs tailored to your actual numbers.
-              </p>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf,.docx,.txt,.csv,.xlsx,.xls,.png,.jpg,.jpeg"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) handleFileUpload(f);
-                }}
-              />
-              <Button
-                size="sm"
-                variant={docCount > 0 ? "default" : "outline"}
-                onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-                disabled={uploading}
-                className="h-8 px-4 text-xs"
-              >
-                {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileUp className="w-3.5 h-3.5" />}
-                {uploading ? "Uploading..." : docCount > 0 ? "Add another file" : "Select a file"}
-              </Button>
-            </div>
-
-            {/* After upload: generate button */}
-            {docCount > 0 && (
-              <div className="flex flex-col items-center gap-3 p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
-                <p className="text-xs text-emerald-400 flex items-center gap-1.5">
-                  <Check className="w-3.5 h-3.5" />
-                  {docCount} file{docCount !== 1 ? "s" : ""} uploaded
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={() => router.push("/dashboard/data")}
+                  className="h-8 px-4 text-xs"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  Go to Data
+                </Button>
+              </>
+            ) : (
+              <>
+                <Check className="w-10 h-10 text-emerald-400 mb-4" />
+                <p className="text-sm font-semibold mb-1">Data uploaded</p>
+                <p className="text-xs text-text-muted/80 max-w-sm mb-4">
+                  Your data is ready. Generate AI-powered KPI suggestions based on what you uploaded?
                 </p>
                 <Button
                   size="sm"
                   variant="default"
                   onClick={() => fetchSuggestions()}
-                  disabled={suggesting}
-                  className="h-9 px-4 text-xs font-semibold"
+                  disabled={false}
+                  className="h-8 px-4 text-xs"
                 >
                   {suggesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                  {suggesting ? "Generating..." : "Generate KPI Suggestions"}
+                  {suggesting ? "Generating..." : "Suggest KPIs"}
                 </Button>
-              </div>
+              </>
             )}
-
-            {/* Data Readiness — compact badges */}
-            <div className="rounded-xl border border-border/50 bg-surface/30 p-3">
-              <div className="flex items-center gap-2 mb-2">
-                <Database className="w-3.5 h-3.5 text-primary" />
-                <span className="text-[10px] font-semibold text-text-muted uppercase tracking-wider">Data Readiness</span>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {readinessChecks.map((check) => (
-                  <span
-                    key={check.key}
-                    className={`inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-full border ${
-                      check.met
-                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                        : "bg-amber-500/5 text-text-muted/60 border-border/40"
-                    }`}
-                  >
-                    {check.met
-                      ? <Check className="w-2.5 h-2.5" />
-                      : <div className="w-1.5 h-1.5 rounded-full bg-amber-400/60" />}
-                    {check.label}
-                  </span>
-                ))}
-              </div>
-            </div>
           </div>
         )}
 
@@ -986,7 +912,7 @@ export default function KPISuggestionsCard() {
           </div>
         )}
 
-        {hasContent && suggestions.length === 0 && (
+        {hasContent && suggestions.length === 0 && storeDataSufficient !== false && (
           <div className="flex items-center gap-2 p-2.5 rounded-lg bg-surface/40 border border-border/40">
             <Plus className="w-3.5 h-3.5 text-text-muted flex-shrink-0" />
             <p className="text-[11px] text-text-muted">
@@ -996,13 +922,23 @@ export default function KPISuggestionsCard() {
               size="sm"
               variant="ghost"
               onClick={() => fetchSuggestions()}
-              disabled={suggesting}
+              disabled={false}
               className="h-6 px-2 text-[10px] ml-auto flex-shrink-0"
             >
               Ask for more
             </Button>
           </div>
         )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf,.docx,.txt,.csv,.xlsx,.xls,.png,.jpg,.jpeg"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) handleFileUpload(f);
+          }}
+        />
       </CardContent>
     </Card>
   );

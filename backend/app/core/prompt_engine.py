@@ -423,20 +423,17 @@ Domain: {org.get('domain', 'N/A')}
     async def _build_documents_section(self, org_id: str, user_id: str | None = None) -> str:
         if self.db is None:
             return "===== DOCUMENTS =====\nNo database connection.\n=======================\n"
-        query: dict = {"org_id": org_id}
-        if user_id:
-            query["user_id"] = user_id
         docs = list(
-            self.db.documents.find(query)
+            self.db.documents.find({"org_id": org_id})
             .sort("created_at", -1)
-            .limit(5)
+            .limit(20)
         )
         if not docs:
             return "===== DOCUMENTS =====\nNo uploaded documents found.\n=======================\n"
 
         lines = []
         for d in docs:
-            preview = (d.get("text", "") or "")[:300]
+            preview = (d.get("text", "") or "")[:4000]
             lines.append(
                 f"  {d.get('filename', 'unknown')} — {d.get('text_length', 0)} chars, "
                 f"{d.get('chunk_count', 0)} chunks. Preview: {preview}"

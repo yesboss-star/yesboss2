@@ -34,6 +34,7 @@ import {
 } from "recharts";
 import { getAuthHeaders } from "@/lib/utils";
 import KPISuggestionsCard from "@/components/owners/KPISuggestionsCard";
+import AcceptedKPIBanner from "@/components/owners/AcceptedKPIBanner";
 import AISummaryChat from "@/components/AISummaryChat";
 import MeetingUploadModal from "@/components/owners/MeetingUploadModal";
 import ZohoCalendarBooking from "@/components/owners/ZohoCalendarBooking";
@@ -2207,22 +2208,46 @@ function HierarchyGoalCard({
 
 
 function WeeklyReportGenerator() {
-  const { currentReport, generating, downloading, generateReport, downloadReport } =
+  const { currentReport, generating, downloading, generateReport, downloadReport,
+          template, templateLoading, templateUploading, placeholders,
+          fetchTemplate, uploadTemplate, deleteTemplate, fetchPlaceholders } =
     useReportStore();
   const { organization } = useOrganizationStore();
+  const orgId = organization?.id;
   const [alertOpen, setAlertOpen] = useState(false);
   const [alertTitle, setAlertTitle] = useState("");
   const [alertMessage, setAlertMessage] = useState("");
+  const [alertType, setAlertType] = useState<"error" | "success" | "info">("error");
+  const [useTemplate, setUseTemplate] = useState(false);
+  const [showPlaceholders, setShowPlaceholders] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
-  const showAlert = (title: string, message: string) => {
+  useEffect(() => {
+    if (orgId) {
+      fetchTemplate(orgId);
+      fetchPlaceholders();
+    }
+  }, [orgId, fetchTemplate, fetchPlaceholders]);
+
+  const showAlert = (title: string, message: string, type: "error" | "success" | "info" = "error") => {
     setAlertTitle(title);
     setAlertMessage(message);
+    setAlertType(type);
     setAlertOpen(true);
   };
 
   const handleGenerate = async () => {
+    if (useTemplate && template) {
+      setConfirmOpen(true);
+      return;
+    }
+    await doGenerate();
+  };
+
+  const doGenerate = async (useTpl = false) => {
     try {
-      await generateReport("weekly", organization?.id);
+      await generateReport("weekly", orgId, useTpl);
     } catch (err: any) {
       if (err?.message?.includes("Insufficient data") || err?.status === 400) {
         showAlert("Insufficient Data", "You need at least one goal or task before generating a report. Create a goal first to get started.");
@@ -2241,6 +2266,32 @@ function WeeklyReportGenerator() {
     }
   };
 
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !orgId) return;
+    if (!file.name.toLowerCase().endsWith(".docx")) {
+      showAlert("Invalid Format", "Only .docx files are accepted.");
+      return;
+    }
+    try {
+      await uploadTemplate(orgId, file);
+      showAlert("Template Uploaded", `"${file.name}" is ready. You can now use it to generate reports.`, "success");
+    } catch (err: any) {
+      showAlert("Upload Failed", err?.message || "Could not upload template.");
+    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleRemoveTemplate = async () => {
+    if (!orgId) return;
+    try {
+      await deleteTemplate(orgId);
+      setUseTemplate(false);
+    } catch {
+      // silent
+    }
+  };
+
   return (
     <>
       <Modal open={alertOpen} onOpenChange={setAlertOpen} size="md">
@@ -2250,8 +2301,18 @@ function WeeklyReportGenerator() {
         </ModalHeader>
         <ModalContent>
           <div className="flex flex-col items-center text-center py-4">
-            <div className="w-16 h-16 rounded-2xl bg-amber-500/10 flex items-center justify-center mb-4">
-              <AlertTriangle className="w-8 h-8 text-amber-400" />
+            <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-4 ${
+              alertType === "success" ? "bg-emerald-500/10" :
+              alertType === "info" ? "bg-primary/10" :
+              "bg-amber-500/10"
+            }`}>
+              {alertType === "success" ? (
+                <CheckCircle className="w-8 h-8 text-emerald-400" />
+              ) : alertType === "info" ? (
+                <Info className="w-8 h-8 text-primary" />
+              ) : (
+                <AlertTriangle className="w-8 h-8 text-amber-400" />
+              )}
             </div>
             <p className="text-sm text-text-muted">{alertMessage}</p>
           </div>
@@ -2263,17 +2324,126 @@ function WeeklyReportGenerator() {
         </ModalFooter>
       </Modal>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <FileText className="w-5 h-5 text-primary" />
-            <CardTitle>Weekly Report Generator</CardTitle>
+      <Modal open={confirmOpen} onOpenChange={setConfirmOpen} size="sm">
+        <ModalHeader>
+          <ModalTitle>Use Custom Template?</ModalTitle>
+          <ModalClose />
+        </ModalHeader>
+        <ModalContent>
+          <p className="text-sm text-text-muted py-2">
+            Generate this report using <strong>{template?.filename}</strong>?
+          </p>
+        </ModalContent>
+        <ModalFooter className="flex gap-2">
+          <Button variant="outline" onClick={() => { setConfirmOpen(false); doGenerate(false); }} className="cursor-pointer">
+            No, use default
+          </Button>
+          <Button onClick={() => { setConfirmOpen(false); doGenerate(true); }} className="cursor-pointer">
+            Yes, use template
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      <div className="p-4 space-y-4">
+          {/* Template section */}
+          <div className="p-4 rounded-xl bg-surface border border-border/50 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4 text-primary" />
+                <span className="text-sm font-medium">Custom Template</span>
+              </div>
+              {template && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={handleRemoveTemplate}
+                  disabled={templateUploading}
+                  className="h-6 px-2 text-[10px] text-rose-400 hover:text-rose-300 cursor-pointer"
+                >
+                  Remove
+                </Button>
+              )}
+            </div>
+
+            {templateLoading ? (
+              <div className="flex items-center gap-2 text-xs text-text-muted">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Loading template...
+              </div>
+            ) : template ? (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-xs text-text-muted">
+                  <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                  {template.filename}
+                  <span className="text-text-muted/60">
+                    (uploaded {new Date(template.upload_date).toLocaleDateString()})
+                  </span>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={useTemplate}
+                    onChange={(e) => setUseTemplate(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded border-border bg-surface text-primary focus:ring-primary cursor-pointer"
+                  />
+                  <span className="text-xs text-text-muted">Use custom template for next report</span>
+                </label>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-text-muted">
+                  No custom template. Upload a .docx file to customize your report format.
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={templateUploading}
+                    className="cursor-pointer"
+                  >
+                    {templateUploading ? (
+                      <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                    ) : (
+                      <Upload className="w-3 h-3 mr-1" />
+                    )}
+                    {templateUploading ? "Uploading..." : "Upload Template"}
+                  </Button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".docx"
+                    onChange={handleFileSelect}
+                    className="hidden"
+                  />
+                </div>
+
+                {/* Placeholder help */}
+                <div>
+                  <button
+                    onClick={() => setShowPlaceholders(!showPlaceholders)}
+                    className="text-[10px] text-primary hover:text-primary-light cursor-pointer"
+                  >
+                    {showPlaceholders ? "Hide" : "View"} available placeholders
+                  </button>
+                  {showPlaceholders && (
+                    <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+                      {placeholders.map((p) => (
+                        <div key={p.key} className="flex items-center gap-2 text-[10px] text-text-muted">
+                          <code className="px-1.5 py-0.5 rounded bg-surface-light text-primary font-mono text-[9px]">
+                            {`{{${p.key}}}`}
+                          </code>
+                          <span>{p.description}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
-          <CardDescription>
-            Generate and download comprehensive business reports (PDF &amp; Word)
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+
+          {/* Generate section */}
           <div className="flex items-center justify-between p-4 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 border border-primary/10">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
@@ -2300,8 +2470,10 @@ function WeeklyReportGenerator() {
               {generating ? "Generating..." : "Generate"}
             </Button>
           </div>
+
+          {/* Report summary */}
           {currentReport && (
-            <div className="mt-3 space-y-3">
+            <div className="space-y-3">
               <div className="grid grid-cols-4 gap-3">
                 {[
                   { label: "Active Goals", value: currentReport.summary.active_goals, icon: Target, color: "text-primary" },
@@ -2319,6 +2491,12 @@ function WeeklyReportGenerator() {
                   );
                 })}
               </div>
+              {currentReport.template_used && (
+                <p className="text-[10px] text-primary flex items-center gap-1">
+                  <CheckCircle className="w-3 h-3" />
+                  Generated with custom template
+                </p>
+              )}
               <div className="flex gap-2">
                 <Button
                   onClick={() => handleDownload("pdf")}
@@ -2340,11 +2518,10 @@ function WeeklyReportGenerator() {
                   <FileSpreadsheet className="w-4 h-4 mr-1" />
                   {downloading ? "Downloading..." : "Download Word"}
                 </Button>
-              </div>
-            </div>
+          </div>
+          </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
     </>
   );
 }
@@ -2988,6 +3165,8 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
 
       {adaptation.showGrokInsights && <OrgHealthWidget orgId={orgId} compact />}
 
+      <AcceptedKPIBanner />
+
       <CollapsibleSection title="Goals Pipeline" icon={Target} badge={goalsBadge} badgeVariant={urgentGoals > 0 ? "warning" : "default"} defaultExpanded={goalsExpanded}>
         <GoalSection />
       </CollapsibleSection>
@@ -3002,7 +3181,11 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
         <KPISuggestionsCard />
       </CollapsibleSection>
 
-      {adaptation.showGrokInsights && <WeeklyReportGenerator />}
+      {adaptation.showGrokInsights && (
+        <CollapsibleSection title="Weekly Report Generator" icon={FileText} defaultExpanded={false}>
+          <WeeklyReportGenerator />
+        </CollapsibleSection>
+      )}
 
       <CollapsibleSection
         title="Meeting Notes"

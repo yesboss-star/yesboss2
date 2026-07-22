@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -40,6 +40,7 @@ class ReportRequest(BaseModel):
     period: str = "weekly"
     sections: list[str] | None = None
     organization_id: str | None = None
+    use_template: bool = False
 
 def build_report_content(db, org_id: str, request: ReportRequest) -> dict[str, Any]:
     goals = list(db.goals.find({"organization_id": org_id}).sort("created_at", -1))
@@ -57,12 +58,12 @@ def build_report_content(db, org_id: str, request: ReportRequest) -> dict[str, A
 
     departments = {}
     for g in goals:
-        dept = g.get("department", "general")
+        dept = g.get("department") or "general"
         if dept not in departments:
             departments[dept] = {"goals": 0, "tasks": 0}
         departments[dept]["goals"] += 1
     for t in tasks:
-        dept = t.get("department", "general")
+        dept = t.get("department") or "general"
         if dept not in departments:
             departments[dept] = {"goals": 0, "tasks": 0}
         departments[dept]["tasks"] += 1
@@ -410,13 +411,31 @@ async def generate_report(
 
     content = build_report_content(db, org_id, request)
 
-    report_doc = {
+    org = db.organizations.find_one({"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id})
+    org_name = org.get("name", "YesBoss") if org else "YesBoss"
+
+    report_doc: dict[str, Any] = {
         "organization_id": org_id,
         "period": request.period,
         "content": content,
+        "template_used": False,
         "created_at": datetime.utcnow(),
         "created_by": getattr(current_user, 'id', None),
     }
+
+    if request.use_template:
+        template = db.files.find_one({"organization_id": org_id, "category": "report_template"})
+        if template:
+            from ..core.report_template import fill_template
+            template_bytes = template.get("content") or template.get("file_data")
+            if template_bytes:
+                fill_data = {"org_name": org_name, "summary": content["summary"], "content": content}
+                try:
+                    filled_docx = fill_template(template_bytes, fill_data)
+                    report_doc["template_docx"] = filled_docx
+                    report_doc["template_used"] = True
+                except Exception as e:
+                    logger.warning(f"Template fill failed, falling back to default: {e}")
 
     result = db.reports.insert_one(report_doc)
     report_doc["_id"] = str(result.inserted_id)
@@ -432,6 +451,7 @@ async def generate_report(
             "tasks": content.get("tasks", []),
             "task_breakdown": content.get("task_breakdown", []),
             "employee_insights": content.get("employee_insights", []),
+            "template_used": report_doc.get("template_used", False),
         }
     }
 
@@ -454,6 +474,8 @@ async def list_reports(current_user = Depends(get_current_user)):
         r["_id"] = str(r["_id"])
         if "content" in r and isinstance(r["content"], dict):
             r["summary"] = r["content"].get("summary", {})
+        r["template_used"] = r.get("template_used", False)
+        r.pop("template_docx", None)
     return {"reports": reports}
 
 @router.post("/generate/employee")
@@ -643,6 +665,110 @@ def generate_docx(content: dict[str, Any], org_name: str = "YesBoss") -> bytes:
     return buf.getvalue()
 
 
+@router.get("/placeholders")
+async def list_placeholders_endpoint():
+    from ..core.report_template import list_placeholders
+    return {"placeholders": list_placeholders()}
+
+
+@router.post("/template/upload")
+async def upload_template_file(
+    organization_id: str = Query(...),
+    file: UploadFile = File(...),
+    current_user = Depends(get_current_user_optional)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    if not file.filename or not file.filename.lower().endswith(".docx"):
+        raise HTTPException(status_code=400, detail="Only .docx files are accepted")
+
+    content = await file.read()
+    if len(content) == 0:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 10MB)")
+
+    from ..core.report_template import list_placeholders
+    placeholders = list_placeholders()
+
+    existing = db.files.find_one({"organization_id": organization_id, "category": "report_template"})
+    if existing:
+        db.files.update_one(
+            {"_id": existing["_id"]},
+            {"$set": {
+                "filename": file.filename,
+                "content": content,
+                "file_type": "docx",
+                "category": "report_template",
+                "updated_at": datetime.utcnow(),
+            }}
+        )
+        template_id = str(existing["_id"])
+    else:
+        result = db.files.insert_one({
+            "organization_id": organization_id,
+            "filename": file.filename,
+            "content": content,
+            "file_type": "docx",
+            "category": "report_template",
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+        })
+        template_id = str(result.inserted_id)
+
+    return {
+        "success": True,
+        "template": {
+            "id": template_id,
+            "filename": file.filename,
+            "upload_date": datetime.utcnow().isoformat(),
+            "placeholder_count": len(placeholders),
+        }
+    }
+
+
+@router.get("/template")
+async def get_template(
+    organization_id: str = Query(...),
+    current_user = Depends(get_current_user_optional)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    template = db.files.find_one(
+        {"organization_id": organization_id, "category": "report_template"},
+        {"content": 0}
+    )
+    if not template:
+        return {"template": None}
+
+    from ..core.report_template import list_placeholders
+    return {
+        "template": {
+            "id": str(template["_id"]),
+            "filename": template.get("filename", ""),
+            "upload_date": template.get("created_at", datetime.utcnow()).isoformat() if isinstance(template.get("created_at"), datetime) else str(template.get("created_at", "")),
+            "placeholder_count": len(list_placeholders()),
+        }
+    }
+
+
+@router.delete("/template")
+async def delete_template(
+    organization_id: str = Query(...),
+    current_user = Depends(get_current_user_optional)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    result = db.files.delete_one({"organization_id": organization_id, "category": "report_template"})
+    return {"success": result.deleted_count > 0}
+
+
 @router.get("/download/{report_id}")
 async def download_report(
     report_id: str,
@@ -665,12 +791,17 @@ async def download_report(
     from fastapi.responses import Response
 
     if format == "docx":
-        docx_bytes = generate_docx(content, org_name)
+        if report.get("template_used") and report.get("template_docx"):
+            docx_bytes = report["template_docx"]
+            suffix = "_template.docx"
+        else:
+            docx_bytes = generate_docx(content, org_name)
+            suffix = ".docx"
         return Response(
             content=docx_bytes,
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             headers={
-                "Content-Disposition": f"attachment; filename=yesboss_report_{report_id}.docx",
+                "Content-Disposition": f"attachment; filename=yesboss_report_{report_id}{suffix}",
                 "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             }
         )

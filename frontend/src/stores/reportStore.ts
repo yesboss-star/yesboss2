@@ -19,6 +19,19 @@ export interface Report {
   generated_at: string;
   summary: ReportSummary;
   departments?: Record<string, { goals: number; tasks: number }>;
+  template_used?: boolean;
+}
+
+export interface TemplateInfo {
+  id: string;
+  filename: string;
+  upload_date: string;
+  placeholder_count: number;
+}
+
+export interface Placeholder {
+  key: string;
+  description: string;
 }
 
 interface ReportState {
@@ -28,11 +41,19 @@ interface ReportState {
   downloading: boolean;
   loading: boolean;
   error: string | null;
+  template: TemplateInfo | null;
+  templateLoading: boolean;
+  templateUploading: boolean;
+  placeholders: Placeholder[];
   setCurrentReport: (report: Report | null) => void;
   setReportHistory: (reports: Report[]) => void;
-  generateReport: (period?: string, organization_id?: string) => Promise<Report>;
+  generateReport: (period?: string, organization_id?: string, useTemplate?: boolean) => Promise<Report>;
   fetchReportHistory: () => Promise<void>;
   downloadReport: (reportId: string, format?: string) => Promise<void>;
+  fetchTemplate: (organization_id: string) => Promise<void>;
+  uploadTemplate: (organization_id: string, file: File) => Promise<void>;
+  deleteTemplate: (organization_id: string) => Promise<void>;
+  fetchPlaceholders: () => Promise<void>;
 }
 
 export const useReportStore = create<ReportState>()(
@@ -43,17 +64,21 @@ export const useReportStore = create<ReportState>()(
     downloading: false,
     loading: false,
     error: null,
+    template: null,
+    templateLoading: false,
+    templateUploading: false,
+    placeholders: [],
 
     setCurrentReport: (report) => set({ currentReport: report }),
     setReportHistory: (reports) => set({ reportHistory: reports }),
 
-    generateReport: async (period = "weekly", organization_id) => {
+    generateReport: async (period = "weekly", organization_id, useTemplate = false) => {
       set({ generating: true, error: null });
       try {
         const response = await fetch(`${API_URL}/reports/generate`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ period, organization_id }),
+          body: JSON.stringify({ period, organization_id, use_template: useTemplate }),
         });
         if (!response.ok) {
           const errBody = await response.json().catch(() => ({}));
@@ -112,6 +137,62 @@ export const useReportStore = create<ReportState>()(
       } catch (error: any) {
         set({ error: error.message, downloading: false });
         throw error;
+      }
+    },
+
+    fetchTemplate: async (organization_id) => {
+      set({ templateLoading: true });
+      try {
+        const response = await fetch(`${API_URL}/reports/template?organization_id=${encodeURIComponent(organization_id)}`);
+        if (!response.ok) { set({ templateLoading: false }); return; }
+        const result = await response.json();
+        set({ template: result.template, templateLoading: false });
+      } catch {
+        set({ templateLoading: false });
+      }
+    },
+
+    uploadTemplate: async (organization_id, file) => {
+      set({ templateUploading: true, error: null });
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const response = await fetch(`${API_URL}/reports/template/upload?organization_id=${encodeURIComponent(organization_id)}`, {
+          method: "POST",
+          body: formData,
+        });
+        if (!response.ok) {
+          const errBody = await response.json().catch(() => ({}));
+          throw new Error(errBody.detail || "Failed to upload template");
+        }
+        const result = await response.json();
+        set({ template: result.template, templateUploading: false });
+      } catch (error: any) {
+        set({ error: error.message, templateUploading: false });
+        throw error;
+      }
+    },
+
+    deleteTemplate: async (organization_id) => {
+      set({ templateUploading: true });
+      try {
+        await fetch(`${API_URL}/reports/template?organization_id=${encodeURIComponent(organization_id)}`, {
+          method: "DELETE",
+        });
+        set({ template: null, templateUploading: false });
+      } catch {
+        set({ templateUploading: false });
+      }
+    },
+
+    fetchPlaceholders: async () => {
+      try {
+        const response = await fetch(`${API_URL}/reports/placeholders`);
+        if (!response.ok) return;
+        const result = await response.json();
+        set({ placeholders: result.placeholders || [] });
+      } catch {
+        // silent
       }
     },
   })

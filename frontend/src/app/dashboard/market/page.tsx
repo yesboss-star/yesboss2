@@ -2,9 +2,15 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { getAuthHeaders } from "@/lib/utils";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, Badge, Button } from "@/components/ui";
-import { TrendingUp, AlertTriangle, Loader2, RefreshCw, ArrowLeft, DollarSign, Target, ExternalLink, Info } from "lucide-react";
+import {
+  TrendingUp, AlertTriangle, Loader2, RefreshCw, ArrowLeft, DollarSign, Target, ExternalLink, Info, Plus,
+} from "lucide-react";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+} from "recharts";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -16,6 +22,7 @@ interface MarketImpactItem {
   risk_if_ignored: string;
   growth_impact: string;
   category: string[];
+  url?: string;
 }
 
 interface Recommendation {
@@ -26,6 +33,11 @@ interface Recommendation {
   risk_level: string;
 }
 
+interface HistoryPoint {
+  snapshot_date: string;
+  impacts: { impact_level: string }[];
+}
+
 export default function MarketPage() {
   const router = useRouter();
   const [impacts, setImpacts] = useState<MarketImpactItem[]>([]);
@@ -34,6 +46,9 @@ export default function MarketPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [orgId, setOrgId] = useState("");
+  const [creatingIds, setCreatingIds] = useState<Set<number>>(new Set());
+  const [goalCreated, setGoalCreated] = useState<Map<number, number>>(new Map());
+  const [history, setHistory] = useState<HistoryPoint[]>([]);
 
   useEffect(() => {
     fetch(`${API_URL}/organizations/me`)
@@ -54,9 +69,10 @@ export default function MarketPage() {
       const impactUrl = refresh
         ? `${API_URL}/trends/refresh-impact/${orgId}`
         : `${API_URL}/trends/impact/${orgId}`;
-      const [impactRes, recRes] = await Promise.all([
+      const [impactRes, recRes, histRes] = await Promise.all([
         fetch(impactUrl, { method: refresh ? "POST" : "GET" }),
         fetch(`${API_URL}/trends/recommendations/${orgId}`),
+        fetch(`${API_URL}/trends/impact-history/${orgId}`),
       ]);
       if (impactRes.ok) {
         const data = await impactRes.json();
@@ -67,6 +83,10 @@ export default function MarketPage() {
         const data = await recRes.json();
         setRecommendations(data.recommendations || []);
       }
+      if (histRes.ok) {
+        const data = await histRes.json();
+        setHistory(data.history || []);
+      }
     } catch {} finally {
       setLoading(false);
       setRefreshing(false);
@@ -74,6 +94,35 @@ export default function MarketPage() {
   }, [orgId]);
 
   useEffect(() => { if (orgId) fetchData(); }, [orgId, fetchData]);
+
+  const createGoal = async (imp: MarketImpactItem, idx: number) => {
+    setCreatingIds((prev) => new Set(prev).add(idx));
+    try {
+      const res = await fetch(
+        `${API_URL}/trends/create-goal?organization_id=${encodeURIComponent(orgId)}&title=${encodeURIComponent("Market Trend: " + imp.title)}&description=${encodeURIComponent(imp.growth_opportunity + " " + imp.investment_recommendation)}&department=general`,
+        { method: "POST", headers: getAuthHeaders() }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setGoalCreated((prev) => new Map(prev).set(idx, data.task_count || 0));
+      }
+    } catch {} finally {
+      setCreatingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(idx);
+        return next;
+      });
+    }
+  };
+
+  const chartData = history
+    .map((h) => ({
+      date: h.snapshot_date ? new Date(h.snapshot_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "",
+      High: h.impacts?.filter((i) => i.impact_level === "high").length || 0,
+      Medium: h.impacts?.filter((i) => i.impact_level === "medium").length || 0,
+      Low: h.impacts?.filter((i) => i.impact_level === "low" || (i.impact_level !== "high" && i.impact_level !== "medium")).length || 0,
+    }))
+    .slice(-8);
 
   const getImpactColor = (level: string) => {
     switch (level) {
@@ -131,6 +180,41 @@ export default function MarketPage() {
               </Card>
             )}
 
+            {chartData.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <TrendingUp className="w-5 h-5 text-primary" />
+                    <CardTitle>Impact History</CardTitle>
+                  </div>
+                  <CardDescription>How market impact levels have changed over recent snapshots</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-56">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={chartData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                        <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#94a3b8" }} />
+                        <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} />
+                        <Tooltip
+                          contentStyle={{
+                            background: "#1e293b",
+                            border: "1px solid rgba(255,255,255,0.1)",
+                            borderRadius: 8,
+                            fontSize: 12,
+                          }}
+                        />
+                        <Legend wrapperStyle={{ fontSize: 11 }} />
+                        <Bar dataKey="High" fill="#10b981" radius={[4, 4, 0, 0]} stackId="a" />
+                        <Bar dataKey="Medium" fill="#f59e0b" radius={[4, 4, 0, 0]} stackId="a" />
+                        <Bar dataKey="Low" fill="#f43f5e" radius={[4, 4, 0, 0]} stackId="a" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             <Card>
               <CardHeader>
                 <div className="flex items-center gap-2">
@@ -147,13 +231,20 @@ export default function MarketPage() {
                     {impacts.map((imp, i) => {
                       const colors = getImpactColor(imp.impact_level);
                       const Icon = colors.icon;
+                      const isCreating = creatingIds.has(i);
+                      const isCreated = goalCreated.has(i);
+                      const taskCount = goalCreated.get(i) || 0;
                       return (
                         <div key={i} className={`p-4 rounded-xl ${colors.bg} ${colors.border} border`}>
                           <div className="flex items-start justify-between gap-3">
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <Icon className={`w-5 h-5 ${colors.text}`} />
-                                <span className="text-base font-semibold">{imp.title}</span>
+                                {imp.url ? (
+                                  <a href={imp.url} target="_blank" rel="noopener noreferrer" className="text-base font-semibold hover:underline">{imp.title}</a>
+                                ) : (
+                                  <span className="text-base font-semibold">{imp.title}</span>
+                                )}
                                 <Badge variant="outline" className={`text-[10px] ${colors.text} ${colors.bg} ${colors.border}`}>
                                   {imp.impact_level} impact
                                 </Badge>
@@ -182,6 +273,23 @@ export default function MarketPage() {
                                   </div>
                                 )}
                               </div>
+                              <button
+                                onClick={() => createGoal(imp, i)}
+                                disabled={isCreating || isCreated}
+                                className={`mt-3 flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50 ${
+                                  isCreated
+                                    ? "text-emerald-400 bg-emerald-500/10"
+                                    : "text-primary bg-primary/10 hover:bg-primary/20"
+                                }`}
+                              >
+                                {isCreating ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : isCreated ? (
+                                  <><Target className="w-3.5 h-3.5" /> Goal + {taskCount} Task{taskCount !== 1 ? "s" : ""}</>
+                                ) : (
+                                  <><Plus className="w-3.5 h-3.5" /> Create Goal from This Trend</>
+                                )}
+                              </button>
                             </div>
                           </div>
                         </div>

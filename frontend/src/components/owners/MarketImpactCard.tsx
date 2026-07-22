@@ -2,8 +2,9 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, Badge, Button } from "@/components/ui";
-import { TrendingUp, AlertTriangle, Loader2, RefreshCw, ArrowRight, DollarSign, Target, ExternalLink } from "lucide-react";
+import { TrendingUp, AlertTriangle, Loader2, RefreshCw, ArrowRight, DollarSign, Target, ExternalLink, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { getAuthHeaders } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -15,6 +16,7 @@ interface MarketImpact {
   risk_if_ignored: string;
   growth_impact: string;
   category: string[];
+  url?: string;
 }
 
 export default function MarketImpactCard({ orgId }: { orgId?: string }) {
@@ -23,6 +25,8 @@ export default function MarketImpactCard({ orgId }: { orgId?: string }) {
   const [summary, setSummary] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [creatingIds, setCreatingIds] = useState<Set<number>>(new Set());
+  const [goalCreated, setGoalCreated] = useState<Map<number, number>>(new Map());
 
   const fetchImpact = useCallback(async (refresh = false) => {
     if (!orgId) return;
@@ -45,6 +49,26 @@ export default function MarketImpactCard({ orgId }: { orgId?: string }) {
   }, [orgId]);
 
   useEffect(() => { fetchImpact(); }, [fetchImpact]);
+
+  const createGoal = async (imp: MarketImpact, idx: number) => {
+    setCreatingIds((prev) => new Set(prev).add(idx));
+    try {
+      const res = await fetch(
+        `${API_URL}/trends/create-goal?organization_id=${encodeURIComponent(orgId || "")}&title=${encodeURIComponent("Market Trend: " + imp.title)}&description=${encodeURIComponent(imp.growth_opportunity + " " + imp.investment_recommendation)}&department=general`,
+        { method: "POST", headers: getAuthHeaders() }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setGoalCreated((prev) => new Map(prev).set(idx, data.task_count || 0));
+      }
+    } catch {} finally {
+      setCreatingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(idx);
+        return next;
+      });
+    }
+  };
 
   const getImpactColor = (level: string) => {
     switch (level) {
@@ -106,13 +130,20 @@ export default function MarketImpactCard({ orgId }: { orgId?: string }) {
               {impacts.slice(0, 3).map((imp, i) => {
                 const colors = getImpactColor(imp.impact_level);
                 const Icon = colors.icon;
+                const isCreating = creatingIds.has(i);
+                const isCreated = goalCreated.has(i);
+                const taskCount = goalCreated.get(i) || 0;
                 return (
                   <div key={i} className={`p-3 rounded-xl ${colors.bg} ${colors.border} border`}>
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <Icon className={`w-4 h-4 ${colors.text}`} />
-                          <span className="text-sm font-semibold">{imp.title}</span>
+                          {imp.url ? (
+                            <a href={imp.url} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold hover:underline">{imp.title}</a>
+                          ) : (
+                            <span className="text-sm font-semibold">{imp.title}</span>
+                          )}
                           <Badge variant="outline" className={`text-[9px] ${colors.text} ${colors.bg} ${colors.border}`}>
                             {imp.impact_level}
                           </Badge>
@@ -126,6 +157,23 @@ export default function MarketImpactCard({ orgId }: { orgId?: string }) {
                         <span>{imp.investment_recommendation}</span>
                       </div>
                     )}
+                    <button
+                      onClick={() => createGoal(imp, i)}
+                      disabled={isCreating || isCreated}
+                      className={`mt-2 flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-lg transition-colors cursor-pointer disabled:opacity-50 ${
+                        isCreated
+                          ? "text-emerald-400 bg-emerald-500/10"
+                          : "text-primary bg-primary/10 hover:bg-primary/20"
+                      }`}
+                    >
+                      {isCreating ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : isCreated ? (
+                        <><Target className="w-3 h-3" /> Goal + {taskCount} Task{taskCount !== 1 ? "s" : ""}</>
+                      ) : (
+                        <><Plus className="w-3 h-3" /> Create Goal</>
+                      )}
+                    </button>
                   </div>
                 );
               })}

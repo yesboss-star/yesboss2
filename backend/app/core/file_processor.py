@@ -117,8 +117,20 @@ def extract_text_from_word(file_bytes: bytes) -> str:
 def extract_text_from_csv(file_bytes: bytes) -> str:
     try:
         import pandas as pd
-        df = pd.read_csv(io.BytesIO(file_bytes))
-        return df.to_string()
+        delimiters = [",", ";", "\t", "|"]
+        for delim in delimiters:
+            try:
+                df = pd.read_csv(io.BytesIO(file_bytes), delimiter=delim, nrows=5)
+                if df.shape[1] > 1:
+                    df = pd.read_csv(io.BytesIO(file_bytes), delimiter=delim)
+                    text = f"CSV delimiter: '{delim}'\n"
+                    text += f"Columns: {list(df.columns)}\n"
+                    text += f"Rows: {len(df)}\n\n"
+                    text += df.to_string()
+                    return text
+            except Exception:
+                continue
+        return "CSV file could not be parsed with standard delimiters."
     except Exception as e:
         logger.error(f"CSV extraction failed: {e}")
         return ""
@@ -283,7 +295,7 @@ async def process_file(
         "file_type": file_type,
         "org_id": org_id,
         "user_id": user_id,
-        "text": text[:10000],
+        "text": text[:50000],
         "text_length": len(text),
         "chunks": chunks,
         "chunk_count": len(chunks),
