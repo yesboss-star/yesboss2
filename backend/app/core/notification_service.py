@@ -178,6 +178,7 @@ async def _send_push(user_id: str, title: str, message: str, link: str = None, n
     vapid_private_key = cfg.VAPID_PRIVATE_KEY
     vapid_claims = {"sub": f"mailto:{cfg.VAPID_CLAIMS_EMAIL}"}
 
+    expired_ids = []
     for sub in subs:
         try:
             webpush(
@@ -188,8 +189,13 @@ async def _send_push(user_id: str, title: str, message: str, link: str = None, n
             )
         except WebPushException as e:
             if e.response and e.response.status_code in (410, 404):
-                db["push_subscriptions"].delete_one({"_id": sub["_id"]})
-            logger.warning(f"Push send failed: {e}")
+                expired_ids.append(sub["_id"])
+            else:
+                logger.warning(f"Push send failed: {e}")
+
+    if expired_ids:
+        db["push_subscriptions"].delete_many({"_id": {"$in": expired_ids}})
+        logger.info(f"Cleaned up {len(expired_ids)} expired push subscriptions")
 
 
 async def send_digest(user_id: str, org_id: str, frequency: str = "daily"):

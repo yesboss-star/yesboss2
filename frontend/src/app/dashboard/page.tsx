@@ -14,6 +14,7 @@ import DashboardView from "@/components/owners/DashboardView";
 import ZohoCalendarBooking from "@/components/owners/ZohoCalendarBooking";
 import MeetingUploadModal from "@/components/owners/MeetingUploadModal";
 import AISummaryChat from "@/components/AISummaryChat";
+import { useWebSocket } from "@/hooks/useWebSocket";
 import { getAuthHeaders } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
@@ -67,6 +68,12 @@ export default function DashboardPage() {
   useEffect(() => {
     window.scrollTo(0, 0);
   }, []);
+
+  useEffect(() => {
+    if (!loading && !user) {
+      router.push("/login");
+    }
+  }, [user, loading, router]);
   
   const [assignedTasks, setAssignedTasks] = useState<Task[]>([]);
   const [pendingReviews, setPendingReviews] = useState<PendingReview[]>([]);
@@ -75,6 +82,32 @@ export default function DashboardPage() {
   const [kpiData, setKpiData] = useState<Record<string, KPIItem>>({});
   const [kpiLoading, setKpiLoading] = useState(false);
   const [kpiError, setKpiError] = useState(false);
+
+  const handleWsTaskCreated = useCallback((data: any) => {
+    if (!data || role !== "employee" || !user?.email) return;
+    const assigneeEmail = data.assignee_email || "";
+    const assigneeIds = Array.isArray(data.assignee_id) ? data.assignee_id : (data.assignee_id ? [data.assignee_id] : []);
+    const userEmail = user.email.toLowerCase();
+    if (assigneeEmail.toLowerCase() === userEmail || assigneeIds.some((id: string) => id.toLowerCase() === userEmail)) {
+      setAssignedTasks((prev) => {
+        if (prev.find((t) => t.id === data._id || t.id === data.id)) return prev;
+        return [{
+          id: data._id || data.id || Math.random().toString(),
+          title: data.title || "Untitled Task",
+          status: data.status || "pending",
+          priority: data.priority || "medium",
+          due_date: data.due_date || "",
+          assigned_by: data.created_by || "",
+        }, ...prev];
+      });
+    }
+  }, [role, user?.email]);
+
+  const { isConnected } = useWebSocket({
+    organizationId: organization?.id,
+    userId: (user as any)?.email || (user as any)?.id,
+    onTaskCreated: handleWsTaskCreated,
+  });
 
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showBooking, setShowBooking] = useState(false);
@@ -198,7 +231,6 @@ export default function DashboardPage() {
   }
 
   if (!user) {
-    router.push("/login");
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">

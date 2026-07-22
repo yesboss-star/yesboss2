@@ -289,6 +289,8 @@ async def create_task_from_meeting(
     task_data: dict,
     meeting_title: str,
     participant_list: list | None = None,
+    goal_id: str | None = None,
+    manual_assignee_emails: list | None = None,
 ):
     assignee_emails = []
     suggested = (task_data.get("suggested_assignee") or "").strip()
@@ -300,19 +302,29 @@ async def create_task_from_meeting(
         assignee_emails = _resolve_multi_assignee(db, org_id, suggested)
         logger.info("Resolved suggested_assignee '%s' -> emails=%s", suggested, assignee_emails)
 
-    if not assignee_emails and participant_list:
-        title_lower = (task_data.get("title", "") + " " + task_data.get("description", "")).lower()
+    if not assignee_emails and suggested and participant_list:
+        suggested_lower = suggested.lower()
         for email in participant_list:
             emp = db.org_chart_members.find_one({
                 "organization_id": org_id,
                 "email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
             })
             if emp:
-                name = (emp.get("full_name") or "").lower()
-                if name and name.split()[0] in title_lower:
-                    assignee_emails = [email]
-                    logger.info("Participant fallback: email=%s name='%s' in title '%s'", email, name, title_lower)
-                    break
+                full_name = (emp.get("full_name") or "").lower()
+                if full_name:
+                    if suggested_lower == full_name or suggested_lower in full_name or full_name in suggested_lower:
+                        assignee_emails = [email]
+                        logger.info("Participant name match: suggested='%s' matched '%s' -> %s", suggested, full_name, email)
+                        break
+                    first_name = full_name.split()[0] if full_name.split() else ""
+                    if first_name and (suggested_lower == first_name or suggested_lower.startswith(first_name)):
+                        assignee_emails = [email]
+                        logger.info("Participant first-name match: suggested='%s' matched '%s' -> %s", suggested, first_name, email)
+                        break
+
+    if not assignee_emails and manual_assignee_emails:
+        assignee_emails = manual_assignee_emails
+        logger.info("Manual override: using emails %s for task '%s'", manual_assignee_emails, task_data.get("title"))
 
     task_doc = {
         "title": task_data.get("title", "Untitled Task"),
@@ -336,6 +348,7 @@ async def create_task_from_meeting(
         "source": "meeting",
         "source_meeting_title": meeting_title,
         "zoho_task_ids": [],
+        "goal_id": goal_id,
     }
     result = db.tasks.insert_one(task_doc)
     task_doc["_id"] = str(result.inserted_id)
@@ -380,6 +393,8 @@ async def process_meeting(
     file: UploadFile | None = File(None),
     zoho_event_id: str | None = Form(None),
     organization_id: str | None = Form(None),
+    goal_id: str | None = Form(None),
+    assignee_emails: str | None = Form(None),
     current_user=Depends(get_current_user_optional),
 ):
     db = get_database()
@@ -484,6 +499,8 @@ async def process_meeting(
         else:
             tasks_data = []
 
+    manual_emails = [e.strip() for e in assignee_emails.split(",") if e.strip()] if assignee_emails else []
+
     logger.info("AI returned %d tasks: %s", len(tasks_data), json.dumps([{
         "title": t.get("title", ""),
         "suggested_assignee": t.get("suggested_assignee", ""),
@@ -502,7 +519,7 @@ async def process_meeting(
                     logger.info("Section fallback: task '%s' matched to '%s'", td.get("title"), td["suggested_assignee"])
                 else:
                     logger.info("Section fallback: no match for task '%s'", td.get("title"))
-            task = await create_task_from_meeting(db, org_id, user_id, td, meeting_title, participant_list)
+            task = await create_task_from_meeting(db, org_id, user_id, td, meeting_title, participant_list, goal_id, manual_emails)
             created_tasks.append(task)
 
     from ..core.notification_service import create_and_deliver

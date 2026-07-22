@@ -52,6 +52,19 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
   const participantDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const participantInputRef = useRef<HTMLDivElement>(null);
 
+  // Assignee multi-select
+  const [selectedAssignees, setSelectedAssignees] = useState<OrgMember[]>([]);
+  const [assigneeQuery, setAssigneeQuery] = useState("");
+  const [assigneeSuggestions, setAssigneeSuggestions] = useState<OrgMember[]>([]);
+  const [showAssigneeDropdown, setShowAssigneeDropdown] = useState(false);
+  const [searchingAssignees, setSearchingAssignees] = useState(false);
+  const assigneeDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const assigneeInputRef = useRef<HTMLDivElement>(null);
+
+  // Goal selector state
+  const [goals, setGoals] = useState<{ id: string; title: string }[]>([]);
+  const [selectedGoalId, setSelectedGoalId] = useState("");
+
   // Calendar tab state
   const [calendarEvents, setCalendarEvents] = useState<any[]>([]);
   const [calLoading, setCalLoading] = useState(false);
@@ -64,12 +77,26 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
   }, [connected, tab]);
 
   useEffect(() => {
+    if (!open || !organization?.id) return;
+    fetch(`${API_URL}/goals?organization_id=${encodeURIComponent(organization.id)}&limit=50`)
+      .then((r) => r.json())
+      .then((data) => {
+        const items = data.goals || data || [];
+        setGoals(Array.isArray(items) ? items.map((g: any) => ({ id: g._id || g.id, title: g.title })) : []);
+      })
+      .catch(() => {});
+  }, [open, organization?.id]);
+
+  useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (titleRef.current && !titleRef.current.contains(e.target as Node)) {
         setShowTitleDropdown(false);
       }
       if (participantInputRef.current && !participantInputRef.current.contains(e.target as Node)) {
         setShowParticipantDropdown(false);
+      }
+      if (assigneeInputRef.current && !assigneeInputRef.current.contains(e.target as Node)) {
+        setShowAssigneeDropdown(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -126,6 +153,27 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
     }
   }, [organization?.id, selectedParticipants]);
 
+  const fetchAssigneeSuggestions = useCallback(async (q: string) => {
+    if (!organization?.id || q.length < 1) {
+      setAssigneeSuggestions([]);
+      setShowAssigneeDropdown(false);
+      return;
+    }
+    setSearchingAssignees(true);
+    try {
+      const res = await fetch(`${API_URL}/org-chart/members/search?q=${encodeURIComponent(q)}&organization_id=${organization.id}`, { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        const alreadySelected = new Set(selectedAssignees.map((p) => p.email.toLowerCase()));
+        const filtered = (data.members || []).filter((m: OrgMember) => !alreadySelected.has(m.email.toLowerCase()));
+        setAssigneeSuggestions(filtered);
+        setShowAssigneeDropdown(filtered.length > 0);
+      }
+    } catch {} finally {
+      setSearchingAssignees(false);
+    }
+  }, [organization?.id, selectedAssignees]);
+
   const onTitleChange = (val: string) => {
     setTitle(val);
     clearTimeout(titleDebounceRef.current);
@@ -148,6 +196,24 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
 
   const removeParticipant = (email: string) => {
     setSelectedParticipants(selectedParticipants.filter((p) => p.email !== email));
+  };
+
+  const onAssigneeQueryChange = (val: string) => {
+    setAssigneeQuery(val);
+    clearTimeout(assigneeDebounceRef.current);
+    assigneeDebounceRef.current = setTimeout(() => fetchAssigneeSuggestions(val), 200);
+  };
+
+  const addAssignee = (member: OrgMember) => {
+    if (selectedAssignees.find((p) => p.email === member.email)) return;
+    setSelectedAssignees([...selectedAssignees, member]);
+    setAssigneeQuery("");
+    setAssigneeSuggestions([]);
+    setShowAssigneeDropdown(false);
+  };
+
+  const removeAssignee = (email: string) => {
+    setSelectedAssignees(selectedAssignees.filter((p) => p.email !== email));
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -177,6 +243,13 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
       const participantEmails = selectedParticipants.map((p) => p.email).join(",");
       if (participantEmails) {
         formData.append("participants", participantEmails);
+      }
+      if (selectedGoalId) {
+        formData.append("goal_id", selectedGoalId);
+      }
+      const assigneeEmails = selectedAssignees.map((p) => p.email).join(",");
+      if (assigneeEmails) {
+        formData.append("assignee_emails", assigneeEmails);
       }
 
       if (tab === "calendar" && selectedEventId) {
@@ -212,11 +285,14 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
     setError("");
     setResult(null);
     setSelectedEventId("");
+    setSelectedGoalId("");
     setTab("file");
     setTitleSuggestions([]);
     setShowTitleDropdown(false);
     setSelectedParticipants([]);
     setParticipantQuery("");
+    setSelectedAssignees([]);
+    setAssigneeQuery("");
     onOpenChange(false);
   };
 
@@ -339,6 +415,73 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
                   )}
                 </div>
               )}
+            </div>
+
+            {/* Assignee Multi-Select */}
+            <div ref={assigneeInputRef} className="relative">
+              <label className="text-xs font-medium text-text-muted mb-1.5 block">Assign tasks to (optional, fallback if AI doesn't detect a name)</label>
+              <div className="flex flex-wrap gap-1.5 p-2 rounded-xl bg-surface border border-border/50 min-h-[42px]">
+                {selectedAssignees.map((p) => (
+                  <span key={p.email} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary/10 text-xs font-medium text-primary">
+                    <User className="w-3 h-3" />
+                    {p.full_name}
+                    <button type="button" onClick={() => removeAssignee(p.email)} className="hover:text-rose-400 transition-colors cursor-pointer">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+                <input
+                  className="flex-1 min-w-[120px] bg-transparent border-none outline-none text-sm px-1 py-0.5"
+                  placeholder={selectedAssignees.length === 0 ? "Search person to assign tasks..." : "Add more..."}
+                  value={assigneeQuery}
+                  onChange={(e) => onAssigneeQueryChange(e.target.value)}
+                  onFocus={() => { if (assigneeSuggestions.length > 0) setShowAssigneeDropdown(true); }}
+                  disabled={loading}
+                />
+                {searchingAssignees && <Loader2 className="w-4 h-4 animate-spin text-text-muted self-center" />}
+              </div>
+              {showAssigneeDropdown && (
+                <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-surface border border-border/50 rounded-xl shadow-lg max-h-56 overflow-y-auto">
+                  {assigneeSuggestions.length === 0 ? (
+                    <div className="px-4 py-3 text-sm text-text-muted">No matches found</div>
+                  ) : (
+                    assigneeSuggestions.map((m) => (
+                      <button
+                        key={m._id}
+                        type="button"
+                        onClick={() => addAssignee(m)}
+                        className="w-full text-left px-4 py-2.5 hover:bg-primary/10 transition-colors cursor-pointer border-b border-border/20 last:border-0"
+                      >
+                        <div className="flex items-center gap-2">
+                          <User className="w-4 h-4 text-text-muted flex-shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">{m.full_name}</p>
+                            <p className="text-xs text-text-muted truncate">
+                              {[m.role, m.department].filter(Boolean).join(" · ") || m.email}
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Link to Goal */}
+            <div>
+              <label className="text-xs font-medium text-text-muted mb-1.5 block">Link tasks to goal (optional)</label>
+              <select
+                value={selectedGoalId}
+                onChange={(e) => setSelectedGoalId(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-surface border border-border/50 text-sm focus:outline-none focus:border-primary transition-colors"
+                disabled={loading}
+              >
+                <option value="">— No goal —</option>
+                {goals.map((g) => (
+                  <option key={g.id} value={g.id}>{g.title}</option>
+                ))}
+              </select>
             </div>
 
             {/* File / Calendar Tab */}

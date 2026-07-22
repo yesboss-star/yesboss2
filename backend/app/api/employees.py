@@ -59,6 +59,7 @@ async def get_employee_tasks(org_id: str, email: str | None = None):
         query["$or"] = [
             {"assignee_email": email},
             {"assigned_to": email},
+            {"assignee_id": email},
         ]
 
     try:
