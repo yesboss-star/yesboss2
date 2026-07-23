@@ -188,10 +188,16 @@ async def _send_push(user_id: str, title: str, message: str, link: str = None, n
                 vapid_claims=vapid_claims,
             )
         except WebPushException as e:
-            if e.response and e.response.status_code in (410, 404):
+            status = e.response.status_code if e.response else None
+            if status in (410, 404):
+                expired_ids.append(sub["_id"])
+            elif "410" in str(e) or "Gone" in str(e) or "404" in str(e):
                 expired_ids.append(sub["_id"])
             else:
                 logger.warning(f"Push send failed: {e}")
+        except Exception as e:
+            logger.warning(f"Push connection failed for endpoint {sub.get('endpoint','')[-40:]}: {e}")
+            expired_ids.append(sub["_id"])
 
     if expired_ids:
         db["push_subscriptions"].delete_many({"_id": {"$in": expired_ids}})

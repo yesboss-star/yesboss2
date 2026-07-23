@@ -72,6 +72,59 @@ def _resolve_assignee(db, org_id: str, name: str):
     return emp
 
 
+def _find_matching_assignees(db, org_id: str, name: str) -> list[dict]:
+    """Return ALL org chart members matching a given name, for disambiguation."""
+    name = name.strip()
+    if not name:
+        return []
+    results = []
+    seen = set()
+    candidates = list(db.org_chart_members.find({
+        "organization_id": org_id,
+        "$or": [
+            {"full_name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}},
+            {"email": {"$regex": f"^{re.escape(name)}$", "$options": "i"}},
+        ]
+    }))
+    for c in candidates:
+        email = c.get("email", "").lower()
+        if email and email not in seen:
+            seen.add(email)
+            results.append({"name": c.get("full_name", email), "email": email})
+
+    if not results:
+        name_parts = name.split()
+        if len(name_parts) >= 2:
+            first = re.escape(name_parts[0])
+            last = re.escape(name_parts[-1])
+            candidates = list(db.org_chart_members.find({
+                "organization_id": org_id,
+                "full_name": {"$regex": f"^{first} .*{last}$", "$options": "i"},
+            }))
+            for c in candidates:
+                email = c.get("email", "").lower()
+                if email and email not in seen:
+                    seen.add(email)
+                    results.append({"name": c.get("full_name", email), "email": email})
+
+    if not results:
+        candidates = list(db.org_chart_members.find({
+            "organization_id": org_id,
+            "$or": [
+                {"full_name": {"$regex": re.escape(name), "$options": "i"}},
+                {"email": {"$regex": re.escape(name), "$options": "i"}},
+            ]
+        }))
+        for c in candidates:
+            email = c.get("email", "").lower()
+            if email and email not in seen:
+                seen.add(email)
+                results.append({"name": c.get("full_name", email), "email": email})
+
+    logger.info("_find_matching_assignees: '%s' → %d matches: %s", name, len(results), results)
+    return results
+
+
 def _resolve_multi_assignee(db, org_id: str, text: str) -> list:
     """Parse compound assignee strings like 'Krisha & Prince' or 'Krisha, Prince' into a list of emails."""
     text = text.strip()
@@ -394,7 +447,6 @@ async def process_meeting(
     zoho_event_id: str | None = Form(None),
     organization_id: str | None = Form(None),
     goal_id: str | None = Form(None),
-    assignee_emails: str | None = Form(None),
     current_user=Depends(get_current_user_optional),
 ):
     db = get_database()
@@ -499,29 +551,154 @@ async def process_meeting(
         else:
             tasks_data = []
 
-    manual_emails = [e.strip() for e in assignee_emails.split(",") if e.strip()] if assignee_emails else []
-
     logger.info("AI returned %d tasks: %s", len(tasks_data), json.dumps([{
         "title": t.get("title", ""),
         "suggested_assignee": t.get("suggested_assignee", ""),
         "priority": t.get("suggested_priority", ""),
     } for t in tasks_data if isinstance(t, dict) and t.get("title")], indent=2))
 
-    created_tasks = []
+    preview_tasks = []
     section_map = _build_section_map(raw_text)
     logger.info("Section map: %s", json.dumps({k: v for k, v in section_map.items()}, indent=2))
     for td in tasks_data:
         if isinstance(td, dict) and td.get("title"):
-            if not td.get("suggested_assignee", "").strip():
+            suggested = (td.get("suggested_assignee") or "").strip()
+            if not suggested:
                 matched = _match_task_to_section(td.get("title", ""), section_map)
                 if matched:
-                    td["suggested_assignee"] = " & ".join(matched)
-                    logger.info("Section fallback: task '%s' matched to '%s'", td.get("title"), td["suggested_assignee"])
-                else:
-                    logger.info("Section fallback: no match for task '%s'", td.get("title"))
-            task = await create_task_from_meeting(db, org_id, user_id, td, meeting_title, participant_list, goal_id, manual_emails)
-            created_tasks.append(task)
+                    suggested = " & ".join(matched)
+                    logger.info("Section fallback: task '%s' matched to '%s'", td.get("title"), suggested)
 
+            suggestions = []
+            if suggested:
+                parts = re.split(r'\s*[&,]\s*|\s+and\s+', suggested)
+                for part in parts:
+                    part = part.strip()
+                    if part:
+                        suggestions.extend(_find_matching_assignees(db, org_id, part))
+
+            resolved_email = suggestions[0]["email"] if len(suggestions) == 1 else ""
+
+            preview_tasks.append({
+                "title": td.get("title", "Untitled Task"),
+                "description": td.get("description", ""),
+                "priority": td.get("suggested_priority", "medium"),
+                "due_date": td.get("suggested_deadline"),
+                "suggested_assignee": suggested,
+                "resolved_assignee_email": resolved_email,
+                "assignee_suggestions": suggestions,
+            })
+
+    return {
+        "meeting_title": meeting_title,
+        "tasks": preview_tasks,
+        "task_count": len(preview_tasks),
+        "raw_text": raw_text[:2000],
+    }
+
+
+@router.get("/confirm")
+async def confirm_route_check():
+    logger.info("GET /confirm route check — route IS loaded")
+    return {"status": "ok", "message": "confirm route loaded"}
+
+
+@router.post("/confirm")
+async def confirm_meeting_tasks(
+    meeting_title: str = Form(...),
+    participants: str | None = Form(None),
+    zoho_event_id: str | None = Form(None),
+    organization_id: str | None = Form(None),
+    goal_id: str | None = Form(None),
+    tasks: str = Form(...),
+    current_user=Depends(get_current_user_optional),
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    org_id = organization_id
+    if not org_id:
+        raise HTTPException(status_code=400, detail="Organization ID required")
+
+    user_id = getattr(current_user, 'id', None) or str(current_user) if current_user else None
+    participant_list = [p.strip() for p in (participants or "").split(",") if p.strip()] if participants else []
+
+    try:
+        tasks_data = json.loads(tasks)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid tasks JSON")
+
+    if not isinstance(tasks_data, list) or not tasks_data:
+        raise HTTPException(status_code=400, detail="tasks must be a non-empty array")
+
+    from ..api.websocket import manager as ws_manager
+    from ..core.notification_service import create_and_deliver
+
+    created_tasks = []
+    for td in tasks_data:
+        assignee_email = (td.get("assignee_email") or "").strip()
+        assignee_name = (td.get("assignee_name") or "").strip()
+
+        assignee_emails = [assignee_email] if assignee_email else []
+
+        task_doc = {
+            "title": td.get("title", "Untitled Task"),
+            "description": td.get("description", ""),
+            "priority": td.get("priority", "medium"),
+            "status": "pending",
+            "assignee_id": assignee_emails,
+            "assignee_email": assignee_email,
+            "assignee_name": assignee_name,
+            "department": None,
+            "due_date": td.get("due_date"),
+            "dependencies": [],
+            "reviewers": [],
+            "organization_id": org_id,
+            "created_by": user_id,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+            "escalation_level": 0,
+            "owner_escalated": False,
+            "owner_escalated_at": None,
+            "source": "meeting",
+            "source_meeting_title": meeting_title,
+            "zoho_task_ids": [],
+            "goal_id": goal_id,
+        }
+        result = db.tasks.insert_one(task_doc)
+        task_doc["_id"] = str(result.inserted_id)
+
+        asyncio.create_task(ws_manager.broadcast_to_organization(
+            {"type": "task_created", "data": task_doc}, org_id
+        ))
+
+        for email in assignee_emails:
+            asyncio.create_task(create_and_deliver(
+                user_id=email,
+                org_id=org_id,
+                type="task_assigned",
+                title="New Task from Meeting",
+                message=f"Task '{task_doc['title']}' created from meeting '{meeting_title}'",
+                link=f"/tasks/{result.inserted_id}",
+                actor_id=user_id,
+            ))
+
+        if not task_doc.get("due_date") and user_id:
+            asyncio.create_task(create_and_deliver(
+                user_id=user_id,
+                org_id=org_id,
+                type="deadline_needed",
+                title="Task needs a deadline",
+                message=f"Task '{task_doc['title']}' has no deadline — please set one",
+                link=f"/tasks/{result.inserted_id}",
+                actor_id=user_id,
+            ))
+
+        asyncio.create_task(_push_to_zoho_todo(db, org_id, task_doc, assignee_emails))
+        created_tasks.append(task_doc)
+
+    filename = ""
     from ..core.notification_service import create_and_deliver
     owner_id = None
     org = db.organizations.find_one({"_id": ObjectId(org_id)})
@@ -544,9 +721,9 @@ async def process_meeting(
         "title": meeting_title,
         "file_name": filename,
         "participants": participant_list,
-        "tasks_created": [t.get("_id") for t in created_tasks],
+        "tasks_created": [t["_id"] for t in created_tasks],
         "task_count": len(created_tasks),
-        "raw_text": raw_text[:5000],
+        "raw_text": "",
         "created_by": user_id,
         "created_at": datetime.utcnow(),
     }
@@ -568,7 +745,6 @@ async def process_meeting(
             for t in created_tasks
         ],
         "task_count": len(created_tasks),
-        "raw_text": raw_text[:2000],
     }
 
 

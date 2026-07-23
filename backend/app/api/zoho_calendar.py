@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -48,31 +48,66 @@ async def get_calendar_events(
     user_id = get_user_id(current_user)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
+
     db = get_database()
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not configured")
+    zoho = ZohoOAuth(db)
+    token = await zoho.get_valid_token(user_id)
+    if not token:
+        raise HTTPException(
+            status_code=400,
+            detail="Zoho not connected. Connect in Settings > Integrations.",
+        )
 
-    org_id = None
-    token_doc = None
-    if db is not None:
-        token_doc = db.zoho_tokens.find_one({"user_id": user_id})
-        if token_doc:
-            org_id = token_doc.get("org_id")
+    cal_uid = await ZohoCalendar.get_default_calendar_uid(token)
+    if not cal_uid:
+        return {"events": [], "total": 0}
 
-    query: dict[str, Any] = {}
-    if org_id:
-        query["organization_id"] = org_id
-    else:
-        query["user_email"] = user_id
-    if from_date:
-        query["start"] = {"$gte": from_date}
-    if to_date:
-        query.setdefault("start", {})
-        query["start"]["$lte"] = to_date
+    now = datetime.utcnow()
+    range_start = (from_date or (now - timedelta(days=90)).strftime("%Y%m%d")).replace("-", "")
+    range_end = (to_date or (now + timedelta(days=30)).strftime("%Y%m%d")).replace("-", "")
 
-    events = list(db.calendar_events.find(query).sort("start", 1).limit(limit))
-    for ev in events:
-        ev["_id"] = str(ev["_id"])
+    raw_events = await ZohoCalendar.get_events(token, cal_uid, range_start, range_end)
+
+    events = []
+    token_doc = db.zoho_tokens.find_one({"user_id": user_id}) if db else None
+    org_id = token_doc.get("org_id", "") if token_doc else ""
+    for ev in raw_events:
+        zoho_id = ev.get("uid")
+        if not zoho_id:
+            continue
+        dt = ev.get("dateandtime", {})
+        event = {
+            "zoho_event_id": zoho_id,
+            "title": ev.get("title", ""),
+            "start": dt.get("start", ""),
+            "end": dt.get("end", ""),
+            "attendees": [{"email": a.get("email")} for a in ev.get("attendees", []) if a.get("email")],
+            "location": ev.get("location", ""),
+            "description": ev.get("description", ""),
+        }
+        event["_id"] = zoho_id
+        events.append(event)
+
+        if db is not None:
+            doc = {
+                "zoho_event_id": zoho_id,
+                "calendar_uid": cal_uid,
+                "organization_id": org_id,
+                "user_email": user_id,
+                "title": event["title"],
+                "description": event["description"],
+                "start": event["start"],
+                "end": event["end"],
+                "attendees": [a["email"] for a in event["attendees"]],
+                "location": event["location"],
+                "raw_data": ev,
+                "synced_at": datetime.utcnow().isoformat(),
+            }
+            existing = db.calendar_events.find_one({"zoho_event_id": zoho_id})
+            if existing:
+                db.calendar_events.update_one({"_id": existing["_id"]}, {"$set": doc})
+            else:
+                db.calendar_events.insert_one(doc)
 
     return {"events": events, "total": len(events)}
 

@@ -248,7 +248,10 @@ export const useTaskStore = create<TaskState>()(
             method: "POST",
             headers: { ...getAuthHeaders() },
           });
-          if (!response.ok) throw new Error("Failed to complete task");
+          if (!response.ok) {
+            const errBody = await response.json().catch(() => ({}));
+            throw new Error(errBody.detail || "Failed to complete task");
+          }
           const result = await response.json();
           const raw = result.task.assignee_id;
           const task = {
@@ -271,7 +274,10 @@ export const useTaskStore = create<TaskState>()(
             method: "POST",
             headers: { ...getAuthHeaders() },
           });
-          if (!response.ok) throw new Error("Failed to approve task");
+          if (!response.ok) {
+            const errBody = await response.json().catch(() => ({}));
+            throw new Error(errBody.detail || "Failed to approve task");
+          }
           const result = await response.json();
           const raw = result.task.assignee_id;
           const task = {

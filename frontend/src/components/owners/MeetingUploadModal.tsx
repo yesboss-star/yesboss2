@@ -28,13 +28,15 @@ interface OrgMember {
 
 export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: MeetingUploadModalProps) {
   const { organization } = useOrganizationStore();
-  const { connected } = useZohoStore();
+  const { connected, loading: zohoLoading, checkStatus } = useZohoStore();
   const [tab, setTab] = useState<"file" | "calendar">("file");
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [preview, setPreview] = useState<{ meeting_title: string; tasks: any[]; task_count: number } | null>(null);
   const [result, setResult] = useState<{ meeting_id: string; tasks_created: any[]; task_count: number } | null>(null);
+  const [editableTasks, setEditableTasks] = useState<any[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Title autocomplete
@@ -52,15 +54,6 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
   const participantDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const participantInputRef = useRef<HTMLDivElement>(null);
 
-  // Assignee multi-select
-  const [selectedAssignees, setSelectedAssignees] = useState<OrgMember[]>([]);
-  const [assigneeQuery, setAssigneeQuery] = useState("");
-  const [assigneeSuggestions, setAssigneeSuggestions] = useState<OrgMember[]>([]);
-  const [showAssigneeDropdown, setShowAssigneeDropdown] = useState(false);
-  const [searchingAssignees, setSearchingAssignees] = useState(false);
-  const assigneeDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const assigneeInputRef = useRef<HTMLDivElement>(null);
-
   // Goal selector state
   const [goals, setGoals] = useState<{ id: string; title: string }[]>([]);
   const [selectedGoalId, setSelectedGoalId] = useState("");
@@ -77,14 +70,39 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
   }, [connected, tab]);
 
   useEffect(() => {
-    if (!open || !organization?.id) return;
+    if (preview && preview.tasks) {
+      console.log("[MeetingUploadModal] syncing editableTasks from preview.tasks:", preview.tasks.length);
+      setEditableTasks(preview.tasks.map((t: any) => ({
+        ...t,
+        assignee_email: t.resolved_assignee_email || "",
+        assignee_name: t.suggested_assignee || "",
+      })));
+    } else {
+      setEditableTasks([]);
+    }
+  }, [preview]);
+
+  useEffect(() => {
+    if (!open || !organization?.id) {
+      console.log("[MeetingUploadModal] skip goals fetch — open:", open, "orgId:", organization?.id);
+      return;
+    }
+    console.log("[MeetingUploadModal] fetching goals for org:", organization.id);
     fetch(`${API_URL}/goals?organization_id=${encodeURIComponent(organization.id)}&limit=50`)
-      .then((r) => r.json())
-      .then((data) => {
-        const items = data.goals || data || [];
-        setGoals(Array.isArray(items) ? items.map((g: any) => ({ id: g._id || g.id, title: g.title })) : []);
+      .then((r) => {
+        console.log("[MeetingUploadModal] goals response status:", r.status);
+        return r.json();
       })
-      .catch(() => {});
+      .then((data) => {
+        console.log("[MeetingUploadModal] goals data:", data);
+        const items = data.goals || data || [];
+        const mapped = Array.isArray(items) ? items.map((g: any) => ({ id: g._id || g.id, title: g.title })) : [];
+        console.log("[MeetingUploadModal] mapped goals:", mapped);
+        setGoals(mapped);
+      })
+      .catch((err) => {
+        console.error("[MeetingUploadModal] goals fetch error:", err);
+      });
   }, [open, organization?.id]);
 
   useEffect(() => {
@@ -94,9 +112,6 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
       }
       if (participantInputRef.current && !participantInputRef.current.contains(e.target as Node)) {
         setShowParticipantDropdown(false);
-      }
-      if (assigneeInputRef.current && !assigneeInputRef.current.contains(e.target as Node)) {
-        setShowAssigneeDropdown(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -153,27 +168,6 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
     }
   }, [organization?.id, selectedParticipants]);
 
-  const fetchAssigneeSuggestions = useCallback(async (q: string) => {
-    if (!organization?.id || q.length < 1) {
-      setAssigneeSuggestions([]);
-      setShowAssigneeDropdown(false);
-      return;
-    }
-    setSearchingAssignees(true);
-    try {
-      const res = await fetch(`${API_URL}/org-chart/members/search?q=${encodeURIComponent(q)}&organization_id=${organization.id}`, { credentials: "include" });
-      if (res.ok) {
-        const data = await res.json();
-        const alreadySelected = new Set(selectedAssignees.map((p) => p.email.toLowerCase()));
-        const filtered = (data.members || []).filter((m: OrgMember) => !alreadySelected.has(m.email.toLowerCase()));
-        setAssigneeSuggestions(filtered);
-        setShowAssigneeDropdown(filtered.length > 0);
-      }
-    } catch {} finally {
-      setSearchingAssignees(false);
-    }
-  }, [organization?.id, selectedAssignees]);
-
   const onTitleChange = (val: string) => {
     setTitle(val);
     clearTimeout(titleDebounceRef.current);
@@ -198,22 +192,9 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
     setSelectedParticipants(selectedParticipants.filter((p) => p.email !== email));
   };
 
-  const onAssigneeQueryChange = (val: string) => {
-    setAssigneeQuery(val);
-    clearTimeout(assigneeDebounceRef.current);
-    assigneeDebounceRef.current = setTimeout(() => fetchAssigneeSuggestions(val), 200);
-  };
-
-  const addAssignee = (member: OrgMember) => {
-    if (selectedAssignees.find((p) => p.email === member.email)) return;
-    setSelectedAssignees([...selectedAssignees, member]);
-    setAssigneeQuery("");
-    setAssigneeSuggestions([]);
-    setShowAssigneeDropdown(false);
-  };
-
-  const removeAssignee = (email: string) => {
-    setSelectedAssignees(selectedAssignees.filter((p) => p.email !== email));
+  const handleCalendarTabClick = () => {
+    setTab("calendar");
+    checkStatus();
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -234,6 +215,7 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
 
     setLoading(true);
     setError("");
+    setPreview(null);
     setResult(null);
 
     try {
@@ -246,10 +228,6 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
       }
       if (selectedGoalId) {
         formData.append("goal_id", selectedGoalId);
-      }
-      const assigneeEmails = selectedAssignees.map((p) => p.email).join(",");
-      if (assigneeEmails) {
-        formData.append("assignee_emails", assigneeEmails);
       }
 
       if (tab === "calendar" && selectedEventId) {
@@ -269,7 +247,56 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
       }
 
       const data = await res.json();
+      console.log("[MeetingUploadModal] process response:", data);
+      setPreview(data);
+    } catch (err: any) {
+      setError(err.message || "Something went wrong");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateTaskAssignee = (index: number, email: string, name: string) => {
+    setEditableTasks((prev: any[]) => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], assignee_email: email, assignee_name: name };
+      return updated;
+    });
+  };
+
+  const handleConfirm = async () => {
+    if (!organization?.id) return;
+    setLoading(true);
+    setError("");
+    try {
+      const formData = new FormData();
+      formData.append("meeting_title", title.trim());
+      formData.append("organization_id", organization.id);
+      const participantEmails = selectedParticipants.map((p) => p.email).join(",");
+      if (participantEmails) {
+        formData.append("participants", participantEmails);
+      }
+      if (selectedGoalId) {
+        formData.append("goal_id", selectedGoalId);
+      }
+      if (selectedEventId) {
+        formData.append("zoho_event_id", selectedEventId);
+      }
+      formData.append("tasks", JSON.stringify(editableTasks));
+
+      const res = await fetch(`${API_URL}/meetings/confirm`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: "Request failed" }));
+        throw new Error(err.detail || "Failed to create tasks");
+      }
+
+      const data = await res.json();
       setResult(data);
+      setPreview(null);
       onSuccess?.();
     } catch (err: any) {
       setError(err.message || "Something went wrong");
@@ -283,7 +310,9 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
     setTitle("");
     setFile(null);
     setError("");
+    setPreview(null);
     setResult(null);
+    setEditableTasks([]);
     setSelectedEventId("");
     setSelectedGoalId("");
     setTab("file");
@@ -291,10 +320,12 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
     setShowTitleDropdown(false);
     setSelectedParticipants([]);
     setParticipantQuery("");
-    setSelectedAssignees([]);
-    setAssigneeQuery("");
     onOpenChange(false);
   };
+
+  // debug logs
+  console.log("[MeetingUploadModal] render: preview?", !!preview, "editableTasks:", editableTasks.length, "goals:", goals.length, "result?", !!result);
+  if (preview) console.log("[MeetingUploadModal] render: preview.tasks len:", preview.tasks?.length, "task_count:", preview.task_count);
 
   return (
     <Modal open={open} onOpenChange={handleClose} size="lg">
@@ -303,6 +334,12 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
         <ModalClose />
       </ModalHeader>
       <ModalContent>
+        {error && (
+          <div className="flex items-center gap-2 p-3 mb-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-sm text-rose-400">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            {error}
+          </div>
+        )}
         {result ? (
           <div className="space-y-4">
             <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
@@ -338,6 +375,63 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
                 ))}
               </div>
             )}
+          </div>
+        ) : preview ? (
+          <div className="space-y-4">
+            <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/20">
+              <p className="text-sm font-medium text-blue-400">Review & Confirm — {preview.task_count} tasks extracted</p>
+            </div>
+            <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
+              {editableTasks.length === 0 ? (
+                <p className="text-sm text-text-muted text-center py-4">No tasks found — the AI may not have extracted any tasks from this meeting.</p>
+              ) : (
+                editableTasks.map((t: any, i: number) => (
+                <div key={i} className="p-4 rounded-xl bg-surface border border-border/50">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <FileText className="w-4 h-4 text-primary flex-shrink-0" />
+                      <span className="text-sm font-medium truncate">{t.title}</span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <label className="text-[10px] text-text-muted whitespace-nowrap">Assignee:</label>
+                      <input
+                        type="text"
+                        value={t.assignee_email}
+                        onChange={(e) => updateTaskAssignee(i, e.target.value, e.target.value)}
+                        placeholder="Type name or email..."
+                        className="w-36 px-2 py-1 rounded-lg bg-surface border border-border/50 text-xs focus:outline-none focus:border-primary transition-colors"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 mt-2">
+                    <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full capitalize ${
+                      t.priority === "high" ? "bg-rose-500/10 text-rose-400" :
+                      t.priority === "low" ? "bg-emerald-500/10 text-emerald-400" :
+                      "bg-amber-500/10 text-amber-400"
+                    }`}>
+                      {t.priority}
+                    </span>
+                    <div className="flex flex-wrap gap-1 justify-end">
+                      {t.assignee_suggestions?.length > 1 && t.assignee_suggestions.map((s: any, si: number) => (
+                        <button
+                          key={si}
+                          type="button"
+                          onClick={() => updateTaskAssignee(i, s.email, s.name)}
+                          className={`text-xs px-2 py-0.5 rounded-full border transition-colors cursor-pointer ${
+                            t.assignee_email === s.email
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border/50 text-text-muted hover:border-primary/30"
+                          }`}
+                        >
+                          {s.name}
+                        </button>
+                      ))}
+
+                    </div>
+                  </div>
+                </div>
+              )))}
+            </div>
           </div>
         ) : (
           <div className="space-y-4">
@@ -417,57 +511,6 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
               )}
             </div>
 
-            {/* Assignee Multi-Select */}
-            <div ref={assigneeInputRef} className="relative">
-              <label className="text-xs font-medium text-text-muted mb-1.5 block">Assign tasks to (optional, fallback if AI doesn't detect a name)</label>
-              <div className="flex flex-wrap gap-1.5 p-2 rounded-xl bg-surface border border-border/50 min-h-[42px]">
-                {selectedAssignees.map((p) => (
-                  <span key={p.email} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary/10 text-xs font-medium text-primary">
-                    <User className="w-3 h-3" />
-                    {p.full_name}
-                    <button type="button" onClick={() => removeAssignee(p.email)} className="hover:text-rose-400 transition-colors cursor-pointer">
-                      <X className="w-3 h-3" />
-                    </button>
-                  </span>
-                ))}
-                <input
-                  className="flex-1 min-w-[120px] bg-transparent border-none outline-none text-sm px-1 py-0.5"
-                  placeholder={selectedAssignees.length === 0 ? "Search person to assign tasks..." : "Add more..."}
-                  value={assigneeQuery}
-                  onChange={(e) => onAssigneeQueryChange(e.target.value)}
-                  onFocus={() => { if (assigneeSuggestions.length > 0) setShowAssigneeDropdown(true); }}
-                  disabled={loading}
-                />
-                {searchingAssignees && <Loader2 className="w-4 h-4 animate-spin text-text-muted self-center" />}
-              </div>
-              {showAssigneeDropdown && (
-                <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-surface border border-border/50 rounded-xl shadow-lg max-h-56 overflow-y-auto">
-                  {assigneeSuggestions.length === 0 ? (
-                    <div className="px-4 py-3 text-sm text-text-muted">No matches found</div>
-                  ) : (
-                    assigneeSuggestions.map((m) => (
-                      <button
-                        key={m._id}
-                        type="button"
-                        onClick={() => addAssignee(m)}
-                        className="w-full text-left px-4 py-2.5 hover:bg-primary/10 transition-colors cursor-pointer border-b border-border/20 last:border-0"
-                      >
-                        <div className="flex items-center gap-2">
-                          <User className="w-4 h-4 text-text-muted flex-shrink-0" />
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium truncate">{m.full_name}</p>
-                            <p className="text-xs text-text-muted truncate">
-                              {[m.role, m.department].filter(Boolean).join(" · ") || m.email}
-                            </p>
-                          </div>
-                        </div>
-                      </button>
-                    ))
-                  )}
-                </div>
-              )}
-            </div>
-
             {/* Link to Goal */}
             <div>
               <label className="text-xs font-medium text-text-muted mb-1.5 block">Link tasks to goal (optional)</label>
@@ -493,9 +536,8 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
                 <Upload className="w-3.5 h-3.5 inline mr-1.5" />File
               </button>
               <button
-                onClick={() => setTab("calendar")}
+                onClick={handleCalendarTabClick}
                 className={`flex-1 px-3 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer ${tab === "calendar" ? "bg-primary text-white" : "text-text-muted hover:text-foreground"}`}
-                disabled={!connected}
               >
                 <Calendar className="w-3.5 h-3.5 inline mr-1.5" />Calendar
               </button>
@@ -535,18 +577,24 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
               </div>
             ) : (
               <div>
-                {!connected ? (
+                {zohoLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-5 h-5 animate-spin text-text-muted" />
+                    <span className="ml-2 text-sm text-text-muted">Checking Zoho connection...</span>
+                  </div>
+                ) : !connected ? (
                   <p className="text-sm text-text-muted text-center py-4">
                     Connect Zoho in Settings &gt; Integrations to import calendar events.
                   </p>
                 ) : calLoading ? (
                   <div className="flex items-center justify-center py-8">
                     <Loader2 className="w-5 h-5 animate-spin text-text-muted" />
+                    <span className="ml-2 text-sm text-text-muted">Loading events...</span>
                   </div>
                 ) : calendarEvents.length === 0 ? (
                   <div className="text-center py-4">
-                    <p className="text-sm text-text-muted">No calendar events synced yet.</p>
-                    <p className="text-xs text-text-muted/60 mt-1">Events sync every 15 minutes.</p>
+                    <p className="text-sm text-text-muted">No calendar events found.</p>
+                    <p className="text-xs text-text-muted/60 mt-1">Try booking a meeting first via Book Meeting.</p>
                   </div>
                 ) : (
                   <div className="space-y-2 max-h-60 overflow-y-auto">
@@ -577,13 +625,6 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
                 )}
               </div>
             )}
-
-            {error && (
-              <div className="flex items-center gap-2 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-sm text-rose-400">
-                <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                {error}
-              </div>
-            )}
           </div>
         )}
       </ModalContent>
@@ -592,6 +633,21 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
           <Button variant="primary" onClick={handleClose} className="cursor-pointer">
             Done
           </Button>
+        ) : preview ? (
+          <>
+            <Button variant="outline" onClick={() => { setPreview(null); setEditableTasks([]); }} className="cursor-pointer" disabled={loading}>
+              Back
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleConfirm}
+              className="cursor-pointer"
+              disabled={loading}
+            >
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+              {loading ? "Creating..." : "Confirm Tasks"}
+            </Button>
+          </>
         ) : (
           <>
             <Button variant="outline" onClick={handleClose} className="cursor-pointer" disabled={loading}>

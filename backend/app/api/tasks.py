@@ -1,8 +1,11 @@
 import asyncio
+import logging
 from datetime import datetime
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query
+
+logger = logging.getLogger("yesboss.tasks")
 from pydantic import BaseModel
 
 from ..api.websocket import manager as ws_manager
@@ -277,12 +280,16 @@ async def list_tasks(
         query["escalation_level"] = escalation_level
 
     if current_user and getattr(current_user, 'id', None):
-        user_email = (getattr(current_user, 'email', '') or '').lower().strip()
-        query["$or"] = [
-            {"created_by": current_user.id},
-            {"assignee_email": user_email},
-            {"assigned_to": user_email},
-        ]
+        from bson import ObjectId
+        org = db.organizations.find_one({"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id}, {"owner_id": 1})
+        is_owner = org and org.get("owner_id") == current_user.id
+        if not is_owner:
+            user_email = (getattr(current_user, 'email', '') or '').lower().strip()
+            query["$or"] = [
+                {"created_by": current_user.id},
+                {"assignee_email": user_email},
+                {"assigned_to": user_email},
+            ]
 
     tasks = list(db.tasks.find(query).sort("created_at", -1))
 
@@ -501,97 +508,109 @@ async def add_comment(task_id: str, comment: TaskComment, current_user = Depends
 
 @router.post("/{task_id}/approve")
 async def approve_task(task_id: str, current_user = Depends(get_current_user_optional)):
-    db = get_database()
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not configured")
+    try:
+        db = get_database()
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not configured")
 
-    task = db.tasks.find_one({"_id": ObjectId(task_id)})
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        task = db.tasks.find_one({"_id": ObjectId(task_id)})
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
 
-    user_id = getattr(current_user, 'id', None) or str(current_user) if current_user else None
+        user_id = getattr(current_user, 'id', None) or str(current_user) if current_user else None
 
-    db.tasks.update_one(
-        {"_id": ObjectId(task_id)},
-        {"$set": {"status": "approved", "approved_by": user_id, "updated_at": datetime.utcnow()}}
-    )
+        db.tasks.update_one(
+            {"_id": ObjectId(task_id)},
+            {"$set": {"status": "approved", "approved_by": user_id, "updated_at": datetime.utcnow()}}
+        )
 
-    task_obj = db.tasks.find_one({"_id": ObjectId(task_id)})
-    task_obj["_id"] = str(task_obj["_id"])
-    raw = task_obj.get("assignee_id")
-    if isinstance(raw, str):
-        task_obj["assignee_id"] = [raw]
-    elif raw is None:
-        task_obj["assignee_id"] = []
+        task_obj = db.tasks.find_one({"_id": ObjectId(task_id)})
+        task_obj["_id"] = str(task_obj["_id"])
+        raw = task_obj.get("assignee_id")
+        if isinstance(raw, str):
+            task_obj["assignee_id"] = [raw]
+        elif raw is None:
+            task_obj["assignee_id"] = []
 
-    org_id = task_obj.get("organization_id")
+        org_id = task_obj.get("organization_id")
 
-    if org_id:
-        asyncio.create_task(ws_manager.broadcast_to_organization(
-            {"type": "task_updated", "data": task_obj},
-            org_id,
-        ))
-
-        for aid in task_obj.get("assignee_id") or []:
-            asyncio.create_task(create_notification(
-                user_id=aid,
-                org_id=org_id,
-                type="task_approved",
-                title="Task Approved",
-                message=f"Task '{task_obj.get('title')}' has been approved",
-                link=f"/tasks/{task_id}",
-                email=task_obj.get("assignee_email"),
+        if org_id:
+            asyncio.create_task(ws_manager.broadcast_to_organization(
+                {"type": "task_updated", "data": task_obj},
+                org_id,
             ))
 
-    from ..agents.frequency_agent import process_task as _freq_task
-    asyncio.create_task(_freq_task(task_obj, org_id))
+            for aid in task_obj.get("assignee_id") or []:
+                asyncio.create_task(create_notification(
+                    user_id=aid,
+                    org_id=org_id,
+                    type="task_approved",
+                    title="Task Approved",
+                    message=f"Task '{task_obj.get('title')}' has been approved",
+                    link=f"/tasks/{task_id}",
+                    email=task_obj.get("assignee_email"),
+                ))
 
-    return {"task": task_obj}
+        from ..agents.frequency_agent import process_task as _freq_task
+        asyncio.create_task(_freq_task(task_obj, org_id))
+
+        return {"task": task_obj}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error approving task {task_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to approve task: {str(e)}")
 
 
 @router.post("/{task_id}/complete")
 async def complete_task(task_id: str, current_user = Depends(get_current_user_optional)):
-    db = get_database()
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not configured")
+    try:
+        db = get_database()
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not configured")
 
-    task = db.tasks.find_one({"_id": ObjectId(task_id)})
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        task = db.tasks.find_one({"_id": ObjectId(task_id)})
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
 
-    db.tasks.update_one(
-        {"_id": ObjectId(task_id)},
-        {"$set": {"status": "completed", "completed_at": datetime.utcnow(), "updated_at": datetime.utcnow()}}
-    )
+        db.tasks.update_one(
+            {"_id": ObjectId(task_id)},
+            {"$set": {"status": "completed", "completed_at": datetime.utcnow(), "updated_at": datetime.utcnow()}}
+        )
 
-    task_obj = db.tasks.find_one({"_id": ObjectId(task_id)})
-    task_obj["_id"] = str(task_obj["_id"])
-    raw = task_obj.get("assignee_id")
-    if isinstance(raw, str):
-        task_obj["assignee_id"] = [raw]
-    elif raw is None:
-        task_obj["assignee_id"] = []
+        task_obj = db.tasks.find_one({"_id": ObjectId(task_id)})
+        task_obj["_id"] = str(task_obj["_id"])
+        raw = task_obj.get("assignee_id")
+        if isinstance(raw, str):
+            task_obj["assignee_id"] = [raw]
+        elif raw is None:
+            task_obj["assignee_id"] = []
 
-    org_id = task_obj.get("organization_id")
+        org_id = task_obj.get("organization_id")
 
-    if org_id:
-        asyncio.create_task(ws_manager.broadcast_to_organization(
-            {"type": "task_updated", "data": task_obj},
-            org_id,
-        ))
-
-        created_by = task_obj.get("created_by")
-        if created_by:
-            asyncio.create_task(create_notification(
-                user_id=created_by,
-                org_id=org_id,
-                type="task_completed",
-                title="Task Completed",
-                message=f"Task '{task_obj.get('title')}' has been marked complete",
-                link=f"/tasks/{task_id}",
+        if org_id:
+            asyncio.create_task(ws_manager.broadcast_to_organization(
+                {"type": "task_updated", "data": task_obj},
+                org_id,
             ))
 
-    from ..agents.frequency_agent import process_task as _freq_task
-    asyncio.create_task(_freq_task(task_obj, org_id))
+            created_by = task_obj.get("created_by")
+            if created_by:
+                asyncio.create_task(create_notification(
+                    user_id=created_by,
+                    org_id=org_id,
+                    type="task_completed",
+                    title="Task Completed",
+                    message=f"Task '{task_obj.get('title')}' has been marked complete",
+                    link=f"/tasks/{task_id}",
+                ))
 
-    return {"task": task_obj}
+        from ..agents.frequency_agent import process_task as _freq_task
+        asyncio.create_task(_freq_task(task_obj, org_id))
+
+        return {"task": task_obj}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error completing task {task_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to complete task: {str(e)}")
