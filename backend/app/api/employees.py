@@ -200,6 +200,7 @@ async def delete_employee(employee_id: str):
 
 class EmployeePersonaRequest(BaseModel):
     email: str | None = None
+    full_name: str | None = None
     organization_id: str | None = None
     department: str | None = None
     role: str | None = None
@@ -239,6 +240,8 @@ async def save_employee_persona(request: EmployeePersonaRequest):
             "onboarding_completed": True,
             "updated_at": datetime.utcnow(),
         }
+        if request.full_name:
+            update_doc["full_name"] = request.full_name
         if request.avatar_style:
             update_doc["avatar_style"] = request.avatar_style
         db.employees.update_one(
@@ -250,6 +253,7 @@ async def save_employee_persona(request: EmployeePersonaRequest):
     else:
         emp_doc = {
             "email": request.email,
+            "full_name": request.full_name,
             "organization_id": request.organization_id,
             "department": request.department,
             "role": request.role,
@@ -299,12 +303,18 @@ async def upload_avatar(
         raise HTTPException(status_code=400, detail="File too large. Max 2MB")
 
     os.makedirs(AVATAR_DIR, exist_ok=True)
+
+    for old_ext in ALLOWED_EXTENSIONS:
+        old_path = os.path.join(AVATAR_DIR, f"{clean_email}{old_ext}")
+        if os.path.exists(old_path):
+            os.remove(old_path)
+
     file_path = os.path.join(AVATAR_DIR, f"{clean_email}{ext}").replace("\\", "/")
 
     with open(file_path, "wb") as f:
         f.write(contents)
 
-    avatar_url = f"/api/v1/employees/avatar/{clean_email}"
+    avatar_url = f"/employees/avatar/{clean_email}"
 
     db.employees.update_one(
         {"email": clean_email},
@@ -332,6 +342,6 @@ async def get_avatar(email: str):
                 ".png": "image/png", ".gif": "image/gif",
                 ".webp": "image/webp",
             }.get(ext, "application/octet-stream")
-            return FileResponse(file_path, media_type=media_type)
+            return FileResponse(file_path, media_type=media_type, headers={"Cache-Control": "no-cache, private"})
 
     raise HTTPException(status_code=404, detail="Avatar not found")

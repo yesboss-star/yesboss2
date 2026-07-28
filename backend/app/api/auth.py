@@ -470,14 +470,19 @@ async def set_session(request: SetSessionRequest):
     email = getattr(user, "email", "")
     org_id = db_user.get("organization_id") if db_user else None
     org_completed = db_user.get("organization_completed", False) if db_user else False
+    phone = getattr(user, "phone_number", None) or (db_user.get("phone") if db_user else None)
+    phone_verified = db_user.get("phone_verified", False) if db_user else False
 
     user_data = {
         "uid": user.uid,
         "email": email,
         "full_name": full_name,
+        "phone": phone,
+        "phone_verified": phone_verified,
         "role": role,
         "organization_id": org_id,
         "organization_completed": org_completed,
+        "account_exists": db_user is not None,
     }
 
     response = JSONResponse(content={
@@ -711,6 +716,134 @@ async def delete_firebase_user(email: str):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
         )
+
+
+# ============================================================
+# Phone verification endpoints (for Settings → Profile)
+# ============================================================
+
+
+class CheckPhoneResponse(BaseModel):
+    exists: bool = False
+    verified: bool = False
+    email: str | None = None
+
+
+@router.get("/check-phone", response_model=CheckPhoneResponse)
+async def check_phone(phone: str):
+    try:
+        db = get_database()
+        if db is None:
+            return CheckPhoneResponse(exists=False, verified=False)
+
+        # Normalize: strip all non-digit chars so format mismatches don't break matching
+        digits = re.sub(r"\D", "", phone)
+        if not digits:
+            return CheckPhoneResponse(exists=False, verified=False)
+
+        # Try exact match first, then digit-only match
+        user_doc = db.users.find_one({"phone": phone})
+        if not user_doc:
+            # Fallback: find any doc whose phone contains the same digits
+            all_phones = db.users.find({"phone": {"$exists": True, "$ne": ""}}, {"phone": 1, "phone_verified": 1, "email": 1})
+            for doc in all_phones:
+                doc_digits = re.sub(r"\D", "", doc.get("phone", ""))
+                if doc_digits == digits:
+                    user_doc = doc
+                    break
+
+        if user_doc:
+            logger.info("Check-phone found: %s (matched %s)", user_doc.get("phone"), phone)
+            return CheckPhoneResponse(
+                exists=True,
+                verified=user_doc.get("phone_verified", False),
+                email=user_doc.get("email"),
+            )
+        logger.info("Check-phone not found for: %s (digits: %s)", phone, digits)
+        return CheckPhoneResponse(exists=False, verified=False)
+    except Exception as e:
+        logger.error("Check phone failed: %s", str(e))
+        return CheckPhoneResponse(exists=False, verified=False)
+
+
+class UpdatePhoneRequest(BaseModel):
+    uid: str
+    phone: str
+
+
+@router.post("/update-phone", response_model=AuthResponse)
+async def update_phone(request: UpdatePhoneRequest):
+    try:
+        db = get_database()
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not configured")
+
+        # Update MongoDB users collection
+        db.users.update_one(
+            {"uid": request.uid},
+            {"$set": {"phone": request.phone, "phone_verified": True, "updated_at": datetime.utcnow().isoformat()}},
+        )
+
+        # Also update employees collection so phone shows in settings
+        user_doc = db.users.find_one({"uid": request.uid})
+        if user_doc and user_doc.get("email"):
+            db.employees.update_one(
+                {"email": user_doc["email"]},
+                {"$set": {"phone": request.phone, "phone_verified": True, "updated_at": datetime.utcnow().isoformat()}},
+                upsert=True,
+            )
+
+        # Update Firebase user phone number
+        try:
+            update_user(request.uid, phone_number=request.phone)
+        except Exception as e:
+            logger.warning("Could not update Firebase phone for %s: %s", request.uid, str(e))
+
+        _audit_log("user.phone_verified", request.uid, f"phone={request.phone}")
+        logger.info("Phone verified for uid=%s: %s", request.uid, request.phone)
+
+        return AuthResponse(
+            success=True,
+            message="Phone verified and saved",
+            uid=request.uid,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Update phone failed: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        )
+
+
+class RejectOrphanRequest(BaseModel):
+    id_token: str
+
+
+@router.post("/reject-orphan-session")
+async def reject_orphan_session(request: RejectOrphanRequest):
+    """Delete a throwaway Firebase user created by a phone-OTP sign-in whose
+    phone number was never linked to a real account. Frees the phone number
+    (Firebase dedupes phone numbers project-wide) so it can be linked to a
+    real account later without hitting auth/credential-already-in-use."""
+    from ..core.firebase_admin import verify_id_token
+
+    user = verify_id_token(request.id_token)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    db = get_database()
+    db_user = db.users.find_one({"uid": user.uid}) if db is not None else None
+
+    # Triple safety: only delete if there is truly no Mongo doc AND no email on
+    # the Firebase user — never delete anything that looks like a real account.
+    if db_user is not None or getattr(user, "email", None):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not an orphan session; refusing to delete")
+
+    delete_user(user.uid)
+    _audit_log("user.orphan_phone_rejected", user.uid, f"phone={getattr(user, 'phone_number', None)}")
+    return {"success": True}
 
 
 # ============================================================

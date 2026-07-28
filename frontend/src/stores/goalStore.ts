@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
 import { getAuthHeaders } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
@@ -105,8 +104,7 @@ interface GoalState {
 }
 
 export const useGoalStore = create<GoalState>()(
-  persist(
-    (set, get) => ({
+  (set, get) => ({
       goals: [],
       currentGoal: null,
       tasks: [],
@@ -121,10 +119,22 @@ export const useGoalStore = create<GoalState>()(
 
       updateGoalFromWs: (goal) => {
         const mapped = { ...goal, id: goal._id || goal.id };
-        set((state) => ({
-          goals: state.goals.map((g) => (g.id === mapped.id ? { ...g, ...mapped } : g)),
-          currentGoal: state.currentGoal?.id === mapped.id ? { ...state.currentGoal, ...mapped } : state.currentGoal,
-        }));
+        console.log("[goalStore] updateGoalFromWs called", { id: mapped.id, status: mapped.status });
+        set((state) => {
+          console.log("[goalStore] preceding goals length", state.goals.length, "match?", state.goals.some((g) => g.id === mapped.id));
+          const existing = state.goals.find((g) => g.id === mapped.id);
+          return {
+            goals: state.goals.map((g) =>
+              g.id === mapped.id
+                ? { ...g, ...mapped, task_counts: mapped.task_counts ?? g.task_counts }
+                : g
+            ),
+            currentGoal:
+              state.currentGoal?.id === mapped.id
+                ? { ...state.currentGoal, ...mapped, task_counts: mapped.task_counts ?? state.currentGoal?.task_counts }
+                : state.currentGoal,
+          };
+        });
       },
 
       addGoalFromWs: (goal) => {
@@ -137,7 +147,7 @@ export const useGoalStore = create<GoalState>()(
       fetchGoals: async (orgId) => {
         set({ loading: true, error: null });
         try {
-          const response = await fetch(`${API_URL}/goals?organization_id=${orgId}&limit=20`, {
+          const response = await fetch(`${API_URL}/goals?organization_id=${orgId}`, {
             headers: { ...getAuthHeaders() },
           });
           if (!response.ok) throw new Error("Failed to fetch goals");
@@ -436,8 +446,4 @@ export const useGoalStore = create<GoalState>()(
         }
       },
     }),
-    {
-      name: "yesboss-goals",
-    }
-  )
-);
+  );

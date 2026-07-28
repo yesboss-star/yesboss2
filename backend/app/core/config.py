@@ -5,7 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 env_name = os.getenv("ENVIRONMENT", "development")
-env_file = ".env.live" if env_name == "production" else ".env.dev"
+env_file = ".env.live" if env_name == "production" else ".env"
 env_path = Path(__file__).resolve().parent.parent.parent / env_file
 load_dotenv(dotenv_path=env_path, override=True)
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState, useRef } from "react";
 import { auth } from "@/lib/firebase";
 import { User, onAuthStateChanged, signOut as firebaseSignOut, getIdToken } from "firebase/auth";
 import { useUserStore } from "@/stores/userStore";
@@ -62,30 +62,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [role, setRole] = useState<UserRole>(null);
   const [loading, setLoading] = useState(true);
   const { setLastLoginAt } = useUserStore();
+  const lastUidRef = useRef<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
 
       if (firebaseUser) {
+        // Skip establishSession if UID hasn't changed (e.g., phone linking token refresh)
+        // Prevents re-render cascade that overwrites state and changes dashboard
+        if (firebaseUser.uid === lastUidRef.current) {
+          setLoading(false);
+          return;
+        }
+        lastUidRef.current = firebaseUser.uid;
+
         const token = await getIdToken(firebaseUser);
+        localStorage.setItem("yesboss_id_token", token);
         const result = await establishSession(token);
 
         if (result?.success) {
           localStorage.removeItem("yesboss_token");
-          localStorage.setItem("yesboss_id_token", token);
           if (result.user) {
             localStorage.setItem("yesboss_user", JSON.stringify(result.user));
           }
           setRole(result.user?.role || "owner");
           setLastLoginAt(new Date().toISOString());
         } else {
-          // Backend unreachable — fall back to cached role
-          localStorage.setItem("yesboss_id_token", token);
           const cached = localStorage.getItem("yesboss_role");
           setRole(cached === "owner" || cached === "employee" ? cached : "owner");
         }
       } else {
+        lastUidRef.current = null;
         await clearSession();
         setRole(null);
       }

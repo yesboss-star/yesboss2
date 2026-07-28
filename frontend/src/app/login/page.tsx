@@ -3,9 +3,18 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Eye, EyeOff, Mail, Lock, AlertCircle, Loader2, CheckCircle, Phone, User } from "lucide-react";
-import { auth, RECAPTCHA_SITE_KEY } from "@/lib/firebase";
-import { setPersistence, browserLocalPersistence, browserSessionPersistence, signInWithEmailAndPassword, RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult } from "firebase/auth";
+import { ArrowLeft, Eye, EyeOff, Mail, Lock, AlertCircle, Loader2, CheckCircle, Phone, User, ArrowRight } from "lucide-react";
+import { auth } from "@/lib/firebase";
+import {
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
+  signInWithEmailAndPassword,
+  signOut as firebaseSignOut,
+  ConfirmationResult,
+  RecaptchaVerifier,
+} from "firebase/auth";
+import { initRecaptcha, sendSignInOtp, resetRecaptcha } from "@/lib/phoneAuth";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -27,69 +36,32 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Phone OTP state
-  const [phoneOtpSent, setPhoneOtpSent] = useState(false);
+  // Phone login state — real Firebase phone+OTP sign-in, no password.
   const [phoneOtpLoading, setPhoneOtpLoading] = useState(false);
-  const [resendTimer, setResendTimer] = useState(0);
+  const [phoneOtpSent, setPhoneOtpSent] = useState(false);
+  const [phoneOtp, setPhoneOtp] = useState("");
+  const [phoneResendTimer, setPhoneResendTimer] = useState(0);
   const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
+  const recaptchaVerifierRef = useRef<RecaptchaVerifier | null>(null);
   const [selectedCountry, setSelectedCountry] = useState(COUNTRY_CODES[0]);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const recaptchaVerifierRef = useRef<any>(null);
 
   const [formData, setFormData] = useState({
     email: "",
     phone: "",
-    otp: "",
     password: "",
     keepSignedIn: true,
   });
 
   useEffect(() => {
-    if (resendTimer > 0) {
-      const timer = setTimeout(() => setResendTimer(resendTimer - 1), 1000);
+    if (phoneResendTimer > 0) {
+      const timer = setTimeout(() => setPhoneResendTimer(phoneResendTimer - 1), 1000);
       return () => clearTimeout(timer);
     }
-  }, [resendTimer]);
+  }, [phoneResendTimer]);
 
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  const ensureRecaptcha = async (): Promise<boolean> => {
-    if (recaptchaVerifierRef.current) return true;
-    if (!containerRef.current) return false;
-    if (typeof window === "undefined") return false;
-
-    if (!document.getElementById("google-recaptcha-js")) {
-      const script = document.createElement("script");
-      script.id = "google-recaptcha-js";
-      script.src = `https://www.google.com/recaptcha/api.js?render=${RECAPTCHA_SITE_KEY}`;
-      script.async = true;
-      script.defer = true;
-      document.head.appendChild(script);
-    }
-
-    if (typeof (window as unknown as { grecaptcha?: unknown }).grecaptcha === "undefined") {
-      await new Promise<void>((resolve) => {
-        let waited = 0;
-        const check = () => {
-          if (typeof (window as unknown as { grecaptcha?: unknown }).grecaptcha !== "undefined") {
-            resolve();
-          } else if (waited < 5000) {
-            waited += 100;
-            setTimeout(check, 100);
-          } else {
-            resolve();
-          }
-        };
-        check();
-      });
-    }
-
-    recaptchaVerifierRef.current = new RecaptchaVerifier(auth, containerRef.current, {
-      size: "invisible",
-      callback: () => {},
-    });
-    return true;
-  };
+  useEffect(() => {
+    return () => resetRecaptcha(recaptchaVerifierRef);
+  }, []);
 
   const updateField = (field: string, value: string | boolean) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -140,43 +112,118 @@ export default function LoginPage() {
     }
   };
 
-  const sendPhoneOtp = async () => {
+  const sendPhoneLoginOtp = async () => {
     const digitsOnly = formData.phone.replace(/\D/g, "");
     if (digitsOnly.length < 6) { setError("Enter a valid phone number"); return; }
     setPhoneOtpLoading(true);
     setError("");
     try {
-      const ok = await ensureRecaptcha();
-      if (!ok) { setError("reCAPTCHA container not found. Refresh and try again."); setPhoneOtpLoading(false); return; }
+      resetRecaptcha(recaptchaVerifierRef);
+      const verifier = await initRecaptcha(auth, "recaptcha-container-login");
+      if (!verifier) { setError("reCAPTCHA is loading. Please try again."); return; }
+      recaptchaVerifierRef.current = verifier;
       const formattedPhone = `${selectedCountry.code}${digitsOnly}`;
-      const result = await signInWithPhoneNumber(auth, formattedPhone, recaptchaVerifierRef.current);
+      const result = await sendSignInOtp(auth, formattedPhone, verifier);
       setConfirmationResult(result);
       setPhoneOtpSent(true);
-      setResendTimer(60);
+      setPhoneResendTimer(60);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       if (err.code === "auth/invalid-phone-number") setError("Invalid phone number for selected country");
       else if (err.code === "auth/too-many-requests") setError("Too many attempts. Try later");
-      else if (err.code === "auth/requires-android-redirect") setError("Please use a desktop browser for phone verification");
       else setError(err.message || "Failed to send OTP");
     } finally {
       setPhoneOtpLoading(false);
     }
   };
 
-  const verifyPhoneOtp = async () => {
-    if (!formData.otp || formData.otp.length < 6) { setError("Enter the 6-digit OTP"); return; }
+  const verifyPhoneLoginOtp = async () => {
+    if (!phoneOtp || phoneOtp.length < 6) { setError("Enter the 6-digit OTP"); return; }
     if (!confirmationResult) { setError("Session expired. Tap resend."); return; }
     setLoading(true);
     setError("");
     try {
-      const result = await confirmationResult.confirm(formData.otp);
-      const phoneEmail = `${selectedCountry.code}${formData.phone.replace(/\D/g, "")}@phone.yesboss.app`;
-      await finalizeLogin(result.user?.uid || "phone-user", phoneEmail);
+      await setPersistence(auth, formData.keepSignedIn ? browserLocalPersistence : browserSessionPersistence);
+      const cred = await confirmationResult.confirm(phoneOtp);
+      const idToken = await cred.user.getIdToken();
+
+      // Establish the real session explicitly so we can inspect the result
+      // before deciding whether to navigate at all (needed for the orphan check).
+      const sessionRes = await fetch(`${API_URL}/auth/set-session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ id_token: idToken }),
+      });
+      const sessionData = await sessionRes.json().catch(() => null);
+
+      if (!sessionRes.ok || !sessionData?.success) {
+        setError("Could not establish session. Please try again.");
+        return;
+      }
+
+      const sessionUser = sessionData.user || {};
+
+      if (sessionUser.account_exists === false) {
+        // This phone number was never linked to any account — signing in
+        // with it just created a blank Firebase-only identity. Undo it
+        // entirely rather than leaving/landing on an empty dashboard.
+        try { await firebaseSignOut(auth); } catch {}
+        try {
+          await fetch(`${API_URL}/auth/clear-session`, { method: "POST", credentials: "include" });
+        } catch {}
+        try {
+          await fetch(`${API_URL}/auth/reject-orphan-session`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id_token: idToken }),
+          });
+        } catch {}
+        setError("This phone number isn't linked to any account yet. Please log in with your email and password, then verify this number in Settings → Profile.");
+        setPhoneOtpSent(false);
+        setPhoneOtp("");
+        setConfirmationResult(null);
+        return;
+      }
+
+      const userData = {
+        uid: sessionUser.uid,
+        email: sessionUser.email,
+        full_name: sessionUser.full_name,
+        phone: sessionUser.phone,
+        phone_verified: sessionUser.phone_verified,
+        role: sessionUser.role,
+        organization_id: sessionUser.organization_id,
+        organization_completed: sessionUser.organization_completed,
+      };
+
+      // Fetch authoritative profile to ensure phone data is populated
+      // (sessionUser.phone may be stale if backend MongoDB hadn't fully synced)
+      try {
+        const meRes = await fetch(`${API_URL}/auth/me`, {
+          headers: { "Authorization": `Bearer ${idToken}` },
+        });
+        if (meRes.ok) {
+          const meData = await meRes.json();
+          if (meData?.user?.phone) {
+            userData.phone = meData.user.phone;
+            userData.phone_verified = meData.user.phone_verified ?? false;
+          }
+        }
+      } catch {}
+
+      localStorage.setItem("yesboss_user", JSON.stringify(userData));
+      localStorage.setItem("yesboss_role", userData.role || "");
+      const userCookie = encodeURIComponent(JSON.stringify(userData));
+      document.cookie = `yesboss_token=true; path=/; max-age=86400; SameSite=Lax`;
+      document.cookie = `yesboss_user=${userCookie}; path=/; max-age=86400; SameSite=Lax`;
+
+      window.location.href = "/dashboard";
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       if (err.code === "auth/invalid-verification-code") setError("Invalid OTP");
-      else setError(err.message || "Verification failed");
+      else if (err.code === "auth/code-expired") setError("OTP expired. Tap resend.");
+      else setError(err.message || "Login failed");
     } finally {
       setLoading(false);
     }
@@ -324,13 +371,17 @@ export default function LoginPage() {
               </>
             ) : (
               <>
+                <div id="recaptcha-container-login" style={{ position: "absolute", left: "-9999px", top: "auto", width: 1, height: 1, overflow: "hidden" }} />
+
+
                 <div>
                   <label className="block text-sm font-medium mb-2">Phone Number</label>
                   <div className="flex gap-2">
                     <select
                       value={selectedCountry.code}
                       onChange={(e) => setSelectedCountry(COUNTRY_CODES.find(c => c.code === e.target.value) || COUNTRY_CODES[0])}
-                      className="px-3 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm cursor-pointer"
+                      disabled={phoneOtpSent}
+                      className="px-3 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm cursor-pointer disabled:opacity-50"
                     >
                       {COUNTRY_CODES.map(c => (
                         <option key={c.code} value={c.code}>{c.code}</option>
@@ -343,56 +394,47 @@ export default function LoginPage() {
                         value={formData.phone}
                         onChange={(e) => updateField("phone", e.target.value)}
                         placeholder="555 000 0000"
-                        className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm"
+                        disabled={phoneOtpSent}
+                        className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm disabled:opacity-50"
                       />
                     </div>
                   </div>
                 </div>
 
-                {!phoneOtpSent && (
+                {!phoneOtpSent ? (
                   <button
-                    onClick={sendPhoneOtp}
+                    onClick={sendPhoneLoginOtp}
                     disabled={phoneOtpLoading || formData.phone.replace(/\D/g, "").length < 6}
                     className="w-full py-3 rounded-xl bg-primary/10 text-primary font-medium hover:bg-primary/20 disabled:opacity-50 cursor-pointer"
                   >
-                    {phoneOtpLoading ? <><Loader2 className="w-4 h-4 animate-spin inline mr-2" />Sending...</> : "Send OTP"}
+                    {phoneOtpLoading ? <><Loader2 className="w-4 h-4 animate-spin inline mr-2" />Sending OTP...</> : "Send OTP"}
                   </button>
-                )}
-
-                {phoneOtpSent && (
+                ) : (
                   <>
                     <div>
                       <label className="block text-sm font-medium mb-2">Enter OTP</label>
                       <input
                         type="text"
-                        value={formData.otp}
-                        onChange={(e) => updateField("otp", e.target.value.replace(/\D/g, "").slice(0, 6))}
+                        value={phoneOtp}
+                        onChange={(e) => setPhoneOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
                         placeholder="6-digit code"
                         className="w-full px-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm"
                       />
                       <div className="mt-2 text-sm text-text-muted text-right">
-                        {resendTimer > 0 ? `Resend in ${resendTimer}s` : (
-                          <button onClick={sendPhoneOtp} className="text-primary hover:underline cursor-pointer">Resend OTP</button>
+                        {phoneResendTimer > 0 ? `Resend in ${phoneResendTimer}s` : (
+                          <button onClick={sendPhoneLoginOtp} className="text-primary hover:underline cursor-pointer">Resend OTP</button>
                         )}
                       </div>
                     </div>
+
                     <button
-                      onClick={verifyPhoneOtp}
-                      disabled={loading || formData.otp.length < 6}
-                      className="w-full py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer disabled:opacity-50"
+                      onClick={verifyPhoneLoginOtp}
+                      disabled={loading || phoneOtp.length < 6}
+                      className="w-full py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
-                      {loading ? <Loader2 className="w-5 h-5 animate-spin inline mr-2" /> : "Verify & Log In"}
+                      {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <>Verify and Log In <ArrowRight className="w-5 h-5" /></>}
                     </button>
                   </>
-                )}
-
-                {/* Forgot password link still visible for phone users */}
-                {!phoneOtpSent && (
-                  <div className="flex items-center justify-end">
-                    <Link href="/forgot-password" className="text-sm text-primary hover:text-primary-light transition-colors cursor-pointer">
-                      Forgot password?
-                    </Link>
-                  </div>
                 )}
               </>
             )}
@@ -404,7 +446,6 @@ export default function LoginPage() {
               Sign up free
             </Link>
           </p>
-          <div ref={containerRef} style={{ position: "fixed", left: "-9999px", top: 0, width: 1, height: 1, overflow: "hidden" }} />
         </div>
       </div>
     </div>

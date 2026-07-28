@@ -72,6 +72,8 @@ function ReviewActions({ goalId, goalTitle, onReviewComplete }: { goalId: string
         body: JSON.stringify({ action, feedback: action === "reject" ? feedback : undefined }),
       });
       if (!res.ok) throw new Error("Review failed");
+      const result = await res.json();
+      if (result.goal) useGoalStore.getState().updateGoalFromWs(result.goal);
       onReviewComplete();
     } catch (e) {
       console.error(e);
@@ -125,6 +127,8 @@ function RequestReviewButton({ goalId, goalTitle, onReviewRequested }: { goalId:
         body: JSON.stringify({ status: "pending_review" }),
       });
       if (!res.ok) throw new Error("Failed to request review");
+      const result = await res.json();
+      if (result.goal) useGoalStore.getState().updateGoalFromWs(result.goal);
       onReviewRequested();
     } catch (e) {
       console.error(e);
@@ -154,7 +158,7 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
   const [loading, setLoading] = useState(true);
   const [goalData, setGoalData] = useState(goal);
   const { updateTask } = useTaskStore();
-  const { generateStrategies, selectStrategy, createGoal } = useGoalStore();
+  const { generateStrategies, selectStrategy, createGoal, fetchGoals } = useGoalStore();
   const { members, fetchOrgMembers } = useOrgChartStore();
   const [confirmingStrategy, setConfirmingStrategy] = useState<{ index: number; strat: any } | null>(null);
   const [selecting, setSelecting] = useState(false);
@@ -369,12 +373,12 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
 
               {/* Approve/Reject — shown when goal is pending_review and current user is the owner */}
               {goal.status === "pending_review" && user?.uid === goal.created_by && (
-                <ReviewActions goalId={goal.id || goal._id} goalTitle={goal.title} onReviewComplete={() => loadTasks()} />
+                <ReviewActions goalId={goal.id || goal._id} goalTitle={goal.title} onReviewComplete={() => { loadTasks(); if (propOrgId) fetchGoals(propOrgId); }} />
               )}
 
               {/* Request Review — shown when goal is active and current user is NOT the owner (assignee side) */}
               {goal.status === "active" && user?.uid !== goal.created_by && (
-                <RequestReviewButton goalId={goal.id || goal._id} goalTitle={goal.title} onReviewRequested={() => loadTasks()} />
+                <RequestReviewButton goalId={goal.id || goal._id} goalTitle={goal.title} onReviewRequested={() => { loadTasks(); if (propOrgId) fetchGoals(propOrgId); }} />
               )}
 
               {/* Parent goal link */}
@@ -1088,6 +1092,7 @@ function DepartmentGoalsModal({
   const orgId = organization?.id;
   const [search, setSearch] = useState("");
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [drillLevel, setDrillLevel] = useState<"goals" | "subgoals" | "tasks">("goals");
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -1159,6 +1164,7 @@ function DepartmentGoalsModal({
       </ModalHeader>
       <ModalContent>
         <div className="space-y-3">
+          {drillLevel === "goals" && (
           <div className="grid grid-cols-3 gap-2">
             <div className="p-3 rounded-xl bg-surface border border-border/50 text-center">
               <p className="text-lg font-bold text-primary">{goals.length}</p>
@@ -1176,6 +1182,7 @@ function DepartmentGoalsModal({
               <p className="text-[10px] text-text-muted">Progress</p>
             </div>
           </div>
+          )}
 
           <Input
             value={search}
@@ -1194,35 +1201,40 @@ function DepartmentGoalsModal({
             onOpenGoal={onSelectGoal}
             onAssign={handleAssign}
             departmentName={department.name}
+            onLevelChange={setDrillLevel}
           />
         </div>
       </ModalContent>
       <ModalFooter>
         <div className="relative flex items-center gap-2 ml-auto">
           <Button variant="outline" onClick={onClose}>Close</Button>
-          <Button onClick={() => setShowMenu(!showMenu)} className="flex items-center gap-1 cursor-pointer">
-            <Plus className="w-4 h-4" /> Add
-          </Button>
-          {showMenu && (
-            <div
-              ref={menuRef}
-              className="absolute bottom-full right-0 mb-1 w-36 rounded-lg bg-surface border border-border/50 shadow-lg overflow-hidden z-50"
-            >
-              <button
-                onClick={() => { setShowMenu(false); onAddGoal?.(); }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-primary/10 transition-colors cursor-pointer"
-              >
-                <Flag className="w-4 h-4 text-primary" />
-                Goal
-              </button>
-              <button
-                onClick={() => { setShowMenu(false); onAddTask?.(); }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-primary/10 transition-colors cursor-pointer border-t border-border/50"
-              >
-                <CheckCircle className="w-4 h-4 text-primary" />
-                Task
-              </button>
-            </div>
+          {drillLevel === "goals" && (
+            <>
+              <Button onClick={() => setShowMenu(!showMenu)} className="flex items-center gap-1 cursor-pointer">
+                <Plus className="w-4 h-4" /> Add
+              </Button>
+              {showMenu && (
+                <div
+                  ref={menuRef}
+                  className="absolute bottom-full right-0 mb-1 w-36 rounded-lg bg-surface border border-border/50 shadow-lg overflow-hidden z-50"
+                >
+                  <button
+                    onClick={() => { setShowMenu(false); onAddGoal?.(); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-primary/10 transition-colors cursor-pointer"
+                  >
+                    <Flag className="w-4 h-4 text-primary" />
+                    Goal
+                  </button>
+                  <button
+                    onClick={() => { setShowMenu(false); onAddTask?.(); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-primary/10 transition-colors cursor-pointer border-t border-border/50"
+                  >
+                    <CheckCircle className="w-4 h-4 text-primary" />
+                    Task
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       </ModalFooter>
@@ -1239,6 +1251,7 @@ function DepartmentDrillView({
   onOpenGoal,
   onAssign,
   departmentName,
+  onLevelChange,
 }: {
   goals: any[];
   members: any[];
@@ -1248,8 +1261,14 @@ function DepartmentDrillView({
   onOpenGoal: (goal: any) => void;
   onAssign: (goal: any, role: "defaulter" | "reviewer", member: { id: string; full_name: string; email: string } | null) => Promise<void> | void;
   departmentName: string;
+  onLevelChange?: (level: "goals" | "subgoals" | "tasks") => void;
 }) {
   const [level, setLevel] = useState<"goals" | "subgoals" | "tasks">("goals");
+
+  const setLevelAndNotify = (newLevel: "goals" | "subgoals" | "tasks") => {
+    setLevel(newLevel);
+    onLevelChange?.(newLevel);
+  };
   const [parentGoal, setParentGoal] = useState<any>(null);
   const [subGoal, setSubGoal] = useState<any>(null);
   const [suggestedSubgoals, setSuggestedSubgoals] = useState<any[]>([]);
@@ -1257,8 +1276,11 @@ function DepartmentDrillView({
   const [suggestedTasks, setSuggestedTasks] = useState<any[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [taskSearch, setTaskSearch] = useState("");
+  const [subgoalSearch, setSubgoalSearch] = useState("");
   const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [newSubgoalTitle, setNewSubgoalTitle] = useState("");
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showCreateSubgoalForm, setShowCreateSubgoalForm] = useState(false);
   const [selectedSuggestionIds, setSelectedSuggestionIds] = useState<Set<number>>(new Set());
   const [selectedTaskSuggestionIds, setSelectedTaskSuggestionIds] = useState<Set<number>>(new Set());
   const [addingSubgoals, setAddingSubgoals] = useState(false);
@@ -1267,6 +1289,7 @@ function DepartmentDrillView({
   const { createGoal, deleteGoal, fetchGoals } = useGoalStore();
   const [goalTaskCache, setGoalTaskCache] = useState<Record<string, any[]>>({});
   const [subgoalOptimistic, setSubgoalOptimistic] = useState<Record<string, Record<string, any>>>({});
+  const [confirmDelete, setConfirmDelete] = useState<{ type: "subgoal" | "task"; id: string; title: string } | null>(null);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -1449,6 +1472,26 @@ function DepartmentDrillView({
     } catch {}
   };
 
+  const handleCreateSubgoal = async () => {
+    if (!newSubgoalTitle.trim() || !parentGoal || !orgId) return;
+    try {
+      await createGoal({
+        title: newSubgoalTitle.trim(),
+        description: newSubgoalTitle.trim(),
+        priority: "medium",
+        department: parentGoal.department || departmentName,
+        organization_id: orgId,
+        goal_type: "short_term" as const,
+        duration: "one_time" as const,
+        parent_goal_id: parentGoal.id || parentGoal._id,
+        industry: parentGoal.industry || "",
+        micro_vertical: parentGoal.micro_vertical || "",
+      } as any);
+      setNewSubgoalTitle("");
+      setShowCreateSubgoalForm(false);
+    } catch {}
+  };
+
   const currentTasks = subGoal ? goalTaskCache[subGoal.id || subGoal._id] || _tasks.filter((t: any) => t.goal_id === (subGoal.id || subGoal._id)) : [];
 
   const filteredTasks = useMemo(() => {
@@ -1457,14 +1500,8 @@ function DepartmentDrillView({
     return currentTasks.filter((t: any) => (t.title || "").toLowerCase().includes(q));
   }, [currentTasks, taskSearch]);
 
-  const renderProgressBar = (pct: number) => (
-    <div className="flex items-center gap-1 w-16 flex-shrink-0">
-      <div className="flex-1 h-1.5 bg-background rounded-full overflow-hidden">
-        <div className={`h-full rounded-full ${pct >= 100 ? "bg-emerald-400" : pct >= 50 ? "bg-primary" : pct > 0 ? "bg-yellow-400" : "bg-gray-500/30"}`} style={{ width: `${Math.min(pct, 100)}%` }} />
-      </div>
-      <span className="text-[10px] text-text-muted w-7 text-right font-medium">{pct}%</span>
-    </div>
-  );
+
+
 
   const renderPersonPickers = (goal: any) => {
     const gid = goal.id || goal._id;
@@ -1503,22 +1540,15 @@ function DepartmentDrillView({
           {parentGoals.length > 0 && <p className="text-[11px] font-medium text-text-muted mb-1 flex items-center gap-1"><Flag className="w-3.5 h-3.5 text-primary" /> Long-term Goals ({parentGoals.length})</p>}
           {parentGoals.map((goal) => {
             const gid = goal.id || goal._id;
-            const t = goal.task_counts || {};
-            const pct = t.total > 0 ? Math.round((t.completed / t.total) * 100) : goal.progress || 0;
             return (
               <div key={gid} className="border border-primary/20 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 overflow-hidden">
-                <div onClick={() => { setParentGoal(goal); setLevel("subgoals"); }} className="flex items-center gap-3 p-3 hover:bg-primary/5 transition-colors cursor-pointer" role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setParentGoal(goal); setLevel("subgoals"); } }}>
+                <div onClick={() => { setParentGoal(goal); setLevelAndNotify("subgoals"); }} className="flex items-center gap-3 p-3 hover:bg-primary/5 transition-colors cursor-pointer" role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setParentGoal(goal); setLevelAndNotify("subgoals"); } }}>
                   <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 bg-primary/10">
                     <Flag className="w-4 h-4 text-primary" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <span className="text-sm font-semibold truncate">{goal.title}</span>
-                    <div className="flex items-center gap-2 text-[10px] text-text-muted mt-0.5">
-                      {(childGoalsByParent.get(gid)?.length || 0) > 0 && <span>{childGoalsByParent.get(gid)?.length} sub-goals</span>}
-                      {t.total > 0 && <span>{t.completed}/{t.total} tasks</span>}
-                    </div>
                   </div>
-                  {renderProgressBar(pct)}
                   <ChevronRight className="w-4 h-4 text-primary flex-shrink-0" />
                 </div>
               </div>
@@ -1526,10 +1556,10 @@ function DepartmentDrillView({
           })}
           {orphanGoals.length > 0 && (
             <div className="pt-1">
-              <p className="text-[10px] font-medium text-text-muted mb-1 flex items-center gap-1"><Flag className="w-3 h-3" /> Standalone ({orphanGoals.length})</p>
-              {orphanGoals.map((goal) => (
+              <p className="text-[10px] font-medium text-text-muted mb-1 flex items-center gap-1"><Flag className="w-3 h-3" /> Standalone</p>
+{orphanGoals.map((goal) => (
                 <div key={goal.id || goal._id} className="border border-primary/20 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 overflow-hidden">
-                  <div onClick={() => onOpenGoal(goal)} className="flex items-center gap-3 p-3 hover:bg-primary/5 transition-colors cursor-pointer" role="button" tabIndex={0}>
+                  <div onClick={() => { setParentGoal(goal); setLevelAndNotify("subgoals"); }} className="flex items-center gap-3 p-3 hover:bg-primary/5 transition-colors cursor-pointer" role="button" tabIndex={0}>
                     <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 bg-primary/10"><Flag className="w-3.5 h-3.5 text-primary" /></div>
                     <div className="flex-1 min-w-0"><span className="text-xs font-semibold truncate">{goal.title}</span></div>
                     <ChevronRight className="w-3.5 h-3.5 text-text-muted flex-shrink-0" />
@@ -1548,17 +1578,29 @@ function DepartmentDrillView({
     if (!parentGoal) return null;
     const pid = parentGoal.id || parentGoal._id;
     const children = childGoalsByParent.get(pid) || [];
+    const sq = subgoalSearch.trim().toLowerCase();
+    const filteredChildren = sq ? children.filter((c: any) => (c.title || "").toLowerCase().includes(sq)) : children;
     return (
       <div className="space-y-3 max-h-[55vh] overflow-y-auto custom-scrollbar pr-1">
-        <button onClick={() => { setLevel("goals"); setParentGoal(null); setSuggestedSubgoals([]); }} className="flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 transition-colors cursor-pointer mb-1">
+        <button onClick={() => { setLevelAndNotify("goals"); setParentGoal(null); setSuggestedSubgoals([]); setShowCreateSubgoalForm(false); setSubgoalSearch(""); }} className="flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 transition-colors cursor-pointer mb-1">
           <ArrowLeft className="w-3.5 h-3.5" /> Back to goals
         </button>
         <div className="flex items-center gap-2 p-3 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 border border-primary/20">
           <div className="w-8 h-8 rounded-xl flex items-center justify-center bg-primary/10"><Flag className="w-4 h-4 text-primary" /></div>
           <div className="flex-1 min-w-0">
             <span className="text-sm font-semibold">{parentGoal.title}</span>
-            <span className="text-[10px] text-text-muted ml-1">{children.length} sub-goal{children.length !== 1 ? "s" : ""}</span>
           </div>
+        </div>
+
+        {/* Search + Create */}
+        <div className="flex items-center gap-2">
+          <div className="flex-1 relative">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
+            <input value={subgoalSearch} onChange={(e) => setSubgoalSearch(e.target.value)} placeholder="Search sub-goals..." className="w-full h-8 pl-8 pr-3 text-xs bg-background border border-border rounded-lg focus:outline-none focus:border-primary" />
+          </div>
+          <button onClick={() => setShowCreateSubgoalForm((v) => !v)} className="px-3 h-8 rounded-lg text-xs font-medium bg-primary text-white hover:bg-primary/90 transition-colors cursor-pointer flex items-center gap-1 flex-shrink-0">
+            <Plus className="w-3.5 h-3.5" /> Create
+          </button>
         </div>
 
         {/* Suggest sub-goals */}
@@ -1609,20 +1651,31 @@ function DepartmentDrillView({
           )}
         </div>
 
+        {/* Manual create form */}
+        {showCreateSubgoalForm && (
+          <div className="p-3 rounded-xl bg-surface border border-primary/20">
+            <p className="text-[10px] font-semibold mb-2">Create Sub-goal</p>
+            <div className="flex gap-2">
+              <input value={newSubgoalTitle} onChange={(e) => setNewSubgoalTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleCreateSubgoal(); }} placeholder="Sub-goal title..." className="flex-1 h-8 px-3 text-xs bg-background border border-border rounded-lg focus:outline-none focus:border-primary" autoFocus />
+              <button onClick={handleCreateSubgoal} disabled={!newSubgoalTitle.trim()} className="px-3 h-8 rounded-lg text-xs font-medium bg-primary text-white hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1">
+                <Plus className="w-3 h-3" /> Add
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Existing sub-goals */}
-        {children.length > 0 ? (
+        {filteredChildren.length > 0 ? (
           <div className="space-y-1.5">
-            <p className="text-[10px] font-medium text-text-muted flex items-center gap-1">{children.length} sub-goal{children.length !== 1 ? "s" : ""}</p>
-            {children.map((child) => (
+            {filteredChildren.map((child) => (
               <div key={child.id || child._id} className="border border-primary/20 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 overflow-hidden">
-                <div onClick={() => { setSubGoal(child); setLevel("tasks"); loadGoalTasks(child.id || child._id); }} className="flex items-center gap-3 p-3 hover:bg-primary/5 transition-colors cursor-pointer" role="button" tabIndex={0}>
+                <div onClick={() => { setSubGoal(child); setLevelAndNotify("tasks"); loadGoalTasks(child.id || child._id); }} className="flex items-center gap-3 p-3 hover:bg-primary/5 transition-colors cursor-pointer" role="button" tabIndex={0}>
                   <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${child.status === "completed" ? "bg-emerald-500/10" : "bg-primary/10"}`}>
                     {child.status === "completed" ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> : <Clock className="w-3.5 h-3.5 text-primary" />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <span className="text-xs font-semibold truncate">{child.title}</span>
                     <div className="flex items-center gap-1.5 text-[9px] text-text-muted mt-0.5">
-                      {(child.task_counts?.total || 0) > 0 && <span>{child.task_counts.completed}/{child.task_counts.total} tasks</span>}
                       {child.priority && <span className={`px-1 py-0.5 rounded text-[8px] font-medium ${child.priority === "urgent" ? "text-rose-400 bg-rose-500/10" : child.priority === "high" ? "text-orange-400 bg-orange-500/10" : child.priority === "medium" ? "text-yellow-400 bg-yellow-500/10" : "text-gray-400 bg-gray-500/10"}`}>{child.priority}</span>}
                     </div>
                   </div>
@@ -1631,7 +1684,7 @@ function DepartmentDrillView({
                 <div onClick={(e) => e.stopPropagation()} className="px-3 pb-2 flex items-center gap-1.5 flex-wrap">
                   {renderPersonPickers(child)}
                   <button
-                    onClick={(e) => { e.stopPropagation(); deleteGoal(child.id || child._id); }}
+                    onClick={(e) => { e.stopPropagation(); setConfirmDelete({ type: "subgoal", id: child.id || child._id, title: child.title }); }}
                     className="p-1 rounded text-text-muted hover:text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer flex-shrink-0 ml-auto"
                     title="Delete sub-goal"
                   >
@@ -1641,8 +1694,10 @@ function DepartmentDrillView({
               </div>
             ))}
           </div>
-        ) : suggestedSubgoals.length === 0 ? (
+        ) : suggestedSubgoals.length === 0 && !subgoalSearch.trim() ? (
           <p className="text-[10px] text-text-muted text-center py-3">No sub-goals yet. Use the Generate button above to create AI-suggested sub-goals.</p>
+        ) : subgoalSearch.trim() && filteredChildren.length === 0 ? (
+          <p className="text-[10px] text-text-muted text-center py-3">No matching sub-goals</p>
         ) : null}
       </div>
     );
@@ -1654,7 +1709,7 @@ function DepartmentDrillView({
     const gid = subGoal.id || subGoal._id;
     return (
       <div className="space-y-3 max-h-[55vh] overflow-y-auto custom-scrollbar pr-1">
-        <button onClick={() => { setLevel("subgoals"); setSubGoal(null); setSuggestedTasks([]); setTaskSearch(""); setShowCreateForm(false); }} className="flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 transition-colors cursor-pointer mb-1">
+        <button onClick={() => { setLevelAndNotify("subgoals"); setSubGoal(null); setSuggestedTasks([]); setTaskSearch(""); setShowCreateForm(false); }} className="flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 transition-colors cursor-pointer mb-1">
           <ArrowLeft className="w-3.5 h-3.5" /> Back to sub-goals
         </button>
         <div className="flex items-center gap-2 p-3 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 border border-primary/20">
@@ -1663,7 +1718,6 @@ function DepartmentDrillView({
           </div>
           <div className="flex-1 min-w-0">
             <span className="text-sm font-semibold">{subGoal.title}</span>
-            <span className="text-[10px] text-text-muted ml-1">{currentTasks.length} task{currentTasks.length !== 1 ? "s" : ""}</span>
           </div>
           {renderPersonPickers(subGoal)}
         </div>
@@ -1759,7 +1813,7 @@ function DepartmentDrillView({
                     getStatusColor={getStatusColor}
                   />
                 </div>
-                <button onClick={() => handleDeleteTask(task.id)} className="p-1 rounded text-text-muted hover:text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer flex-shrink-0" title="Delete task">
+                <button onClick={() => setConfirmDelete({ type: "task", id: task.id, title: task.title })} className="p-1 rounded text-text-muted hover:text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer flex-shrink-0" title="Delete task">
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -1770,10 +1824,52 @@ function DepartmentDrillView({
     );
   };
 
-  if (level === "tasks" && subGoal) return renderTasksView();
-  if (level === "subgoals" && parentGoal) return renderSubgoalsView();
-  return renderGoalsList();
+  const renderContent = () => {
+    if (level === "tasks" && subGoal) return renderTasksView();
+    if (level === "subgoals" && parentGoal) return renderSubgoalsView();
+    return renderGoalsList();
+  };
+
+  return (
+    <>
+      {renderContent()}
+      <Modal open={!!confirmDelete} onOpenChange={(open) => { if (!open) setConfirmDelete(null); }} size="sm">
+        <ModalHeader>
+          <ModalTitle>Confirm Delete</ModalTitle>
+          <ModalClose />
+        </ModalHeader>
+        <ModalContent>
+          <p className="text-sm text-text-muted">
+            Are you sure you want to delete <strong>{confirmDelete?.title}</strong>?
+          </p>
+        </ModalContent>
+        <ModalFooter>
+          <Button variant="outline" onClick={() => setConfirmDelete(null)}>Cancel</Button>
+          <Button
+            onClick={async () => {
+              if (!confirmDelete) return;
+              if (confirmDelete.type === "subgoal") {
+                await deleteGoal(confirmDelete.id);
+              } else if (confirmDelete.type === "task") {
+                await deleteTask(confirmDelete.id);
+                if (subGoal) {
+                  const gid = subGoal.id || subGoal._id;
+                  setGoalTaskCache((prev) => ({ ...prev, [gid]: (prev[gid] || []).filter((t: any) => t.id !== confirmDelete.id) }));
+                }
+              }
+              setConfirmDelete(null);
+            }}
+            className="bg-rose-500 hover:bg-rose-600 cursor-pointer"
+          >
+            Delete
+          </Button>
+        </ModalFooter>
+      </Modal>
+    </>
+  );
 }
+
+
 
 function GoalSection() {
   const { organization } = useOrganizationStore();
@@ -1845,10 +1941,13 @@ function GoalSection() {
   }, [goals]);
 
   const totalActive = goals.filter((g) => g.status === "active").length;
+  const totalPendingReview = goals.filter((g) => g.status === "pending_review").length;
   const totalCompleted = goals.filter((g) => g.status === "completed").length;
   const totalTasks = goals.reduce((acc, g) => acc + (g.task_counts?.total || 0), 0);
   const totalDone = goals.reduce((acc, g) => acc + (g.task_counts?.completed || 0), 0);
   const overallProgress = totalTasks > 0 ? Math.round((totalDone / totalTasks) * 100) : 0;
+
+  console.log("[GoalSection] render", { total: goals.length, totalActive, totalPendingReview, totalCompleted, totalTasks, totalDone, goalsStatuses: goals.map((g) => g.status) });
 
   const openDepartmentGoals = openDepartment
     ? goals.filter((g) => (g.department || "Unassigned") === openDepartment)
@@ -1884,9 +1983,10 @@ function GoalSection() {
               <CardTitle>Goals Pipeline</CardTitle>
             </div>
             <div className="flex items-center gap-2 flex-wrap justify-end">
-              <span className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-primary text-white">Department</span>
+<span className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-primary text-white">Department</span>
               <Badge variant="outline" className="text-xs">{goals.length} total</Badge>
               <Badge variant="outline" className="text-xs">{totalActive} active</Badge>
+              <Badge variant="outline" className="text-xs">{totalPendingReview} pending review</Badge>
               <Badge variant="outline" className="text-xs">{totalCompleted} done</Badge>
             </div>
           </div>
@@ -1926,10 +2026,10 @@ function GoalSection() {
               {departments.map((dept) => {
                 const style = getDepartmentStyle(dept.name);
                 const DeptIcon = style.icon;
-                const activeCount = dept.goals.filter((g) => g.status === "active").length;
+const activeCount = dept.goals.filter((g) => g.status === "active").length;
                 const completedCount = dept.goals.filter((g) => g.status === "completed").length;
-                const dTasks = dept.goals.reduce((acc, g) => acc + (g.task_counts?.total || 0), 0);
                 const dDone = dept.goals.reduce((acc, g) => acc + (g.task_counts?.completed || 0), 0);
+                const dTasks = dept.goals.reduce((acc, g) => acc + (g.task_counts?.total || 0), 0);
                 const dProgress = dTasks > 0 ? Math.round((dDone / dTasks) * 100) : 0;
                 const topGoals = [...dept.goals]
                   .sort((a, b) => (b.progress ?? 0) - (a.progress ?? 0))
@@ -2960,6 +3060,7 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
   const [meetingHistory, setMeetingHistory] = useState<any[]>([]);
   const [meetingHistoryLoading, setMeetingHistoryLoading] = useState(false);
   const [expandedTitles, setExpandedTitles] = useState<Set<string>>(new Set());
+  const [confirmDeleteMeeting, setConfirmDeleteMeeting] = useState<{ id: string; title: string } | null>(null);
 
   useEffect(() => {
     if (searchParams?.get("checkin") === "true" && orgId) {
@@ -3267,7 +3368,7 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
                                 </p>
                               </div>
                               <Badge variant="outline" className="text-[10px] flex-shrink-0">{m.task_count || 0}</Badge>
-                              <button onClick={(e) => { e.stopPropagation(); handleDeleteMeeting(m.id); }} className="p-1 rounded-lg hover:bg-rose-500/10 text-text-muted hover:text-rose-400 transition-colors cursor-pointer flex-shrink-0">
+                              <button onClick={(e) => { e.stopPropagation(); setConfirmDeleteMeeting({ id: m.id, title: m.title || "Untitled meeting" }); }} className="p-1 rounded-lg hover:bg-rose-500/10 text-text-muted hover:text-rose-400 transition-colors cursor-pointer flex-shrink-0">
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             </div>
@@ -3373,6 +3474,31 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
           </div>
         </div>
       )}
+
+      <Modal open={!!confirmDeleteMeeting} onOpenChange={(open) => { if (!open) setConfirmDeleteMeeting(null); }} size="sm">
+        <ModalHeader>
+          <ModalTitle>Confirm Delete</ModalTitle>
+          <ModalClose />
+        </ModalHeader>
+        <ModalContent>
+          <p className="text-sm text-text-muted">
+            Are you sure you want to delete <strong>{confirmDeleteMeeting?.title}</strong>?
+          </p>
+        </ModalContent>
+        <ModalFooter>
+          <Button variant="outline" onClick={() => setConfirmDeleteMeeting(null)}>Cancel</Button>
+          <Button
+            onClick={async () => {
+              if (!confirmDeleteMeeting) return;
+              await handleDeleteMeeting(confirmDeleteMeeting.id);
+              setConfirmDeleteMeeting(null);
+            }}
+            className="bg-rose-500 hover:bg-rose-600 cursor-pointer"
+          >
+            Delete
+          </Button>
+        </ModalFooter>
+      </Modal>
     </div>
   );
 }

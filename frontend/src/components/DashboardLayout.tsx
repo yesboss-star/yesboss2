@@ -11,7 +11,6 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
-  Search,
   Menu,
   X,
   LogOut,
@@ -45,9 +44,29 @@ const navItems: NavItem[] = [
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, role, signOut } = useAuth();
   const { sidebarOpen, mobileSidebarOpen, setSidebarOpen, setMobileSidebarOpen } = useUIStore();
-  const { organization, avatarUrl, avatarStyle } = useOrganizationStore();
+  const { organization, avatarUrl, avatarStyle, setAvatarUrl } = useOrganizationStore();
   const pathname = usePathname();
   const [isMobile, setIsMobile] = useState(false);
+
+  // Load avatar from DB on mount — always source from API, not stale local state
+  useEffect(() => {
+    if (!user?.email) return;
+    // Clean up stale blob URLs from previous sessions
+    if (avatarUrl && avatarUrl.startsWith("blob:")) {
+      setAvatarUrl(undefined);
+    }
+    // Clean up stale double-/api/v1 URLs from a previous bug
+    if (avatarUrl && avatarUrl.includes("/api/v1/api/v1/")) {
+      setAvatarUrl(undefined);
+    }
+    // Fetch avatar from API
+    const avatarApiUrl = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"}/employees/avatar/${encodeURIComponent(user.email)}`;
+    fetch(avatarApiUrl, { method: "HEAD" })
+      .then((r) => {
+        if (r.ok) setAvatarUrl(avatarApiUrl);
+      })
+      .catch(() => {});
+  }, [user?.email]);
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 1024);
@@ -198,14 +217,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   <Menu className="w-5 h-5" />
                 </button>
               )}
-              <div className="relative hidden sm:block">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
-                <input
-                  type="text"
-                  placeholder="Search anything, tasks, people..."
-                  className="w-64 lg:w-96 pl-10 pr-4 py-2 rounded-xl bg-surface border border-border text-sm focus:outline-none focus:border-primary transition-colors"
-                />
-              </div>
+
             </div>
 
             <div className="flex items-center gap-3">

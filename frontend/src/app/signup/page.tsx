@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Eye, EyeOff, User, Mail, Lock, Shield, CheckCircle, AlertCircle, Loader2, MessageSquare, X } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, User, Mail, Lock, Shield, CheckCircle, AlertCircle, Loader2, MessageSquare, X, ArrowRight } from "lucide-react";
 import { auth } from "@/lib/firebase";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 
@@ -129,11 +129,7 @@ export default function SignupPage() {
       const credential = await createUserWithEmailAndPassword(auth, formData.email.trim(), formData.password);
       const firebaseUid = credential.user.uid;
 
-      const userData: {
-        uid: string; email: string; full_name: string; phone: string;
-        role: UserRole; phone_verified: boolean; email_verified: boolean;
-        verification_token?: string;
-      } = {
+      const userData = {
         uid: firebaseUid,
         email: formData.email.trim(),
         full_name: formData.fullName,
@@ -141,12 +137,8 @@ export default function SignupPage() {
         role,
         phone_verified: false,
         email_verified: true,
+        verification_token: verificationToken || undefined,
       };
-
-      if (verificationToken) {
-        userData.verification_token = verificationToken;
-      }
-
       const syncRes = await fetch(`${API_URL}/auth/sync-user`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -384,32 +376,42 @@ export default function SignupPage() {
               </div>
             ) : otpSent ? (
               <>
-                <div>
-                  <label className="block text-sm font-medium mb-2">OTP Code</label>
-                  <div className="relative">
-                    <MessageSquare className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
-                    <input
-                      type="text"
-                      value={formData.otp}
-                      onChange={(e) => setFormData((p) => ({ ...p, otp: e.target.value.replace(/\D/g, "").slice(0, 6) }))}
-                      placeholder="Enter 6-digit OTP"
-                      className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm"
-                    />
+                {otpSent && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium mb-2">OTP Code</label>
+                      <div className="relative">
+                        <MessageSquare className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
+                        <input
+                          type="text"
+                          value={formData.otp}
+                          onChange={(e) => setFormData((p) => ({ ...p, otp: e.target.value.replace(/\D/g, "").slice(0, 6) }))}
+                          placeholder="Enter 6-digit OTP"
+                          className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm"
+                        />
+                      </div>
+                    </div>
+                    <div className="mt-2 text-sm text-text-muted text-right">
+                      {resendTimer > 0 ? `Resend in ${resendTimer}s` : (
+                        <button onClick={sendOtpToBackend} className="text-primary hover:underline cursor-pointer">Resend OTP</button>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={verifyOtp}
+                      disabled={otpLoading || formData.otp.length < 6}
+                      className="w-full mt-4 py-3 rounded-xl bg-accent text-white font-medium disabled:opacity-50 cursor-pointer"
+                    >
+                      {otpLoading ? <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> : "Verify OTP"}
+                    </button>
+                  </>
+                )}
+                {!otpSent && (
+                  <div className="flex items-center gap-2 text-text-muted p-3 rounded-xl bg-surface border border-border mb-4">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span className="text-sm">Sending OTP...</span>
                   </div>
-                </div>
-                <div className="mt-2 text-sm text-text-muted text-right">
-                  {resendTimer > 0 ? `Resend in ${resendTimer}s` : (
-                    <button onClick={sendOtpToBackend} className="text-primary hover:underline cursor-pointer">Resend OTP</button>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={verifyOtp}
-                  disabled={otpLoading || formData.otp.length < 6}
-                  className="w-full mt-4 py-3 rounded-xl bg-accent text-white font-medium disabled:opacity-50 cursor-pointer"
-                >
-                  {otpLoading ? <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> : "Verify OTP"}
-                </button>
+                )}
               </>
             ) : null}
 

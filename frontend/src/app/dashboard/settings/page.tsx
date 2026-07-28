@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/contexts/AuthContext";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, Tabs, TabsList, TabsTrigger, TabsContent, Button } from "@/components/ui";
-import { Bell, Volume2, Mail, Smartphone, Plug, MessageSquare, ArrowLeft, Loader2 } from "lucide-react";
+import { Bell, ArrowLeft, Volume2, Mail, Smartphone, Plug, MessageSquare } from "lucide-react";
 import ZohoConnectButton from "@/components/owners/ZohoConnectButton";
 import { useZohoStore } from "@/stores/zohoStore";
 import { useUIStore } from "@/stores/uiStore";
@@ -40,7 +41,6 @@ export default function SettingsPage() {
   const router = useRouter();
   const [prefs, setPrefs] = useState<any>(DEFAULT_PREFS);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const headers = getAuthHeaders();
