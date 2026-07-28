@@ -18,6 +18,7 @@ from typing import Any
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from ..core.ai_client import get_ai_response
@@ -1019,7 +1020,179 @@ async def _gather_org_snapshot(db, org_id: str) -> dict[str, Any]:
     except Exception:
         snap["team_updates"] = []
 
+    try:
+        insights_list = list(
+            db.session_insights.find({"organization_id": org_id, "status": "open"})
+            .sort("created_at", -1)
+            .limit(5)
+        )
+        snap["recent_insights"] = [
+            {"summary": i.get("summary", ""), "type": i.get("type", "insight"), "created_at": str(i.get("created_at"))}
+            for i in insights_list
+        ]
+    except Exception:
+        snap["recent_insights"] = []
+
     return snap
+
+
+async def _store_session_insight(db, org_id: str | None, session_id: str | None, answer_text: str, insight_type: str = "insight"):
+    """Extract a one-line summary from the assistant's answer and store it as a session insight."""
+    if db is None or not org_id or not answer_text or len(answer_text) < 15:
+        return
+    try:
+        first_line = answer_text.strip().split("\n")[0][:200]
+        summary = first_line.replace("*", "").replace("✅", "").replace("🎯", "").strip()
+        if len(summary) < 10:
+            summary = answer_text.strip()[:200]
+        db.session_insights.insert_one({
+            "organization_id": org_id,
+            "session_id": session_id or "",
+            "summary": summary,
+            "type": insight_type,
+            "status": "open",
+            "created_at": datetime.utcnow(),
+        })
+    except Exception as e:
+        logger.warning(f"Failed to store session insight: {e}")
+
+
+async def _confirm_insight_by_summary(db, org_id: str | None, summary: str):
+    """Mark session insights matching the summary as done."""
+    if db is None or not org_id or not summary:
+        return
+    try:
+        db.session_insights.update_many(
+            {"organization_id": org_id, "summary": {"$regex": re.escape(summary[:100]), "$options": "i"}, "status": "open"},
+            {"$set": {"status": "done", "confirmed_at": datetime.utcnow()}},
+        )
+    except Exception as e:
+        logger.warning(f"Failed to confirm insight: {e}")
+
+
+def _format_insights_block(insights: list[dict[str, Any]] | None) -> str:
+    """Render stored cross-session insights for injection into the prompt.
+
+    ASK_SYSTEM's CROSS-SESSION MEMORY section tells the model a "Recent insights"
+    section is present above, so this must be injected everywhere that system
+    prompt is used — otherwise the model is instructed to reference data it never
+    actually receives, and cross-session recall silently does nothing.
+    """
+    if not insights:
+        return ""
+    lines = []
+    for item in insights[:5]:
+        summary = (item.get("summary") or "").strip()
+        if not summary:
+            continue
+        created = str(item.get("created_at") or "")[:10]
+        if created and created != "None":
+            lines.append(f"- {summary} (from {created})")
+        else:
+            lines.append(f"- {summary}")
+    if not lines:
+        return ""
+    return "Recent insights from previous sessions:\n" + "\n".join(lines) + "\n"
+
+
+async def _build_ask_prompt(
+    *,
+    text: str,
+    ctx: ChatContext,
+    org_id: str | None,
+    db,
+    session_context: dict[str, Any],
+    conversation_history: list[dict[str, str]] | None,
+    proactive: bool,
+) -> tuple[str, str, dict[str, Any]]:
+    """Shared prompt + system choice for smart_ask and ask_stream.
+
+    Returns (prompt_string, system_prompt_choice, snapshot_data).
+    """
+    snap: dict[str, Any] = {}
+    if db is not None and org_id:
+        try:
+            snap = await _gather_org_snapshot(db, org_id)
+        except Exception as e:
+            logger.warning("_build_ask_prompt: snapshot failed: %s", e)
+
+    org_p = snap.get("org_profile") or {}
+    docs = snap.get("documents") or {}
+    goals = snap.get("goals") or {}
+    tasks = snap.get("tasks") or {}
+    employees = snap.get("employees") or {}
+
+    org_block = f"Organization: {ctx.organization_name or 'your business'}\n"
+    if org_p:
+        org_lines = [f"- {k}: {v}" for k, v in org_p.items() if v]
+        if org_lines:
+            org_block += "\n".join(org_lines) + "\n"
+
+    doc_block = ""
+    if docs and (docs.get("analyzed_documents") or 0) > 0:
+        doc_block = f"Uploaded documents ({docs.get('analyzed_documents', 0)} analyzed):\n"
+        for d in (docs.get("documents") or [])[:8]:
+            line = f"- {d.get('filename')}: {(d.get('summary') or '')[:200]}"
+            metrics = d.get("key_metrics") or []
+            if metrics:
+                kv = ", ".join(f"{m.get('name')}={m.get('value')}" for m in metrics[:3])
+                line += f" [{kv}]"
+            decisions = d.get("decisions") or []
+            if decisions:
+                line += f" | decisions: {'; '.join(decisions[:2])}"
+            doc_block += line + "\n"
+
+    rag_block = ""
+    if db is not None and org_id:
+        try:
+            from ..core.file_processor import search_documents
+            search_results = await search_documents(org_id, text, top_k=3)
+            if search_results:
+                chunks = []
+                for r in search_results:
+                    chunks.append(f"- [{r.get('filename','?')}] (score: {r.get('score',0):.2f}): {r.get('text','')[:600]}")
+                rag_block = "Relevant document excerpts (search results):\n" + "\n".join(chunks) + "\n"
+        except Exception as e:
+            logger.warning(f"_build_ask_prompt: vector search failed: {e}")
+
+    goals_block = ""
+    if goals.get("titles"):
+        goals_block = f"Goals ({goals.get('active', 0)} active of {goals.get('count', 0)}):\n" + "\n".join(f"- {t}" for t in goals["titles"][:5]) + "\n"
+
+    tasks_block = ""
+    if tasks.get("total", 0) > 0:
+        tasks_block = f"Tasks: {tasks.get('total', 0)} total ({tasks.get('pending', 0)} pending, {tasks.get('in_progress', 0)} in progress)\n"
+
+    emp_block = ""
+    if employees.get("count", 0) > 0:
+        emp_block = f"Team: {employees['count']} people\n"
+
+    ctx_block = ""
+    if session_context:
+        ctx_block = "What we already know from this chat:\n" + "\n".join(f"- {k}: {v}" for k, v in session_context.items()) + "\n"
+
+    insights_block = _format_insights_block(snap.get("recent_insights") or [])
+
+    history = (conversation_history or [])[-8:]
+    history_block = "\n".join(f"{m.get('role','')}: {m.get('content','')[:300]}" for m in history) if history else ""
+
+    prompt = (
+        f"{org_block}\n"
+        f"{doc_block}"
+        f"{rag_block}"
+        f"{goals_block}"
+        f"{tasks_block}"
+        f"{emp_block}"
+        f"{ctx_block}"
+        f"{insights_block}\n"
+        f"Recent chat:\n{history_block}\n\n"
+        f"Current date: {datetime.now().strftime('%A, %Y-%m-%d')}\n\n"
+        f"User's message:\n\"{text}\"\n\n"
+        f"{'Decide: answer directly or ask one question for missing info.' if not proactive else 'Respond with your proactive overview.'}"
+    )
+
+    system_choice = PROACTIVE_SYSTEM if proactive else ASK_SYSTEM
+    return prompt, system_choice, snap
 
 
 class DiagnoseRequest(BaseModel):
@@ -1492,12 +1665,108 @@ When the user asks to book/schedule a meeting (e.g. "add meeting with @john next
 
 ## RESPONSE FORMATS
 
-For answers: {"type":"answer","answer":"your answer here (max 8 lines)","follow_up":"optional 1-line follow-up"}
+For answers: {"type":"answer","answer":"your answer here (max 8 lines)","follow_up":"optional 1-line follow-up","suggestions":[{"label":"Button text","action":"Full sentence to send as follow-up"}]}
 
 For questions: {"type":"question","question":{"id":"q_xxx","field_id":"field_name","text":"one clear question","options":[{"value":"opt1","label":"Option 1"},...],"allow_custom":true},"answer":null}
 
 For delegation (when user wants to assign a task to someone AND you have enough context):
-{"type":"delegate","assignee_name":"full name of person","assignee_email":"their email if known","title":"short task title (2-8 words)","description":"optional detail about the task","priority":"medium|high|low","answer":"confirmation message to show the user (1-2 sentences)"}"""
+{"type":"delegate","assignee_name":"full name of person","assignee_email":"their email if known","title":"short task title (2-8 words)","description":"optional detail about the task","priority":"medium|high|low","answer":"confirmation message to show the user (1-2 sentences)"}
+
+## ACTION ITEMS (OPTIONAL)
+After answering, if the conversation reveals clear next steps or action items the user hasn't explicitly delegated, include an "action_items" array in your JSON response. Each action item should have a title, optional description, priority, and optional assignee_name (if the user mentioned someone who should own it).
+
+Example: User discusses needing to review marketing budget and hire a designer
+→ {"type":"answer","answer":"Good news — your budget has room for both. I'd suggest starting with the designer hire since it takes longest.","follow_up":"Want me to draft a job description?","action_items":[{"title":"Review Q3 marketing budget","description":"Compare actual spend vs budget for Q3","priority":"high"},{"title":"Hire a graphic designer","description":"Draft job post and initiate hiring","priority":"medium"}]}
+
+Only include action_items when there are 1-5 clear, specific, actionable items. Don't include them for general knowledge questions or casual chat. Limit to 5 items max.
+
+## CROSS-SESSION MEMORY (IMPORTANT)
+The "Recent insights" section above shows key takeaways from previous chat sessions with this user. Use them to:
+- Reference past discussions: *"Last session you mentioned wanting to review ad channels — did that happen?"*
+- Follow up on open items: *"You were planning to set up a hiring pipeline. Want to continue that?"*
+- Suggest marking things done: *"Should I mark that task as completed?"*
+- Connect dots across conversations: *"Your goal from last week ties into what you're asking now."*
+
+Always reference insights naturally, as if you remember the conversation. If the user confirms something is done, include "confirmation" in your response so the backend can mark it.
+
+Example: Recent insights include "Planned to review marketing budget"
+User: "Yes, we reviewed it — all good"
+→ {"type":"answer","answer":"Great that it's sorted! I'll mark that as done.","follow_up":"Want to set a new budget goal based on that review?","confirmation":{"insight_summary":"Planned to review marketing budget","status":"done"}}
+
+## FOLLOW-UP SUGGESTIONS (OPTIONAL)
+After answering, if there are 1-3 natural next steps the user might want to take, include a "suggestions" array in your response. Each suggestion has a "label" (short button text, 2-4 words) and "action" (what it does — used as the input text when the user clicks it).
+
+Example: User asks "What should I focus on this week?" with goals including "Q4 hiring push"
+→ {"type":"answer","answer":"Start with the Q4 hiring push — it's your only high priority goal.","follow_up":"Want me to break it into steps?","suggestions":[{"label":"Break into steps","action":"Break the Q4 hiring push into actionable steps"},{"label":"Show my tasks","action":"Show me all my pending tasks this week"},{"label":"Set a new goal","action":"I want to set a new goal"}]}
+
+Only include suggestions when there are 1-3 clear, specific, useful next steps. Don't include them for simple confirmations, yes/no answers, or clarification questions. The action text should be a complete sentence the user could send as a follow-up message.
+
+## MISSING DATA REQUEST (OPTIONAL)
+When you cannot fully answer because specific data is NOT present in the uploaded documents, org profile, or chat context, include a "missing_data" field in your JSON response with doc_type and reason. This tells the frontend to prompt the user for the specific document.
+
+Only use this when:
+- The user asks something that clearly requires data from a specific document type
+- No uploaded document contains that data
+- You know exactly what document type would help
+
+Known document types you can request:
+- "Financial Statement (P&L / Budget)" — profit & loss, balance sheet, budget planning
+- "Sales Report" — revenue data, pipeline, deals
+- "Team Structure / Org Chart" — team roles, headcount, reporting lines
+- "Marketing Plan" — campaign strategy, ad spend, channels
+- "Business Plan" — overall business strategy and goals
+- "Inventory / Stock Report" — stock levels, supply chain
+- "Customer Feedback / Survey" — NPS, survey results
+- "Contract / Legal Document" — agreements, terms
+
+Example: User asks "Can we afford to hire 2 more developers?" and no financial docs exist
+→ {"type":"answer","answer":"I don't have your financial data to check this. Upload your budget or financial statement and I'll run the numbers.","missing_data":{"doc_type":"Financial Statement (P&L / Budget)","reason":"Need to verify available budget for headcount expansion"}}
+
+Do NOT use missing_data for general knowledge questions. Only use it when the answer depends on data that should exist in a specific company document."""
+
+PROACTIVE_SYSTEM = """You are YesBoss's AI Business Analyst — starting a conversation with a business owner.
+
+## YOUR JOB
+The user just opened this chat. They haven't asked anything yet. Your job is to proactively analyze their business and start the conversation with a valuable overview.
+
+## WHAT TO DO
+1. Look at the Organization Profile, Goals, Tasks, Uploaded Documents, Team, Recent Chat context, and any "Recent insights from previous sessions" provided below.
+   - If past-session insights are present, lead with a follow-up on one of them — *"Last session you were planning to review ad channels — did that happen?"* That's far more valuable than a cold summary.
+2. Give a concise, insightful **business overview** (4-6 lines max) that covers:
+   - What you see — key metrics, active goals, pending tasks, team size
+   - One notable observation — e.g. "I notice you have 3 overdue tasks", "Your documents include a budget with room to invest", "Your team has capacity"
+   - A specific offer — "Want to dive into any of these?"
+
+## RULES
+- Be sharp and human, like a colleague who walked into your office with a coffee
+- Never say "How can I help you?" — that's lazy. Be specific about what you see.
+- If the org has little data (no goals, no docs, small team), offer to help set things up
+- If there are clear problems (overdue tasks, incomplete profile), flag them gently
+- End with a single, specific question — not a generic "What would you like to do?"
+
+## EXAMPLES
+
+Scenario: 12 active goals, 3 overdue tasks, budget doc uploaded
+→ "Morning! You've got 12 goals running and a budget doc I analyzed — looks like you have ₹15L to work with. But 3 tasks are overdue. Want to review those or talk about where to invest the budget?"
+
+Scenario: New org, no goals, no docs, 2 team members
+→ "Welcome! I see you've just started building your org. You've got 2 team members but no goals or documents yet. Want to set up your first goal or upload a financial plan? Happy to guide you through either."
+
+Scenario: 5 active goals, all on track, sales report uploaded showing growth
+→ "Good week so far — all 5 goals are on track. I scanned your sales report: revenue is up 12% this quarter. 🎉 Want to adjust any targets or set a new growth goal?"
+
+## FOLLOW-UP SUGGESTIONS (ALWAYS INCLUDE)
+The user hasn't typed anything yet, so give them 2-3 one-tap ways to start. Include a
+"suggestions" array where each entry has a "label" (short button text, 2-4 words) and an
+"action" (a complete sentence sent as the user's next message). Base them on what you
+actually saw in the data — reference real goals, overdue tasks, or documents, not generic
+filler.
+
+Example: 12 goals, 3 overdue tasks, budget doc uploaded
+→ "suggestions":[{"label":"Review overdue","action":"Show me the 3 overdue tasks and what's blocking them"},{"label":"Budget breakdown","action":"Break down what's in my budget document"},{"label":"Set a goal","action":"Help me set a new goal for this quarter"}]
+
+## RESPONSE FORMAT
+{"type":"answer","answer":"your proactive overview here (max 6 lines)","follow_up":"single follow-up question here","suggestions":[{"label":"Button text","action":"Full sentence to send as follow-up"}]}"""
 
 
 class AskRequest(BaseModel):
@@ -1506,6 +1775,7 @@ class AskRequest(BaseModel):
     session_context: dict[str, str] | None = None
     context: ChatContext | None = None
     conversation_history: list[dict[str, str]] | None = None
+    proactive: bool = False
 
 
 class BookingSlot(BaseModel):
@@ -1522,6 +1792,20 @@ class BookingParams(BaseModel):
     available_slots: list[BookingSlot] | None = None
     booking_result: dict[str, Any] | None = None
 
+class ActionItem(BaseModel):
+    title: str
+    description: str | None = None
+    priority: str = "medium"
+    assignee_name: str | None = None
+    assignee_email: str | None = None
+
+
+class BulkCreateTasksRequest(BaseModel):
+    organization_id: str
+    action_items: list[ActionItem]
+    context: ChatContext | None = None
+
+
 class AskResponse(BaseModel):
     type: str  # "question" | "answer" | "meeting_booking"
     question: dict[str, Any] | None = None
@@ -1529,6 +1813,10 @@ class AskResponse(BaseModel):
     follow_up: str | None = None
     session_id: str | None = None
     booking_params: BookingParams | None = None
+    action_items: list[dict[str, Any]] | None = None
+    missing_data: dict[str, str] | None = None  # {"doc_type": "...", "reason": "..."}
+    confirmation: dict[str, str] | None = None  # {"insight_summary": "...", "status": "done"}
+    suggestions: list[dict[str, str]] | None = None  # [{"label": "...", "action": "..."}]
 
 
 @router.post("/ask", response_model=AskResponse)
@@ -1543,69 +1831,14 @@ async def smart_ask(request: AskRequest):
     db = get_database()
 
     session_context = dict(request.session_context or {})
-    snap: dict[str, Any] = {}
-    if db is not None and org_id:
-        try:
-            snap = await _gather_org_snapshot(db, org_id)
-        except Exception as e:
-            logger.warning("ask: snapshot failed: %s", e)
-
-    org_p = snap.get("org_profile") or {}
-    docs = snap.get("documents") or {}
-    goals = snap.get("goals") or {}
-    tasks = snap.get("tasks") or {}
-    employees = snap.get("employees") or {}
-
-    org_block = f"Organization: {ctx.organization_name or 'your business'}\n"
-    if org_p:
-        org_lines = [f"- {k}: {v}" for k, v in org_p.items() if v]
-        if org_lines:
-            org_block += "\n".join(org_lines) + "\n"
-
-    doc_block = ""
-    if docs and (docs.get("analyzed_documents") or 0) > 0:
-        doc_block = f"Uploaded documents ({docs.get('analyzed_documents', 0)} analyzed):\n"
-        for d in (docs.get("documents") or [])[:8]:
-            line = f"- {d.get('filename')}: {(d.get('summary') or '')[:200]}"
-            metrics = d.get("key_metrics") or []
-            if metrics:
-                kv = ", ".join(f"{m.get('name')}={m.get('value')}" for m in metrics[:3])
-                line += f" [{kv}]"
-            decisions = d.get("decisions") or []
-            if decisions:
-                line += f" | decisions: {'; '.join(decisions[:2])}"
-            doc_block += line + "\n"
-
-    goals_block = ""
-    if goals.get("titles"):
-        goals_block = f"Goals ({goals.get('active', 0)} active of {goals.get('count', 0)}):\n" + "\n".join(f"- {t}" for t in goals["titles"][:5]) + "\n"
-
-    tasks_block = ""
-    if tasks.get("total", 0) > 0:
-        tasks_block = f"Tasks: {tasks.get('total', 0)} total ({tasks.get('pending', 0)} pending, {tasks.get('in_progress', 0)} in progress)\n"
-
-    emp_block = ""
-    if employees.get("count", 0) > 0:
-        emp_block = f"Team: {employees['count']} people\n"
-
-    ctx_block = ""
-    if session_context:
-        ctx_block = "What we already know from this chat:\n" + "\n".join(f"- {k}: {v}" for k, v in session_context.items()) + "\n"
-
-    history = (request.conversation_history or [])[-8:]
-    history_block = "\n".join(f"{m.get('role','')}: {m.get('content','')[:300]}" for m in history) if history else ""
-
-    prompt = (
-        f"{org_block}\n"
-        f"{doc_block}"
-        f"{goals_block}"
-        f"{tasks_block}"
-        f"{emp_block}"
-        f"{ctx_block}\n"
-        f"Recent chat:\n{history_block}\n\n"
-        f"Current date: {datetime.now().strftime('%A, %Y-%m-%d')}\n\n"
-        f"User's message:\n\"{text}\"\n\n"
-        "Decide: answer directly or ask one question for missing info."
+    prompt, system, snap = await _build_ask_prompt(
+        text=text,
+        ctx=ctx,
+        org_id=org_id,
+        db=db,
+        session_context=session_context,
+        conversation_history=request.conversation_history,
+        proactive=request.proactive,
     )
 
     fallback_question = {
@@ -1628,7 +1861,7 @@ async def smart_ask(request: AskRequest):
     try:
         raw = await get_ai_response(
             prompt=prompt,
-            system_prompt=ASK_SYSTEM,
+            system_prompt=system,
             temperature=0.5,
             max_tokens=1100,
         )
@@ -1748,10 +1981,31 @@ async def smart_ask(request: AskRequest):
             answer_text = (parsed.get("answer") or "").strip()
             if not answer_text:
                 return AskResponse(**fallback_question)
+            action_items = parsed.get("action_items")
+            if action_items and not isinstance(action_items, list):
+                action_items = None
+            missing_data = parsed.get("missing_data")
+            if missing_data and not isinstance(missing_data, dict):
+                missing_data = None
+            suggestions = parsed.get("suggestions")
+            if suggestions and not isinstance(suggestions, list):
+                suggestions = None
+            asyncio.create_task(
+                _store_session_insight(db, org_id, request.session_id, answer_text)
+            )
+            confirmation = parsed.get("confirmation")
+            if confirmation and isinstance(confirmation, dict) and confirmation.get("status") == "done":
+                asyncio.create_task(
+                    _confirm_insight_by_summary(db, org_id, confirmation.get("insight_summary", ""))
+                )
             return AskResponse(
                 type="answer",
                 answer=answer_text,
                 follow_up=parsed.get("follow_up"),
+                action_items=action_items,
+                missing_data=missing_data,
+                confirmation=confirmation if isinstance(confirmation, dict) else None,
+                suggestions=suggestions,
                 session_id=request.session_id,
             )
         else:
@@ -1778,6 +2032,378 @@ async def smart_ask(request: AskRequest):
         except Exception:
             pass
         return AskResponse(**fallback_question)
+
+
+_STREAM_ANSWER_KEY_RE = re.compile(r'"answer"\s*:\s*"')
+_STREAM_ESCAPES = {"n": "\n", "t": "\t", '"': '"', "\\": "\\", "r": "\r", "/": "/"}
+
+
+def _extract_streaming_answer_delta(buf: str, emitted_len: int) -> tuple[str, int]:
+    """Best-effort incremental extraction of the `answer` string value out of a
+    partially-streamed JSON blob, so the frontend can show clean typed text
+    instead of raw JSON syntax. Only fires once the model has started writing
+    a quoted "answer" value (i.e. not for type=question, where answer is null).
+    Authoritative text still comes from the final parsed JSON — this is purely
+    for the live typewriter effect."""
+    key_match = _STREAM_ANSWER_KEY_RE.search(buf)
+    if not key_match:
+        return "", emitted_len
+
+    out: list[str] = []
+    i = key_match.end()
+    n = len(buf)
+    while i < n:
+        ch = buf[i]
+        if ch == "\\":
+            if i + 1 >= n:
+                break  # trailing backslash — incomplete escape, wait for more tokens
+            unescaped = _STREAM_ESCAPES.get(buf[i + 1])
+            if unescaped is None:
+                break  # unicode escape or unknown — stop live extraction here
+            out.append(unescaped)
+            i += 2
+            continue
+        if ch == '"':
+            break  # unescaped quote = end of the answer string value
+        out.append(ch)
+        i += 1
+
+    extracted = "".join(out)
+    if len(extracted) <= emitted_len:
+        return "", emitted_len
+    return extracted[emitted_len:], len(extracted)
+
+
+@router.post("/ask-stream")
+async def ask_stream(request: AskRequest, user: dict = Depends(get_current_user_optional)):
+    """Streaming version of smart_ask — yields SSR tokens as the AI generates them."""
+    text = (request.message or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="message is required")
+
+    ctx = request.context or ChatContext()
+    org_id = ctx.organization_id
+    db = get_database()
+
+    session_context = dict(request.session_context or {})
+    prompt, system, snap = await _build_ask_prompt(
+        text=text,
+        ctx=ctx,
+        org_id=org_id,
+        db=db,
+        session_context=session_context,
+        conversation_history=request.conversation_history,
+        proactive=request.proactive,
+    )
+
+    async def event_stream():
+        from ..core.ai_client import AIClient
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+
+        full_content = ""
+        emitted_len = 0
+        looks_like_json = None  # None = undetermined, True = JSON envelope, False = plain prose
+        client = AIClient()
+        try:
+            async for token in client.chat_complete_stream(messages, temperature=0.5, max_tokens=1100):
+                full_content += token
+                if looks_like_json is None:
+                    stripped = full_content.lstrip()
+                    if stripped:
+                        looks_like_json = stripped.startswith("{") or stripped.startswith("```")
+                if looks_like_json:
+                    delta, emitted_len = _extract_streaming_answer_delta(full_content, emitted_len)
+                    if delta:
+                        yield f"data: {json.dumps({'token': delta})}\n\n"
+                elif looks_like_json is False:
+                    # Model ignored the JSON envelope and replied in plain prose —
+                    # there's no wrapper to strip, so stream it straight through.
+                    yield f"data: {json.dumps({'token': token})}\n\n"
+        except Exception as e:
+            logger.warning(f"ask_stream: AI streaming failed: {e}")
+            yield f"data: {json.dumps({'token': f'I encountered an error: {e}'})}\n\n"
+            yield f"event: done\ndata: [DONE]\n\n"
+            return
+
+        # Parse the full JSON response
+        cleaned = full_content.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```(?:json)?", "", cleaned).strip()
+            cleaned = re.sub(r"```$", "", cleaned).strip()
+        m = re.search(r"\{.*\}", cleaned, re.DOTALL)
+        if m:
+            cleaned = m.group(0)
+
+        metadata = {
+            "type": "answer",
+            "follow_up": None,
+            "action_items": None,
+            "missing_data": None,
+            "confirmation": None,
+            "suggestions": None,
+        }
+        try:
+            parsed = json.loads(cleaned)
+            parsed_type = parsed.get("type", "answer")
+            metadata["type"] = parsed_type
+            metadata["follow_up"] = parsed.get("follow_up")
+            if parsed_type == "answer":
+                answer_text = (parsed.get("answer") or "").strip()
+                if answer_text:
+                    metadata["answer"] = answer_text
+                action_items = parsed.get("action_items")
+                if action_items and isinstance(action_items, list):
+                    metadata["action_items"] = action_items
+                missing_data = parsed.get("missing_data")
+                if missing_data and isinstance(missing_data, dict):
+                    metadata["missing_data"] = missing_data
+                confirmation = parsed.get("confirmation")
+                if confirmation and isinstance(confirmation, dict):
+                    metadata["confirmation"] = confirmation
+                suggestions = parsed.get("suggestions")
+                if suggestions and isinstance(suggestions, list):
+                    metadata["suggestions"] = suggestions
+            elif parsed_type == "question":
+                q = parsed.get("question", {})
+                q.setdefault("id", f"q_{uuid.uuid4().hex[:6]}")
+                q.setdefault("allow_custom", True)
+                q.setdefault("options", [{"value": "tell_me_more", "label": "Tell me more"}])
+                metadata["question"] = q
+            elif parsed_type == "delegate":
+                assignee_name = (parsed.get("assignee_name") or "").strip()
+                task_title = (parsed.get("title") or "").strip()
+                if not task_title or not assignee_name:
+                    metadata["type"] = "answer"
+                    metadata["answer"] = parsed.get("answer") or "I need a bit more detail — who should I assign this to, and what's the task?"
+                else:
+                    try:
+                        delegate_req = DelegateRequest(
+                            title=task_title,
+                            description=parsed.get("description"),
+                            assignee_name=assignee_name,
+                            priority=parsed.get("priority", "medium"),
+                            create_tasks=True,
+                            task_count=3,
+                            context=ctx,
+                        )
+                        delegate_result = await delegate_task(delegate_req)
+                        answer_text = parsed.get("answer") or f"✅ Task \"{task_title}\" created and assigned to {assignee_name}."
+                        if delegate_result.get("sub_tasks"):
+                            answer_text += f"\n\nI also broke it into {len(delegate_result['sub_tasks'])} smaller steps."
+                        metadata["type"] = "answer"
+                        metadata["answer"] = answer_text
+                    except Exception as e:
+                        logger.warning(f"ask_stream: delegate failed: {e}")
+                        metadata["type"] = "answer"
+                        metadata["answer"] = f"I couldn't create that task right now. The system said: {e}. Want to try again?"
+        except json.JSONDecodeError:
+            logger.warning("ask_stream: could not parse AI output as JSON, using raw text as answer")
+            metadata["type"] = "answer"
+            metadata["answer"] = full_content.strip()
+
+        # Fire-and-forget insight storage for answer type
+        if metadata["type"] == "answer" and metadata.get("answer"):
+            asyncio.create_task(
+                _store_session_insight(db, org_id, request.session_id, metadata["answer"])
+            )
+        # Handle confirmation
+        if metadata.get("confirmation") and metadata["confirmation"].get("status") == "done":
+            asyncio.create_task(
+                _confirm_insight_by_summary(db, org_id, metadata["confirmation"].get("insight_summary", ""))
+            )
+
+        yield f"event: metadata\ndata: {json.dumps(metadata)}\n\n"
+        yield f"event: done\ndata: [DONE]\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.post("/bulk-create-tasks")
+async def bulk_create_tasks(request: BulkCreateTasksRequest):
+    """Create multiple tasks from a list of action items extracted by the AI."""
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    org_id = request.organization_id
+    if not org_id:
+        raise HTTPException(status_code=400, detail="organization_id is required")
+
+    created = []
+    failed = []
+    now = datetime.utcnow()
+
+    for item in request.action_items:
+        title = (item.title or "").strip()
+        if not title:
+            failed.append({"title": "", "error": "Empty title"})
+            continue
+        try:
+            emp = None
+            if item.assignee_name or item.assignee_email:
+                emp = _resolve_assignee(db, org_id, item.assignee_email, item.assignee_name)
+            assignee_id = str(emp["_id"]) if emp else None
+            assignee_email = (emp.get("email") if emp else None) or item.assignee_email
+            assignee_name = (emp.get("full_name") if emp else None) or item.assignee_name
+
+            task_doc = {
+                "title": title,
+                "description": item.description or "",
+                "priority": item.priority or "medium",
+                "status": "pending",
+                "organization_id": org_id,
+                "assignee_id": assignee_id,
+                "assignee_email": assignee_email,
+                "assignee_name": assignee_name,
+                "source": "ai_action_item",
+                "created_at": now,
+                "updated_at": now,
+            }
+            tr = db.tasks.insert_one(task_doc)
+            task_doc["_id"] = str(tr.inserted_id)
+            created.append(task_doc)
+
+            if assignee_email:
+                try:
+                    from .tasks import sync_task_to_zoho
+                    asyncio.create_task(sync_task_to_zoho(db, task_doc, org_id))
+                except Exception as e:
+                    logger.warning(f"Zoho sync failed for action item: {e}")
+
+            if assignee_id:
+                try:
+                    asyncio.create_task(create_notification(
+                        user_id=assignee_id, org_id=org_id, type="task_assigned",
+                        title="New Task from AI Analysis",
+                        message=f"Action item created: {title}",
+                        link=f"/tasks/{task_doc['_id']}",
+                        email=assignee_email,
+                    ))
+                except Exception as e:
+                    logger.warning(f"Notification failed for action item: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to create action item '{title}': {e}")
+            failed.append({"title": title, "error": str(e)})
+
+    try:
+        asyncio.create_task(ws_manager.broadcast_to_organization(
+            {"type": "tasks_bulk_created", "data": {"created": len(created), "failed": len(failed)}}, org_id
+        ))
+    except Exception as e:
+        logger.warning(f"WS broadcast failed for bulk create: {e}")
+
+    return {
+        "success": True,
+        "created_count": len(created),
+        "failed_count": len(failed),
+        "created": [{"id": t["_id"], "title": t["title"]} for t in created],
+        "failed": failed,
+    }
+
+
+class ReAnalyzeRequest(BaseModel):
+    file_id: str
+    original_message: str
+    session_id: str | None = None
+    organization_id: str
+    context: ChatContext | None = None
+    conversation_history: list[dict[str, str]] | None = None
+
+
+@router.post("/re-analyze", response_model=AskResponse)
+async def re_analyze(request: ReAnalyzeRequest):
+    """Re-run analysis after a missing-data file was uploaded."""
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    doc = db.documents.find_one({"file_id": request.file_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    file_text = doc.get("text", "")[:10000]
+
+    # Build a new AskRequest with the file text injected into session context
+    history = (request.conversation_history or [])[-8:]
+    ask_req = AskRequest(
+        message=request.original_message,
+        session_id=request.session_id,
+        session_context={"file_text_preview": file_text},
+        context=request.context,
+        conversation_history=history,
+        proactive=False,
+    )
+    return await smart_ask(ask_req)
+
+
+class GenerateInsightsRequest(BaseModel):
+    organization_id: str
+
+
+@router.post("/generate-insights")
+async def generate_insights(request: GenerateInsightsRequest):
+    """Analyze uploaded documents and return proactive insight cards."""
+    db = get_database()
+    if db is None:
+        return {"insights": []}
+
+    org_id = request.organization_id
+    if not org_id:
+        return {"insights": []}
+
+    try:
+        # Fetch recent documents with raw text for insight generation
+        raw_docs = list(
+            db.documents.find({"organization_id": org_id})
+            .sort("created_at", -1)
+            .limit(6)
+        )
+        if not raw_docs:
+            return {"insights": []}
+
+        doc_block_parts = []
+        for d in raw_docs:
+            line = f"- {d.get('filename','?')}"
+            text = (d.get('text') or d.get('summary') or '')[:500]
+            if text:
+                line += f": {text}"
+            doc_block_parts.append(line)
+        doc_block = "\n".join(doc_block_parts)
+
+        prompt = f"""You are analyzing documents for a business. Identify 1-3 valuable, specific insights that would be useful to the business owner.
+
+Documents:
+{doc_block}
+
+For each insight, look for:
+- TRENDS — positive or negative changes over time (e.g., revenue growth, cost increase)
+- ANOMALIES — unusual data points or patterns (e.g., a sudden spike in expenses)
+- GAPS — missing data or areas where info would be valuable (e.g., no sales pipeline data)
+- BENCHMARKS — how the data compares to typical industry metrics
+- OPPORTUNITIES — clear actions the owner could take based on the data
+
+Return ONLY valid JSON array (no markdown, no code fences):
+[{{"title":"short actionable title","explanation":"1-2 sentence explanation","type":"trend|anomaly|gap|benchmark|opportunity","suggested_goal_title":"goal title or null if not applicable","suggested_department":"department name or null"}}]
+
+If no meaningful insights found, return []"""
+
+        from ..core.ai_client import get_ai_response
+        raw = await get_ai_response(prompt, temperature=0.4, max_tokens=1200)
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```(?:json)?", "", cleaned).strip()
+            cleaned = re.sub(r"```$", "", cleaned).strip()
+        insights = json.loads(cleaned)
+        if not isinstance(insights, list):
+            insights = []
+        insights = insights[:5]
+        return {"insights": insights}
+    except Exception as e:
+        logger.warning(f"generate_insights failed: {e}")
+        return {"insights": []}
 
 
 # ---------------------------------------------------------------------------

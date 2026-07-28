@@ -1,9 +1,12 @@
 import asyncio
+import json
 import logging
+import os
+import re
 from datetime import datetime
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 
 logger = logging.getLogger("yesboss.tasks")
 from pydantic import BaseModel
@@ -614,3 +617,367 @@ async def complete_task(task_id: str, current_user = Depends(get_current_user_op
     except Exception as e:
         logger.error(f"Error completing task {task_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to complete task: {str(e)}")
+
+
+TASK_COLUMN_PROMPT = """You are a smart data interpreter. Given column headers and sample rows from an Excel file, determine:
+
+1. Whether this file contains task assignment data (rows with a task title and a person to assign it to)
+2. Map each column to its role using these categories:
+   - "title" — the task name / description of work
+   - "assignee" — who the task is assigned to (name or email)
+   - "priority" — priority level
+   - "due_date" — deadline or due date
+   - "description" — additional details about the task
+   - "status" — current status of the task
+   - "ignore" — columns not relevant to task creation
+
+3. For each row, extract the mapped fields. For assignee, resolve against the provided org chart members (return email if found, otherwise return the raw value).
+
+Return ONLY valid JSON:
+{
+  "is_task_file": true/false,
+  "confidence": 0.0-1.0,
+  "column_mapping": { "original_column_name": "title|assignee|priority|due_date|description|status|ignore" },
+  "rows": [
+    {
+      "row_index": 0,
+      "title": "...",
+      "assignee_raw": "...",
+      "assignee_email": "...",
+      "assignee_name": "...",
+      "priority": "high|medium|low",
+      "due_date": "...",
+      "description": "...",
+      "status": "...",
+      "valid": true,
+      "validation_error": ""
+    }
+  ]
+}
+
+Be flexible with column name variations across languages. Use sample data to infer meaning.
+If you cannot confidently map a column, mark it as "ignore".
+Set is_task_file to false if the data is clearly not a task list (e.g. financial reports, pure analytics, employee lists)."""
+
+
+@router.post("/bulk-import/preview")
+async def bulk_import_preview(
+    file: UploadFile = File(None),
+    organization_id: str = Form(...),
+    file_id: str = Form(""),
+    current_user = Depends(get_current_user_optional),
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    # If file_id is provided, read from previously uploaded file on disk
+    if file_id:
+        doc = db.documents.find_one({"file_id": file_id, "org_id": organization_id})
+        if not doc:
+            raise HTTPException(status_code=404, detail="Uploaded file not found")
+        file_path = doc.get("file_path")
+        if not file_path or not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="File not found on disk")
+        with open(file_path, "rb") as fh:
+            contents = fh.read()
+        filename = doc.get("filename", "upload.xlsx")
+    else:
+        if not file or not file.filename:
+            raise HTTPException(status_code=400, detail="Filename required")
+        filename = file.filename
+        ext = filename.lower().rsplit(".", 1)[-1]
+        if ext not in ("xlsx", "xls"):
+            raise HTTPException(status_code=400, detail="Only .xlsx and .xls files are supported")
+        contents = await file.read()
+        if len(contents) > 25 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="File too large (max 25MB)")
+
+    try:
+        import pandas as pd
+        import io
+        dfs = pd.read_excel(io.BytesIO(contents), sheet_name=None)
+        sheet_names = list(dfs.keys())
+        combined = pd.concat(dfs.values(), ignore_index=True)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to parse Excel file: {str(e)}")
+
+    if combined.empty:
+        raise HTTPException(status_code=400, detail="Excel file is empty")
+
+    headers = list(combined.columns)
+    sample_rows = combined.head(5).fillna("").to_dict(orient="records")
+    sample_rows_clean = []
+    for row in sample_rows:
+        sample_rows_clean.append({k: str(v) for k, v in row.items()})
+
+    org_members = list(db.org_chart_members.find({"organization_id": organization_id}))
+    org_members_list = [{"name": m.get("full_name", ""), "email": m.get("email", "")} for m in org_members]
+
+    from ..core.ai_client import get_ai_response
+
+    ai_prompt = (
+        f"Column Headers: {headers}\n\n"
+        f"Sample Rows ({len(sample_rows_clean)}):\n"
+        f"{json.dumps(sample_rows_clean, indent=2)}\n\n"
+        f"Org Chart Members ({len(org_members_list)}):\n"
+        f"{json.dumps(org_members_list, indent=2)}"
+    )
+
+    ai_result = ""
+    try:
+        ai_result = await get_ai_response(
+            prompt=ai_prompt,
+            system_prompt=TASK_COLUMN_PROMPT,
+            temperature=0.2,
+            max_tokens=4000,
+        )
+    except Exception as e:
+        logger.error(f"AI column mapping failed: {e}")
+        raise HTTPException(status_code=502, detail=f"AI analysis failed: {e}")
+
+    cleaned = ai_result.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
+        cleaned = re.sub(r'\s*```$', '', cleaned)
+
+    try:
+        mapping = json.loads(cleaned)
+    except json.JSONDecodeError:
+        logger.error(f"AI returned invalid JSON: {ai_result[:500]}")
+        raise HTTPException(status_code=502, detail="AI returned invalid response format")
+
+    is_task_file = mapping.get("is_task_file", False)
+    confidence = mapping.get("confidence", 0)
+    column_mapping = mapping.get("column_mapping", {})
+
+    preview_rows = []
+    title_col = next((c for c, v in column_mapping.items() if v == "title"), None)
+    assignee_col = next((c for c, v in column_mapping.items() if v == "assignee"), None)
+
+    all_data = combined.fillna("").to_dict(orient="records")
+    org_member_map = {m["email"].lower(): m for m in org_members_list if m.get("email")}
+    org_member_by_name = {m["name"].lower(): m for m in org_members_list if m.get("name")}
+
+    for idx, row in enumerate(all_data):
+        if title_col:
+            title = str(row.get(title_col, "")).strip()
+        else:
+            continue
+
+        if not title:
+            continue
+
+        assignee_raw = ""
+        assignee_email = ""
+        assignee_name = ""
+        if assignee_col:
+            assignee_raw = str(row.get(assignee_col, "")).strip()
+            lower = assignee_raw.lower()
+            if lower in org_member_map:
+                assignee_email = org_member_map[lower]["email"]
+                assignee_name = org_member_map[lower]["name"]
+            elif lower in org_member_by_name:
+                assignee_email = org_member_by_name[lower]["email"]
+                assignee_name = org_member_by_name[lower]["name"]
+            else:
+                assignee_email = assignee_raw
+                assignee_name = assignee_raw
+
+        priority = "medium"
+        priority_col = next((c for c, v in column_mapping.items() if v == "priority"), None)
+        if priority_col:
+            raw_p = str(row.get(priority_col, "")).strip().lower()
+            if raw_p in ("high", "urgent", "critical", "p0", "p1"):
+                priority = "high"
+            elif raw_p in ("low", "minor", "p3", "p4"):
+                priority = "low"
+
+        due_date = ""
+        due_col = next((c for c, v in column_mapping.items() if v == "due_date"), None)
+        if due_col:
+            raw_d = row.get(due_col)
+            if raw_d is not None and str(raw_d).strip():
+                due_date = str(raw_d).strip()
+
+        description = ""
+        desc_col = next((c for c, v in column_mapping.items() if v == "description"), None)
+        if desc_col:
+            raw_desc = str(row.get(desc_col, "")).strip()
+            if raw_desc:
+                description = raw_desc
+
+        preview_rows.append({
+            "row_index": idx,
+            "title": title,
+            "assignee_raw": assignee_raw,
+            "assignee_email": assignee_email,
+            "assignee_name": assignee_name,
+            "priority": priority,
+            "due_date": due_date,
+            "description": description,
+            "valid": bool(assignee_email),
+            "total_rows": len(all_data),
+        })
+
+    return {
+        "is_task_file": is_task_file,
+        "confidence": confidence,
+        "column_mapping": column_mapping,
+        "sheet_names": sheet_names,
+        "total_rows": len(all_data),
+        "detected_count": len(preview_rows),
+        "rows": preview_rows,
+        "message": f"Detected {len(preview_rows)} tasks from {len(all_data)} rows" if is_task_file else "File does not appear to be a task list",
+    }
+
+
+@router.post("/bulk-import/confirm")
+async def bulk_import_confirm(
+    tasks: str = Form(...),
+    organization_id: str = Form(...),
+    meeting_title: str | None = Form(None),
+    current_user = Depends(get_current_user_optional),
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    try:
+        tasks_data = json.loads(tasks)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid tasks JSON")
+
+    if not isinstance(tasks_data, list) or not tasks_data:
+        raise HTTPException(status_code=400, detail="tasks must be a non-empty array")
+
+    user_id = getattr(current_user, 'id', None) or str(current_user) if current_user else None
+
+    from ..api.websocket import manager as ws_manager
+    from ..core.notification_service import create_and_deliver
+
+    created_tasks = []
+    failed = []
+
+    for td in tasks_data:
+        try:
+            assignee_email = (td.get("assignee_email") or "").strip()
+            assignee_name = (td.get("assignee_name") or "").strip()
+            assignee_emails = [assignee_email] if assignee_email else []
+
+            task_doc = {
+                "title": td.get("title", "Untitled Task"),
+                "description": td.get("description", ""),
+                "priority": td.get("priority", "medium"),
+                "status": "pending",
+                "assignee_id": assignee_emails,
+                "assignee_email": assignee_email,
+                "assignee_name": assignee_name,
+                "department": None,
+                "due_date": td.get("due_date"),
+                "dependencies": [],
+                "reviewers": [],
+                "organization_id": organization_id,
+                "created_by": user_id,
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+                "escalation_level": 0,
+                "owner_escalated": False,
+                "owner_escalated_at": None,
+                "source": "bulk_import",
+                "source_meeting_title": meeting_title or "",
+                "zoho_task_ids": [],
+                "goal_id": None,
+            }
+
+            result = db.tasks.insert_one(task_doc)
+            task_doc["_id"] = str(result.inserted_id)
+
+            asyncio.create_task(ws_manager.broadcast_to_organization(
+                {"type": "task_created", "data": task_doc}, organization_id
+            ))
+
+            for email in assignee_emails:
+                asyncio.create_task(create_and_deliver(
+                    user_id=email,
+                    org_id=organization_id,
+                    type="task_assigned",
+                    title="New Task from Import",
+                    message=f"Task '{task_doc['title']}' created from bulk import",
+                    link=f"/tasks/{result.inserted_id}",
+                    actor_id=user_id,
+                ))
+
+            if not task_doc.get("due_date") and user_id:
+                asyncio.create_task(create_and_deliver(
+                    user_id=user_id,
+                    org_id=organization_id,
+                    type="deadline_needed",
+                    title="Task needs a deadline",
+                    message=f"Task '{task_doc['title']}' has no deadline — please set one",
+                    link=f"/tasks/{result.inserted_id}",
+                    actor_id=user_id,
+                ))
+
+            from ..api.meetings import _push_to_zoho_todo
+            asyncio.create_task(_push_to_zoho_todo(db, organization_id, task_doc, assignee_emails))
+
+            from ..agents.frequency_agent import process_task as _freq_task
+            asyncio.create_task(_freq_task(task_doc, organization_id))
+
+            created_tasks.append(task_doc)
+        except Exception as e:
+            logger.error(f"Failed to create task from bulk import: {e}", exc_info=True)
+            failed.append({"row": td.get("title", ""), "reason": str(e)})
+
+    suggestion = None
+    if created_tasks:
+        try:
+            from ..core.ai_client import get_ai_response
+            titles = [t.get("title", "") for t in created_tasks]
+            descs = [t.get("description", "") for t in created_tasks]
+            no_dates = sum(1 for t in created_tasks if not t.get("due_date"))
+            prompt = f"""You are analyzing a set of tasks just created via bulk import.
+
+Task titles: {json.dumps(titles)}
+Task descriptions: {json.dumps(descs)}
+Tasks without due dates: {no_dates}
+
+Analyze these tasks and return ONLY valid JSON (no markdown, no code fences):
+1. If 3+ tasks share a common theme (e.g., marketing, hiring, product, sales, engineering), suggest a goal title and description to group them
+2. Count how many tasks have no due date
+3. Generate a brief, friendly suggestion_text (1-2 sentences) that explains what was found and offers next steps
+
+Return format:
+{{"suggested_goal_title": "string or null", "suggested_goal_description": "string or null", "tasks_without_dates_count": number, "suggestion_text": "string"}}"""
+            ai_text = await get_ai_response(prompt)
+            import re
+            json_match = re.search(r'\{.*\}', ai_text, re.DOTALL)
+            if json_match:
+                parsed = json.loads(json_match.group())
+                suggestion = {
+                    "suggested_goal_title": parsed.get("suggested_goal_title"),
+                    "suggested_goal_description": parsed.get("suggested_goal_description"),
+                    "tasks_without_dates_count": parsed.get("tasks_without_dates_count", no_dates),
+                    "suggestion_text": parsed.get("suggestion_text", ""),
+                }
+        except Exception as e:
+            logger.warning(f"Failed to generate import suggestion: {e}")
+
+    return {
+        "created_count": len(created_tasks),
+        "failed_count": len(failed),
+        "failed": failed,
+        "suggestion": suggestion,
+        "tasks_created": [
+            {
+                "id": t["_id"],
+                "title": t["title"],
+                "priority": t["priority"],
+                "assignee_id": t.get("assignee_id", []),
+                "assignee_email": t.get("assignee_email", ""),
+                "assignee_name": t.get("assignee_name", ""),
+            }
+            for t in created_tasks
+        ],
+    }

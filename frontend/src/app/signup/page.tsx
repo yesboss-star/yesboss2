@@ -3,25 +3,15 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Eye, EyeOff, User, Mail, Lock, Phone, Shield, CheckCircle, AlertCircle, Loader2, MessageSquare, X, ArrowRight } from "lucide-react";
-import { auth, RECAPTCHA_SITE_KEY } from "@/lib/firebase";
-import { createUserWithEmailAndPassword, RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult, ApplicationVerifier } from "firebase/auth";
+import { ArrowLeft, Eye, EyeOff, User, Mail, Lock, Shield, CheckCircle, AlertCircle, Loader2, MessageSquare, X } from "lucide-react";
+import { auth } from "@/lib/firebase";
+import { createUserWithEmailAndPassword } from "firebase/auth";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
 type UserRole = "owner" | "employee";
 
-const COUNTRY_CODES = [
-  { code: "+91", country: "India" },
-  { code: "+1", country: "US/Canada" },
-  { code: "+44", country: "UK" },
-  { code: "+61", country: "Australia" },
-  { code: "+971", country: "UAE" },
-  { code: "+65", country: "Singapore" },
-];
-
 const EMAIL_RE = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-const PHONE_RE = /^\+?\d{6,15}$/;
 
 export default function SignupPage() {
   const router = useRouter();
@@ -38,29 +28,14 @@ export default function SignupPage() {
   const [resendTimer, setResendTimer] = useState(0);
   const [otpLoading, setOtpLoading] = useState(false);
   const [otpError, setOtpError] = useState("");
-  const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
-  const [selectedCountry, setSelectedCountry] = useState(COUNTRY_CODES[0]);
-  const [recaptchaReady, setRecaptchaReady] = useState(false);
-  const recaptchaVerifierRef = useRef<ApplicationVerifier | null>(null);
-  const recaptchaInitPromiseRef = useRef<Promise<void> | null>(null);
 
   const [formData, setFormData] = useState({
     fullName: "",
-    contact: "",
+    email: "",
     otp: "",
     password: "",
     confirmPassword: "",
   });
-
-  // Detect whether the user typed an email or a phone number
-  const contactKind: "email" | "phone" | "unknown" = (() => {
-    const v = formData.contact.trim();
-    if (!v) return "unknown";
-    if (v.includes("@")) return EMAIL_RE.test(v) ? "email" : "unknown";
-    const digits = v.replace(/\D/g, "");
-    if (digits.length >= 6) return "phone";
-    return "unknown";
-  })();
 
   useEffect(() => {
     if (resendTimer > 0) {
@@ -69,66 +44,6 @@ export default function SignupPage() {
     }
   }, [resendTimer]);
 
-  useEffect(() => {
-    if (!otpModalOpen || otpVerified) return;
-    if (typeof window === "undefined") return;
-    if (contactKind !== "phone") return;
-
-    if (recaptchaInitPromiseRef.current) return;
-
-    const loadScript = () => {
-      if (document.getElementById("google-recaptcha-js")) return;
-      const script = document.createElement("script");
-      script.id = "google-recaptcha-js";
-      script.src = `https://www.google.com/recaptcha/api.js?render=${RECAPTCHA_SITE_KEY}`;
-      script.async = true;
-      script.defer = true;
-      document.head.appendChild(script);
-    };
-
-    const initRecaptcha = async (): Promise<void> => {
-      loadScript();
-      try {
-        if (typeof (window as unknown as { grecaptcha?: unknown }).grecaptcha === "undefined") {
-          await new Promise<void>((resolve) => {
-            const check = () => {
-              if (typeof (window as unknown as { grecaptcha?: unknown }).grecaptcha !== "undefined") {
-                resolve();
-              } else {
-                setTimeout(check, 100);
-              }
-            };
-            check();
-            setTimeout(() => resolve(), 3000);
-          });
-        }
-        recaptchaVerifierRef.current = new RecaptchaVerifier(auth, "recaptcha-container-modal", {
-          siteKey: RECAPTCHA_SITE_KEY,
-          size: "invisible",
-          callback: () => {},
-        });
-        setRecaptchaReady(true);
-      } catch (err) {
-        console.error("Recaptcha init error:", err);
-        setRecaptchaReady(false);
-      }
-    };
-
-    const promise = initRecaptcha();
-    recaptchaInitPromiseRef.current = promise;
-    promise.catch(() => {});
-
-    return () => {
-      const verifier = recaptchaVerifierRef.current as (ApplicationVerifier & { clear?: () => void }) | null;
-      try {
-        verifier?.clear?.();
-      } catch {}
-      recaptchaVerifierRef.current = null;
-      recaptchaInitPromiseRef.current = null;
-      setRecaptchaReady(false);
-    };
-  }, [otpModalOpen, otpVerified, contactKind]);
-
   const updateField = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
     setError("");
@@ -136,7 +51,7 @@ export default function SignupPage() {
 
   const canSubmit = () => {
     if (!formData.fullName.trim()) return false;
-    if (contactKind === "unknown") return false;
+    if (!EMAIL_RE.test(formData.email.trim())) return false;
     if (formData.password.length < 6) return false;
     if (formData.password !== formData.confirmPassword) return false;
     return true;
@@ -149,10 +64,7 @@ export default function SignupPage() {
     }
     setOtpModalOpen(true);
     setOtpError("");
-    // For email, send OTP immediately. For phone, wait for user to press "Send OTP" in modal.
-    if (contactKind === "email") {
-      await sendOtpToBackend();
-    }
+    await sendOtpToBackend();
   };
 
   const sendOtpToBackend = async () => {
@@ -162,7 +74,7 @@ export default function SignupPage() {
       const res = await fetch(`${API_URL}/auth/send-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: formData.contact.trim() }),
+        body: JSON.stringify({ email: formData.email.trim() }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
@@ -178,56 +90,6 @@ export default function SignupPage() {
     }
   };
 
-  const waitForRecaptcha = async (timeoutMs = 5000): Promise<ApplicationVerifier | null> => {
-    if (recaptchaVerifierRef.current) return recaptchaVerifierRef.current;
-    if (recaptchaInitPromiseRef.current) {
-      await recaptchaInitPromiseRef.current;
-    }
-    const start = Date.now();
-    while (!recaptchaVerifierRef.current && Date.now() - start < timeoutMs) {
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    return recaptchaVerifierRef.current;
-  };
-
-  const sendPhoneOtp = async () => {
-    setOtpLoading(true);
-    setOtpError("");
-    try {
-      const digitsOnly = formData.contact.replace(/\D/g, "");
-      const formattedPhone = `${selectedCountry.code}${digitsOnly}`;
-      if (!digitsOnly) {
-        setOtpError("Please enter a valid phone number");
-        setOtpLoading(false);
-        return;
-      }
-      const appVerifier = await waitForRecaptcha();
-      if (!appVerifier) {
-        setOtpError("reCAPTCHA is still loading. Please try again in a moment.");
-        setOtpLoading(false);
-        return;
-      }
-      const result = await signInWithPhoneNumber(auth, formattedPhone, appVerifier);
-      setConfirmationResult(result);
-      setOtpSent(true);
-      setResendTimer(60);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      console.error("OTP Error:", err);
-      if (err.code === "auth/invalid-phone-number") {
-        setOtpError("Invalid phone number for selected country");
-      } else if (err.code === "auth/too-many-requests") {
-        setOtpError("Too many attempts. Try later");
-      } else if (err.code === "auth/requires-android-redirect") {
-        setOtpError("Please use a desktop browser for phone verification");
-      } else {
-        setOtpError(err.message || "Failed to send OTP");
-      }
-    } finally {
-      setOtpLoading(false);
-    }
-  };
-
   const verifyOtp = async () => {
     if (!formData.otp || formData.otp.length < 6) {
       setOtpError("Enter the 6-digit OTP");
@@ -236,22 +98,15 @@ export default function SignupPage() {
     setOtpLoading(true);
     setOtpError("");
     try {
-      if (contactKind === "phone" && confirmationResult) {
-        await confirmationResult.confirm(formData.otp);
-        setOtpVerified(true);
-        return;
-      }
-      // Email flow: call backend verify-otp
       const res = await fetch(`${API_URL}/auth/verify-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: formData.contact.trim(), code: formData.otp }),
+        body: JSON.stringify({ email: formData.email.trim(), code: formData.otp }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
         throw new Error(data.detail || data.message || "Invalid OTP");
       }
-      // The uid field contains the verification_token
       setVerificationToken(data.uid || null);
       setOtpVerified(true);
     } catch (err) {
@@ -263,7 +118,7 @@ export default function SignupPage() {
   };
 
   const finalizeSignup = async () => {
-    if (contactKind !== "phone" && !otpVerified) {
+    if (!otpVerified) {
       setOtpError("Please verify the OTP first");
       return;
     }
@@ -271,13 +126,8 @@ export default function SignupPage() {
     setError("");
     setOtpError("");
     try {
-      let firebaseUid = "";
-      if (contactKind === "email") {
-        const credential = await createUserWithEmailAndPassword(auth, formData.contact.trim(), formData.password);
-        firebaseUid = credential.user.uid;
-      } else {
-        firebaseUid = auth.currentUser?.uid || "";
-      }
+      const credential = await createUserWithEmailAndPassword(auth, formData.email.trim(), formData.password);
+      const firebaseUid = credential.user.uid;
 
       const userData: {
         uid: string; email: string; full_name: string; phone: string;
@@ -285,15 +135,15 @@ export default function SignupPage() {
         verification_token?: string;
       } = {
         uid: firebaseUid,
-        email: contactKind === "email" ? formData.contact.trim() : `${selectedCountry.code}${formData.contact.replace(/\D/g, "")}@phone.yesboss.app`,
+        email: formData.email.trim(),
         full_name: formData.fullName,
-        phone: contactKind === "phone" ? `${selectedCountry.code}${formData.contact.replace(/\D/g, "")}` : "",
+        phone: "",
         role,
-        phone_verified: contactKind === "phone",
-        email_verified: contactKind === "email",
+        phone_verified: false,
+        email_verified: true,
       };
 
-      if (contactKind === "email" && verificationToken) {
+      if (verificationToken) {
         userData.verification_token = verificationToken;
       }
 
@@ -354,7 +204,7 @@ export default function SignupPage() {
           <div className="space-y-6">
             {[
               { icon: Shield, text: "Enterprise-grade security" },
-              { icon: CheckCircle, text: "CXO's level insights" },
+              { icon: CheckCircle, text: "CXO&apos;s level insights" },
               { icon: User, text: "AI onboarding learns your business" },
             ].map((item, i) => (
               <div key={i} className="flex items-center gap-4">
@@ -420,37 +270,19 @@ export default function SignupPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-2">Email or Phone</label>
+              <label className="block text-sm font-medium mb-2">Email</label>
               <div className="relative">
-                {contactKind === "phone" ? (
-                  <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
-                ) : (
-                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
-                )}
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
                 <input
-                  type="text"
-                  value={formData.contact}
-                  onChange={(e) => updateField("contact", e.target.value)}
-                  placeholder="you@company.com or 555 000 0000"
+                  type="email"
+                  value={formData.email}
+                  onChange={(e) => updateField("email", e.target.value)}
+                  placeholder="you@company.com"
                   className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
                 />
               </div>
-              {formData.contact && contactKind === "unknown" && (
-                <p className="text-xs text-rose-400 mt-1">Enter a valid email or phone number</p>
-              )}
-              {contactKind === "phone" && (
-                <div className="flex items-center gap-2 mt-2">
-                  <select
-                    value={selectedCountry.code}
-                    onChange={(e) => setSelectedCountry(COUNTRY_CODES.find(c => c.code === e.target.value) || COUNTRY_CODES[0])}
-                    className="px-2 py-1 rounded-lg bg-surface border border-border text-xs"
-                  >
-                    {COUNTRY_CODES.map(c => (
-                      <option key={c.code} value={c.code}>{c.code} {c.country}</option>
-                    ))}
-                  </select>
-                  <span className="text-xs text-text-muted">Will send OTP to {selectedCountry.code} {formData.contact.replace(/\D/g, "")}</span>
-                </div>
+              {formData.email && !EMAIL_RE.test(formData.email.trim()) && (
+                <p className="text-xs text-rose-400 mt-1">Enter a valid email address</p>
               )}
             </div>
 
@@ -497,7 +329,7 @@ export default function SignupPage() {
               disabled={!canSubmit() || loading}
               className="w-full py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
-              {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <>Sign up <ArrowRight className="w-5 h-5" /></>}
+              {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Sign up"}
             </button>
 
             <p className="text-center text-sm text-text-muted">
@@ -513,7 +345,7 @@ export default function SignupPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/60 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl bg-background border border-border p-6 shadow-2xl">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold">Verify your {contactKind === "phone" ? "phone" : "email"}</h3>
+              <h3 className="text-xl font-bold">Verify your email</h3>
               <button
                 type="button"
                 onClick={() => {
@@ -535,9 +367,8 @@ export default function SignupPage() {
             <p className="text-sm text-text-muted mb-4">
               {otpVerified
                 ? "Verified! We'll finish creating your account now."
-                : `We sent a 6-digit code to ${contactKind === "email" ? formData.contact : `${selectedCountry.code} ${formData.contact.replace(/\D/g, "")}`}.`}
+                : `We sent a 6-digit code to ${formData.email}.`}
             </p>
-            <div id="recaptcha-container-modal" style={{ position: "absolute", left: "-9999px", top: "auto", width: 1, height: 1, overflow: "hidden" }} />
 
             {otpError && (
               <div className="flex items-center gap-3 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 mb-4">
@@ -549,59 +380,38 @@ export default function SignupPage() {
             {otpVerified ? (
               <div className="flex items-center gap-2 text-emerald-400 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 mb-4">
                 <CheckCircle className="w-5 h-5" />
-                <span className="text-sm">{contactKind === "phone" ? "Phone" : "Email"} verified</span>
+                <span className="text-sm">Email verified</span>
               </div>
-            ) : (
+            ) : otpSent ? (
               <>
-                {!otpSent && contactKind === "phone" && (
-                  <button
-                    type="button"
-                    onClick={sendPhoneOtp}
-                    disabled={otpLoading || !recaptchaReady}
-                    className="w-full py-3 rounded-xl bg-primary/10 text-primary font-medium hover:bg-primary/20 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer mb-3"
-                  >
-                    {otpLoading ? (
-                      <><Loader2 className="w-4 h-4 animate-spin inline mr-2" />Sending...</>
-                    ) : !recaptchaReady ? (
-                      <><Loader2 className="w-4 h-4 animate-spin inline mr-2" />Preparing verification...</>
-                    ) : (
-                      "Send OTP"
-                    )}
-                  </button>
-                )}
-
-                {otpSent && (
-                  <>
-                    <div>
-                      <label className="block text-sm font-medium mb-2">OTP Code</label>
-                      <div className="relative">
-                        <MessageSquare className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
-                        <input
-                          type="text"
-                          value={formData.otp}
-                          onChange={(e) => setFormData((p) => ({ ...p, otp: e.target.value.replace(/\D/g, "").slice(0, 6) }))}
-                          placeholder="Enter 6-digit OTP"
-                          className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm"
-                        />
-                      </div>
-                    </div>
-                    <div className="mt-2 text-sm text-text-muted text-right">
-                      {resendTimer > 0 ? `Resend in ${resendTimer}s` : (
-                        <button onClick={() => (contactKind === "phone" ? sendPhoneOtp() : sendOtpToBackend())} className="text-primary hover:underline cursor-pointer">Resend OTP</button>
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={verifyOtp}
-                      disabled={otpLoading || formData.otp.length < 6}
-                      className="w-full mt-4 py-3 rounded-xl bg-accent text-white font-medium disabled:opacity-50 cursor-pointer"
-                    >
-                      {otpLoading ? <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> : "Verify OTP"}
-                    </button>
-                  </>
-                )}
+                <div>
+                  <label className="block text-sm font-medium mb-2">OTP Code</label>
+                  <div className="relative">
+                    <MessageSquare className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
+                    <input
+                      type="text"
+                      value={formData.otp}
+                      onChange={(e) => setFormData((p) => ({ ...p, otp: e.target.value.replace(/\D/g, "").slice(0, 6) }))}
+                      placeholder="Enter 6-digit OTP"
+                      className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm"
+                    />
+                  </div>
+                </div>
+                <div className="mt-2 text-sm text-text-muted text-right">
+                  {resendTimer > 0 ? `Resend in ${resendTimer}s` : (
+                    <button onClick={sendOtpToBackend} className="text-primary hover:underline cursor-pointer">Resend OTP</button>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={verifyOtp}
+                  disabled={otpLoading || formData.otp.length < 6}
+                  className="w-full mt-4 py-3 rounded-xl bg-accent text-white font-medium disabled:opacity-50 cursor-pointer"
+                >
+                  {otpLoading ? <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> : "Verify OTP"}
+                </button>
               </>
-            )}
+            ) : null}
 
             {otpVerified && (
               <button

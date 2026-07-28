@@ -35,6 +35,7 @@ export interface SessionMessage {
   is_booking?: boolean;
   booking_params?: BookingParams;
   is_loading?: boolean;
+  is_streaming?: boolean;
   timestamp: number;
 }
 

@@ -208,5 +208,32 @@ body {
   animation-duration: 3s;
 }
 @keyframes claude-spin {
-  100% { transform: rotate(1turn); }
+   100% { transform: rotate(1turn); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .border-border, .border-border\/50, .border-border\/20 {
+    border-color: CanvasText !important;
+  }
+  .bg-primary, .bg-primary\/5, .bg-primary\/10 {
+    background-color: Highlight !important;
+  }
+  .text-primary, .text-primary\/70 {
+    color: Highlight !important;
+  }
+  .text-text-muted {
+    color: GrayText !important;
+  }
+  button, [role="checkbox"] {
+    border: 1px solid ButtonText !important;
+  }
 }

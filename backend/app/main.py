@@ -92,6 +92,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 from .api.assistant import router as assistant_router
+from .api.sessions import router as sessions_router
 from .api.auth import router as auth_router
 from .api.chatbot import router as chatbot_router
 from .api.check_ins import router as check_ins_router
@@ -124,6 +125,7 @@ from .api.upload import router as upload_router
 from .api.websocket import router as websocket_router
 from .api.zoho_auth import router as zoho_auth_router
 from .api.zoho_calendar import router as zoho_calendar_router
+from .api.finance import router as finance_router
 from .core import settings
 from .core.database import close_mongodb, connect_mongodb, get_database
 from .core.qdrant import close_qdrant, connect_qdrant
@@ -356,3 +358,5 @@ app.include_router(check_ins_router, prefix="/api/v1/organizations", tags=["Chec
 app.include_router(smart_suggestions_router, prefix="/api/v1/smart", tags=["Smart Suggestions"])
 app.include_router(websocket_router, tags=["WebSocket"])
 app.include_router(journal_router, prefix="/api/v1/journal", tags=["Journal"])
+app.include_router(finance_router, prefix="/api/v1/finance", tags=["Finance"])
+app.include_router(sessions_router, prefix="/api/v1/sessions", tags=["Sessions"])

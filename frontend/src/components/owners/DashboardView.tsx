@@ -42,6 +42,7 @@ import OrgHealthWidget from "@/components/owners/OrgHealthWidget";
 import MarketImpactCard from "@/components/owners/MarketImpactCard";
 import CheckInModal from "@/components/owners/CheckInModal";
 import IndustryBenchmarksCard from "@/components/owners/IndustryBenchmarksCard";
+import FinancialMetricsCard from "@/components/owners/FinancialMetricsCard";
 import CollapsibleSection from "@/components/owners/CollapsibleSection";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
@@ -3296,6 +3297,7 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
         <>
           <RevenueRiskRadar />
           <IndustryBenchmarksCard industry={organization?.industry || ""} microVertical={organization?.micro_vertical} />
+          <FinancialMetricsCard organizationId={organization?.id || ""} />
         </>
       )}
 

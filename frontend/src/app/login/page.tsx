@@ -51,49 +51,45 @@ export default function LoginPage() {
     }
   }, [resendTimer]);
 
-  useEffect(() => {
-    if (tab !== "phone") return;
-    if (typeof window === "undefined") return;
-    if (recaptchaVerifierRef.current) return;
+  const containerRef = useRef<HTMLDivElement>(null);
 
-    const loadScript = () => {
-      if (document.getElementById("google-recaptcha-js")) return;
+  const ensureRecaptcha = async (): Promise<boolean> => {
+    if (recaptchaVerifierRef.current) return true;
+    if (!containerRef.current) return false;
+    if (typeof window === "undefined") return false;
+
+    if (!document.getElementById("google-recaptcha-js")) {
       const script = document.createElement("script");
       script.id = "google-recaptcha-js";
       script.src = `https://www.google.com/recaptcha/api.js?render=${RECAPTCHA_SITE_KEY}`;
       script.async = true;
       script.defer = true;
       document.head.appendChild(script);
-    };
+    }
 
-    const initRecaptcha = async () => {
-      loadScript();
-      try {
-        if (typeof (window as unknown as { grecaptcha?: unknown }).grecaptcha === "undefined") {
-          await new Promise<void>((resolve) => {
-            const check = () => {
-              if (typeof (window as unknown as { grecaptcha?: unknown }).grecaptcha !== "undefined") {
-                resolve();
-              } else {
-                setTimeout(check, 100);
-              }
-            };
-            check();
-            setTimeout(() => resolve(), 3000);
-          });
-        }
-        recaptchaVerifierRef.current = new RecaptchaVerifier(auth, "recaptcha-container-login", {
-          siteKey: RECAPTCHA_SITE_KEY,
-          size: "invisible",
-          callback: () => {},
-        });
-      } catch (err) {
-        console.error("Recaptcha init error:", err);
-      }
-    };
+    if (typeof (window as unknown as { grecaptcha?: unknown }).grecaptcha === "undefined") {
+      await new Promise<void>((resolve) => {
+        let waited = 0;
+        const check = () => {
+          if (typeof (window as unknown as { grecaptcha?: unknown }).grecaptcha !== "undefined") {
+            resolve();
+          } else if (waited < 5000) {
+            waited += 100;
+            setTimeout(check, 100);
+          } else {
+            resolve();
+          }
+        };
+        check();
+      });
+    }
 
-    initRecaptcha();
-  }, [tab]);
+    recaptchaVerifierRef.current = new RecaptchaVerifier(auth, containerRef.current, {
+      size: "invisible",
+      callback: () => {},
+    });
+    return true;
+  };
 
   const updateField = (field: string, value: string | boolean) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -150,6 +146,8 @@ export default function LoginPage() {
     setPhoneOtpLoading(true);
     setError("");
     try {
+      const ok = await ensureRecaptcha();
+      if (!ok) { setError("reCAPTCHA container not found. Refresh and try again."); setPhoneOtpLoading(false); return; }
       const formattedPhone = `${selectedCountry.code}${digitsOnly}`;
       const result = await signInWithPhoneNumber(auth, formattedPhone, recaptchaVerifierRef.current);
       setConfirmationResult(result);
@@ -326,7 +324,6 @@ export default function LoginPage() {
               </>
             ) : (
               <>
-                <div id="recaptcha-container-login" style={{ position: "absolute", left: "-9999px", top: "auto", width: 1, height: 1, overflow: "hidden" }} />
                 <div>
                   <label className="block text-sm font-medium mb-2">Phone Number</label>
                   <div className="flex gap-2">
@@ -407,6 +404,7 @@ export default function LoginPage() {
               Sign up free
             </Link>
           </p>
+          <div ref={containerRef} style={{ position: "fixed", left: "-9999px", top: 0, width: 1, height: 1, overflow: "hidden" }} />
         </div>
       </div>
     </div>

@@ -224,12 +224,35 @@ export default function AISummaryChat() {
   const [pendingQuestion, setPendingQuestion] = useState<ClarifyingQuestion | null>(null);
   const [questionCount, setQuestionCount] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [taskImportPreview, setTaskImportPreview] = useState<any>(null);
+  const [taskImportLoading, setTaskImportLoading] = useState(false);
+  const [taskImportConfirming, setTaskImportConfirming] = useState(false);
+  const [taskImportResult, setTaskImportResult] = useState<any>(null);
+  const [selectedTaskIndices, setSelectedTaskIndices] = useState<Set<number>>(new Set());
+  const [importSuggestion, setImportSuggestion] = useState<any>(null);
+  const [suggestionGoalCreating, setSuggestionGoalCreating] = useState(false);
+  const [suggestionGoalCreated, setSuggestionGoalCreated] = useState(false);
+  const [missingDataRequest, setMissingDataRequest] = useState<any>(null);
+  const [reAnalyzing, setReAnalyzing] = useState(false);
+  const [insights, setInsights] = useState<any[]>([]);
+  const [insightsLoading, setInsightsLoading] = useState(false);
+  const [actionItems, setActionItems] = useState<any[] | null>(null);
+  const [selectedActionIndices, setSelectedActionIndices] = useState<Set<number>>(new Set());
+  const [actionItemsCreating, setActionItemsCreating] = useState(false);
+  const [actionItemsCreated, setActionItemsCreated] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingContent, setStreamingContent] = useState("");
+  const [suggestions, setSuggestions] = useState<any[] | null>(null);
+  const [sessionInsights, setSessionInsights] = useState<any[]>([]);
+  const [sessionInsightsOpen, setSessionInsightsOpen] = useState(false);
+  const [sessionInsightsLoading, setSessionInsightsLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const isFirstRender = useRef(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const mentionListRef = useRef<HTMLDivElement>(null);
+  const proactiveTriggeredRef = useRef<string | null>(null);
   const { user, role } = useAuth();
   const { organization } = useOrganizationStore();
   const { goals } = useGoalStore();
@@ -309,6 +332,61 @@ export default function AISummaryChat() {
     }
   }, [messages]);
 
+  useEffect(() => {
+    if (!organization?.id) return;
+    try {
+      const v = localStorage.getItem(`yesboss-suggestions-${organization.id}`);
+      if (v) setSuggestions(JSON.parse(v));
+    } catch { /* ignore */ }
+  }, [organization?.id]);
+
+  useEffect(() => {
+    const orgId = organization?.id;
+    if (!orgId) return;
+    try {
+      if (suggestions) {
+        localStorage.setItem(`yesboss-suggestions-${orgId}`, JSON.stringify(suggestions));
+      } else {
+        localStorage.removeItem(`yesboss-suggestions-${orgId}`);
+      }
+    } catch { /* ignore */ }
+  }, [suggestions, organization?.id]);
+
+  useEffect(() => {
+    if (!activeSession || !organization?.id) return;
+    if (proactiveTriggeredRef.current === activeSession.id) return;
+    if (activeSession.messages.length > 0) return;
+    proactiveTriggeredRef.current = activeSession.id;
+
+    const doProactive = async () => {
+      const s = activeSession;
+      const loadingMsg: SessionMessage = { role: "assistant", content: "", is_loading: true, timestamp: Date.now() };
+      setMessages([loadingMsg]);
+      try {
+        const data = await apiAsk("Analyze my business", undefined, true);
+        if (!data) return;
+        let content = data.answer || data.response || "";
+        const followUp = data.follow_up || "";
+        if (followUp) content += "\n\n" + followUp;
+        const resultMsg: SessionMessage = { role: "assistant", content, is_answer: true, timestamp: Date.now() };
+        setMessages([resultMsg]);
+        addMessage(s.id, resultMsg);
+        if (data.suggestions && Array.isArray(data.suggestions) && data.suggestions.length > 0) {
+          setSuggestions(data.suggestions);
+        }
+        if (data.action_items && Array.isArray(data.action_items) && data.action_items.length > 0) {
+          const capped = data.action_items.slice(0, 5);
+          setActionItems(capped);
+          setSelectedActionIndices(new Set(capped.map((_: any, i: number) => i)));
+          setActionItemsCreated(false);
+        }
+      } catch {
+        setMessages([]);
+      }
+    };
+    doProactive();
+  }, [activeSession?.id, organization?.id]);
+
   const ensureSession = async () => {
     if (activeSession) return activeSession;
     if (!organization?.id) return null;
@@ -316,7 +394,7 @@ export default function AISummaryChat() {
     return s || null;
   };
 
-  const apiAsk = async (text: string, ctx?: Record<string, string>) => {
+  const apiAsk = async (text: string, ctx?: Record<string, string>, proactive?: boolean) => {
     const s = activeSession || await ensureSession();
     if (!s) return null;
     const mergedCtx = ctx ? { ...s.context, ...ctx } : s.context;
@@ -328,24 +406,117 @@ export default function AISummaryChat() {
       : {};
     const enrichedCtx = { ...mergedCtx, ...membersCtx, ...goalsCtx, user_email: user?.email || "" };
     const history = messages.map((m) => ({ role: m.role, content: m.content || "" }));
+    const body: Record<string, any> = {
+      message: text,
+      session_id: s.id,
+      session_context: enrichedCtx,
+      context: {
+        user_email: user?.email,
+        organization_id: organization?.id,
+        organization_name: organization?.name,
+        role: role || "owner",
+      },
+      conversation_history: history.slice(-10),
+    };
+    if (proactive) body.proactive = true;
     const res = await fetch(`${API_URL}/assistant/ask`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message: text,
-        session_id: s.id,
-        session_context: enrichedCtx,
-        context: {
-          user_email: user?.email,
-          organization_id: organization?.id,
-          organization_name: organization?.name,
-          role: role || "owner",
-        },
-        conversation_history: history.slice(-10),
-      }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error("Ask failed");
     return res.json();
+  };
+
+  const apiAskStream = async (
+    text: string,
+    onToken: (token: string) => void,
+    ctx?: Record<string, string>,
+    proactive?: boolean,
+  ): Promise<any> => {
+    const s = activeSession || await ensureSession();
+    if (!s) return null;
+    const mergedCtx = ctx ? { ...s.context, ...ctx } : s.context;
+    const membersCtx = members?.length
+      ? { org_members: JSON.stringify(members.map((m: any) => ({ name: m.full_name, email: m.email, role: m.role, department: m.department, manager_email: m.manager_email }))) }
+      : {};
+    const goalsCtx = myGoals?.length
+      ? { org_goals: JSON.stringify(myGoals.map((g: any) => ({ title: g.title, status: g.status, progress: g.progress, assignee_id: g.assignee_id }))) }
+      : {};
+    const enrichedCtx = { ...mergedCtx, ...membersCtx, ...goalsCtx, user_email: user?.email || "" };
+    const history = messages.map((m) => ({ role: m.role, content: m.content || "" }));
+    const body: Record<string, any> = {
+      message: text,
+      session_id: s.id,
+      session_context: enrichedCtx,
+      context: {
+        user_email: user?.email,
+        organization_id: organization?.id,
+        organization_name: organization?.name,
+        role: role || "owner",
+      },
+      conversation_history: history.slice(-10),
+    };
+    if (proactive) body.proactive = true;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+    const res = await fetch(`${API_URL}/assistant/ask-stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    if (!res.ok) throw new Error("Ask stream failed");
+
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error("No response body");
+
+    const decoder = new TextDecoder();
+    let buf = "";
+    let metadata: any = null;
+    const donePromise = new Promise<any>((resolve, reject) => {
+      const abortTimer = setTimeout(() => {
+        controller.abort();
+        reject(new Error("Stream timeout"));
+      }, 60000);
+      const pump = () => {
+        reader!.read().then(({ value, done }) => {
+          if (done) {
+            clearTimeout(abortTimer);
+            resolve(metadata);
+            return;
+          }
+          buf += decoder.decode(value, { stream: true });
+          const parts = buf.split("\n\n");
+          buf = parts.pop() || "";
+          for (const part of parts) {
+            const lines = part.split("\n");
+            let eventType = "message";
+            let data = "";
+            for (const line of lines) {
+              if (line.startsWith("event: ")) eventType = line.slice(7).trim();
+              else if (line.startsWith("data: ")) data = line.slice(6);
+            }
+            if (!data) continue;
+            if (eventType === "done") { clearTimeout(abortTimer); resolve(metadata); return; }
+            if (eventType === "metadata") { try { metadata = JSON.parse(data); } catch {} continue; }
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.token) onToken(parsed.token);
+            } catch {}
+          }
+          pump();
+        }).catch((err) => {
+          clearTimeout(abortTimer);
+          reject(err);
+        });
+      };
+      pump();
+    });
+    return donePromise;
   };
 
   const mentionSuggestions = useMemo(() => {
@@ -491,10 +662,16 @@ export default function AISummaryChat() {
     [organization?.id, messages, addKPI, addMessage, extractKpiTitleFromAssistant]
   );
 
-  const sendMessage = async () => {
-    if ((!input.trim() && !attachedFile) || loading) return;
-    const userMsg = input.trim();
+  // `overrideText` lets quick-reply chips send their action directly. Without it
+  // they'd have to setInput() then call sendMessage(), which reads the previous
+  // render's `input` and silently sends nothing. Guarded with a typeof check
+  // because this is also used bare as onClick={sendMessage}, which passes an event.
+  const sendMessage = async (overrideText?: string) => {
+    const rawText = typeof overrideText === "string" ? overrideText : input;
+    if ((!rawText.trim() && !attachedFile) || loading) return;
+    const userMsg = rawText.trim();
     setInput("");
+    setSuggestions(null);
 
     // Get or create session ONCE — reuse across all calls in this function
     const session = activeSession || await ensureSession();
@@ -507,21 +684,30 @@ export default function AISummaryChat() {
       if (userMsg) {
         // File + text: upload with text context, then proceed
         try {
-          await uploadAttachedFile(userMsg);
-          updateSessionContext(s.id, { recently_uploaded_file: fileName });
+          const result = await uploadAttachedFile(userMsg);
+          if (result) {
+            updateSessionContext(s.id, { recently_uploaded_file: fileName, file_text_preview: result.textPreview });
+            checkTaskImport(result.fileId, fileName);
+          }
         } catch { /* proceed */ }
       } else {
-        // File-only: upload, show result, done
+        // File-only: upload, then check for task import
         setLoading(true);
         try {
           const result = await uploadAttachedFile();
           if (result) {
+            const hasTasks = await checkTaskImport(result.fileId, fileName);
+
             const fileMsg: SessionMessage = { role: "user", content: `📎 Uploaded: **${fileName}**`, timestamp: Date.now() };
-            const resultMsg: SessionMessage = { role: "assistant", content: `✅ ${result}`, timestamp: Date.now() };
-            setMessages((prev) => [...prev, fileMsg, resultMsg]);
+            setMessages((prev) => [...prev, fileMsg]);
             addMessage(s.id, fileMsg);
-            addMessage(s.id, resultMsg);
-            updateSessionContext(s.id, { recently_uploaded_file: fileName });
+
+            if (!hasTasks) {
+              const resultMsg: SessionMessage = { role: "assistant", content: `✅ ${result.message}`, timestamp: Date.now() };
+              setMessages((prev) => [...prev, resultMsg]);
+              addMessage(s.id, resultMsg);
+            }
+            updateSessionContext(s.id, { recently_uploaded_file: fileName, file_text_preview: result.textPreview || "" });
           }
         } catch (err: any) {
           const errMsg: SessionMessage = { role: "assistant", content: `❌ Upload failed: ${err.message || "Unknown error"}`, timestamp: Date.now() };
@@ -583,8 +769,17 @@ export default function AISummaryChat() {
     const loadingMsg: SessionMessage = { role: "assistant", content: "", is_loading: true, timestamp: Date.now() };
     setMessages([...updated, loadingMsg]);
 
+    let streamedAnswer = "";
     try {
-      const data = await apiAsk(userMsg);
+      const data = await apiAskStream(
+        userMsg,
+        (token) => {
+          streamedAnswer += token;
+          setIsStreaming(true);
+          setStreamingContent(streamedAnswer);
+        },
+      );
+      setIsStreaming(false);
       if (!data) return;
 
       if (data.type === "question" && data.question) {
@@ -607,7 +802,23 @@ export default function AISummaryChat() {
         const answerMsg: SessionMessage = { role: "assistant", content: answer, is_answer: true, timestamp: Date.now() };
         setMessages([...updated, answerMsg]);
         addMessage(s.id, answerMsg);
+        if (data.action_items && Array.isArray(data.action_items) && data.action_items.length > 0) {
+          const capped = data.action_items.slice(0, 5);
+          setActionItems(capped);
+          setSelectedActionIndices(new Set(capped.map((_: any, i: number) => i)));
+          setActionItemsCreated(false);
+        }
+        if (data.missing_data && data.missing_data.doc_type && data.missing_data.reason) {
+          setMissingDataRequest({ ...data.missing_data, originalMessage: userMsg });
+        }
+        if (data.suggestions && Array.isArray(data.suggestions) && data.suggestions.length > 0) {
+          setSuggestions(data.suggestions);
+        } else {
+          setSuggestions(null);
+        }
       } else {
+        setIsStreaming(false);
+        setSuggestions(null);
         const fallbackMsg: SessionMessage = { role: "assistant", content: "Thanks! Let me know if you have more questions.", timestamp: Date.now() };
         setMessages([...updated, fallbackMsg]);
         addMessage(s.id, fallbackMsg);
@@ -618,6 +829,7 @@ export default function AISummaryChat() {
       addMessage(s.id, errMsg);
     } finally {
       setLoading(false);
+      setIsStreaming(false);
     }
   };
 
@@ -677,6 +889,20 @@ export default function AISummaryChat() {
         const answerMsg: SessionMessage = { role: "assistant", content: answer, is_answer: true, timestamp: Date.now() };
         setMessages([...updated, answerMsg]);
         addMessage(s.id, answerMsg);
+        if (data.action_items && Array.isArray(data.action_items) && data.action_items.length > 0) {
+          const capped = data.action_items.slice(0, 5);
+          setActionItems(capped);
+          setSelectedActionIndices(new Set(capped.map((_: any, i: number) => i)));
+          setActionItemsCreated(false);
+        }
+        if (data.missing_data && data.missing_data.doc_type && data.missing_data.reason) {
+          setMissingDataRequest({ ...data.missing_data, originalMessage: valueLabel });
+        }
+        if (data.suggestions && Array.isArray(data.suggestions) && data.suggestions.length > 0) {
+          setSuggestions(data.suggestions);
+        } else {
+          setSuggestions(null);
+        }
       } else {
         const fallbackMsg: SessionMessage = { role: "assistant", content: "Thanks! Let me know if you have more questions.", timestamp: Date.now() };
         setMessages([...updated, fallbackMsg]);
@@ -703,9 +929,10 @@ export default function AISummaryChat() {
     setAttachedFile(null);
   };
 
-  const uploadAttachedFile = async (text?: string): Promise<string | null> => {
+  const uploadAttachedFile = async (text?: string): Promise<{ message: string; textPreview: string; fileId: string } | null> => {
     if (!attachedFile || !organization?.id) return null;
     setUploading(true);
+    setInsightsLoading(true);
     const formData = new FormData();
     formData.append("file", attachedFile);
     formData.append("organization_id", organization.id);
@@ -723,12 +950,433 @@ export default function AISummaryChat() {
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("kpi-document-uploaded", { detail: { filename: fileName } }));
       }
-      return data.message || `File **${fileName}** processed.`;
+
+      // Fetch proactive insights after successful upload
+      try {
+        const insRes = await fetch(`${API_URL}/assistant/generate-insights`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ organization_id: organization.id }),
+        });
+        if (insRes.ok) {
+          const insData = await insRes.json();
+          if (insData.insights && insData.insights.length > 0) {
+            setInsights(insData.insights);
+          }
+        }
+      } catch { /* insights are optional */ }
+
+      return { message: data.message || `File **${fileName}** processed.`, textPreview: data.text_preview || "", fileId: data.file_id || "" };
     } catch (err: any) {
       setAttachedFile(null);
       throw err;
     } finally {
       setUploading(false);
+      setInsightsLoading(false);
+    }
+  };
+
+  const checkTaskImport = useCallback(async (fileId: string, fileName: string): Promise<boolean> => {
+    if (!organization?.id) return false;
+    const ext = fileName.toLowerCase().split(".").pop();
+    if (ext !== "xlsx" && ext !== "xls") return false;
+
+    setTaskImportLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file_id", fileId);
+      formData.append("organization_id", organization.id);
+      const res = await fetch(`${API_URL}/tasks/bulk-import/preview`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      if (data.is_task_file && data.detected_count > 0) {
+        setTaskImportPreview(data);
+        setTaskImportResult(null);
+        setSelectedTaskIndices(new Set(data.rows.map((_: any, i: number) => i)));
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    } finally {
+      setTaskImportLoading(false);
+    }
+  }, [organization?.id]);
+
+  const handleTaskImportConfirm = async () => {
+    if (!taskImportPreview || !organization?.id) return;
+    const selectedRows = taskImportPreview.rows.filter((_: any, i: number) => selectedTaskIndices.has(i));
+    if (selectedRows.length === 0) return;
+    setTaskImportConfirming(true);
+    try {
+      const formData = new FormData();
+      formData.append("tasks", JSON.stringify(selectedRows));
+      formData.append("organization_id", organization.id);
+      const res = await fetch(`${API_URL}/tasks/bulk-import/confirm`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: "Import failed" }));
+        throw new Error(err.detail);
+      }
+      const data = await res.json();
+      setTaskImportResult(data);
+      setTaskImportPreview(null);
+
+      if (data.suggestion) {
+        setImportSuggestion(data.suggestion);
+      }
+
+      let content = `✅ **Bulk Import Complete** — ${data.created_count} tasks created${data.failed_count > 0 ? `, ${data.failed_count} failed` : ""}.`;
+      if (data.suggestion?.suggestion_text) {
+        content += `\n\n💡 ${data.suggestion.suggestion_text}`;
+      }
+      const resultMsg: SessionMessage = {
+        role: "assistant",
+        content,
+        timestamp: Date.now(),
+      };
+      const session = activeSession || sessions[0];
+      if (session) {
+        setMessages((prev) => [...prev, resultMsg]);
+        addMessage(session.id, resultMsg);
+      }
+    } catch (err: any) {
+      const errMsg: SessionMessage = {
+        role: "assistant",
+        content: `❌ Import failed: ${err.message}`,
+        timestamp: Date.now(),
+      };
+      const session = activeSession || sessions[0];
+      if (session) {
+        setMessages((prev) => [...prev, errMsg]);
+        addMessage(session.id, errMsg);
+      }
+    } finally {
+      setTaskImportConfirming(false);
+    }
+  };
+
+  const toggleTaskSelection = (index: number) => {
+    setSelectedTaskIndices((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
+
+  const selectAllTasks = () => {
+    if (!taskImportPreview) return;
+    setSelectedTaskIndices(new Set(taskImportPreview.rows.map((_: any, i: number) => i)));
+  };
+
+  const deselectAllTasks = () => {
+    setSelectedTaskIndices(new Set());
+  };
+
+  const dismissTaskImport = () => {
+    setTaskImportPreview(null);
+    setTaskImportResult(null);
+    setImportSuggestion(null);
+    setSuggestionGoalCreated(false);
+    setSelectedTaskIndices(new Set());
+  };
+
+  const dismissImportSuggestion = () => {
+    setImportSuggestion(null);
+    setSuggestionGoalCreated(false);
+  };
+
+  const handleMissingDataUpload = async () => {
+    if (!missingDataRequest || !organization?.id) return;
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".pdf,.docx,.txt,.csv,.xlsx,.xls,.png,.jpg,.jpeg";
+    input.onchange = async (e: any) => {
+      const file = e.target?.files?.[0];
+      if (!file) return;
+      setReAnalyzing(true);
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("organization_id", organization.id);
+        const uploadRes = await fetch(`${API_URL}/strategy-chat/upload-and-analyze`, {
+          method: "POST",
+          body: formData,
+        });
+        if (!uploadRes.ok) throw new Error("Upload failed");
+        const uploadData = await uploadRes.json();
+        const fileId = uploadData.file_id;
+        if (!fileId) throw new Error("No file_id in upload response");
+
+        const reRes = await fetch(`${API_URL}/assistant/re-analyze`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            file_id: fileId,
+            original_message: missingDataRequest.originalMessage,
+            organization_id: organization.id,
+            session_id: activeSession?.id || sessions[0]?.id,
+            context: {
+              user_email: user?.email,
+              organization_id: organization?.id,
+              organization_name: organization?.name,
+              role: role || "owner",
+            },
+            conversation_history: messages.map((m) => ({ role: m.role, content: m.content || "" })).slice(-10),
+          }),
+        });
+        if (!reRes.ok) throw new Error("Re-analysis failed");
+        const reData = await reRes.json();
+
+        setMissingDataRequest(null);
+
+        if (reData.type === "answer" && reData.answer) {
+          let answer = reData.answer;
+          if (reData.follow_up) answer += "\n\n" + reData.follow_up;
+          const answerMsg: SessionMessage = { role: "assistant", content: answer, is_answer: true, timestamp: Date.now() };
+          const session = activeSession || sessions[0];
+          if (session) {
+            setMessages((prev) => [...prev, answerMsg]);
+            addMessage(session.id, answerMsg);
+          }
+          if (reData.action_items && Array.isArray(reData.action_items) && reData.action_items.length > 0) {
+            const capped = reData.action_items.slice(0, 5);
+            setActionItems(capped);
+            setSelectedActionIndices(new Set(capped.map((_: any, i: number) => i)));
+            setActionItemsCreated(false);
+          }
+        } else {
+          const fallbackMsg: SessionMessage = { role: "assistant", content: reData.answer || "Thanks! I've analyzed the file. What else can I help with?", timestamp: Date.now() };
+          const session = activeSession || sessions[0];
+          if (session) {
+            setMessages((prev) => [...prev, fallbackMsg]);
+            addMessage(session.id, fallbackMsg);
+          }
+        }
+      } catch (err: any) {
+        const errMsg: SessionMessage = { role: "assistant", content: `❌ Re-analysis failed: ${err.message}`, timestamp: Date.now() };
+        const session = activeSession || sessions[0];
+        if (session) {
+          setMessages((prev) => [...prev, errMsg]);
+          addMessage(session.id, errMsg);
+        }
+      } finally {
+        setReAnalyzing(false);
+      }
+    };
+    input.click();
+  };
+
+  const dismissMissingData = () => {
+    setMissingDataRequest(null);
+  };
+
+  const dismissInsight = (index: number) => {
+    setInsights((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const dismissAllInsights = () => {
+    setInsights([]);
+  };
+
+  const handleCreateInsightGoal = async (insight: any) => {
+    if (!insight?.suggested_goal_title || !organization?.id) return;
+    try {
+      const res = await fetch(`${API_URL}/goals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: insight.suggested_goal_title,
+          description: insight.explanation || "",
+          organization_id: organization.id,
+          department: insight.suggested_department || null,
+          priority: "medium",
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to create goal");
+      const created = await res.json();
+      const goalMsg: SessionMessage = {
+        role: "assistant",
+        content: `🎯 **Goal Created:** "${created.title || insight.suggested_goal_title}" from your document insight.`,
+        timestamp: Date.now(),
+      };
+      const session = activeSession || sessions[0];
+      if (session) {
+        setMessages((prev) => [...prev, goalMsg]);
+        addMessage(session.id, goalMsg);
+      }
+      dismissInsight(insights.indexOf(insight));
+    } catch (err: any) {
+      const errMsg: SessionMessage = {
+        role: "assistant",
+        content: `❌ Failed to create goal: ${err.message}`,
+        timestamp: Date.now(),
+      };
+      const session = activeSession || sessions[0];
+      if (session) {
+        setMessages((prev) => [...prev, errMsg]);
+        addMessage(session.id, errMsg);
+      }
+    }
+  };
+
+  const handleCreateSuggestedGoal = async () => {
+    if (!importSuggestion?.suggested_goal_title || !organization?.id) return;
+    setSuggestionGoalCreating(true);
+    try {
+      const res = await fetch(`${API_URL}/goals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: importSuggestion.suggested_goal_title,
+          description: importSuggestion.suggested_goal_description || `Goal auto-created from imported task cluster`,
+          organization_id: organization.id,
+          priority: "medium",
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to create goal");
+      setSuggestionGoalCreated(true);
+      const created = await res.json();
+      const goalMsg: SessionMessage = {
+        role: "assistant",
+        content: `🎯 **Goal Created:** "${created.title || importSuggestion.suggested_goal_title}" — tasks from this import are now trackable under this goal.`,
+        timestamp: Date.now(),
+      };
+      const session = activeSession || sessions[0];
+      if (session) {
+        setMessages((prev) => [...prev, goalMsg]);
+        addMessage(session.id, goalMsg);
+      }
+    } catch (err: any) {
+      const errMsg: SessionMessage = {
+        role: "assistant",
+        content: `❌ Failed to create goal: ${err.message}`,
+        timestamp: Date.now(),
+      };
+      const session = activeSession || sessions[0];
+      if (session) {
+        setMessages((prev) => [...prev, errMsg]);
+        addMessage(session.id, errMsg);
+      }
+    } finally {
+      setSuggestionGoalCreating(false);
+    }
+  };
+
+  const toggleActionSelection = (index: number) => {
+    setSelectedActionIndices((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
+
+  const handleCreateActionItems = async () => {
+    if (!actionItems || !organization?.id) return;
+    const selected = actionItems.filter((_: any, i: number) => selectedActionIndices.has(i));
+    if (selected.length === 0) return;
+    setActionItemsCreating(true);
+    try {
+      const membersCtx = members?.length
+        ? { org_members: JSON.stringify(members.map((m: any) => ({ name: m.full_name, email: m.email }))) }
+        : {};
+      const res = await fetch(`${API_URL}/assistant/bulk-create-tasks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          organization_id: organization.id,
+          action_items: selected.map((item: any) => ({
+            title: item.title,
+            description: item.description || "",
+            priority: item.priority || "medium",
+            assignee_name: item.assignee_name || null,
+            assignee_email: item.assignee_email || null,
+          })),
+          context: { organization_id: organization.id, user_email: user?.email },
+        }),
+      });
+      if (!res.ok) throw new Error("Bulk create failed");
+      const data = await res.json();
+      const resultMsg: SessionMessage = {
+        role: "assistant",
+        content: `✅ **${data.created_count} action item${data.created_count !== 1 ? "s" : ""} turned into tasks**${data.failed_count > 0 ? ` (${data.failed_count} failed)` : ""}.`,
+        timestamp: Date.now(),
+      };
+      const session = activeSession || sessions[0];
+      if (session) {
+        setMessages((prev) => [...prev, resultMsg]);
+        addMessage(session.id, resultMsg);
+      }
+      setActionItemsCreated(true);
+    } catch (err: any) {
+      const errMsg: SessionMessage = {
+        role: "assistant",
+        content: `❌ Failed to create tasks: ${err.message}`,
+        timestamp: Date.now(),
+      };
+      const session = activeSession || sessions[0];
+      if (session) {
+        setMessages((prev) => [...prev, errMsg]);
+        addMessage(session.id, errMsg);
+      }
+    } finally {
+      setActionItemsCreating(false);
+    }
+  };
+
+  const dismissActionItems = () => {
+    setActionItems(null);
+    setSelectedActionIndices(new Set());
+    setActionItemsCreated(false);
+  };
+
+  const fetchSessionInsights = async () => {
+    if (!organization?.id || sessionInsightsOpen) return;
+    setSessionInsightsLoading(true);
+    setSessionInsightsOpen(true);
+    try {
+      const res = await fetch(`${API_URL}/sessions/insights/${organization.id}?limit=20`, {
+        headers: { "Content-Type": "application/json" },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSessionInsights(data.insights || []);
+      }
+    } catch {
+      // silent
+    } finally {
+      setSessionInsightsLoading(false);
+    }
+  };
+
+  const confirmSessionInsight = async (insightId: string) => {
+    try {
+      await fetch(`${API_URL}/sessions/insights/confirm?insight_id=${insightId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      setSessionInsights((prev) => prev.filter((i) => i._id !== insightId));
+    } catch {
+      // silent
+    }
+  };
+
+  const dismissSessionInsight = async (insightId: string) => {
+    try {
+      await fetch(`${API_URL}/sessions/insights/dismiss?insight_id=${insightId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      setSessionInsights((prev) => prev.filter((i) => i._id !== insightId));
+    } catch {
+      // silent
     }
   };
 
@@ -829,6 +1477,57 @@ export default function AISummaryChat() {
               ))}
             </div>
           )}
+          {sidebarOpen && (
+            <div className="border-t border-border">
+              <button
+                onClick={fetchSessionInsights}
+                className="flex items-center gap-2 w-full px-3 py-2 text-xs text-text-muted hover:text-foreground hover:bg-surface-light/50 transition-colors cursor-pointer"
+              >
+                <Lightbulb className="w-3.5 h-3.5" />
+                <span>Past Insights</span>
+                {sessionInsightsLoading && <Loader2 className="w-3 h-3 animate-spin ml-auto" />}
+                {!sessionInsightsOpen && !sessionInsightsLoading && <span className="ml-auto text-[10px] text-primary">Show</span>}
+              </button>
+              {sessionInsightsOpen && (
+                <div className="max-h-[200px] overflow-y-auto p-1.5 space-y-1 custom-scrollbar">
+                  {sessionInsights.length === 0 && !sessionInsightsLoading && (
+                    <p className="px-2 py-2 text-[10px] text-text-muted text-center">No pending insights</p>
+                  )}
+                  {sessionInsights.map((insight: any) => (
+                    <div key={insight._id} className="group flex items-start gap-1.5 px-2 py-1.5 rounded-lg bg-surface/30 text-[10px]">
+                      <span className="flex-1 text-text-muted leading-relaxed line-clamp-2">{insight.summary}</span>
+                      <div className="hidden group-hover:flex items-center gap-0.5 flex-shrink-0">
+                        <button
+                          onClick={() => confirmSessionInsight(insight._id)}
+                          className="p-0.5 rounded hover:bg-emerald-500/20 text-text-muted hover:text-emerald-400 cursor-pointer"
+                          title="Mark as done"
+                          aria-label={`Confirm insight: ${(insight.summary || "").slice(0, 60)}`}
+                        >
+                          <Check className="w-3 h-3" />
+                        </button>
+                        <button
+                          onClick={() => dismissSessionInsight(insight._id)}
+                          className="p-0.5 rounded hover:bg-rose-500/20 text-text-muted hover:text-rose-400 cursor-pointer"
+                          title="Dismiss"
+                          aria-label={`Dismiss insight: ${(insight.summary || "").slice(0, 60)}`}
+                        >
+                          <span className="text-[11px] font-bold leading-none" aria-hidden="true">×</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {sessionInsights.length > 0 && (
+                    <button
+                      onClick={() => setSessionInsightsOpen(false)}
+                      className="w-full text-[10px] text-text-muted hover:text-foreground text-center pt-1 cursor-pointer"
+                    >
+                      Collapse
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         {!sidebarOpen && (
           <div className="flex-shrink-0 w-8 flex flex-col items-center pt-2 border-r border-border bg-surface/20">
@@ -875,6 +1574,7 @@ export default function AISummaryChat() {
             )}
             {messages.map((msg, i) => {
               if (msg.is_loading) {
+                if (isStreaming) return null;
                 return (
                   <div key={i} className="flex items-start gap-3">
                     <div className="w-7 h-7 rounded-full bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center flex-shrink-0 mt-1">
@@ -925,6 +1625,19 @@ export default function AISummaryChat() {
                 </div>
               );
             })}
+          {isStreaming && (
+            <div className="flex items-start gap-3 animate-in fade-in slide-in-from-bottom-1 duration-200">
+              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center flex-shrink-0 mt-1">
+                <Sparkles className="w-3.5 h-3.5 text-white" />
+              </div>
+              <div className="max-w-[90%] text-foreground">
+                <div className="text-sm leading-relaxed">
+                  <span dangerouslySetInnerHTML={{ __html: renderMarkdown(streamingContent) }} />
+                  <span className="inline-block w-1.5 h-4 bg-primary/70 animate-pulse ml-0.5 rounded-sm align-middle" />
+                </div>
+              </div>
+            </div>
+          )}
           {uploading && (
             <div className="flex items-center gap-2 text-text-muted text-sm">
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -933,6 +1646,42 @@ export default function AISummaryChat() {
           )}
           <div ref={chatEndRef} />
           </div>
+        {suggestions && suggestions.length > 0 && !loading && (
+          <div className="flex-shrink-0 px-4 py-2 border-t border-border/50">
+            <div
+              className="flex flex-wrap gap-2"
+              role="group"
+              aria-label="Suggested follow-up actions"
+              onKeyDown={(e) => {
+                const buttons = (e.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>("button");
+                const current = Array.from(buttons).findIndex((b) => b === document.activeElement);
+                if (current === -1) return;
+                let next = current;
+                if (e.key === "ArrowRight") next = (current + 1) % buttons.length;
+                else if (e.key === "ArrowLeft") next = (current - 1 + buttons.length) % buttons.length;
+                else return;
+                e.preventDefault();
+                buttons[next]?.focus();
+              }}
+            >
+              {suggestions.map((s: any, i: number) => (
+                <button
+                  key={i}
+                  type="button"
+                  disabled={loading}
+                  tabIndex={0}
+                  onClick={() => {
+                    setSuggestions(null);
+                    sendMessage(s.action || s.label);
+                  }}
+                  className="px-3 py-1.5 rounded-full border border-primary/30 bg-primary/5 hover:bg-primary/15 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 text-xs text-foreground cursor-pointer transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {pendingQuestion && (
           <div className="flex-shrink-0 border-t border-border bg-surface/40 px-4 py-3">
             <QuestionCard
@@ -942,6 +1691,295 @@ export default function AISummaryChat() {
               disabled={loading}
               questionNumber={questionCount}
             />
+          </div>
+        )}
+        {missingDataRequest && (
+          <div className="flex-shrink-0 border-t border-border bg-surface/40 px-4 py-3">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-primary">
+                  📄 <span className="text-foreground">Missing Data</span>
+                </p>
+                <Button variant="outline" onClick={dismissMissingData} className="text-xs cursor-pointer" size="sm">
+                  Dismiss
+                </Button>
+              </div>
+              <div className="p-3 rounded-lg border border-dashed border-primary/30 bg-primary/5">
+                <p className="text-sm font-medium mb-1">
+                  I need your <span className="text-primary">{missingDataRequest.doc_type}</span>
+                </p>
+                <p className="text-xs text-text-muted mb-3">{missingDataRequest.reason}</p>
+                <Button
+                  onClick={handleMissingDataUpload}
+                  disabled={reAnalyzing}
+                  className="text-xs cursor-pointer"
+                  size="sm"
+                >
+                  {reAnalyzing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Paperclip className="w-3 h-3" />}
+                  {reAnalyzing ? "Analyzing..." : `Upload ${missingDataRequest.doc_type}`}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+        {actionItems && !actionItemsCreated && (
+          <div className="flex-shrink-0 border-t border-border bg-surface/40 px-4 py-3 max-h-[360px] overflow-y-auto">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-primary">
+                  📋 <span className="text-foreground">{selectedActionIndices.size}</span> of {actionItems.length} action items
+                </p>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={dismissActionItems} className="text-xs cursor-pointer" size="sm">
+                    Dismiss
+                  </Button>
+                  <Button
+                    onClick={handleCreateActionItems}
+                    disabled={actionItemsCreating || selectedActionIndices.size === 0}
+                    className="text-xs cursor-pointer"
+                    size="sm"
+                  >
+                    {actionItemsCreating ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                    {actionItemsCreating ? "Creating..." : `Create ${selectedActionIndices.size} Task${selectedActionIndices.size !== 1 ? "s" : ""}`}
+                  </Button>
+                </div>
+              </div>
+              <div className="space-y-1.5 max-h-[260px] overflow-y-auto pr-1">
+                {actionItems.map((item: any, i: number) => (
+                  <div
+                    key={i}
+                    role="checkbox"
+                    aria-checked={selectedActionIndices.has(i)}
+                    aria-label={`${item.title} (${item.priority} priority${item.assignee_name ? `, assignee: ${item.assignee_name}` : ""})`}
+                    tabIndex={0}
+                    onClick={() => toggleActionSelection(i)}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleActionSelection(i); } }}
+                    className={`flex items-center gap-2 p-2 rounded-lg border text-xs cursor-pointer transition-colors ${
+                      selectedActionIndices.has(i)
+                        ? "bg-background border-border/50"
+                        : "bg-surface/30 border-border/20 opacity-60"
+                    }`}
+                  >
+                    <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 border transition-colors ${
+                      selectedActionIndices.has(i)
+                        ? "bg-primary border-primary text-white"
+                        : "border-border hover:border-primary/50"
+                    }`} aria-hidden="true">
+                      {selectedActionIndices.has(i) && (
+                        <Check className="w-3 h-3" />
+                      )}
+                    </div>
+                    <span className="flex-1 truncate font-medium">{item.title}</span>
+                    {item.assignee_name && (
+                      <span className="text-text-muted truncate max-w-[120px]">{item.assignee_name}</span>
+                    )}
+                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full capitalize flex-shrink-0 ${
+                      item.priority === "high" ? "bg-rose-500/10 text-rose-400" :
+                      item.priority === "low" ? "bg-emerald-500/10 text-emerald-400" :
+                      "bg-amber-500/10 text-amber-400"
+                    }`}>
+                      {item.priority}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+        {importSuggestion && !suggestionGoalCreated && (
+          <div className="flex-shrink-0 border-t border-border bg-surface/40 px-4 py-3">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-primary">💡 After Import Suggestion</p>
+                <Button variant="outline" onClick={dismissImportSuggestion} className="text-xs cursor-pointer" size="sm">
+                  Dismiss
+                </Button>
+              </div>
+              <div className="space-y-2 text-sm">
+                {importSuggestion.suggested_goal_title && (
+                  <div className="flex items-center justify-between p-2 rounded-lg border bg-background border-border/50">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium truncate">🎯 Create goal: <span className="text-primary">{importSuggestion.suggested_goal_title}</span></p>
+                      {importSuggestion.suggested_goal_description && (
+                        <p className="text-xs text-text-muted truncate mt-0.5">{importSuggestion.suggested_goal_description}</p>
+                      )}
+                    </div>
+                    <Button
+                      onClick={handleCreateSuggestedGoal}
+                      disabled={suggestionGoalCreating}
+                      className="text-xs cursor-pointer ml-3 flex-shrink-0"
+                      size="sm"
+                    >
+                      {suggestionGoalCreating ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                      {suggestionGoalCreating ? "Creating..." : "Create Goal"}
+                    </Button>
+                  </div>
+                )}
+                {importSuggestion.tasks_without_dates_count > 0 && (
+                  <div className="p-2 rounded-lg border bg-amber-500/5 border-amber-500/20">
+                    <p className="text-xs">
+                      ⏰ <span className="font-medium">{importSuggestion.tasks_without_dates_count} task{importSuggestion.tasks_without_dates_count !== 1 ? "s" : ""}</span> {importSuggestion.tasks_without_dates_count !== 1 ? "have" : "has"} no due date — consider setting deadlines to keep things on track.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+        {insights.length > 0 && (
+          <div className="flex-shrink-0 border-t border-border bg-surface/40 px-4 py-3 max-h-[400px] overflow-y-auto">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-primary">
+                  💡 <span className="text-foreground">{insights.length} insight{insights.length !== 1 ? "s" : ""} from your documents</span>
+                </p>
+                <Button variant="outline" onClick={dismissAllInsights} className="text-xs cursor-pointer" size="sm">
+                  Dismiss all
+                </Button>
+              </div>
+              <div className="space-y-2">
+                {insights.map((insight: any, i: number) => (
+                  <div key={i} className="p-3 rounded-lg border bg-background border-border/50 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full capitalize ${
+                            insight.type === "trend" ? "bg-blue-500/10 text-blue-400" :
+                            insight.type === "anomaly" ? "bg-rose-500/10 text-rose-400" :
+                            insight.type === "gap" ? "bg-amber-500/10 text-amber-400" :
+                            insight.type === "benchmark" ? "bg-emerald-500/10 text-emerald-400" :
+                            "bg-purple-500/10 text-purple-400"
+                          }`}>{insight.type}</span>
+                        </div>
+                        <p className="text-sm font-medium">{insight.title}</p>
+                        <p className="text-xs text-text-muted mt-0.5">{insight.explanation}</p>
+                      </div>
+                      <button onClick={() => dismissInsight(i)} aria-label={`Dismiss insight: ${insight.title || ""}`} className="text-text-muted hover:text-foreground cursor-pointer flex-shrink-0">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    </div>
+                    {insight.suggested_goal_title && (
+                      <Button
+                        onClick={() => handleCreateInsightGoal(insight)}
+                        className="text-xs cursor-pointer"
+                        size="sm"
+                      >
+                        🎯 Create Goal
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+        {insightsLoading && (
+          <div className="flex-shrink-0 border-t border-border px-4 py-3">
+            <div className="flex items-center gap-2 text-sm text-text-muted">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Analyzing your documents for insights...
+            </div>
+          </div>
+        )}
+        {taskImportLoading && (
+          <div className="flex-shrink-0 border-t border-border px-4 py-3">
+            <div className="flex items-center gap-2 text-sm text-text-muted">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Detecting tasks in your file...
+            </div>
+          </div>
+        )}
+        {taskImportPreview && !taskImportResult && (
+          <div className="flex-shrink-0 border-t border-border bg-surface/40 px-4 py-3 max-h-[400px] overflow-y-auto">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <p className="text-sm font-medium text-primary">
+                    📊 <span className="text-foreground">{selectedTaskIndices.size}</span> of {taskImportPreview.detected_count} tasks selected
+                  </p>
+                  {selectedTaskIndices.size === taskImportPreview.detected_count ? (
+                    <button onClick={deselectAllTasks} className="text-[11px] text-text-muted hover:text-primary cursor-pointer underline-offset-2 hover:underline">
+                      Deselect All
+                    </button>
+                  ) : (
+                    <button onClick={selectAllTasks} className="text-[11px] text-text-muted hover:text-primary cursor-pointer underline-offset-2 hover:underline">
+                      Select All
+                    </button>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={dismissTaskImport} className="text-xs cursor-pointer" size="sm">
+                    Dismiss
+                  </Button>
+                  <Button
+                    onClick={handleTaskImportConfirm}
+                    disabled={taskImportConfirming || selectedTaskIndices.size === 0}
+                    className="text-xs cursor-pointer"
+                    size="sm"
+                  >
+                    {taskImportConfirming ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                    {taskImportConfirming ? "Importing..." : `Import ${selectedTaskIndices.size} of ${taskImportPreview.detected_count} Tasks`}
+                  </Button>
+                </div>
+              </div>
+              <div className="space-y-1.5 max-h-[300px] overflow-y-auto pr-1">
+                {taskImportPreview.rows.slice(0, 50).map((row: any, i: number) => (
+                  <div
+                    key={i}
+                    role="checkbox"
+                    aria-checked={selectedTaskIndices.has(i)}
+                    aria-label={`${row.title} (${row.priority} priority${row.assignee_name ? `, assignee: ${row.assignee_name}` : ""})`}
+                    tabIndex={0}
+                    onClick={() => toggleTaskSelection(i)}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleTaskSelection(i); } }}
+                    className={`flex items-center gap-2 p-2 rounded-lg border text-xs cursor-pointer transition-colors ${
+                      selectedTaskIndices.has(i)
+                        ? "bg-background border-border/50"
+                        : "bg-surface/30 border-border/20 opacity-60"
+                    }`}
+                  >
+                    <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 border transition-colors ${
+                      selectedTaskIndices.has(i)
+                        ? "bg-primary border-primary text-white"
+                        : "border-border hover:border-primary/50"
+                    }`} aria-hidden="true">
+                      {selectedTaskIndices.has(i) && (
+                        <Check className="w-3 h-3" />
+                      )}
+                    </div>
+                    <span className="flex-1 truncate font-medium">{row.title}</span>
+                    {row.assignee_name && (
+                      <span className="text-text-muted truncate max-w-[120px]">{row.assignee_name}</span>
+                    )}
+                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full capitalize flex-shrink-0 ${
+                      row.priority === "high" ? "bg-rose-500/10 text-rose-400" :
+                      row.priority === "low" ? "bg-emerald-500/10 text-emerald-400" :
+                      "bg-amber-500/10 text-amber-400"
+                    }`}>
+                      {row.priority}
+                    </span>
+                  </div>
+                ))}
+                {taskImportPreview.detected_count > 50 && (
+                  <p className="text-[10px] text-text-muted text-center">
+                    +{taskImportPreview.detected_count - 50} more tasks
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+        {taskImportResult && (
+          <div className="flex-shrink-0 border-t border-border px-4 py-3">
+            <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+              <div>
+                <p className="text-sm font-medium text-emerald-400">✅ Import Complete</p>
+                <p className="text-xs text-text-muted">{taskImportResult.created_count} tasks created{taskImportResult.failed_count > 0 ? `, ${taskImportResult.failed_count} failed` : ""}</p>
+              </div>
+              <Button variant="outline" onClick={dismissTaskImport} className="text-xs cursor-pointer" size="sm">
+                Dismiss
+              </Button>
+            </div>
           </div>
         )}
         <div className="flex flex-col px-4 pb-4 pt-2 border-t border-border flex-shrink-0">
@@ -1100,7 +2138,7 @@ export default function AISummaryChat() {
             />
           </div>
           <Button
-            onClick={sendMessage}
+            onClick={() => sendMessage()}
             disabled={loading || (!input.trim() && !attachedFile)}
             size="icon"
             className="cursor-pointer flex-shrink-0"

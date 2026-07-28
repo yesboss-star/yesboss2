@@ -1,0 +1,1 @@
+data: {"type": "answer", "follow_up": null, "action_items": null, "missing_data": null, "confirmation": null, "suggestions": null, "answer": "You planned to hire two junior electricians and renegotiate the warehouse lease before September."}

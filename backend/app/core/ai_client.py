@@ -1,5 +1,7 @@
+import asyncio
+import json
 import logging
-from typing import Any
+from typing import Any, AsyncGenerator
 
 from .config import settings
 
@@ -245,6 +247,146 @@ class AIClient:
         except Exception as e:
             logger.error(f"Qwen API error: {e}")
             raise
+
+
+    # ------------------------------------------------------------------
+    # Streaming support
+    # ------------------------------------------------------------------
+    async def chat_complete_stream(
+        self,
+        messages: list[dict[str, str]],
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 2000,
+    ) -> AsyncGenerator[str, None]:
+        if self.provider == "xai":
+            async for token in self._xai_stream(messages, model or settings.XAI_MODEL, temperature, max_tokens):
+                yield token
+        elif self.provider == "openai":
+            async for token in self._openai_stream(messages, model or "gpt-4o", temperature, max_tokens):
+                yield token
+        elif self.provider == "qwen":
+            async for token in self._qwen_stream(messages, model or settings.QWEN_MODEL or "qwen2.5:0.5b", temperature, max_tokens):
+                yield token
+        else:
+            async for token in self._fallback_stream(messages, model, temperature, max_tokens):
+                yield token
+
+    async def _xai_stream(
+        self,
+        messages: list[dict[str, str]],
+        model: str = "grok-3",
+        temperature: float = 0.7,
+        max_tokens: int = 2000,
+    ) -> AsyncGenerator[str, None]:
+        client = self._get_xai_client()
+        stream = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,
+        )
+        async for chunk in stream:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta and delta.content:
+                yield delta.content
+
+    async def _openai_stream(
+        self,
+        messages: list[dict[str, str]],
+        model: str = "gpt-4o",
+        temperature: float = 0.7,
+        max_tokens: int = 2000,
+    ) -> AsyncGenerator[str, None]:
+        client = self._get_openai_client()
+        stream = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,
+        )
+        async for chunk in stream:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta and delta.content:
+                yield delta.content
+
+    async def _qwen_stream(
+        self,
+        messages: list[dict[str, str]],
+        model: str = "qwen2.5:14b",
+        temperature: float = 0.7,
+        max_tokens: int = 2000,
+    ) -> AsyncGenerator[str, None]:
+        import httpx
+        url = f"{settings.QWEN_BASE_URL}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {settings.QWEN_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            async with client.stream("POST", url, json=payload, headers=headers) as resp:
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data = line[6:]
+                    if data == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data)
+                        delta = chunk.get("choices", [{}])[0].get("delta", {})
+                        if delta.get("content"):
+                            yield delta["content"]
+                    except json.JSONDecodeError:
+                        pass
+
+    async def _fallback_stream(
+        self,
+        messages: list[dict[str, str]],
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 2000,
+    ) -> AsyncGenerator[str, None]:
+        """Fallback for providers without streaming support (Anthropic, Gemini).
+
+        Yields the full response in ~15-character chunks with a small async sleep
+        between each, so the frontend gets a typewriter-like effect even on non-
+        streaming providers.
+        """
+        result = await self.chat_complete(messages, model, temperature, max_tokens)
+        content = result.get("content", "")
+        chunk_size = 15
+        i = 0
+        n = len(content)
+        while i < n:
+            yield content[i : i + chunk_size]
+            i += chunk_size
+            await asyncio.sleep(0.03)
+
+
+async def get_ai_stream_response(
+    prompt: str,
+    system_prompt: str = "You are a helpful AI assistant.",
+    provider: str | None = None,
+    model: str | None = None,
+    temperature: float = 0.7,
+    max_tokens: int = 2000,
+) -> AsyncGenerator[str, None]:
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+    client = AIClient(provider=provider)
+    async for token in client.chat_complete_stream(messages, model, temperature, max_tokens):
+        yield token
 
 
 async def get_ai_response(

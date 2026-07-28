@@ -121,6 +121,7 @@ class UserResponse(BaseModel):
     email: str | None = None
     full_name: str | None = None
     phone: str | None = None
+    phone_verified: bool = False
     role: str | None = None
     organization_id: str | None = None
     created_at: str | None = None
@@ -133,12 +134,13 @@ class AuthResponse(BaseModel):
     uid: str | None = None
 
 
-def _user_to_response(user) -> UserResponse:
+def _user_to_response(user, db_user: dict | None = None) -> UserResponse:
     return UserResponse(
         uid=user.uid,
         email=user.email,
         full_name=getattr(user, "display_name", None),
-        phone=getattr(user, "phone_number", None),
+        phone=db_user.get("phone") if db_user else getattr(user, "phone_number", None),
+        phone_verified=db_user.get("phone_verified", False) if db_user else False,
         created_at=str(user.user_meta.creation_timestamp) if hasattr(user, "user_meta") else None,
     )
 
@@ -379,18 +381,10 @@ async def get_me(current_user = Depends(get_current_user)):
         if db is not None:
             db_user = db.users.find_one({"uid": uid})
 
-        return AuthResponse(
-            success=True,
-            message="User retrieved",
-            user=UserResponse(
-                uid=user.uid,
-                email=user.email,
-                full_name=getattr(user, "display_name", None),
-                phone=getattr(user, "phone_number", None),
-                role=db_user.get("role", role) if db_user else role,
-                organization_id=db_user.get("organization_id") if db_user else None,
-            ),
-        )
+        resp = _user_to_response(user, db_user)
+        resp.role = db_user.get("role", role) if db_user else role
+        resp.organization_id = db_user.get("organization_id") if db_user else None
+        return AuthResponse(success=True, message="User retrieved", user=resp)
 
     except HTTPException:
         raise
@@ -400,6 +394,51 @@ async def get_me(current_user = Depends(get_current_user)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
         )
+
+
+class UpdatePhoneRequest(BaseModel):
+    phone: str
+    phone_verified: bool = False
+
+
+@router.put("/me/phone", response_model=AuthResponse)
+async def update_phone(request: UpdatePhoneRequest, current_user = Depends(get_current_user)):
+    """Update the current user's phone number in Firebase + MongoDB."""
+    from ..core.firebase_admin import update_user as fb_update_user
+    uid = current_user.id or current_user.sub
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    try:
+        fb_update_user(uid, phone=request.phone)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update Firebase: {e}")
+
+    db.users.update_one(
+        {"uid": uid},
+        {"$set": {"phone": request.phone, "phone_verified": request.phone_verified, "updated_at": datetime.utcnow().isoformat()}},
+    )
+
+    user = db.users.find_one({"uid": uid})
+    if user and user.get("email"):
+        db.employees.update_one(
+            {"email": user["email"]},
+            {"$set": {"phone": request.phone}},
+        )
+
+    return AuthResponse(
+        success=True,
+        message="Phone updated",
+        user=UserResponse(
+            uid=uid,
+            email=user.get("email") if user else None,
+            phone=request.phone,
+            phone_verified=request.phone_verified,
+            role=user.get("role") if user else None,
+            organization_id=user.get("organization_id") if user else None,
+        ),
+    )
 
 
 class SetSessionRequest(BaseModel):
