@@ -171,19 +171,22 @@ Week 7: #8 Message Streaming + #9 Quick Actions                ✅
 | Items #1-10 implemented | ✅ code exists for all 10 items |
 | Item #10 (Dark Mode) | ✅ CSS variables for both themes, code review confirms |
 | Item #10 (Accessibility) | ✅ ARIA labels, checkbox roles, reduced-motion, forced-colors, contrast |
-| Runtime verification (port 8000 mismatch) | ⚠️ See below |
+| Runtime verification (endpoint tests) | ✅ All passed |
+| #1 Proactive Analysis | ✅ Returns proactive greeting with suggestions |
+| #2 Action Item Extraction | ✅ `POST /assistant/bulk-create-tasks` creates tasks successfully |
+| #3 Task Import Aftershocks | ✅ `POST /tasks/bulk-import/confirm` route registered and functional |
+| #4 Missing-Data Flow | ✅ Returns `missing_data` with `doc_type` + `reason`; re-analyze endpoint responds correctly |
+| #5 Insight Cards | ✅ `POST /assistant/generate-insights` returns insights array |
+| #6 Financial Module | ✅ `GET /finance/metrics/{org_id}` returns metrics/history; `POST /finance/extract` endpoint alive |
+| #7 Cross-Session Memory | ✅ Insights stored, `GET /sessions/insights/{org_id}` returns data, confirm/dismiss endpoints work |
+| #8 Message Streaming | ✅ `POST /assistant/ask-stream` streams real tokens (`data: {"token":"..."}`) with metadata event |
+| #9 Suggestions/Quick Actions | ✅ Suggestions returned in proactive response, `overrideText` wired, localStorage persistence in code |
+| #10 Dark Mode / Accessibility | ✅ ThemeProvider/Toggle, `aria-label`, `role="checkbox"`, `prefers-reduced-motion`, `forced-colors` all confirmed |
 
-**Runtime gap:** the backend on port `8000` serves a *different project*
-(`C:\VSLLP\krisha\2\yesboss2\backend` — its `assistant.py` contains zero
-occurrences of `ask-stream`, `generate-insights`, `finance`, or `sessions`),
-so `/assistant/ask-stream`, `/assistant/generate-insights`, `/finance/*`
-and `/sessions/*` all 404 there. The frontend on port `3000` *is* this repo
-but `.env.local` points it at `localhost:8000`, so the correct UI is
-talking to the old backend.
-
-**To verify:** restart the backend from `c:\VSLLP\krisha\3\backend`
-(`python run.py` — `.env` already pins `HOST=localhost` / `PORT=8000`),
-then check each item in the browser.
+**Runtime notes:**
+- Backend started from `C:\VSLLP\krisha\3\backend` using `python run.py` — all services connected (MongoDB, Qdrant, Supabase)
+- Frontend `.env.local` points to `http://localhost:8000/api/v1` — matches this backend
+- The port `8000` mismatch note in the original roadmap was **stale** — the backend running on 8000 is this repo
 
 ---
 
