@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import re
 from datetime import datetime
@@ -456,17 +457,19 @@ async def list_goals(
             "in_progress": tc["in_progress"],
             "pending": tc["pending"]
         }
+        if goal.get("status") == "active" and tc["total"] > 0 and tc["completed"] >= tc["total"]:
+            goal["status"] = "pending_review"
 
     return {"goals": goals}
+
+
+
 
 
 @router.post("/suggest-breakdown")
 async def suggest_goal_breakdown(request: GoalBreakdownRequest):
     """Suggest sub-goals and tasks for a goal based on its title/description."""
     try:
-        import json
-        import re
-
         from ..core.ai_client import get_ai_response
 
         prompt = (
@@ -510,8 +513,8 @@ async def suggest_goal_breakdown(request: GoalBreakdownRequest):
         return {"sub_goals": sub_goals, "tasks": tasks}
     except Exception as e:
         logger = logging.getLogger("yesboss.goals")
-        logger.warning(f"Failed to suggest goal breakdown: {e}")
-        return {"sub_goals": [], "tasks": []}
+        logger.warning(f"AI suggest-breakdown failed: {e}")
+        raise HTTPException(status_code=503, detail=f"AI service unavailable: {str(e)[:200]}")
 
 
 class BulkDeleteDefaultGoalsRequest(BaseModel):
@@ -1072,11 +1075,9 @@ async def generate_tasks_from_goal(request: TaskGenerate, current_user = Depends
             goal_description=goal.get("description", ""),
             count=request.count
         )
-    except Exception:
-        tasks_data = [
-            {"title": f"Task {i+1} for {goal.get('title')}", "description": "AI task generation failed - create manually", "priority": "medium"}
-            for i in range(request.count)
-        ]
+    except Exception as e:
+        logging.getLogger("yesboss.goals").error(f"AI generate-tasks failed: {e}")
+        raise HTTPException(status_code=503, detail=f"AI service unavailable: {str(e)[:200]}")
 
     created_tasks = []
     goal_assignee_ids = goal.get("assignee_id") or []

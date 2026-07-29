@@ -101,6 +101,23 @@ class Settings:
             if not v:
                 logger.info(f"Optional env var not set: {k}")
 
+        provider = self.DEFAULT_AI_PROVIDER
+        provider_key_map = {
+            "xai": ("XAI_API_KEY", self.XAI_API_KEY),
+            "openai": ("OPENAI_API_KEY", self.OPENAI_API_KEY),
+            "anthropic": ("ANTHROPIC_API_KEY", self.ANTHROPIC_API_KEY),
+            "gemini": ("GEMINI_API_KEY", self.GEMINI_API_KEY),
+            "qwen": ("QWEN_API_KEY", self.QWEN_API_KEY),
+        }
+        if provider in provider_key_map:
+            key_name, key_value = provider_key_map[provider]
+            if key_value:
+                logger.info(f"AI provider '{provider}' configured ({key_name} is set)")
+            else:
+                logger.warning(f"AI provider '{provider}' selected but {key_name} is not set — AI features (suggestions, strategies) will fail. Set {key_name} or change DEFAULT_AI_PROVIDER.")
+        else:
+            logger.warning(f"Unknown DEFAULT_AI_PROVIDER '{provider}'. AI features may not work.")
+
 
 settings = Settings()
 settings.validate()

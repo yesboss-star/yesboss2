@@ -22,6 +22,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.url.path.startswith("/api/v1/health"):
             return await call_next(request)
+        if request.url.path.startswith("/api/v1/ws/"):
+            return await call_next(request)
 
         key = request.client.host if request.client else "unknown"
         now = time.time()
@@ -214,7 +216,7 @@ if sentry_dsn:
 
 app.add_middleware(RequestIDMiddleware)
 app.add_middleware(CSRFMiddleware)
-app.add_middleware(RateLimitMiddleware, max_requests=60, window_seconds=60)
+app.add_middleware(RateLimitMiddleware, max_requests=300, window_seconds=60)
 app.add_middleware(SecurityHeadersMiddleware)
 
 cors_origins_str = getattr(settings, "CORS_ORIGINS", "")

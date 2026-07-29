@@ -280,15 +280,15 @@ Return ONLY the JSON array, no other text."""
             cleaned = re.sub(r"```$", "", cleaned).strip()
         import json
         tasks = json.loads(cleaned)
-        if isinstance(tasks, list):
-            for t in tasks:
-                t.setdefault("priority", "medium")
-                t.setdefault("description", "")
-            return tasks[:count]
+        if not isinstance(tasks, list):
+            raise ValueError(f"AI returned non-list: {type(tasks).__name__}")
+        for t in tasks:
+            t.setdefault("priority", "medium")
+            t.setdefault("description", "")
+        return tasks[:count]
     except Exception as e:
-        logger.warning("AI task generation failed, using fallback: %s", e)
-
-    return [{"title": f"Complete {goal_title}", "description": goal_description or goal_title, "priority": "medium"}]
+        logger.warning("AI task generation failed: %s", e)
+        raise RuntimeError(f"AI task generation failed: {e}") from e
 
 
 async def analyze_goal_department(title: str, description: str = "", industry: str = "") -> str:

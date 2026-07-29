@@ -430,6 +430,10 @@ async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get
                     email=task_obj.get("assignee_email"),
                 ))
 
+    goal_id = task_obj.get("goal_id")
+    if goal_id:
+        await _recalc_goal_task_counts_and_broadcast(db, goal_id, org_id)
+
     from ..agents.frequency_agent import process_task as _freq_task
     asyncio.create_task(_freq_task(task_obj, org_id))
 
@@ -475,6 +479,10 @@ async def delete_task(task_id: str, current_user = Depends(get_current_user_opti
                 metadata={"task_id": task_id},
                 email=assignee_email,
             ))
+
+    goal_id = task.get("goal_id")
+    if goal_id:
+        await _recalc_goal_task_counts_and_broadcast(db, goal_id, org_id)
 
     db.tasks.delete_one({"_id": ObjectId(task_id)})
     db.task_comments.delete_many({"task_id": task_id})
@@ -554,6 +562,10 @@ async def approve_task(task_id: str, current_user = Depends(get_current_user_opt
                     email=task_obj.get("assignee_email"),
                 ))
 
+        goal_id = task_obj.get("goal_id")
+        if goal_id:
+            await _recalc_goal_task_counts_and_broadcast(db, goal_id, org_id)
+
         from ..agents.frequency_agent import process_task as _freq_task
         asyncio.create_task(_freq_task(task_obj, org_id))
 
@@ -563,6 +575,58 @@ async def approve_task(task_id: str, current_user = Depends(get_current_user_opt
     except Exception as e:
         logger.error(f"Error approving task {task_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to approve task: {str(e)}")
+
+
+async def _recalc_goal_task_counts_and_broadcast(db, goal_id: str, org_id: str):
+    """Recalculate task_counts for a goal, auto-set to pending_review if all done, and broadcast goal_updated."""
+    if not goal_id or not org_id:
+        return
+    pipeline = [
+        {"$match": {"goal_id": goal_id}},
+        {"$group": {
+            "_id": "$goal_id",
+            "total": {"$sum": 1},
+            "completed": {"$sum": {"$cond": [{"$in": ["$status", ["completed", "approved"]]}, 1, 0]}},
+            "in_progress": {"$sum": {"$cond": [{"$eq": ["$status", "in_progress"]}, 1, 0]}},
+            "pending": {"$sum": {"$cond": [{"$eq": ["$status", "pending"]}, 1, 0]}},
+        }}
+    ]
+    results = list(db.tasks.aggregate(pipeline))
+    if results:
+        r = results[0]
+        tc = {"total": r["total"], "completed": r["completed"], "in_progress": r["in_progress"], "pending": r["pending"]}
+    else:
+        tc = {"total": 0, "completed": 0, "in_progress": 0, "pending": 0}
+
+    goal = db.goals.find_one({"_id": ObjectId(goal_id)})
+    if not goal:
+        return
+
+    new_status = goal.get("status", "active")
+    if tc["total"] > 0 and tc["completed"] >= tc["total"] and new_status not in ("completed", "pending_review", "archived"):
+        new_status = "pending_review"
+
+    update_fields = {"task_counts": tc, "updated_at": datetime.utcnow()}
+    if new_status != goal.get("status"):
+        update_fields["status"] = new_status
+        logger.info("Goal %s status changed: %s -> %s", goal_id, goal.get("status"), new_status)
+
+    db.goals.update_one({"_id": ObjectId(goal_id)}, {"$set": update_fields})
+
+    goal_obj = db.goals.find_one({"_id": ObjectId(goal_id)})
+    if goal_obj:
+        goal_obj["_id"] = str(goal_obj["_id"])
+        for f in ("assignee_id", "assignee_name", "reviewer_id", "reviewer_name"):
+            raw = goal_obj.get(f)
+            if isinstance(raw, str):
+                goal_obj[f] = [raw]
+            elif raw is None:
+                goal_obj[f] = []
+        goal_obj["progress"] = round((tc["completed"] / tc["total"] * 100) if tc["total"] > 0 else 0, 1)
+        goal_obj["task_counts"] = tc
+        asyncio.create_task(ws_manager.broadcast_to_organization(
+            {"type": "goal_updated", "data": goal_obj}, org_id,
+        ))
 
 
 @router.post("/{task_id}/complete")
@@ -607,6 +671,10 @@ async def complete_task(task_id: str, current_user = Depends(get_current_user_op
                     message=f"Task '{task_obj.get('title')}' has been marked complete",
                     link=f"/tasks/{task_id}",
                 ))
+
+        goal_id = task_obj.get("goal_id")
+        if goal_id:
+            await _recalc_goal_task_counts_and_broadcast(db, goal_id, org_id)
 
         from ..agents.frequency_agent import process_task as _freq_task
         asyncio.create_task(_freq_task(task_obj, org_id))

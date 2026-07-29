@@ -157,7 +157,7 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [goalData, setGoalData] = useState(goal);
-  const { updateTask } = useTaskStore();
+  const { updateTask, createTask } = useTaskStore();
   const { generateStrategies, selectStrategy, createGoal, fetchGoals } = useGoalStore();
   const { members, fetchOrgMembers } = useOrgChartStore();
   const [confirmingStrategy, setConfirmingStrategy] = useState<{ index: number; strat: any } | null>(null);
@@ -165,6 +165,11 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
   const [childGoalSuggestions, setChildGoalSuggestions] = useState<any[]>([]);
   const [generatingChildGoals, setGeneratingChildGoals] = useState(false);
   const [childGoalsBeingAdded, setChildGoalsBeingAdded] = useState<number[]>([]);
+  const [pipelineTaskSuggestions, setPipelineTaskSuggestions] = useState<any[]>([]);
+  const [selectedPipelineTaskIds, setSelectedPipelineTaskIds] = useState<Set<number>>(new Set());
+  const [suggestingPipelineTasks, setSuggestingPipelineTasks] = useState(false);
+  const [addingPipelineTasks, setAddingPipelineTasks] = useState(false);
+  const [pipelineSuggestionError, setPipelineSuggestionError] = useState("");
 
   const handleGenerateChildGoals = async () => {
     setGeneratingChildGoals(true);
@@ -217,6 +222,71 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
       console.error("Failed to add child goal", e);
       setChildGoalsBeingAdded((prev) => prev.filter((i) => i !== index));
     }
+  };
+
+  const suggestPipelineTasks = async () => {
+    if (!goalData.id && !goalData._id) return;
+    setSuggestingPipelineTasks(true);
+    setPipelineSuggestionError("");
+    setPipelineTaskSuggestions([]);
+    setSelectedPipelineTaskIds(new Set());
+    try {
+      const res = await fetch(`${API_URL}/goals/suggest-breakdown`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({
+          title: goalData.title,
+          description: goalData.description || "",
+          industry: goalData.industry || "",
+          micro_vertical: goalData.micro_vertical || "",
+          goal_type: goalData.goal_type || "short_term",
+          department: goalData.department || "",
+          organization_id: propOrgId || goalData.organization_id,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPipelineTaskSuggestions(data.tasks || []);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setPipelineTaskSuggestions(data.tasks || []);
+        if (!data.tasks || data.tasks.length === 0) {
+          setPipelineSuggestionError("AI suggestion unavailable. Check backend AI provider config.");
+        }
+      }
+    } catch (e) {
+      console.error("[suggestPipelineTasks] error", e);
+      setPipelineSuggestionError("Network error. Please try again.");
+    } finally {
+      setSuggestingPipelineTasks(false);
+    }
+  };
+
+  const addSelectedPipelineTasks = async () => {
+    if (selectedPipelineTaskIds.size === 0) return;
+    setAddingPipelineTasks(true);
+    const items = pipelineTaskSuggestions.filter((_, i) => selectedPipelineTaskIds.has(i));
+    const gid = goalData.id || goalData._id;
+    const orgId = propOrgId || goalData.organization_id;
+    const results = await Promise.allSettled(
+      items.map((s) =>
+        createTask({
+          title: s.title,
+          description: s.description || "",
+          priority: s.priority || "medium",
+          goal_id: gid,
+          organization_id: orgId,
+        } as any)
+      )
+    );
+    const failed = results.filter((r) => r.status === "rejected");
+    if (failed.length > 0) {
+      console.warn("[addSelectedPipelineTasks] failed to create", failed.length, "tasks");
+    }
+    loadTasks();
+    setPipelineTaskSuggestions([]);
+    setSelectedPipelineTaskIds(new Set());
+    setAddingPipelineTasks(false);
   };
 
   useEffect(() => {
@@ -529,6 +599,77 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
                         </div>
                       );
                     })}
+                  </div>
+                )}
+              </div>
+
+              {/* Suggest Tasks */}
+              <div>
+                <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-primary" />
+                  Task Suggestions
+                </h4>
+                {pipelineTaskSuggestions.length === 0 ? (
+                  <div className="p-4 rounded-xl bg-surface border border-primary/20 text-center">
+                    <p className="text-xs text-text-muted mb-2">Generate AI-suggested tasks for this goal.</p>
+                    {pipelineSuggestionError && (
+                      <p className="text-[10px] text-rose-400 mb-2">{pipelineSuggestionError}</p>
+                    )}
+                    <button
+                      onClick={suggestPipelineTasks}
+                      disabled={suggestingPipelineTasks}
+                      className="px-4 py-2 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-xs font-medium cursor-pointer disabled:opacity-50 flex items-center gap-1.5 mx-auto"
+                    >
+                      {suggestingPipelineTasks ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                      {suggestingPipelineTasks ? "Generating..." : "Suggest Tasks"}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-[10px] text-text-muted">Select tasks to add:</p>
+                    {pipelineTaskSuggestions.map((s: any, i: number) => {
+                      const isSelected = selectedPipelineTaskIds.has(i);
+                      return (
+                        <div
+                          key={i}
+                          onClick={() => setSelectedPipelineTaskIds((prev) => { const next = new Set(prev); next.has(i) ? next.delete(i) : next.add(i); return next; })}
+                          className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                            isSelected ? "bg-emerald-500/10 border-emerald-500/30" : "bg-surface border-border/50 hover:border-primary/40"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <span className="text-sm font-semibold">{s.title}</span>
+                              <p className="text-xs text-text-muted mt-0.5">{s.description}</p>
+                              <div className="flex items-center gap-2 mt-1.5">
+                                {s.priority && (
+                                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${
+                                    s.priority === "high" || s.priority === "urgent" ? "text-orange-400 bg-orange-500/10" :
+                                    s.priority === "medium" ? "text-yellow-400 bg-yellow-500/10" : "text-gray-400 bg-gray-500/10"
+                                  }`}>{s.priority}</span>
+                                )}
+                                {s.assignee_hint && (
+                                  <span className="text-[10px] text-text-muted flex items-center gap-1"><User className="w-3 h-3" />{s.assignee_hint}</span>
+                                )}
+                              </div>
+                            </div>
+                            <div className={`w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 mt-0.5 ${isSelected ? "bg-primary border-primary" : "bg-background border-border"}`}>
+                              {isSelected && <CheckCircle className="w-3.5 h-3.5 text-white" />}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {selectedPipelineTaskIds.size > 0 && (
+                      <button
+                        onClick={addSelectedPipelineTasks}
+                        disabled={addingPipelineTasks}
+                        className="w-full py-2 rounded-lg text-xs font-medium bg-primary text-white hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1"
+                      >
+                        {addingPipelineTasks ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                        {addingPipelineTasks ? "Adding..." : `Add ${selectedPipelineTaskIds.size} Selected Task${selectedPipelineTaskIds.size > 1 ? "s" : ""}`}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -1285,6 +1426,7 @@ function DepartmentDrillView({
   const [selectedTaskSuggestionIds, setSelectedTaskSuggestionIds] = useState<Set<number>>(new Set());
   const [addingSubgoals, setAddingSubgoals] = useState(false);
   const [addingTasks, setAddingTasks] = useState(false);
+  const [suggestionError, setSuggestionError] = useState("");
   const { updateTask, createTask, deleteTask, fetchTasks } = useTaskStore();
   const { createGoal, deleteGoal, fetchGoals } = useGoalStore();
   const [goalTaskCache, setGoalTaskCache] = useState<Record<string, any[]>>({});
@@ -1360,6 +1502,7 @@ function DepartmentDrillView({
   const suggestTasks = async () => {
     if (!subGoal) return;
     setLoadingTasks(true);
+    setSuggestionError("");
     setSuggestedTasks([]);
     setSelectedTaskSuggestionIds(new Set());
     try {
@@ -1379,8 +1522,17 @@ function DepartmentDrillView({
       if (res.ok) {
         const data = await res.json();
         setSuggestedTasks(data.tasks || []);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setSuggestedTasks(data.tasks || []);
+        if (!data.tasks || data.tasks.length === 0) {
+          setSuggestionError("AI suggestion unavailable. Check backend AI provider config.");
+        }
       }
-    } catch {} finally {
+    } catch (e) {
+      console.error("[suggestTasks] network error", e);
+      setSuggestionError("Network error. Please check your connection and try again.");
+    } finally {
       setLoadingTasks(false);
     }
   };
@@ -1742,8 +1894,14 @@ function DepartmentDrillView({
               {loadingTasks ? "Loading..." : "Suggest"}
             </button>
           </div>
+          {suggestionError && (
+            <p className="text-[9px] text-rose-400 mt-1">{suggestionError}</p>
+          )}
           {suggestedTasks.length > 0 && (
             <div className="space-y-1.5 mt-1.5">
+              {!suggestionError && suggestedTasks.length > 0 && (
+                <p className="text-[9px] text-text-muted mb-1">Select tasks to add to this goal:</p>
+              )}
               {suggestedTasks.map((s: any, i: number) => {
                 const isSelected = selectedTaskSuggestionIds.has(i);
                 return (
