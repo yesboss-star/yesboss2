@@ -23,12 +23,13 @@ services:
         NEXT_PUBLIC_RECAPTCHA_SITE_KEY: 6Lep7u8sAAAAAMCEeg8_Ef4an34SWBZy-Ncynxdj
         NEXT_PUBLIC_SUPABASE_URL: https://oiwbdstrjpchgugavbss.supabase.co
         NEXT_PUBLIC_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9pd2Jkc3RyanBjaGd1Z2F2YnNzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODgzMTU2NiwiZXhwIjoyMDk0NDA3NTI2fQ.CwjxEiPHWkhu_4t8isQCD_V7AExLqJUpL2wwJvE9RMs
-        NEXT_PUBLIC_API_URL: http://52.140.177.20:8000/api/v1
+        NEXT_PUBLIC_API_URL: https://vsllp.live/api/v1
     container_name: yesboss-app
     restart: unless-stopped
+    # Bound to loopback only — public traffic enters via nginx (deploy/nginx)
     ports:
-      - "8000:8000"
-      - "3000:3000"
+      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:3000:3000"
     environment:
       - ENVIRONMENT=production
     volumes:
