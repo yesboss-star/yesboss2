@@ -159,7 +159,7 @@ async def _sync_goal_to_google(db, goal_doc: dict, org_id: str):
         for email in assignee_emails:
             if not email:
                 continue
-            token = await _resolve_google_token(db, email, org_id)
+            token = await _resolve_google_token(db, email, org_id, include_org_fallback=False)
             if not token:
                 logger.warning("No Google token for assignee %s, skipping Google sync", email)
                 continue

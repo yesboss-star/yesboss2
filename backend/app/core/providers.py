@@ -65,7 +65,12 @@ async def get_provider_token(db, user_id: str | None):
     return None
 
 
-async def _resolve_google_token(db, email: str, org_id: str | None = None) -> str | None:
+async def _resolve_google_token(
+    db,
+    email: str,
+    org_id: str | None = None,
+    include_org_fallback: bool = True,
+) -> str | None:
     goauth = GoogleOAuth(db)
     gdoc = db.google_tokens.find_one({
         "$or": [
@@ -78,7 +83,7 @@ async def _resolve_google_token(db, email: str, org_id: str | None = None) -> st
         token = await goauth.get_valid_token(gdoc["user_id"])
         if token:
             return token
-    if org_id:
+    if org_id and include_org_fallback:
         gorg = db.google_tokens.find_one({"org_id": str(org_id)})
         if gorg and gorg.get("user_id"):
             token = await goauth.get_valid_token(gorg["user_id"])

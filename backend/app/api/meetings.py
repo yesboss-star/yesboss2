@@ -338,17 +338,20 @@ async def _push_to_zoho_todo(db, org_id: str, task_doc: dict, assignee_emails: l
 async def _push_google_todo(db, org_id: str, task_doc: dict, assignee_emails: list):
     try:
         from ..core.google import GoogleTasks
-        from ..core.providers import resolve_token_for_email
+        from ..core.providers import _resolve_google_token
 
         gtasks = GoogleTasks(db)
         google_ids = []
         for email in assignee_emails:
             if not email:
                 continue
-            provider_token = await resolve_token_for_email(db, email, org_id)
-            if not provider_token or provider_token[0] != "google":
+            # Strict resolution — only push to assignees who are themselves
+            # Google-connected. Never fall back to the owner's account so tasks
+            # assigned to someone else don't end up in the owner's Google Tasks.
+            token = await _resolve_google_token(db, email, org_id, include_org_fallback=False)
+            if not token:
+                logger.info("No Google token for assignee %s — skipping Google Tasks push", email)
                 continue
-            token = provider_token[1]
             list_id = await gtasks.ensure_list(token)
             if not list_id:
                 continue

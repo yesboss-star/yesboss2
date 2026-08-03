@@ -156,7 +156,7 @@ async def sync_task_to_google(db, task_doc: dict, org_id: str, old_data: dict = 
         for email in assignee_emails:
             if not email:
                 continue
-            assignee_token = await _resolve_google_token(db, email, org_id)
+            assignee_token = await _resolve_google_token(db, email, org_id, include_org_fallback=False)
             if not assignee_token:
                 continue
 
@@ -212,7 +212,7 @@ async def delete_google_task(task: dict):
             assignee_emails = [assignee_emails]
         for email in assignee_emails:
             if email and google_task_id:
-                token = await _resolve_google_token(db, email, task.get("organization_id"))
+                token = await _resolve_google_token(db, email, task.get("organization_id"), include_org_fallback=False)
                 if token and list_id:
                     await gtasks.delete_task(token, list_id, google_task_id)
     except Exception as e:
@@ -1085,8 +1085,8 @@ async def bulk_import_confirm(
                     actor_id=user_id,
                 ))
 
-            from ..api.meetings import _push_to_zoho_todo
-            asyncio.create_task(_push_to_zoho_todo(db, organization_id, task_doc, assignee_emails))
+            from ..api.meetings import _push_to_provider_todo
+            asyncio.create_task(_push_to_provider_todo(db, organization_id, task_doc, assignee_emails))
 
             from ..agents.frequency_agent import process_task as _freq_task
             asyncio.create_task(_freq_task(task_doc, organization_id))
