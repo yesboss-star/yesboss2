@@ -4,7 +4,7 @@ import { create } from "zustand";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
-interface ZohoState {
+interface GoogleState {
   connected: boolean;
   email: string;
   scopes: string[];
@@ -23,7 +23,7 @@ function getAuthHeaders(): Record<string, string> {
   return headers;
 }
 
-export const useZohoStore = create<ZohoState>()((set, get) => ({
+export const useGoogleStore = create<GoogleState>()((set, get) => ({
   connected: false,
   email: "",
   scopes: [],
@@ -34,7 +34,7 @@ export const useZohoStore = create<ZohoState>()((set, get) => ({
   checkStatus: async () => {
     try {
       set({ loading: true });
-      const res = await fetch(`${API_URL}/zoho/status`, {
+      const res = await fetch(`${API_URL}/google/status`, {
         credentials: "include",
         headers: getAuthHeaders(),
       });
@@ -57,12 +57,12 @@ export const useZohoStore = create<ZohoState>()((set, get) => ({
   connect: async () => {
     try {
       set({ connecting: true });
-      const res = await fetch(`${API_URL}/zoho/auth-url`, {
+      const res = await fetch(`${API_URL}/google/auth-url`, {
         credentials: "include",
         headers: { ...getAuthHeaders() },
       });
       if (!res.ok) {
-        console.error("Failed to get Zoho auth URL");
+        console.error("Failed to get Google auth URL");
         set({ connecting: false });
         return;
       }
@@ -73,7 +73,7 @@ export const useZohoStore = create<ZohoState>()((set, get) => ({
       const top = window.screenY + (window.outerHeight - height) / 2;
       const popup = window.open(
         data.url,
-        "ZohoAuth",
+        "GoogleAuth",
         `width=${width},height=${height},left=${left},top=${top},popup=yes`
       );
       const pollTimer = window.setInterval(() => {
@@ -84,7 +84,7 @@ export const useZohoStore = create<ZohoState>()((set, get) => ({
         }
       }, 500);
     } catch (err) {
-      console.error("Zoho connect failed:", err);
+      console.error("Google connect failed:", err);
       set({ connecting: false });
     }
   },
@@ -92,14 +92,14 @@ export const useZohoStore = create<ZohoState>()((set, get) => ({
   disconnect: async () => {
     try {
       set({ loading: true });
-      await fetch(`${API_URL}/zoho/disconnect`, {
+      await fetch(`${API_URL}/google/disconnect`, {
         method: "POST",
         credentials: "include",
         headers: { ...getAuthHeaders() },
       });
       set({ connected: false, email: "", scopes: [], connectedAt: "" });
     } catch (err) {
-      console.error("Zoho disconnect failed:", err);
+      console.error("Google disconnect failed:", err);
     } finally {
       set({ loading: false });
     }

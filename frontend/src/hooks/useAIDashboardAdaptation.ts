@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -7,7 +7,7 @@ import { useOrgChartStore } from "@/stores/orgChartStore";
 import { useTaskStore } from "@/stores/taskStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
 export type OrgStage = "new" | "onboarding" | "growing" | "established";
 

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -8,7 +8,7 @@ import { BarChart3, Download, FileText, TrendingUp, Users, Loader2, RefreshCw, A
 import OrgHealthWidget from "@/components/owners/OrgHealthWidget";
 import EmployeeReportCard from "@/components/owners/EmployeeReportCard";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
 interface ReportSummary {
   total_goals: number;

@@ -61,6 +61,9 @@ class Settings:
     ZOHO_ACCOUNTS_URL: str = os.getenv("ZOHO_ACCOUNTS_URL", "https://accounts.zoho.com")
     ZOHO_MAIL_API_URL: str = os.getenv("ZOHO_MAIL_API_URL", "https://mail.zoho.com/api")
     ZOHO_CALENDAR_API_URL: str = os.getenv("ZOHO_CALENDAR_API_URL", "https://calendar.zoho.com/api/v1")
+    GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
+    GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
+    GOOGLE_REDIRECT_URI: str = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/v1/google/callback")
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
     API_URL: str = os.getenv("API_URL", "http://localhost:8000/api/v1")
 

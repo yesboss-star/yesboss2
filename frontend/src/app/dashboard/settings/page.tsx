@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
@@ -7,10 +7,12 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, Tabs, TabsList, TabsTrigger, TabsContent, Button } from "@/components/ui";
 import { Bell, ArrowLeft, Volume2, Mail, Smartphone, Plug, MessageSquare } from "lucide-react";
 import ZohoConnectButton from "@/components/owners/ZohoConnectButton";
+import GoogleConnectButton from "@/components/owners/GoogleConnectButton";
 import { useZohoStore } from "@/stores/zohoStore";
+import { useGoogleStore } from "@/stores/googleStore";
 import { useUIStore } from "@/stores/uiStore";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
 function getAuthHeaders(): Record<string, string> {
   const token = localStorage.getItem("yesboss_id_token");
@@ -67,6 +69,21 @@ export default function SettingsPage() {
           type: "success",
           title: "Zoho Connected",
           message: "Your Zoho account has been connected successfully.",
+        });
+      }
+    }
+    if (params.get("google") === "connected") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("google");
+      window.history.replaceState({}, "", url.toString());
+      useGoogleStore.getState().checkStatus();
+      if (window.opener && window.opener !== window) {
+        window.close();
+      } else {
+        useUIStore.getState().addNotification({
+          type: "success",
+          title: "Google Connected",
+          message: "Your Google account has been connected successfully.",
         });
       }
     }
@@ -199,6 +216,44 @@ export default function SettingsPage() {
                     <li className="flex items-start gap-2">
                       <span className="text-primary mt-0.5">&bull;</span>
                       Your calendar is read to help the AI schedule and recommend
+                    </li>
+                  </ul>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle><Plug className="w-4 h-4 inline mr-2" /> Google Integration</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">Gmail, Google Tasks & Calendar</p>
+                    <p className="text-xs text-text-muted mt-1">
+                      Prefer Google? Connect your Gmail to sync tasks to Google Tasks and use your Google Calendar.
+                    </p>
+                  </div>
+                  <GoogleConnectButton />
+                </div>
+                <div className="p-3 rounded-xl bg-surface border border-border/50">
+                  <h4 className="text-xs font-medium text-text-muted mb-2">What gets connected?</h4>
+                  <ul className="space-y-1 text-xs text-text-muted">
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary mt-0.5">&bull;</span>
+                      Tasks created in yesboss appear in your Google Tasks (YesBoss list)
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary mt-0.5">&bull;</span>
+                      Completing a task in Google Tasks syncs the status back
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary mt-0.5">&bull;</span>
+                      Your Google Calendar is read to help the AI schedule and recommend
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary mt-0.5">&bull;</span>
+                      Only one provider can be active â€” connecting Google disconnects Zoho
                     </li>
                   </ul>
                 </div>

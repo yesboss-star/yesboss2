@@ -1,6 +1,6 @@
-import { create } from "zustand";
+﻿import { create } from "zustand";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
 export type AssistantMode = "idle" | "chat" | "action_q" | "delegate_q" | "creating" | "done";
 export type Intent = "chat" | "action" | "delegate";
@@ -75,7 +75,7 @@ interface AssistantState {
   lastDelegate: DelegateResult | null;
   recentDelegates: DelegateResult[];
 
-  // Pending question state — when AI asks for data
+  // Pending question state â€” when AI asks for data
   pendingQuestionMessage: string | null;       // the user's original question waiting for data
   pendingUploadRequests: UploadRequest[] | null; // what AI wants uploaded
   pendingReasoning: string | null;              // AI's reasoning line
@@ -239,7 +239,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
       });
       const data = await res.json();
       return {
-        response: data.response || "I'm here — try asking me again.",
+        response: data.response || "I'm here â€” try asking me again.",
         status: data.status || "ok",
         data_sufficiency: data.data_sufficiency,
         question_type: data.question_type,

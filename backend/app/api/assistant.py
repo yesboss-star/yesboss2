@@ -580,16 +580,16 @@ async def delegate_task(request: DelegateRequest):
         except Exception as e:
             logger.warning("Sub-task generation failed in delegate: %s", e)
 
-    # 4) Zoho ToDo sync
+    # 4) Provider ToDo sync
     try:
-        from .tasks import sync_task_to_zoho
+        from .tasks import sync_task_to_provider
         zoho_task = {**task_doc, "assignee_id": emp.get("email")}
-        asyncio.create_task(sync_task_to_zoho(db, zoho_task, org_id))
+        asyncio.create_task(sync_task_to_provider(db, zoho_task, org_id))
         for st in sub_tasks:
             st_zoho = {**st, "assignee_id": emp.get("email")}
-            asyncio.create_task(sync_task_to_zoho(db, st_zoho, org_id))
+            asyncio.create_task(sync_task_to_provider(db, st_zoho, org_id))
     except Exception as e:
-        logger.warning("Zoho sync failed in delegate: %s", e)
+        logger.warning("Provider sync failed in delegate: %s", e)
 
     # 5) Real-time push + notifications
     user_id = (request.context.user_email if request.context else None)
@@ -750,22 +750,37 @@ async def handle_meeting_booking(booking_params: dict, db, org_id: str, user_id:
     if not attendee_emails:
         return {"error": "Could not find any attendees in your team. Make sure they are added to the org chart."}
 
+    from ..core.providers import get_provider_token
     from ..core.zoho import ZohoCalendar, ZohoOAuth
-    zoho = ZohoOAuth(db)
 
-    organizer_token = await zoho.get_valid_token(user_id) if user_id else None
-    if not organizer_token and user_id and "@" in user_id:
-        token_doc = db.zoho_tokens.find_one({"email": user_id})
-        if token_doc:
-            organizer_token = await zoho.get_valid_token(token_doc["user_id"])
-    if not organizer_token:
-        token_doc = db.zoho_tokens.find_one({"org_id": org_id})
-        if not token_doc and org_id:
-            token_doc = db.zoho_tokens.find_one({}, sort=[("connected_at", -1)])
-        if token_doc:
-            organizer_token = await zoho.get_valid_token(token_doc["user_id"])
-    if not organizer_token:
-        return {"error": "No Zoho account connected. Please connect Zoho in Settings first."}
+    provider_token = await get_provider_token(db, user_id)
+    if not provider_token:
+        # Fall back to org-level token (either provider)
+        if org_id:
+            gdoc = db.google_tokens.find_one({"org_id": str(org_id)}) if db else None
+            if gdoc and gdoc.get("user_id"):
+                from ..core.google import GoogleOAuth
+                gtoken = await GoogleOAuth(db).get_valid_token(gdoc["user_id"])
+                if gtoken:
+                    provider_token = ("google", gtoken)
+            if not provider_token:
+                zdoc = db.zoho_tokens.find_one({"org_id": str(org_id)}) if db else None
+                if zdoc and zdoc.get("user_id"):
+                    ztoken = await ZohoOAuth(db).get_valid_token(zdoc["user_id"])
+                    if ztoken:
+                        provider_token = ("zoho", ztoken)
+        if not provider_token:
+            zdoc = db.zoho_tokens.find_one({}, sort=[("connected_at", -1)]) if db else None
+            if zdoc and zdoc.get("user_id"):
+                ztoken = await ZohoOAuth(db).get_valid_token(zdoc["user_id"])
+                if ztoken:
+                    provider_token = ("zoho", ztoken)
+
+    if not provider_token:
+        return {"error": "No calendar account connected. Please connect Zoho or Google in Settings first."}
+
+    provider, organizer_token = provider_token
+    is_google = provider == "google"
 
     parsed_date = None
     if date_str:
@@ -786,6 +801,27 @@ async def handle_meeting_booking(booking_params: dict, db, org_id: str, user_id:
     # Gather busy blocks for all attendees
     all_busy = []
     for email in attendee_emails:
+        if is_google:
+            from ..core.google import GoogleCalendar
+            from ..core.providers import resolve_token_for_email
+
+            att_provider_token = await resolve_token_for_email(db, email, org_id)
+            if not att_provider_token or att_provider_token[0] != "google":
+                continue
+            att_token = att_provider_token[1]
+            tz_start = f"{parsed_date.strftime('%Y-%m-%d')}T00:00:00Z"
+            tz_end = f"{parsed_date.strftime('%Y-%m-%d')}T23:59:59Z"
+            blocks = await GoogleCalendar.get_freebusy(att_token, [email], tz_start, tz_end)
+            for b in blocks:
+                s = b.get("start", "")
+                e = b.get("end", "")
+                if s and e and len(s) >= 16:
+                    try:
+                        all_busy.append({"start": s[11:16], "end": e[11:16]})
+                    except Exception:
+                        pass
+            continue
+
         blocks = await ZohoCalendar.check_freebusy(organizer_token, email, start_str, end_str)
         for b in blocks:
             fb_start = b.get("startTime", "")
@@ -842,38 +878,73 @@ async def handle_meeting_booking(booking_params: dict, db, org_id: str, user_id:
                     break
 
             if not conflict:
-                cal_uid = await ZohoCalendar.get_default_calendar_uid(organizer_token)
-                if cal_uid:
-                    event_id = await ZohoCalendar.create_event(
+                if is_google:
+                    from ..core.google import GoogleCalendar
+                    from ..core.providers import resolve_token_for_email
+
+                    cal_uid = await GoogleCalendar.get_primary_calendar_id(organizer_token)
+                    tz = "Asia/Kolkata"
+                    g_start = f"{parsed_date.strftime('%Y-%m-%d')}T{slot_start_str}:00"
+                    g_end = f"{parsed_date.strftime('%Y-%m-%d')}T{slot_end_str}:00"
+                    event_id = await GoogleCalendar.create_event(
                         user_token=organizer_token,
-                        calendar_uid=cal_uid,
+                        calendar_id=cal_uid,
                         title=title,
                         description=description,
-                        start_dt=slot_to_iso(slot_start_str),
-                        end_dt=slot_to_iso(slot_end_str),
-                        timezone="Asia/Kolkata",
+                        start_dt=g_start,
+                        end_dt=g_end,
+                        timezone=tz,
                         attendees=[{"email": e} for e in attendee_emails],
                     )
-                    if event_id:
-                        try:
-                            from ..core.notification_service import create_and_deliver
-                            for email in attendee_emails:
-                                asyncio.create_task(create_and_deliver(
-                                    user_id=email, org_id=org_id,
-                                    type="meeting_booked",
-                                    title=f"Meeting: {title}",
-                                    message=f"Booked {date_key} at {slot_start_str}",
-                                ))
-                        except Exception:
-                            pass
-                        return {
-                            "booked": True,
-                            "title": title,
-                            "start": slot_to_iso(slot_start_str),
-                            "end": slot_to_iso(slot_end_str),
-                            "attendees": attendee_emails,
-                            "slot": {"start": slot_start_str, "end": slot_end_str},
-                        }
+                    for email in attendee_emails:
+                        att_provider_token = await resolve_token_for_email(db, email, org_id)
+                        if att_provider_token and att_provider_token[0] == "google":
+                            att_cal = await GoogleCalendar.get_primary_calendar_id(att_provider_token[1])
+                            if att_cal:
+                                await GoogleCalendar.create_event(
+                                    user_token=att_provider_token[1],
+                                    calendar_id=att_cal,
+                                    title=title,
+                                    description=description,
+                                    start_dt=g_start,
+                                    end_dt=g_end,
+                                    timezone=tz,
+                                    attendees=[{"email": e} for e in attendee_emails],
+                                )
+                else:
+                    cal_uid = await ZohoCalendar.get_default_calendar_uid(organizer_token)
+                    event_id = None
+                    if cal_uid:
+                        event_id = await ZohoCalendar.create_event(
+                            user_token=organizer_token,
+                            calendar_uid=cal_uid,
+                            title=title,
+                            description=description,
+                            start_dt=slot_to_iso(slot_start_str),
+                            end_dt=slot_to_iso(slot_end_str),
+                            timezone="Asia/Kolkata",
+                            attendees=[{"email": e} for e in attendee_emails],
+                        )
+                if event_id:
+                    try:
+                        from ..core.notification_service import create_and_deliver
+                        for email in attendee_emails:
+                            asyncio.create_task(create_and_deliver(
+                                user_id=email, org_id=org_id,
+                                type="meeting_booked",
+                                title=f"Meeting: {title}",
+                                message=f"Booked {date_key} at {slot_start_str}",
+                            ))
+                    except Exception:
+                        pass
+                    return {
+                        "booked": True,
+                        "title": title,
+                        "start": slot_to_iso(slot_start_str),
+                        "end": slot_to_iso(slot_end_str),
+                        "attendees": attendee_emails,
+                        "slot": {"start": slot_start_str, "end": slot_end_str},
+                    }
 
         return {
             "booked": False,
@@ -891,38 +962,73 @@ async def handle_meeting_booking(booking_params: dict, db, org_id: str, user_id:
 
     if len(available) == 1:
         slot = available[0]
-        cal_uid = await ZohoCalendar.get_default_calendar_uid(organizer_token)
-        if cal_uid:
-            event_id = await ZohoCalendar.create_event(
+        if is_google:
+            from ..core.google import GoogleCalendar
+            from ..core.providers import resolve_token_for_email
+
+            cal_uid = await GoogleCalendar.get_primary_calendar_id(organizer_token)
+            tz = "Asia/Kolkata"
+            g_start = f"{parsed_date.strftime('%Y-%m-%d')}T{slot['start']}:00"
+            g_end = f"{parsed_date.strftime('%Y-%m-%d')}T{slot['end']}:00"
+            event_id = await GoogleCalendar.create_event(
                 user_token=organizer_token,
-                calendar_uid=cal_uid,
+                calendar_id=cal_uid,
                 title=title,
                 description=description,
-                start_dt=slot_to_iso(slot["start"]),
-                end_dt=slot_to_iso(slot["end"]),
-                timezone="Asia/Kolkata",
+                start_dt=g_start,
+                end_dt=g_end,
+                timezone=tz,
                 attendees=[{"email": e} for e in attendee_emails],
             )
-            if event_id:
-                try:
-                    from ..core.notification_service import create_and_deliver
-                    for email in attendee_emails:
-                        asyncio.create_task(create_and_deliver(
-                            user_id=email, org_id=org_id,
-                            type="meeting_booked",
-                            title=f"Meeting: {title}",
-                            message=f"Booked {date_key} at {slot['start']}",
-                        ))
-                except Exception:
-                    pass
-                return {
-                    "booked": True,
-                    "title": title,
-                    "start": slot_to_iso(slot["start"]),
-                    "end": slot_to_iso(slot["end"]),
-                    "attendees": attendee_emails,
-                    "slot": slot,
-                }
+            for email in attendee_emails:
+                att_provider_token = await resolve_token_for_email(db, email, org_id)
+                if att_provider_token and att_provider_token[0] == "google":
+                    att_cal = await GoogleCalendar.get_primary_calendar_id(att_provider_token[1])
+                    if att_cal:
+                        await GoogleCalendar.create_event(
+                            user_token=att_provider_token[1],
+                            calendar_id=att_cal,
+                            title=title,
+                            description=description,
+                            start_dt=g_start,
+                            end_dt=g_end,
+                            timezone=tz,
+                            attendees=[{"email": e} for e in attendee_emails],
+                        )
+        else:
+            cal_uid = await ZohoCalendar.get_default_calendar_uid(organizer_token)
+            event_id = None
+            if cal_uid:
+                event_id = await ZohoCalendar.create_event(
+                    user_token=organizer_token,
+                    calendar_uid=cal_uid,
+                    title=title,
+                    description=description,
+                    start_dt=slot_to_iso(slot["start"]),
+                    end_dt=slot_to_iso(slot["end"]),
+                    timezone="Asia/Kolkata",
+                    attendees=[{"email": e} for e in attendee_emails],
+                )
+        if event_id:
+            try:
+                from ..core.notification_service import create_and_deliver
+                for email in attendee_emails:
+                    asyncio.create_task(create_and_deliver(
+                        user_id=email, org_id=org_id,
+                        type="meeting_booked",
+                        title=f"Meeting: {title}",
+                        message=f"Booked {date_key} at {slot['start']}",
+                    ))
+            except Exception:
+                pass
+            return {
+                "booked": True,
+                "title": title,
+                "start": slot_to_iso(slot["start"]),
+                "end": slot_to_iso(slot["end"]),
+                "attendees": attendee_emails,
+                "slot": slot,
+            }
 
     return {
         "booked": False,
@@ -2268,10 +2374,10 @@ async def bulk_create_tasks(request: BulkCreateTasksRequest):
 
             if assignee_email:
                 try:
-                    from .tasks import sync_task_to_zoho
-                    asyncio.create_task(sync_task_to_zoho(db, task_doc, org_id))
+                    from .tasks import sync_task_to_provider
+                    asyncio.create_task(sync_task_to_provider(db, task_doc, org_id))
                 except Exception as e:
-                    logger.warning(f"Zoho sync failed for action item: {e}")
+                    logger.warning(f"Provider sync failed for action item: {e}")
 
             if assignee_id:
                 try:

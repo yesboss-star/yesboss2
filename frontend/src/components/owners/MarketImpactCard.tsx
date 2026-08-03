@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, Badge, Button } from "@/components/ui";
@@ -6,7 +6,7 @@ import { TrendingUp, AlertTriangle, Loader2, RefreshCw, ArrowRight, DollarSign, 
 import { useRouter } from "next/navigation";
 import { getAuthHeaders } from "@/lib/utils";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
 interface MarketImpact {
   title: string;

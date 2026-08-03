@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useGoalStore } from "@/stores/goalStore";
@@ -6,7 +6,7 @@ import { useOrgChartStore } from "@/stores/orgChartStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { X, Loader2, Sparkles, Calendar, Users, Flag, CheckCircle2, ChevronDown, Check, GitBranch, Clock, ArrowLeft } from "lucide-react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 const DEPARTMENTS = ["Engineering", "Marketing", "Sales", "Operations", "Finance", "Human Resources", "Product", "Design", "Customer Support", "R&D", "Supply Chain", "Legal"];
 
 function PersonMultiSelect({ label, valueIds, valueNames, members, filterDept, onChange }: {
@@ -469,7 +469,7 @@ export default function GoalModal({ isOpen, onClose, onBack }: GoalModalProps) {
 
           <div ref={parentRef} className="relative">
             <label className="block text-sm font-medium mb-2"><GitBranch className="w-4 h-4 inline mr-1" />
-              {formData.goal_type === "short_term" ? "Link under a Long-Term Goal (optional)" : "Parent Goal (optional — makes this a sub-goal)"}
+              {formData.goal_type === "short_term" ? "Link under a Long-Term Goal (optional)" : "Parent Goal (optional â€” makes this a sub-goal)"}
             </label>
             {formData.goal_type === "short_term" && !formData.parent_goal_id && (
               <div className="mb-2 p-2.5 rounded-lg bg-primary/5 border border-primary/20 text-[11px] text-text-muted flex items-center gap-2">

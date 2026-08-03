@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { createContext, useContext, useEffect, useState, useRef } from "react";
 import { auth } from "@/lib/firebase";
@@ -21,7 +21,7 @@ const AuthContext = createContext<AuthContextType>({
   signOut: async () => {},
 });
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
 async function establishSession(idToken: string) {
   try {
@@ -53,7 +53,7 @@ async function clearSession() {
     });
     clearTimeout(timeout);
   } catch {
-    // Expected — backend may not be running during sign-out
+    // Expected â€” backend may not be running during sign-out
   }
 }
 

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
@@ -16,7 +16,7 @@ import {
 } from "firebase/auth";
 import { initRecaptcha, sendSignInOtp, resetRecaptcha } from "@/lib/phoneAuth";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
 type LoginTab = "email" | "phone";
 
@@ -36,7 +36,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Phone login state — real Firebase phone+OTP sign-in, no password.
+  // Phone login state â€” real Firebase phone+OTP sign-in, no password.
   const [phoneOtpLoading, setPhoneOtpLoading] = useState(false);
   const [phoneOtpSent, setPhoneOtpSent] = useState(false);
   const [phoneOtp, setPhoneOtp] = useState("");
@@ -165,7 +165,7 @@ export default function LoginPage() {
       const sessionUser = sessionData.user || {};
 
       if (sessionUser.account_exists === false) {
-        // This phone number was never linked to any account — signing in
+        // This phone number was never linked to any account â€” signing in
         // with it just created a blank Firebase-only identity. Undo it
         // entirely rather than leaving/landing on an empty dashboard.
         try { await firebaseSignOut(auth); } catch {}
@@ -179,7 +179,7 @@ export default function LoginPage() {
             body: JSON.stringify({ id_token: idToken }),
           });
         } catch {}
-        setError("This phone number isn't linked to any account yet. Please log in with your email and password, then verify this number in Settings → Profile.");
+        setError("This phone number isn't linked to any account yet. Please log in with your email and password, then verify this number in Settings â†’ Profile.");
         setPhoneOtpSent(false);
         setPhoneOtp("");
         setConfirmationResult(null);

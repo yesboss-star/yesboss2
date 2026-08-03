@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, Badge, Button } from "@/compo
 import { ArrowLeft, Calendar, Target, Flag, User, Loader2 } from "lucide-react";
 import { useGoalStore } from "@/stores/goalStore";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
 interface GoalDetail {
   id: string;

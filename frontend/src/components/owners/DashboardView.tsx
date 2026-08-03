@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -37,7 +37,7 @@ import KPISuggestionsCard from "@/components/owners/KPISuggestionsCard";
 import AcceptedKPIBanner from "@/components/owners/AcceptedKPIBanner";
 import AISummaryChat from "@/components/AISummaryChat";
 import MeetingUploadModal from "@/components/owners/MeetingUploadModal";
-import ZohoCalendarBooking from "@/components/owners/ZohoCalendarBooking";
+import CalendarBooking from "@/components/owners/CalendarBooking";
 import OrgHealthWidget from "@/components/owners/OrgHealthWidget";
 import MarketImpactCard from "@/components/owners/MarketImpactCard";
 import CheckInModal from "@/components/owners/CheckInModal";
@@ -45,7 +45,7 @@ import IndustryBenchmarksCard from "@/components/owners/IndustryBenchmarksCard";
 import FinancialMetricsCard from "@/components/owners/FinancialMetricsCard";
 import CollapsibleSection from "@/components/owners/CollapsibleSection";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
 function EmptyStateTemplate({ title, hint }: { title: string; hint: string }) {
   return (
@@ -86,7 +86,7 @@ function ReviewActions({ goalId, goalTitle, onReviewComplete }: { goalId: string
     <div className="p-4 rounded-xl bg-amber-500/5 border border-amber-500/20 space-y-3">
       <p className="text-sm font-medium flex items-center gap-2">
         <Clock className="w-4 h-4 text-amber-400" />
-        <span>Review Required — <span className="text-amber-400">"{goalTitle}"</span> is marked as complete</span>
+        <span>Review Required â€” <span className="text-amber-400">"{goalTitle}"</span> is marked as complete</span>
       </p>
       <div className="flex gap-2">
         <button
@@ -94,20 +94,20 @@ function ReviewActions({ goalId, goalTitle, onReviewComplete }: { goalId: string
           disabled={submitting}
           className="flex-1 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium transition-all cursor-pointer disabled:opacity-50"
         >
-          {submitting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "✓ Approve"}
+          {submitting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "âœ“ Approve"}
         </button>
         <button
           onClick={() => handleReview("reject")}
           disabled={submitting || !feedback.trim()}
           className="flex-1 py-2 rounded-lg bg-rose-500 hover:bg-rose-600 text-white text-sm font-medium transition-all cursor-pointer disabled:opacity-50"
         >
-          {submitting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "✗ Send Back"}
+          {submitting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "âœ— Send Back"}
         </button>
       </div>
       <textarea
         value={feedback}
         onChange={(e) => setFeedback(e.target.value)}
-        placeholder="Optional feedback — why are you sending this back?"
+        placeholder="Optional feedback â€” why are you sending this back?"
         rows={2}
         className="w-full px-3 py-2 rounded-lg bg-surface border border-border focus:border-primary focus:outline-none text-sm resize-none"
       />
@@ -145,7 +145,7 @@ function RequestReviewButton({ goalId, goalTitle, onReviewRequested }: { goalId:
         className="w-full py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
       >
         {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-        {submitting ? "Submitting..." : "Mark as Complete — Request Review"}
+        {submitting ? "Submitting..." : "Mark as Complete â€” Request Review"}
       </button>
       <p className="text-xs text-text-muted mt-2 text-center">The owner will review and approve your completion</p>
     </div>
@@ -441,12 +441,12 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
                 )}
               </div>
 
-              {/* Approve/Reject — shown when goal is pending_review and current user is the owner */}
+              {/* Approve/Reject â€” shown when goal is pending_review and current user is the owner */}
               {goal.status === "pending_review" && user?.uid === goal.created_by && (
                 <ReviewActions goalId={goal.id || goal._id} goalTitle={goal.title} onReviewComplete={() => { loadTasks(); if (propOrgId) fetchGoals(propOrgId); }} />
               )}
 
-              {/* Request Review — shown when goal is active and current user is NOT the owner (assignee side) */}
+              {/* Request Review â€” shown when goal is active and current user is NOT the owner (assignee side) */}
               {goal.status === "active" && user?.uid !== goal.created_by && (
                 <RequestReviewButton goalId={goal.id || goal._id} goalTitle={goal.title} onReviewRequested={() => { loadTasks(); if (propOrgId) fetchGoals(propOrgId); }} />
               )}
@@ -932,7 +932,7 @@ function TaskRow({
         >
           <span className="flex items-center gap-1 truncate">
             <User className="w-3 h-3 flex-shrink-0" />
-            {selected ? <span className="truncate">{selected}</span> : <span className="text-text-muted/60">Assign…</span>}
+            {selected ? <span className="truncate">{selected}</span> : <span className="text-text-muted/60">Assignâ€¦</span>}
           </span>
           <ChevronDown className="w-3 h-3 flex-shrink-0" />
         </button>
@@ -1052,7 +1052,7 @@ function InlinePersonPicker({
       >
         <User className="w-3 h-3 flex-shrink-0" />
         <span className="truncate flex-1 text-left">
-          {selected || `${label}…`}
+          {selected || `${label}â€¦`}
         </span>
         {saving ? <Loader2 className="w-3 h-3 animate-spin flex-shrink-0" /> : <ChevronDown className="w-3 h-3 flex-shrink-0 opacity-60" />}
       </button>
@@ -1294,7 +1294,7 @@ function DepartmentGoalsModal({
               <div className="flex flex-col">
                 <span>{department.name} Goals</span>
                 <span className="text-[10px] text-text-muted font-normal">
-                  {goals.length} goal{goals.length === 1 ? "" : "s"} · {activeCount} active · {completedCount} done · {unassignedCount} unassigned
+                  {goals.length} goal{goals.length === 1 ? "" : "s"} Â· {activeCount} active Â· {completedCount} done Â· {unassignedCount} unassigned
                 </span>
               </div>
             </div>
@@ -1679,7 +1679,7 @@ function DepartmentDrillView({
     );
   };
 
-  // ─── Level 1: Goals (Long-term goals list) ───
+  // â”€â”€â”€ Level 1: Goals (Long-term goals list) â”€â”€â”€
   const renderGoalsList = () => (
     <div className="space-y-2 max-h-[55vh] overflow-y-auto custom-scrollbar pr-1">
       {parentGoals.length === 0 && orphanGoals.length === 0 ? (
@@ -1725,7 +1725,7 @@ function DepartmentDrillView({
     </div>
   );
 
-  // ─── Level 2: Sub-goals of a parent ───
+  // â”€â”€â”€ Level 2: Sub-goals of a parent â”€â”€â”€
   const renderSubgoalsView = () => {
     if (!parentGoal) return null;
     const pid = parentGoal.id || parentGoal._id;
@@ -1855,7 +1855,7 @@ function DepartmentDrillView({
     );
   };
 
-  // ─── Level 3: Tasks of a sub-goal ───
+  // â”€â”€â”€ Level 3: Tasks of a sub-goal â”€â”€â”€
   const renderTasksView = () => {
     if (!subGoal) return null;
     const gid = subGoal.id || subGoal._id;
@@ -3353,7 +3353,7 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
           </h1>
           <p className="text-text-muted mt-1">
             {organization?.name
-              ? `${organization.name} — ${organization.industry || "Business"}${organization.micro_vertical ? ` — ${organization.micro_vertical}` : ""}`
+              ? `${organization.name} â€” ${organization.industry || "Business"}${organization.micro_vertical ? ` â€” ${organization.micro_vertical}` : ""}`
               : "Your business command center"}
           </p>
         </div>
@@ -3522,7 +3522,7 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
                             <div key={m.id} className="flex items-center gap-3 px-3 py-2.5 pl-12 bg-surface/50 border-b border-border/30 last:border-0">
                               <div className="flex-1 min-w-0">
                                 <p className="text-xs text-text-muted">
-                                  {m.task_count || 0} tasks · {m.created_at ? new Date(m.created_at).toLocaleDateString() : ""}
+                                  {m.task_count || 0} tasks Â· {m.created_at ? new Date(m.created_at).toLocaleDateString() : ""}
                                 </p>
                               </div>
                               <Badge variant="outline" className="text-[10px] flex-shrink-0">{m.task_count || 0}</Badge>
@@ -3570,7 +3570,7 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
               </div>
               <Badge variant="warning" className="text-xs">{escalatedTasks.length} escalated</Badge>
             </div>
-            <CardDescription>Tasks escalated to owner — overdue 3+ days</CardDescription>
+            <CardDescription>Tasks escalated to owner â€” overdue 3+ days</CardDescription>
           </CardHeader>
           <CardContent>
             {escalationsLoading ? (
@@ -3593,7 +3593,7 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium truncate">{task.title}</p>
                         <p className="text-xs text-text-muted">
-                          {assignee} · {daysOverdue}d overdue
+                          {assignee} Â· {daysOverdue}d overdue
                         </p>
                       </div>
                       <Button
@@ -3628,7 +3628,7 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
       {showBookingModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowBookingModal(false)}>
           <div className="w-full max-w-lg mx-4" onClick={(e) => e.stopPropagation()}>
-            <ZohoCalendarBooking onClose={() => setShowBookingModal(false)} />
+            <CalendarBooking onClose={() => setShowBookingModal(false)} />
           </div>
         </div>
       )}

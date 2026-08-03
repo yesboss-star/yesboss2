@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
@@ -18,7 +18,7 @@ import { auth } from "@/lib/firebase";
 import { ConfirmationResult } from "firebase/auth";
 import { initRecaptcha, sendLinkOtp, resetRecaptcha } from "@/lib/phoneAuth";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
 interface SocialLink {
   platform: string;
@@ -680,7 +680,7 @@ export default function ProfilePage() {
                       <div>
                         <Label>Department</Label>
                         {role === "owner" ? (
-                          <Input value="" placeholder="Owner — no department" disabled />
+                          <Input value="" placeholder="Owner â€” no department" disabled />
                         ) : (
                           <Input
                             value={profile.department}
@@ -735,7 +735,7 @@ export default function ProfilePage() {
                   <div className="space-y-3">
                     <div className="flex items-center gap-2 text-emerald-400 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
                       <CheckCircle className="w-5 h-5" />
-                      <span className="text-sm">{phoneOtpError ? "OTP verified — saving failed" : "OTP verified — saving..."}</span>
+                      <span className="text-sm">{phoneOtpError ? "OTP verified â€” saving failed" : "OTP verified â€” saving..."}</span>
                     </div>
                     {phoneOtpError && (
                       <>

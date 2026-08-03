@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useRef, useCallback } from "react";
 import { useNotificationStore } from "@/stores/notificationStore";
@@ -54,7 +54,7 @@ export function NotificationWatcher({ children }: { children: React.ReactNode })
       wsRef.current = null;
     }
 
-    const rawUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1").replace(/\/api\/v1\/?$/, "");
+    const rawUrl = (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1").replace(/\/api\/v1\/?$/, "");
     const baseWsUrl = rawUrl.replace(/^http/, "ws");
     const wsUrl = `${baseWsUrl}/ws/${encodeURIComponent(orgId)}?user_id=${encodeURIComponent(userId)}`;
 

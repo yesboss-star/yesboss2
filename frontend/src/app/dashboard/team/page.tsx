@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -7,7 +7,7 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent } from "@/components/ui";
 import { Users, Search, Loader2, ArrowLeft } from "lucide-react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
 interface TeamMember {
   id: string;
@@ -100,7 +100,7 @@ export default function TeamPage() {
                       <p className="text-sm font-medium">{member.full_name || "Unknown"}</p>
                       <p className="text-xs text-text-muted">{member.role || member.email}</p>
                     </div>
-                    <div className="hidden sm:block text-sm text-text-muted">{member.department || "—"}</div>
+                    <div className="hidden sm:block text-sm text-text-muted">{member.department || "â€”"}</div>
                   </div>
                 ))}
               </div>

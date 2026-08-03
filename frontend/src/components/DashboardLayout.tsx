@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
@@ -48,7 +48,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname();
   const [isMobile, setIsMobile] = useState(false);
 
-  // Load avatar from DB on mount — always source from API, not stale local state
+  // Load avatar from DB on mount â€” always source from API, not stale local state
   useEffect(() => {
     if (!user?.email) return;
     // Clean up stale blob URLs from previous sessions
@@ -60,7 +60,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       setAvatarUrl(undefined);
     }
     // Fetch avatar from API
-    const avatarApiUrl = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"}/employees/avatar/${encodeURIComponent(user.email)}`;
+    const avatarApiUrl = `${process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1"}/employees/avatar/${encodeURIComponent(user.email)}`;
     fetch(avatarApiUrl, { method: "HEAD" })
       .then((r) => {
         if (r.ok) setAvatarUrl(avatarApiUrl);

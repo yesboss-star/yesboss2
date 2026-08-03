@@ -4,8 +4,10 @@ import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, Button, Input, Label } from "@/components/ui";
 import { Loader2, Calendar, Clock, Users, CheckCircle, X, Plus } from "lucide-react";
 import { useZohoStore } from "@/stores/zohoStore";
+import { useGoogleStore } from "@/stores/googleStore";
+import { getCalendarBase } from "@/lib/calendar";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
 function authHeaders(): Record<string, string> {
   const token = localStorage.getItem("yesboss_id_token");
@@ -28,13 +30,17 @@ for (let h = 0; h < 24; h++) {
   }
 }
 
-export default function ZohoCalendarBooking({ onClose }: { onClose?: () => void }) {
-  const { connected, loading, checkStatus } = useZohoStore();
+export default function CalendarBooking({ onClose }: { onClose?: () => void }) {
+  const zoho = useZohoStore();
+  const google = useGoogleStore();
+  const connected = zoho.connected || google.connected;
+  const loading = zoho.loading || google.loading;
   const [initialLoading, setInitialLoading] = useState(true);
 
   useEffect(() => {
-    checkStatus().finally(() => setInitialLoading(false));
-  }, [checkStatus]);
+    Promise.all([zoho.checkStatus(), google.checkStatus()]).finally(() => setInitialLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [step, setStep] = useState<"select" | "book" | "done">("select");
   const [attendees, setAttendees] = useState<{ name: string; email: string }[]>([]);
@@ -84,7 +90,7 @@ export default function ZohoCalendarBooking({ onClose }: { onClose?: () => void 
     return (
       <Card>
         <CardContent className="p-6 text-center text-text-muted">
-          Connect your Zoho account in Settings &gt; Integrations to book meetings.
+          Connect your Google or Zoho account in Settings &gt; Integrations to book meetings.
         </CardContent>
       </Card>
     );
@@ -93,7 +99,7 @@ export default function ZohoCalendarBooking({ onClose }: { onClose?: () => void 
   const searchUsers = async (q: string) => {
     if (!q || q.length < 1) { setSuggestions([]); return; }
     try {
-      const res = await fetch(`${API_URL}/zoho/calendar/users/search?q=${encodeURIComponent(q)}`, {
+      const res = await fetch(`${getCalendarBase()}/users/search?q=${encodeURIComponent(q)}`, {
         credentials: "include",
         headers: authHeaders(),
       });
@@ -144,7 +150,7 @@ export default function ZohoCalendarBooking({ onClose }: { onClose?: () => void 
     try {
       const emails = attendees.map((a) => a.email).join(",");
       const res = await fetch(
-        `${API_URL}/zoho/calendar/freebusy?emails=${encodeURIComponent(emails)}&date=${date}&from_time=${fromTime}&to_time=${toTime}`,
+        `${getCalendarBase()}/freebusy?emails=${encodeURIComponent(emails)}&date=${date}&from_time=${fromTime}&to_time=${toTime}`,
         { credentials: "include", headers: authHeaders() }
       );
       if (!res.ok) {
@@ -197,7 +203,7 @@ export default function ZohoCalendarBooking({ onClose }: { onClose?: () => void 
       const endDt = `${date.replace(/-/g, "")}T${toTime.replace(":", "")}00+0530`;
       const attendeeList = attendees.map((a) => ({ email: a.email }));
 
-      const res = await fetch(`${API_URL}/zoho/calendar/book`, {
+      const res = await fetch(`${getCalendarBase()}/book`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         credentials: "include",
@@ -240,7 +246,7 @@ export default function ZohoCalendarBooking({ onClose }: { onClose?: () => void 
             </button>
           )}
         </div>
-        <CardDescription>Schedule a meeting via Zoho Calendar</CardDescription>
+        <CardDescription>Schedule a meeting via your connected calendar</CardDescription>
       </CardHeader>
       <CardContent>
         {error && (
@@ -346,7 +352,7 @@ export default function ZohoCalendarBooking({ onClose }: { onClose?: () => void 
           <div className="space-y-4">
             <div className="flex items-center justify-between text-sm">
               <span className="text-text-muted">
-                {date} | {fromTime}–{toTime}
+                {date} | {fromTime}â€“{toTime}
                 <span className="ml-2 text-emerald-400 text-xs">Available</span>
               </span>
               <button onClick={() => setStep("select")} className="text-primary hover:underline cursor-pointer text-xs">
@@ -360,7 +366,7 @@ export default function ZohoCalendarBooking({ onClose }: { onClose?: () => void 
                 <div className="flex flex-wrap gap-1">
                   {busy.map((b, i) => (
                     <span key={i} className="px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 text-[10px] border border-rose-500/30">
-                      {b.start}–{b.end}
+                      {b.start}â€“{b.end}
                     </span>
                   ))}
                 </div>
@@ -415,7 +421,7 @@ export default function ZohoCalendarBooking({ onClose }: { onClose?: () => void 
             <p className="text-sm font-medium">Meeting Booked!</p>
             <div className="p-3 rounded-xl bg-surface border border-border/50 text-xs text-left space-y-1">
               <p><strong>Title:</strong> {result.title}</p>
-              <p><strong>Time:</strong> {date} | {fromTime} – {toTime}</p>
+              <p><strong>Time:</strong> {date} | {fromTime} â€“ {toTime}</p>
               <p><strong>Attendees:</strong> {result.attendees?.map((a: any) => a.email || a).join(", ")}</p>
             </div>
             {attendeeResults.length > 0 && (
@@ -423,7 +429,7 @@ export default function ZohoCalendarBooking({ onClose }: { onClose?: () => void 
                 <p className="font-medium mb-1">Calendar booking results:</p>
                 {attendeeResults.map((ar: any) => (
                   <p key={ar.email} className={ar.event_id ? "text-emerald-400" : "text-amber-400"}>
-                    {ar.email}: {ar.event_id ? "Booked" : ar.status === "not_connected" ? "Zoho not connected" : ar.status === "no_token" ? "Invalid token" : ar.status === "no_calendar" ? "No default calendar" : "Failed"}
+                    {ar.email}: {ar.event_id ? "Booked" : ar.status === "not_connected" ? "Calendar not connected" : ar.status === "no_token" ? "Invalid token" : ar.status === "no_calendar" ? "No default calendar" : "Failed"}
                   </p>
                 ))}
               </div>

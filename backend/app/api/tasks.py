@@ -141,6 +141,100 @@ async def delete_zoho_task(task: dict, org_id: str):
         logger.warning("Zoho delete sync failed: %s", e)
 
 
+async def sync_task_to_google(db, task_doc: dict, org_id: str, old_data: dict = None):
+    try:
+        from ..core.google import GoogleTasks
+        from ..core.providers import _resolve_google_token
+
+        gtasks = GoogleTasks(db)
+        assignee_emails = task_doc.get("assignee_id") or []
+        if isinstance(assignee_emails, str):
+            assignee_emails = [assignee_emails]
+        if not assignee_emails:
+            assignee_emails = [task_doc.get("assignee_email")] if task_doc.get("assignee_email") else []
+
+        for email in assignee_emails:
+            if not email:
+                continue
+            assignee_token = await _resolve_google_token(db, email, org_id)
+            if not assignee_token:
+                continue
+
+            list_id = await gtasks.ensure_list(assignee_token)
+            if not list_id:
+                continue
+
+            existing_task_id = task_doc.get("google_task_id")
+
+            if old_data is None:
+                task_id = await gtasks.create_task(assignee_token, list_id, task_doc)
+                updates = {
+                    "google_sync_status": "synced" if task_id else "pending",
+                    "google_last_synced_at": datetime.utcnow().isoformat(),
+                }
+                if task_id:
+                    updates["google_task_id"] = task_id
+                    updates["google_task_list_id"] = list_id
+                db.tasks.update_one(
+                    {"_id": task_doc["_id"] if isinstance(task_doc["_id"], ObjectId) else ObjectId(task_doc["_id"])},
+                    {"$set": updates},
+                )
+            else:
+                if not existing_task_id:
+                    continue
+                changes = {}
+                for f in ("title", "description", "status", "due_date"):
+                    if task_doc.get(f) != old_data.get(f):
+                        changes[f] = task_doc.get(f)
+                if changes:
+                    await gtasks.update_task(assignee_token, list_id, existing_task_id, changes)
+                    db.tasks.update_one(
+                        {"_id": task_doc["_id"] if isinstance(task_doc["_id"], ObjectId) else ObjectId(task_doc["_id"])},
+                        {"$set": {"google_sync_status": "synced", "google_last_synced_at": datetime.utcnow().isoformat()}},
+                    )
+    except Exception as e:
+        logger = __import__("logging").getLogger("yesboss.tasks")
+        logger.warning("Google sync failed: %s", e)
+
+
+async def delete_google_task(task: dict):
+    try:
+        from ..core.database import get_database as _get_db
+        from ..core.google import GoogleTasks
+        from ..core.providers import _resolve_google_token
+
+        db = _get_db()
+        gtasks = GoogleTasks(db)
+        google_task_id = task.get("google_task_id")
+        list_id = task.get("google_task_list_id")
+        assignee_emails = task.get("assignee_id") or []
+        if isinstance(assignee_emails, str):
+            assignee_emails = [assignee_emails]
+        for email in assignee_emails:
+            if email and google_task_id:
+                token = await _resolve_google_token(db, email, task.get("organization_id"))
+                if token and list_id:
+                    await gtasks.delete_task(token, list_id, google_task_id)
+    except Exception as e:
+        logger = __import__("logging").getLogger("yesboss.tasks")
+        logger.warning("Google delete sync failed: %s", e)
+
+
+async def sync_task_to_provider(db, task_doc: dict, org_id: str, old_data: dict = None):
+    """Dispatch a task sync to the org's connected provider (Google or Zoho)."""
+    try:
+        from ..core.providers import get_org_provider
+
+        provider = get_org_provider(db, org_id)
+        if provider == "google":
+            await sync_task_to_google(db, task_doc, org_id, old_data)
+        else:
+            await sync_task_to_zoho(db, task_doc, org_id, old_data)
+    except Exception as e:
+        logger = __import__("logging").getLogger("yesboss.tasks")
+        logger.warning("Provider task sync dispatch failed: %s", e)
+
+
 def _normalize_assignee_ids(v):
     if v is None:
         return None
@@ -220,7 +314,7 @@ async def create_task(task: TaskCreate, organization_id: str | None = None, curr
         {"type": "task_created", "data": task_doc},
         org_id
     ))
-    asyncio.create_task(sync_task_to_zoho(db, task_doc, org_id))
+    asyncio.create_task(sync_task_to_provider(db, task_doc, org_id))
 
     for aid in assignee_ids:
         asyncio.create_task(ws_manager.send_personal_message(
@@ -390,7 +484,7 @@ async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get
         task_obj["assignee_name"] = []
 
     if org_id:
-        asyncio.create_task(sync_task_to_zoho(db, task_obj, org_id, old_obj))
+        asyncio.create_task(sync_task_to_provider(db, task_obj, org_id, old_obj))
 
         asyncio.create_task(ws_manager.broadcast_to_organization(
             {"type": "task_updated", "data": task_obj},
@@ -466,8 +560,11 @@ async def delete_task(task_id: str, current_user = Depends(get_current_user_opti
 
         zoho_group_id = task.get("zoho_group_task_id")
         zoho_personal_id = task.get("zoho_personal_task_id")
+        google_task_id = task.get("google_task_id")
         if zoho_group_id or zoho_personal_id:
             asyncio.create_task(delete_zoho_task(task, org_id))
+        if google_task_id:
+            asyncio.create_task(delete_google_task(task))
 
         for aid in raw_assignees or []:
             asyncio.create_task(create_notification(
@@ -762,8 +859,9 @@ async def bulk_import_preview(
             raise HTTPException(status_code=400, detail="File too large (max 25MB)")
 
     try:
-        import pandas as pd
         import io
+
+        import pandas as pd
         dfs = pd.read_excel(io.BytesIO(contents), sheet_name=None)
         sheet_names = list(dfs.keys())
         combined = pd.concat(dfs.values(), ignore_index=True)

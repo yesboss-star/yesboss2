@@ -1,11 +1,11 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Badge } from "@/components/ui";
 import { BarChart3, Loader2, TrendingUp, Clock, AlertCircle } from "lucide-react";
 import { getAuthHeaders } from "@/lib/utils";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
 export default function IndustryBenchmarksCard({ industry, microVertical }: { industry: string; microVertical?: string }) {
   const [data, setData] = useState<any>(null);

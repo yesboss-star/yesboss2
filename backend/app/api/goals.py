@@ -116,6 +116,75 @@ async def sync_goal_to_zoho(db, goal_doc: dict, org_id: str):
         logger.warning("Zoho goal sync failed: %s", e)
 
 
+async def sync_goal_to_provider(db, goal_doc: dict, org_id: str):
+    """Dispatch a goal task push to the org's connected provider (Google or Zoho)."""
+    try:
+        from ..core.providers import get_org_provider
+
+        provider = get_org_provider(db, org_id)
+        if provider == "google":
+            await _sync_goal_to_google(db, goal_doc, org_id)
+        else:
+            await sync_goal_to_zoho(db, goal_doc, org_id)
+    except Exception as e:
+        logger = __import__("logging").getLogger("yesboss.goals")
+        logger.warning("Goal provider sync dispatch failed: %s", e)
+
+
+async def _sync_goal_to_google(db, goal_doc: dict, org_id: str):
+    try:
+        import logging as _log
+
+        from ..core.google import GoogleTasks
+        from ..core.providers import _resolve_google_token
+        logger = _log.getLogger("yesboss.goals")
+
+        assignee_emails = goal_doc.get("assignee_id") or []
+        if isinstance(assignee_emails, str):
+            assignee_emails = [assignee_emails]
+        if not assignee_emails:
+            return
+
+        due = goal_doc.get("due_date") or goal_doc.get("end_date")
+        task_data = {
+            "title": goal_doc.get("title", "Untitled Goal"),
+            "description": goal_doc.get("description", ""),
+            "priority": goal_doc.get("priority", "medium"),
+            "due_date": due,
+        }
+
+        gtasks = GoogleTasks(db)
+        goal_google_ids = []
+
+        for email in assignee_emails:
+            if not email:
+                continue
+            token = await _resolve_google_token(db, email, org_id)
+            if not token:
+                logger.warning("No Google token for assignee %s, skipping Google sync", email)
+                continue
+            list_id = await gtasks.ensure_list(token)
+            if not list_id:
+                continue
+            task_id = await gtasks.create_task(token, list_id, task_data)
+            if task_id:
+                goal_google_ids.append({
+                    "email": email,
+                    "task_id": task_id,
+                    "list_id": list_id,
+                })
+
+        if goal_google_ids:
+            db.goals.update_one(
+                {"_id": ObjectId(goal_doc["_id"])},
+                {"$set": {"google_task_ids": goal_google_ids}}
+            )
+            logger.info("Synced goal %s to Google Tasks for %d assignees", goal_doc.get("_id"), len(goal_google_ids))
+    except Exception as e:
+        logger = __import__("logging").getLogger("yesboss.goals")
+        logger.warning("Google goal sync failed: %s", e)
+
+
 class GoalCreate(BaseModel):
     title: str
     description: str | None = None
@@ -347,7 +416,7 @@ async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user_
     from ..agents.frequency_agent import process_goal as _freq_goal
     asyncio.create_task(_freq_goal(goal_doc, org_id))
 
-    asyncio.create_task(sync_goal_to_zoho(db, goal_doc, org_id))
+    asyncio.create_task(sync_goal_to_provider(db, goal_doc, org_id))
 
     return {"goal": goal_doc}
 
@@ -782,7 +851,7 @@ async def update_goal(goal_id: str, goal: GoalUpdate, current_user = Depends(get
             ))
 
     if new_assignees:
-        asyncio.create_task(sync_goal_to_zoho(db, goal_doc, org_id))
+        asyncio.create_task(sync_goal_to_provider(db, goal_doc, org_id))
 
     # If goal was moved to pending_review, notify the owner who created it
     if update_data.get("status") == "pending_review":
@@ -1298,8 +1367,8 @@ async def select_strategy(
                 {"type": "task_created", "data": task_doc},
                 org_id
             ))
-            from ..api.tasks import sync_task_to_zoho
-            asyncio.create_task(sync_task_to_zoho(db, task_doc, org_id))
+            from ..api.tasks import sync_task_to_provider
+            asyncio.create_task(sync_task_to_provider(db, task_doc, org_id))
 
     db.goals.update_one(
         {"_id": ObjectId(goal_id)},

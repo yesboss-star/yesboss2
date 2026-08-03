@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect } from "react";
 import { getAuthHeaders } from "@/lib/utils";
@@ -7,7 +7,7 @@ import {
 } from "@/components/ui/Modal";
 import { Clock, Flag, Loader2, AlertCircle, Calendar, CheckCircle, MessageSquare, X } from "lucide-react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
 interface CheckInNote {
   goal_id: string;

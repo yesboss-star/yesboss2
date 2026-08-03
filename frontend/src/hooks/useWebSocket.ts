@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useRef, useCallback, useState } from "react";
 
@@ -60,7 +60,7 @@ export function useWebSocket(options: UseWebSocketOptions) {
     if (typeof window === "undefined") return;
     if (wsRef.current) disconnect();
 
-    const rawUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1").replace(/\/api\/v1\/?$/, "");
+    const rawUrl = (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1").replace(/\/api\/v1\/?$/, "");
     const baseWsUrl = rawUrl.replace(/^http/, "ws");
 
     let wsUrl = "";

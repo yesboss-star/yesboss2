@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import time
 import uuid
@@ -94,7 +93,6 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 from .api.assistant import router as assistant_router
-from .api.sessions import router as sessions_router
 from .api.auth import router as auth_router
 from .api.chatbot import router as chatbot_router
 from .api.check_ins import router as check_ins_router
@@ -102,7 +100,10 @@ from .api.dashboard import router as dashboard_router
 from .api.employees import router as employees_router
 from .api.expert_agents import router as expert_agents_router
 from .api.file_processing import router as file_processing_router
+from .api.finance import router as finance_router
 from .api.goals import router as goals_router
+from .api.google_auth import router as google_auth_router
+from .api.google_calendar import router as google_calendar_router
 from .api.health import router as health_router
 from .api.intelligence import router as intelligence_router
 from .api.journal import router as journal_router
@@ -119,6 +120,7 @@ from .api.prompt import router as prompt_router
 from .api.push_subscriptions import router as push_subscriptions_router
 from .api.reports import router as reports_router
 from .api.scrape import router as scrape_router
+from .api.sessions import router as sessions_router
 from .api.smart_suggestions import router as smart_suggestions_router
 from .api.social import router as social_router
 from .api.strategy_chat import router as strategy_chat_router
@@ -127,7 +129,6 @@ from .api.upload import router as upload_router
 from .api.websocket import router as websocket_router
 from .api.zoho_auth import router as zoho_auth_router
 from .api.zoho_calendar import router as zoho_calendar_router
-from .api.finance import router as finance_router
 from .core import settings
 from .core.database import close_mongodb, connect_mongodb, get_database
 from .core.qdrant import close_qdrant, connect_qdrant
@@ -149,10 +150,10 @@ async def lifespan(app: FastAPI):
     create_collection("conversations", 1536)
     create_collection("workflows", 1536)
 
-    scheduler_task = None
+    scheduler_thread = None
     try:
-        from .core.scheduler import scheduler_loop
-        scheduler_task = asyncio.create_task(scheduler_loop())
+        from .core.scheduler import start_scheduler
+        scheduler_thread = start_scheduler()
         logger.info("Scheduler started")
     except Exception as e:
         logger.warning(f"Scheduler not started: {e}")
@@ -184,8 +185,9 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    if scheduler_task:
-        scheduler_task.cancel()
+    if scheduler_thread:
+        from .core.scheduler import stop_scheduler
+        stop_scheduler()
         logger.info("Scheduler stopped")
 
     logger.info("Shutting down YesBoss API...")
@@ -356,6 +358,8 @@ app.include_router(meetings_router, prefix="/api/v1/meetings", tags=["Meetings"]
 app.include_router(push_subscriptions_router, prefix="/api/v1/push", tags=["Push Notifications"])
 app.include_router(zoho_auth_router, prefix="/api/v1/zoho", tags=["Zoho Auth"])
 app.include_router(zoho_calendar_router, prefix="/api/v1/zoho/calendar", tags=["Zoho Calendar"])
+app.include_router(google_auth_router, prefix="/api/v1/google", tags=["Google Auth"])
+app.include_router(google_calendar_router, prefix="/api/v1/google/calendar", tags=["Google Calendar"])
 app.include_router(check_ins_router, prefix="/api/v1/organizations", tags=["Check-Ins"])
 app.include_router(smart_suggestions_router, prefix="/api/v1/smart", tags=["Smart Suggestions"])
 app.include_router(websocket_router, tags=["WebSocket"])

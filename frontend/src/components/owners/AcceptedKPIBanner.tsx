@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { BarChart3, RefreshCw, Loader2 } from "lucide-react";
@@ -7,7 +7,7 @@ import { useKPIStore } from "@/stores/kpiStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { AcceptedKPITile } from "./AcceptedKPITile";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
 interface KPIValue {
   value: number | string;

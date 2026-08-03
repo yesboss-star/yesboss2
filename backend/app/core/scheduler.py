@@ -1,10 +1,52 @@
 import asyncio
 import logging
+import threading
 from datetime import datetime, timedelta
 
 logger = logging.getLogger("yesboss.scheduler")
 
 CHECK_INTERVAL = 300  # 5 min base — Zoho syncs use this; other jobs use counters
+
+_scheduler_thread: threading.Thread | None = None
+_scheduler_stop = threading.Event()
+
+
+def start_scheduler() -> threading.Thread:
+    """Run the scheduler on its own daemon thread + event loop.
+
+    The scheduler does synchronous pymongo / network work (list(db.*.find(...)),
+    SMTP sends, etc.). Running it on the uvicorn event loop would block HTTP
+    handling for the duration of every cycle (including the heavy first one at
+    startup), causing browser requests to hang and fail. A dedicated thread keeps
+    the API responsive.
+    """
+    global _scheduler_thread
+    if _scheduler_thread is not None and _scheduler_thread.is_alive():
+        return _scheduler_thread
+
+    def _run() -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(scheduler_loop())
+        except Exception:
+            logger.exception("Scheduler loop crashed")
+        finally:
+            try:
+                for task in asyncio.all_tasks(loop):
+                    task.cancel()
+            finally:
+                loop.close()
+
+    _scheduler_thread = threading.Thread(
+        target=_run, daemon=True, name="yesboss-scheduler"
+    )
+    _scheduler_thread.start()
+    return _scheduler_thread
+
+
+def stop_scheduler() -> None:
+    _scheduler_stop.set()
 
 
 async def find_manager_email(db, assignee_id: str) -> str | None:
@@ -885,6 +927,151 @@ async def sync_zoho_calendar():
         logger.warning(f"Zoho calendar sync error: {e}")
 
 
+async def sync_google_tasks():
+    try:
+        from datetime import datetime
+
+        from ..core.database import get_database
+        from ..core.google import GoogleOAuth, GoogleTasks
+
+        db = get_database()
+        if db is None:
+            return
+        google = GoogleOAuth(db)
+        now_iso = datetime.utcnow().isoformat()
+
+        users = list(db.google_tokens.find({"scope": {"$regex": "tasks"}}))
+        for token_doc in users:
+            user_id = token_doc.get("user_id", "")
+            org_id = token_doc.get("org_id", "")
+            if not user_id:
+                continue
+            token = await google.get_valid_token(user_id)
+            if not token:
+                continue
+
+            gtasks = GoogleTasks(db)
+            list_id = await gtasks.ensure_list(token)
+            if not list_id:
+                continue
+
+            google_tasks = await gtasks.list_tasks(token, list_id, show_completed=True)
+            for gt in google_tasks:
+                gtask_id = gt.get("id")
+                existing = db.tasks.find_one({"google_task_id": gtask_id})
+                if existing:
+                    updates = {}
+                    google_status = gt.get("status", "")
+                    mapped = GoogleTasks.map_google_status(google_status)
+                    if mapped != existing.get("status"):
+                        updates["status"] = mapped
+                    new_title = gt.get("title", "")
+                    if new_title and new_title != existing.get("title"):
+                        updates["title"] = new_title
+                    if updates:
+                        updates["updated_at"] = datetime.utcnow()
+                        db.tasks.update_one({"_id": existing["_id"]}, {"$set": updates})
+                else:
+                    # Only pull in tasks created directly in Google Tasks (not pushed by yesboss).
+                    notes = gt.get("notes", "") or ""
+                    if "YesBoss" in notes or "yesboss" in notes.lower():
+                        continue
+                    new_task = {
+                        "title": gt.get("title", "Untitled"),
+                        "description": notes,
+                        "priority": "medium",
+                        "status": GoogleTasks.map_google_status(gt.get("status", "")),
+                        "assignee_id": [user_id],
+                        "assignee_email": user_id,
+                        "organization_id": org_id,
+                        "due_date": (gt.get("due") or "")[:10] or None,
+                        "google_task_id": gtask_id,
+                        "google_task_list_id": list_id,
+                        "google_sync_status": "synced",
+                        "google_last_synced_at": now_iso,
+                        "source": "google_sync",
+                        "created_at": datetime.utcnow(),
+                        "updated_at": datetime.utcnow(),
+                        "escalation_level": 0,
+                        "owner_escalated": False,
+                        "owner_escalated_at": None,
+                        "reviewers": [],
+                        "dependencies": [],
+                    }
+                    result = db.tasks.insert_one(new_task)
+                    new_task["_id"] = str(result.inserted_id)
+                    from ..core.notification_service import create_and_deliver
+                    await create_and_deliver(
+                        user_id=user_id, org_id=org_id, type="task_assigned",
+                        title="New Task from Google Sync",
+                        message=f"Task '{new_task['title']}' synced from your Google Tasks",
+                        link=f"/tasks/{new_task['_id']}",
+                    )
+
+            db.google_tokens.update_one(
+                {"user_id": user_id},
+                {"$set": {"last_task_sync_at": now_iso}},
+            )
+    except Exception as e:
+        logger.warning(f"Google task sync error: {e}")
+
+
+async def sync_google_calendar():
+    try:
+        from datetime import datetime, timedelta
+
+        from ..core.database import get_database
+        from ..core.google import GoogleCalendar, GoogleOAuth
+
+        db = get_database()
+        if db is None:
+            return
+        google = GoogleOAuth(db)
+
+        users = list(db.google_tokens.find({"scope": {"$regex": "calendar"}}))
+        for token_doc in users:
+            user_id = token_doc.get("user_id", "")
+            org_id = token_doc.get("org_id", "")
+            token = await google.get_valid_token(user_id)
+            if not token:
+                continue
+
+            cal_id = await GoogleCalendar.get_primary_calendar_id(token)
+            if not cal_id:
+                continue
+
+            now = datetime.utcnow()
+            time_min = now.isoformat()
+            time_max = (now + timedelta(days=30)).isoformat()
+
+            events = await GoogleCalendar.list_events(token, cal_id, time_min, time_max)
+            for ev in events:
+                gid = ev.get("id")
+                if not gid:
+                    continue
+                doc = {
+                    "google_event_id": gid,
+                    "calendar_uid": cal_id,
+                    "organization_id": org_id,
+                    "user_email": user_id,
+                    "title": ev.get("summary", ""),
+                    "description": ev.get("description", ""),
+                    "start": (ev.get("start") or {}).get("dateTime", ""),
+                    "end": (ev.get("end") or {}).get("dateTime", ""),
+                    "attendees": [a.get("email") for a in ev.get("attendees", []) if a.get("email")],
+                    "location": ev.get("location", ""),
+                    "raw_data": ev,
+                    "synced_at": datetime.utcnow().isoformat(),
+                }
+                existing = db.calendar_events.find_one({"google_event_id": gid})
+                if existing:
+                    db.calendar_events.update_one({"_id": existing["_id"]}, {"$set": doc})
+                else:
+                    db.calendar_events.insert_one(doc)
+    except Exception as e:
+        logger.warning(f"Google calendar sync error: {e}")
+
+
 async def check_owner_check_ins():
     try:
         from ..core.check_in_service import (
@@ -1123,7 +1310,9 @@ async def scheduler_loop():
     logger.info("Scheduler started")
     deadline_counter = 0
     cal_sync_counter = 0
-    while True:
+    # Defer the first heavy cycle so the API is responsive right after startup.
+    await asyncio.sleep(30)
+    while not _scheduler_stop.is_set():
         try:
             if deadline_counter % 12 == 0:  # every ~60 min
                 await check_deadline_reminders()
@@ -1149,9 +1338,11 @@ async def scheduler_loop():
                 await check_owner_check_ins()
 
             await sync_zoho_tasks()
+            await sync_google_tasks()
 
             if cal_sync_counter % 3 == 0:  # every ~15 min (stub until G3)
                 await sync_zoho_calendar()
+                await sync_google_calendar()
 
             deadline_counter += 1
             cal_sync_counter += 1

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useState } from "react";
 import { useDocumentStore, type DocumentSuggestion } from "@/stores/documentStore";
@@ -7,7 +7,7 @@ import { downloadDocumentTemplate } from "@/lib/documentTemplates";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui";
 import { Sparkles, FileText, FileDown, Loader2, Lightbulb, RefreshCw } from "lucide-react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
 interface OrgMeta {
   organizationName: string;
@@ -23,7 +23,7 @@ function shorten(text: string, max: number): string {
   if (t.length <= max) return t;
   const slice = t.slice(0, max);
   const lastSpace = slice.lastIndexOf(" ");
-  return (lastSpace > max * 0.6 ? slice.slice(0, lastSpace) : slice) + "…";
+  return (lastSpace > max * 0.6 ? slice.slice(0, lastSpace) : slice) + "â€¦";
 }
 
 const PRIORITY_STYLES: Record<string, string> = {

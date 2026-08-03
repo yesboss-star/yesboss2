@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -17,7 +17,7 @@ import {
   Badge, Button, Input,
 } from "@/components/ui";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
 function renderMarkdown(text: string): string {
   const lines = text.split("\n");
@@ -60,7 +60,7 @@ function renderMarkdown(text: string): string {
         inList = true;
         listType = "ol";
       }
-      result.push(`<li class="flex items-start gap-2 text-sm"><span class="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-semibold flex items-center justify-center flex-shrink-0 mt-0.5">${numMatch[1].match(/^\d+/)?.[0] || "•"}</span><span>${numMatch[1].replace(/^\d+[.)]\s*/, "")}</span></li>`);
+      result.push(`<li class="flex items-start gap-2 text-sm"><span class="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-semibold flex items-center justify-center flex-shrink-0 mt-0.5">${numMatch[1].match(/^\d+/)?.[0] || "â€¢"}</span><span>${numMatch[1].replace(/^\d+[.)]\s*/, "")}</span></li>`);
       continue;
     }
 
@@ -187,7 +187,7 @@ function QuestionCard({ question, onAnswer, onSkip, disabled, questionNumber, to
               disabled={disabled || !!answeredLabel}
               className="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg border border-dashed border-border hover:border-primary/30 text-sm text-text-muted hover:text-foreground transition-all disabled:opacity-50 cursor-pointer"
             >
-              <span className="w-6 h-6 rounded-full bg-surface-light text-text-muted text-xs flex items-center justify-center">✏️</span>
+              <span className="w-6 h-6 rounded-full bg-surface-light text-text-muted text-xs flex items-center justify-center">âœï¸</span>
               <span>Type my own answer</span>
             </button>
           )}
@@ -201,7 +201,7 @@ function QuestionCard({ question, onAnswer, onSkip, disabled, questionNumber, to
             disabled={disabled}
             className="text-[10px] text-text-muted hover:text-foreground cursor-pointer disabled:opacity-50"
           >
-            Skip this question →
+            Skip this question â†’
           </button>
         </div>
       )}
@@ -652,8 +652,8 @@ export default function AISummaryChat() {
         title: finalTitle, source: "ai", sourceDetail: "Added from AI Business Analytics chat", category: "growth", icon: "BarChart3",
       });
       const confirm = created
-        ? `✅ Added **${finalTitle}** as a new KPI card. It will start showing values as soon as the dashboard refreshes (every 30s).`
-        : `I couldn't add that KPI right now — please try again.`;
+        ? `âœ… Added **${finalTitle}** as a new KPI card. It will start showing values as soon as the dashboard refreshes (every 30s).`
+        : `I couldn't add that KPI right now â€” please try again.`;
       const userKpiMsg: SessionMessage = { role: "user", content: `Make this a KPI: ${finalTitle}`, timestamp: Date.now() };
       const asstKpiMsg: SessionMessage = { role: "assistant", content: confirm, timestamp: Date.now() };
       setMessages([...messages, userKpiMsg, asstKpiMsg]);
@@ -673,12 +673,12 @@ export default function AISummaryChat() {
     setInput("");
     setSuggestions(null);
 
-    // Get or create session ONCE — reuse across all calls in this function
+    // Get or create session ONCE â€” reuse across all calls in this function
     const session = activeSession || await ensureSession();
     if (!session) return;
     const s = session;
 
-    // Upload file first (if attached) — before answering a question or sending text
+    // Upload file first (if attached) â€” before answering a question or sending text
     if (attachedFile) {
       const fileName = attachedFile.name;
       if (userMsg) {
@@ -698,19 +698,19 @@ export default function AISummaryChat() {
           if (result) {
             const hasTasks = await checkTaskImport(result.fileId, fileName);
 
-            const fileMsg: SessionMessage = { role: "user", content: `📎 Uploaded: **${fileName}**`, timestamp: Date.now() };
+            const fileMsg: SessionMessage = { role: "user", content: `ðŸ“Ž Uploaded: **${fileName}**`, timestamp: Date.now() };
             setMessages((prev) => [...prev, fileMsg]);
             addMessage(s.id, fileMsg);
 
             if (!hasTasks) {
-              const resultMsg: SessionMessage = { role: "assistant", content: `✅ ${result.message}`, timestamp: Date.now() };
+              const resultMsg: SessionMessage = { role: "assistant", content: `âœ… ${result.message}`, timestamp: Date.now() };
               setMessages((prev) => [...prev, resultMsg]);
               addMessage(s.id, resultMsg);
             }
             updateSessionContext(s.id, { recently_uploaded_file: fileName, file_text_preview: result.textPreview || "" });
           }
         } catch (err: any) {
-          const errMsg: SessionMessage = { role: "assistant", content: `❌ Upload failed: ${err.message || "Unknown error"}`, timestamp: Date.now() };
+          const errMsg: SessionMessage = { role: "assistant", content: `âŒ Upload failed: ${err.message || "Unknown error"}`, timestamp: Date.now() };
           setMessages((prev) => [...prev, errMsg]);
           addMessage(s.id, errMsg);
         } finally {
@@ -720,14 +720,14 @@ export default function AISummaryChat() {
       }
     }
 
-    // If file uploaded with text + question pending → answer it
+    // If file uploaded with text + question pending â†’ answer it
     if (pendingQuestion) {
       setPendingQuestion(null);
       await handleAnswerQuestion(pendingQuestion.field_id, userMsg, userMsg, s);
       return;
     }
 
-    // No question pending — send as regular message (file already uploaded if any)
+    // No question pending â€” send as regular message (file already uploaded if any)
     if (!userMsg) return;
 
     const userMsgObj: SessionMessage = { role: "user", content: userMsg, timestamp: Date.now() };
@@ -850,7 +850,7 @@ export default function AISummaryChat() {
         const title = extractKpiTitleFromAssistant(pendingQuestion?.text || "") || "New KPI";
         if (title) {
           const created = addKPI(organization.id, { title, source: "ai", sourceDetail: "Added from AI Business Analytics chat", category: "growth", icon: "BarChart3" });
-          const confirm = created ? `✅ Added **${title}** as a new KPI card on your dashboard.` : `I couldn't add that KPI right now. Please try again.`;
+          const confirm = created ? `âœ… Added **${title}** as a new KPI card on your dashboard.` : `I couldn't add that KPI right now. Please try again.`;
           const kpiMsg: SessionMessage = { role: "assistant", content: confirm, timestamp: Date.now() };
           setMessages([...updated, kpiMsg]);
           addMessage(s.id, kpiMsg);
@@ -1031,9 +1031,9 @@ export default function AISummaryChat() {
         setImportSuggestion(data.suggestion);
       }
 
-      let content = `✅ **Bulk Import Complete** — ${data.created_count} tasks created${data.failed_count > 0 ? `, ${data.failed_count} failed` : ""}.`;
+      let content = `âœ… **Bulk Import Complete** â€” ${data.created_count} tasks created${data.failed_count > 0 ? `, ${data.failed_count} failed` : ""}.`;
       if (data.suggestion?.suggestion_text) {
-        content += `\n\n💡 ${data.suggestion.suggestion_text}`;
+        content += `\n\nðŸ’¡ ${data.suggestion.suggestion_text}`;
       }
       const resultMsg: SessionMessage = {
         role: "assistant",
@@ -1048,7 +1048,7 @@ export default function AISummaryChat() {
     } catch (err: any) {
       const errMsg: SessionMessage = {
         role: "assistant",
-        content: `❌ Import failed: ${err.message}`,
+        content: `âŒ Import failed: ${err.message}`,
         timestamp: Date.now(),
       };
       const session = activeSession || sessions[0];
@@ -1160,7 +1160,7 @@ export default function AISummaryChat() {
           }
         }
       } catch (err: any) {
-        const errMsg: SessionMessage = { role: "assistant", content: `❌ Re-analysis failed: ${err.message}`, timestamp: Date.now() };
+        const errMsg: SessionMessage = { role: "assistant", content: `âŒ Re-analysis failed: ${err.message}`, timestamp: Date.now() };
         const session = activeSession || sessions[0];
         if (session) {
           setMessages((prev) => [...prev, errMsg]);
@@ -1203,7 +1203,7 @@ export default function AISummaryChat() {
       const created = await res.json();
       const goalMsg: SessionMessage = {
         role: "assistant",
-        content: `🎯 **Goal Created:** "${created.title || insight.suggested_goal_title}" from your document insight.`,
+        content: `ðŸŽ¯ **Goal Created:** "${created.title || insight.suggested_goal_title}" from your document insight.`,
         timestamp: Date.now(),
       };
       const session = activeSession || sessions[0];
@@ -1215,7 +1215,7 @@ export default function AISummaryChat() {
     } catch (err: any) {
       const errMsg: SessionMessage = {
         role: "assistant",
-        content: `❌ Failed to create goal: ${err.message}`,
+        content: `âŒ Failed to create goal: ${err.message}`,
         timestamp: Date.now(),
       };
       const session = activeSession || sessions[0];
@@ -1245,7 +1245,7 @@ export default function AISummaryChat() {
       const created = await res.json();
       const goalMsg: SessionMessage = {
         role: "assistant",
-        content: `🎯 **Goal Created:** "${created.title || importSuggestion.suggested_goal_title}" — tasks from this import are now trackable under this goal.`,
+        content: `ðŸŽ¯ **Goal Created:** "${created.title || importSuggestion.suggested_goal_title}" â€” tasks from this import are now trackable under this goal.`,
         timestamp: Date.now(),
       };
       const session = activeSession || sessions[0];
@@ -1256,7 +1256,7 @@ export default function AISummaryChat() {
     } catch (err: any) {
       const errMsg: SessionMessage = {
         role: "assistant",
-        content: `❌ Failed to create goal: ${err.message}`,
+        content: `âŒ Failed to create goal: ${err.message}`,
         timestamp: Date.now(),
       };
       const session = activeSession || sessions[0];
@@ -1306,7 +1306,7 @@ export default function AISummaryChat() {
       const data = await res.json();
       const resultMsg: SessionMessage = {
         role: "assistant",
-        content: `✅ **${data.created_count} action item${data.created_count !== 1 ? "s" : ""} turned into tasks**${data.failed_count > 0 ? ` (${data.failed_count} failed)` : ""}.`,
+        content: `âœ… **${data.created_count} action item${data.created_count !== 1 ? "s" : ""} turned into tasks**${data.failed_count > 0 ? ` (${data.failed_count} failed)` : ""}.`,
         timestamp: Date.now(),
       };
       const session = activeSession || sessions[0];
@@ -1318,7 +1318,7 @@ export default function AISummaryChat() {
     } catch (err: any) {
       const errMsg: SessionMessage = {
         role: "assistant",
-        content: `❌ Failed to create tasks: ${err.message}`,
+        content: `âŒ Failed to create tasks: ${err.message}`,
         timestamp: Date.now(),
       };
       const session = activeSession || sessions[0];
@@ -1511,7 +1511,7 @@ export default function AISummaryChat() {
                           title="Dismiss"
                           aria-label={`Dismiss insight: ${(insight.summary || "").slice(0, 60)}`}
                         >
-                          <span className="text-[11px] font-bold leading-none" aria-hidden="true">×</span>
+                          <span className="text-[11px] font-bold leading-none" aria-hidden="true">Ã—</span>
                         </button>
                       </div>
                     </div>
@@ -1551,7 +1551,7 @@ export default function AISummaryChat() {
                 </div>
                 <h2 className="text-lg font-semibold text-foreground mb-1">How can I help you today?</h2>
                 <p className="text-sm text-text-muted font-medium max-w-sm mb-6">
-                  Ask me anything about your business — goals, tasks, documents, or advice.
+                  Ask me anything about your business â€” goals, tasks, documents, or advice.
                 </p>
                 <div className="flex flex-wrap gap-2 justify-center">
                   {[
@@ -1698,7 +1698,7 @@ export default function AISummaryChat() {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium text-primary">
-                  📄 <span className="text-foreground">Missing Data</span>
+                  ðŸ“„ <span className="text-foreground">Missing Data</span>
                 </p>
                 <Button variant="outline" onClick={dismissMissingData} className="text-xs cursor-pointer" size="sm">
                   Dismiss
@@ -1727,7 +1727,7 @@ export default function AISummaryChat() {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium text-primary">
-                  📋 <span className="text-foreground">{selectedActionIndices.size}</span> of {actionItems.length} action items
+                  ðŸ“‹ <span className="text-foreground">{selectedActionIndices.size}</span> of {actionItems.length} action items
                 </p>
                 <div className="flex gap-2">
                   <Button variant="outline" onClick={dismissActionItems} className="text-xs cursor-pointer" size="sm">
@@ -1790,7 +1790,7 @@ export default function AISummaryChat() {
           <div className="flex-shrink-0 border-t border-border bg-surface/40 px-4 py-3">
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <p className="text-sm font-medium text-primary">💡 After Import Suggestion</p>
+                <p className="text-sm font-medium text-primary">ðŸ’¡ After Import Suggestion</p>
                 <Button variant="outline" onClick={dismissImportSuggestion} className="text-xs cursor-pointer" size="sm">
                   Dismiss
                 </Button>
@@ -1799,7 +1799,7 @@ export default function AISummaryChat() {
                 {importSuggestion.suggested_goal_title && (
                   <div className="flex items-center justify-between p-2 rounded-lg border bg-background border-border/50">
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">🎯 Create goal: <span className="text-primary">{importSuggestion.suggested_goal_title}</span></p>
+                      <p className="font-medium truncate">ðŸŽ¯ Create goal: <span className="text-primary">{importSuggestion.suggested_goal_title}</span></p>
                       {importSuggestion.suggested_goal_description && (
                         <p className="text-xs text-text-muted truncate mt-0.5">{importSuggestion.suggested_goal_description}</p>
                       )}
@@ -1818,7 +1818,7 @@ export default function AISummaryChat() {
                 {importSuggestion.tasks_without_dates_count > 0 && (
                   <div className="p-2 rounded-lg border bg-amber-500/5 border-amber-500/20">
                     <p className="text-xs">
-                      ⏰ <span className="font-medium">{importSuggestion.tasks_without_dates_count} task{importSuggestion.tasks_without_dates_count !== 1 ? "s" : ""}</span> {importSuggestion.tasks_without_dates_count !== 1 ? "have" : "has"} no due date — consider setting deadlines to keep things on track.
+                      â° <span className="font-medium">{importSuggestion.tasks_without_dates_count} task{importSuggestion.tasks_without_dates_count !== 1 ? "s" : ""}</span> {importSuggestion.tasks_without_dates_count !== 1 ? "have" : "has"} no due date â€” consider setting deadlines to keep things on track.
                     </p>
                   </div>
                 )}
@@ -1831,7 +1831,7 @@ export default function AISummaryChat() {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium text-primary">
-                  💡 <span className="text-foreground">{insights.length} insight{insights.length !== 1 ? "s" : ""} from your documents</span>
+                  ðŸ’¡ <span className="text-foreground">{insights.length} insight{insights.length !== 1 ? "s" : ""} from your documents</span>
                 </p>
                 <Button variant="outline" onClick={dismissAllInsights} className="text-xs cursor-pointer" size="sm">
                   Dismiss all
@@ -1864,7 +1864,7 @@ export default function AISummaryChat() {
                         className="text-xs cursor-pointer"
                         size="sm"
                       >
-                        🎯 Create Goal
+                        ðŸŽ¯ Create Goal
                       </Button>
                     )}
                   </div>
@@ -1895,7 +1895,7 @@ export default function AISummaryChat() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <p className="text-sm font-medium text-primary">
-                    📊 <span className="text-foreground">{selectedTaskIndices.size}</span> of {taskImportPreview.detected_count} tasks selected
+                    ðŸ“Š <span className="text-foreground">{selectedTaskIndices.size}</span> of {taskImportPreview.detected_count} tasks selected
                   </p>
                   {selectedTaskIndices.size === taskImportPreview.detected_count ? (
                     <button onClick={deselectAllTasks} className="text-[11px] text-text-muted hover:text-primary cursor-pointer underline-offset-2 hover:underline">
@@ -1973,7 +1973,7 @@ export default function AISummaryChat() {
           <div className="flex-shrink-0 border-t border-border px-4 py-3">
             <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
               <div>
-                <p className="text-sm font-medium text-emerald-400">✅ Import Complete</p>
+                <p className="text-sm font-medium text-emerald-400">âœ… Import Complete</p>
                 <p className="text-xs text-text-muted">{taskImportResult.created_count} tasks created{taskImportResult.failed_count > 0 ? `, ${taskImportResult.failed_count} failed` : ""}</p>
               </div>
               <Button variant="outline" onClick={dismissTaskImport} className="text-xs cursor-pointer" size="sm">
@@ -2069,13 +2069,13 @@ export default function AISummaryChat() {
                             {m.full_name}
                           </p>
                           <p className="text-[11px] text-text-muted/70 truncate">
-                            {[m.role, m.department].filter(Boolean).join(" • ") || m.email}
+                            {[m.role, m.department].filter(Boolean).join(" â€¢ ") || m.email}
                           </p>
                         </div>
                         {isActive && (
                           <div className="flex items-center gap-1 flex-shrink-0">
                             <kbd className="text-[9px] px-1.5 py-0.5 rounded border border-border/60 bg-surface text-text-muted font-mono">
-                              ↵
+                              â†µ
                             </kbd>
                           </div>
                         )}
@@ -2085,9 +2085,9 @@ export default function AISummaryChat() {
                 </ul>
                 <div className="px-3 py-1.5 flex items-center justify-between border-t border-border/60 bg-surface-light/30 text-[10px] text-text-muted/70">
                   <div className="flex items-center gap-2">
-                    <kbd className="px-1 py-0.5 rounded border border-border/60 bg-surface font-mono">↑↓</kbd>
+                    <kbd className="px-1 py-0.5 rounded border border-border/60 bg-surface font-mono">â†‘â†“</kbd>
                     <span>navigate</span>
-                    <kbd className="px-1 py-0.5 rounded border border-border/60 bg-surface font-mono ml-1">↵</kbd>
+                    <kbd className="px-1 py-0.5 rounded border border-border/60 bg-surface font-mono ml-1">â†µ</kbd>
                     <span>select</span>
                   </div>
                   <kbd className="px-1 py-0.5 rounded border border-border/60 bg-surface font-mono">esc</kbd>
@@ -2133,7 +2133,7 @@ export default function AISummaryChat() {
                   sendMessage();
                 }
               }}
-              placeholder="Ask anything, or attach a file to analyze…"
+              placeholder="Ask anything, or attach a file to analyzeâ€¦"
               icon={<MessageSquare className="w-4 h-4 text-text-muted" />}
             />
           </div>

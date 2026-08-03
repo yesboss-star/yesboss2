@@ -1,11 +1,11 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Badge } from "@/components/ui";
 import { Users, AlertTriangle, Loader2, BarChart3 } from "lucide-react";
 import { getAuthHeaders } from "@/lib/utils";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
 export default function EmployeeFrequencyWidget({ orgId }: { orgId?: string }) {
   const [data, setData] = useState<any>(null);
@@ -68,7 +68,7 @@ export default function EmployeeFrequencyWidget({ orgId }: { orgId?: string }) {
                 />
               </div>
               {emp.categories?.length > 0 && (
-                <p className="text-[10px] text-text-muted truncate">{emp.categories.join(" · ")}</p>
+                <p className="text-[10px] text-text-muted truncate">{emp.categories.join(" Â· ")}</p>
               )}
             </div>
           );

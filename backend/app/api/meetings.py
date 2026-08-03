@@ -335,6 +335,50 @@ async def _push_to_zoho_todo(db, org_id: str, task_doc: dict, assignee_emails: l
         logger.error("Failed to push task to Zoho ToDo: %s", e, exc_info=True)
 
 
+async def _push_google_todo(db, org_id: str, task_doc: dict, assignee_emails: list):
+    try:
+        from ..core.google import GoogleTasks
+        from ..core.providers import resolve_token_for_email
+
+        gtasks = GoogleTasks(db)
+        google_ids = []
+        for email in assignee_emails:
+            if not email:
+                continue
+            provider_token = await resolve_token_for_email(db, email, org_id)
+            if not provider_token or provider_token[0] != "google":
+                continue
+            token = provider_token[1]
+            list_id = await gtasks.ensure_list(token)
+            if not list_id:
+                continue
+            gtask_id = await gtasks.create_task(token, list_id, task_doc)
+            if gtask_id:
+                google_ids.append({"email": email, "task_id": gtask_id, "list_id": list_id})
+                logger.info("Pushed task '%s' to Google Tasks for %s (id=%s)", task_doc.get("title"), email, gtask_id)
+            else:
+                logger.warning("Failed to push task to Google Tasks for %s", email)
+
+        if google_ids:
+            db.tasks.update_one({"_id": ObjectId(task_doc["_id"])}, {"$set": {"google_task_ids": google_ids}})
+    except Exception as e:
+        logger.error("Failed to push task to Google Tasks: %s", e, exc_info=True)
+
+
+async def _push_to_provider_todo(db, org_id: str, task_doc: dict, assignee_emails: list):
+    """Dispatch task push by the org's connected provider (Google or Zoho).
+
+    Per-org either/or model: the owner's provider decides for everyone.
+    """
+    from ..core.providers import get_org_provider
+
+    provider = get_org_provider(db, org_id)
+    if provider == "google":
+        await _push_google_todo(db, org_id, task_doc, assignee_emails)
+    else:
+        await _push_to_zoho_todo(db, org_id, task_doc, assignee_emails)
+
+
 async def create_task_from_meeting(
     db,
     org_id: str,
@@ -434,7 +478,7 @@ async def create_task_from_meeting(
             actor_id=user_id,
         ))
 
-    asyncio.create_task(_push_to_zoho_todo(db, org_id, task_doc, assignee_emails))
+    asyncio.create_task(_push_to_provider_todo(db, org_id, task_doc, assignee_emails))
 
     return task_doc
 
@@ -695,7 +739,7 @@ async def confirm_meeting_tasks(
                 actor_id=user_id,
             ))
 
-        asyncio.create_task(_push_to_zoho_todo(db, org_id, task_doc, assignee_emails))
+        asyncio.create_task(_push_to_provider_todo(db, org_id, task_doc, assignee_emails))
         created_tasks.append(task_doc)
 
     filename = ""

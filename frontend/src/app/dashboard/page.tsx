@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
@@ -11,13 +11,13 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Badge, Button } from "@/components/ui";
 import GoalModal from "@/components/GoalModal";
 import DashboardView from "@/components/owners/DashboardView";
-import ZohoCalendarBooking from "@/components/owners/ZohoCalendarBooking";
+import CalendarBooking from "@/components/owners/CalendarBooking";
 import MeetingUploadModal from "@/components/owners/MeetingUploadModal";
 import AISummaryChat from "@/components/AISummaryChat";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { getAuthHeaders } from "@/lib/utils";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
 interface Task {
   id: string;
@@ -508,7 +508,7 @@ export default function DashboardPage() {
                                 <div key={m.id || m._id || mi} className="flex items-center gap-3 px-3 py-2.5 pl-12 bg-surface/50 border-b border-border/30 last:border-0">
                                   <div className="flex-1 min-w-0">
                                     <p className="text-xs text-text-muted">
-                                      {m.task_count || 0} tasks · {m.created_at ? new Date(m.created_at).toLocaleDateString() : ""}
+                                      {m.task_count || 0} tasks Â· {m.created_at ? new Date(m.created_at).toLocaleDateString() : ""}
                                     </p>
                                   </div>
                                   <Badge variant="outline" className="text-[10px] flex-shrink-0">{m.task_count || 0}</Badge>
@@ -545,8 +545,8 @@ export default function DashboardPage() {
           <CardContent>
             <div className="space-y-3">
               {(role === "employee" ? getEmployeeInsights() : [
-                { text: kpiData?.completion_rate ? `${kpiData.completion_rate.formatted} task completion rate — ${kpiData.completion_rate.change}` : "Loading insights...", type: "info" as const },
-                {text: kpiData?.goal_completion_rate ? `Goal completion at ${kpiData.goal_completion_rate.formatted} — ${kpiData.goal_completion_rate.change}` : null, type: "success" as const},
+                { text: kpiData?.completion_rate ? `${kpiData.completion_rate.formatted} task completion rate â€” ${kpiData.completion_rate.change}` : "Loading insights...", type: "info" as const },
+                {text: kpiData?.goal_completion_rate ? `Goal completion at ${kpiData.goal_completion_rate.formatted} â€” ${kpiData.goal_completion_rate.change}` : null, type: "success" as const},
                 {text: kpiData?.team_size ? `${kpiData.team_size.formatted} team members ${kpiData.team_size.change}` : null, type: "info" as const},
               ].filter(i => i.text !== null) as { text: string; type: "success" | "warning" | "info" }[]).map((insight, i) => (
                 <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-surface">
@@ -604,7 +604,7 @@ export default function DashboardPage() {
       {showBooking && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowBooking(false)}>
           <div className="w-full max-w-lg mx-4" onClick={(e) => e.stopPropagation()}>
-            <ZohoCalendarBooking onClose={() => setShowBooking(false)} />
+            <CalendarBooking onClose={() => setShowBooking(false)} />
           </div>
         </div>
       )}

@@ -125,6 +125,24 @@
       "uses": 1,
       "created_at": 1783574656,
       "last_used": 1783574656
+    },
+    {
+      "value": "Floriculture & Flower Farming",
+      "uses": 2,
+      "created_at": 1785731978,
+      "last_used": 1785732129
+    },
+    {
+      "value": "Flower Retail & Floristry",
+      "uses": 2,
+      "created_at": 1785731993,
+      "last_used": 1785732132
+    },
+    {
+      "value": "Floral Design & Arrangement",
+      "uses": 1,
+      "created_at": 1785732138,
+      "last_used": 1785732138
     }
   ],
   "micro_verticals": [
@@ -442,6 +460,13 @@
       "created_at": 1784007604,
       "last_used": 1784007604,
       "industry": "IT Services & Consulting"
+    },
+    {
+      "value": "Florist Retail",
+      "uses": 1,
+      "created_at": 1785732187,
+      "last_used": 1785732187,
+      "industry": "Floriculture & Flower Farming"
     }
   ],
   "company_names": []

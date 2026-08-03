@@ -1,17 +1,17 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent, Badge, Button } from "@/components/ui";
 import { DollarSign, Loader2, TrendingUp, TrendingDown, Minus, FileText } from "lucide-react";
 import { getAuthHeaders } from "@/lib/utils";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
 function formatValue(val: number | null): string {
-  if (val == null) return "—";
-  if (val >= 10000000) return `₹${(val / 10000000).toFixed(1)}Cr`;
-  if (val >= 100000) return `₹${(val / 100000).toFixed(1)}L`;
-  return `₹${val.toLocaleString("en-IN")}`;
+  if (val == null) return "â€”";
+  if (val >= 10000000) return `â‚¹${(val / 10000000).toFixed(1)}Cr`;
+  if (val >= 100000) return `â‚¹${(val / 100000).toFixed(1)}L`;
+  return `â‚¹${val.toLocaleString("en-IN")}`;
 }
 
 function TrendIndicator({ trend }: { trend: { change_pct: number; direction: string } | undefined }) {
@@ -154,7 +154,7 @@ export default function FinancialMetricsCard({ organizationId }: { organizationI
           <div className="p-2 rounded-lg bg-rose-500/5 border border-rose-500/20">
             <p className="text-[10px] text-rose-400 font-medium uppercase mb-1">Key Risks</p>
             {m.key_risks.map((risk: string, i: number) => (
-              <p key={i} className="text-xs text-rose-300/80">• {risk}</p>
+              <p key={i} className="text-xs text-rose-300/80">â€¢ {risk}</p>
             ))}
           </div>
         )}
