@@ -13,7 +13,7 @@ from reportlab.lib.units import inch
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from ..core.database import get_database
-from ..dependencies.auth import get_current_user, get_current_user_optional
+from ..dependencies.auth import get_current_user_optional
 
 router = APIRouter()
 logger = logging.getLogger("yesboss.reports")
@@ -456,12 +456,15 @@ async def generate_report(
     }
 
 @router.get("/history")
-async def list_reports(current_user = Depends(get_current_user)):
+async def list_reports(
+    organization_id: str | None = None,
+    current_user = Depends(get_current_user_optional)
+):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
-    org_id = get_user_org_id(current_user)
+    org_id = organization_id or get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
 

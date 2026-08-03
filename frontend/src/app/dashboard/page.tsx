@@ -61,7 +61,7 @@ export default function DashboardPage() {
   const { user, role, loading } = useAuth();
   const router = useRouter();
   const { setBreadcrumbs } = useUIStore();
-  const { organization, setOrganization, fetchOrganizationByEmail } = useOrganizationStore();
+  const { organization } = useOrganizationStore();
   const { goals, fetchGoals } = useGoalStore();
   const [showGoalModal, setShowGoalModal] = useState(false);
 

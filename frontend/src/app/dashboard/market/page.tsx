@@ -51,12 +51,13 @@ export default function MarketPage() {
   const [history, setHistory] = useState<HistoryPoint[]>([]);
 
   useEffect(() => {
-    fetch(`${API_URL}/organizations/me`)
+    fetch(`${API_URL}/organizations/me`, { headers: getAuthHeaders() })
       .then((r) => r.json())
       .then((data) => {
         if (data.organization?.id) setOrgId(data.organization.id);
         else if (data.id) setOrgId(data.id);
         else if (data._id) setOrgId(data._id);
+        else if (data.organization?._id) setOrgId(data.organization._id);
       })
       .catch(() => {});
   }, []);

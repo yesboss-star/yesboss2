@@ -97,14 +97,14 @@ export default function AIDashboardPage() {
 
   useEffect(() => {
     const industry = organization?.industry || "technology";
-    fetchModules(industry);
-    fetchInsights(industry);
-    fetchModuleMetrics(currentModule);
+    fetchModules(industry, organization?.id);
+    fetchInsights(industry, undefined, organization?.id);
+    fetchModuleMetrics(currentModule, organization?.id);
   }, [organization?.industry]);
 
   useEffect(() => {
-    fetchModuleMetrics(currentModule);
-    fetchInsights(organization?.industry, currentModule);
+    fetchModuleMetrics(currentModule, organization?.id);
+    fetchInsights(organization?.industry, currentModule, organization?.id);
   }, [currentModule, organization?.industry]);
 
   useEffect(() => {

@@ -276,13 +276,14 @@ async def get_dashboard_insights(
     industry: str | None = Query(None),
     module: str | None = Query(None),
     priority: str | None = Query(None),
-    current_user = Depends(get_current_user)
+    organization_id: str | None = Query(None),
+    current_user = Depends(get_current_user_optional),
 ):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
-    org_id = get_user_org_id(current_user)
+    org_id = organization_id or get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
 
@@ -302,13 +303,14 @@ async def get_dashboard_insights(
 @router.get("/modules")
 async def get_dashboard_modules(
     industry: str | None = Query(None),
+    organization_id: str | None = Query(None),
     current_user = Depends(get_current_user)
 ):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
-    org_id = get_user_org_id(current_user)
+    org_id = organization_id or get_user_org_id(current_user)
     if org_id:
         organization = db.organizations.find_one({"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id})
         org_industry = industry or (organization.get("industry") if organization else None)
@@ -565,13 +567,14 @@ async def get_dashboard_kpi(
 async def get_module_metrics(
     module: str,
     period: str | None = Query("30d"),
+    organization_id: str | None = Query(None),
     current_user = Depends(get_current_user)
 ):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
-    org_id = get_user_org_id(current_user)
+    org_id = organization_id or get_user_org_id(current_user)
     if org_id:
         organization = db.organizations.find_one({"_id": org_id})
         org_industry = organization.get("industry") if organization else None

@@ -1,5 +1,7 @@
 ﻿import { create } from "zustand";
 
+import { getAuthHeaders } from "@/lib/utils";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
 export interface DashboardInsight {
@@ -40,9 +42,9 @@ interface DashboardState {
   setModuleMetrics: (metrics: Record<string, ModuleMetric>) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
-  fetchInsights: (industry?: string, module?: string) => Promise<void>;
-  fetchModules: (industry?: string) => Promise<void>;
-  fetchModuleMetrics: (module: string) => Promise<void>;
+  fetchInsights: (industry?: string, module?: string, organizationId?: string) => Promise<void>;
+  fetchModules: (industry?: string, organizationId?: string) => Promise<void>;
+  fetchModuleMetrics: (module: string, organizationId?: string) => Promise<void>;
 }
 
 export const useDashboardStore = create<DashboardState>()(
@@ -61,14 +63,17 @@ export const useDashboardStore = create<DashboardState>()(
     setLoading: (loading) => set({ loading }),
     setError: (error) => set({ error }),
 
-    fetchInsights: async (industry, module) => {
+    fetchInsights: async (industry, module, organizationId) => {
       set({ loading: true, error: null });
       try {
         const params = new URLSearchParams();
         if (industry) params.append("industry", industry);
         if (module) params.append("module", module);
+        if (organizationId) params.append("organization_id", organizationId);
         
-        const response = await fetch(`${API_URL}/dashboard/insights?${params}`);
+        const response = await fetch(`${API_URL}/dashboard/insights?${params}`, {
+          headers: { ...getAuthHeaders() },
+        });
         if (!response.ok) throw new Error("Failed to fetch insights");
         const result = await response.json();
         set({ insights: result.insights || [], loading: false });
@@ -77,11 +82,15 @@ export const useDashboardStore = create<DashboardState>()(
       }
     },
 
-    fetchModules: async (industry) => {
+    fetchModules: async (industry, organizationId) => {
       set({ loading: true, error: null });
       try {
-        const params = industry ? `?industry=${industry}` : "";
-        const response = await fetch(`${API_URL}/dashboard/modules${params}`);
+        const params = new URLSearchParams();
+        if (industry) params.append("industry", industry);
+        if (organizationId) params.append("organization_id", organizationId);
+        const response = await fetch(`${API_URL}/dashboard/modules?${params}`, {
+          headers: { ...getAuthHeaders() },
+        });
         if (!response.ok) throw new Error("Failed to fetch modules");
         const result = await response.json();
         set({ modules: result.modules || [], loading: false });
@@ -90,10 +99,15 @@ export const useDashboardStore = create<DashboardState>()(
       }
     },
 
-    fetchModuleMetrics: async (module) => {
+    fetchModuleMetrics: async (module, organizationId) => {
       set({ loading: true, error: null });
       try {
-        const response = await fetch(`${API_URL}/dashboard/metrics/${module}`);
+        const params = new URLSearchParams();
+        if (organizationId) params.append("organization_id", organizationId);
+        const qs = params.toString() ? `?${params}` : "";
+        const response = await fetch(`${API_URL}/dashboard/metrics/${module}${qs}`, {
+          headers: { ...getAuthHeaders() },
+        });
         if (!response.ok) throw new Error("Failed to fetch metrics");
         const result = await response.json();
         set({ moduleMetrics: result.metrics || {}, loading: false });

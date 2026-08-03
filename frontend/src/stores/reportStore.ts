@@ -1,4 +1,5 @@
 ﻿import { create } from "zustand";
+import { getAuthHeaders } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
@@ -48,7 +49,7 @@ interface ReportState {
   setCurrentReport: (report: Report | null) => void;
   setReportHistory: (reports: Report[]) => void;
   generateReport: (period?: string, organization_id?: string, useTemplate?: boolean) => Promise<Report>;
-  fetchReportHistory: () => Promise<void>;
+  fetchReportHistory: (organizationId?: string) => Promise<void>;
   downloadReport: (reportId: string, format?: string) => Promise<void>;
   fetchTemplate: (organization_id: string) => Promise<void>;
   uploadTemplate: (organization_id: string, file: File) => Promise<void>;
@@ -103,10 +104,13 @@ export const useReportStore = create<ReportState>()(
       }
     },
 
-    fetchReportHistory: async () => {
+    fetchReportHistory: async (organizationId) => {
       set({ loading: true, error: null });
       try {
-        const response = await fetch(`${API_URL}/reports/history`);
+        const query = organizationId ? `?organization_id=${encodeURIComponent(organizationId)}` : "";
+        const response = await fetch(`${API_URL}/reports/history${query}`, {
+          headers: getAuthHeaders(),
+        });
         if (!response.ok) throw new Error("Failed to fetch reports");
         const result = await response.json();
         const reports = (result.reports || []).map((r: any) => ({

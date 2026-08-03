@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, useRef } from "react";
 import { auth } from "@/lib/firebase";
 import { User, onAuthStateChanged, signOut as firebaseSignOut, getIdToken } from "firebase/auth";
 import { useUserStore } from "@/stores/userStore";
+import { useOrganizationStore } from "@/stores/organizationStore";
 
 type UserRole = "owner" | "employee" | null;
 
@@ -53,7 +54,32 @@ async function clearSession() {
     });
     clearTimeout(timeout);
   } catch {
-    // Expected â€” backend may not be running during sign-out
+    // Expected — backend may not be running during sign-out
+  }
+}
+
+async function resolveOrganization(idToken: string) {
+  try {
+    const res = await fetch(`${API_URL}/organizations/me`, {
+      headers: { Authorization: `Bearer ${idToken}` },
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const org = data.organization;
+    if (!org) return;
+    useOrganizationStore.getState().setOrganization({
+      id: org._id || org.id,
+      name: org.name || "",
+      domain: org.domain || "",
+      industry: org.industry || "",
+      size: org.size || "",
+      micro_vertical: org.micro_vertical,
+      createdAt: org.created_at || new Date().toISOString(),
+      owner_id: org.owner_id,
+      co_owners: org.co_owners || [],
+    });
+  } catch {
+    // Non-fatal — dashboard falls back to generic state
   }
 }
 
@@ -88,6 +114,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
           setRole(result.user?.role || "owner");
           setLastLoginAt(new Date().toISOString());
+          await resolveOrganization(token);
         } else {
           const cached = localStorage.getItem("yesboss_role");
           setRole(cached === "owner" || cached === "employee" ? cached : "owner");
@@ -109,6 +136,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem("yesboss_user");
     localStorage.removeItem("yesboss_role");
     localStorage.removeItem("yesboss_id_token");
+    useOrganizationStore.getState().clearOrganization();
     await clearSession();
     window.location.href = "/login";
   };

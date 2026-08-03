@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { getAuthHeaders } from "@/lib/utils";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, Tabs, TabsList, TabsTrigger, TabsContent, Badge, Button } from "@/components/ui";
 import { BarChart3, Download, FileText, TrendingUp, Users, Loader2, RefreshCw, ArrowLeft, Activity, User } from "lucide-react";
@@ -81,12 +82,13 @@ export default function ReportsPage() {
 
   useEffect(() => {
     fetchSummary();
-    fetch(`${API_URL}/organizations/me`)
+    fetch(`${API_URL}/organizations/me`, { headers: getAuthHeaders() })
       .then((r) => r.json())
       .then((data) => {
         if (data.organization?.id) setOrgId(data.organization.id);
         else if (data.id) setOrgId(data.id);
         else if (data._id) setOrgId(data._id);
+        else if (data.organization?._id) setOrgId(data.organization._id);
       })
       .catch(() => {});
   }, []);

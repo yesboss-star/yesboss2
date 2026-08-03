@@ -41,7 +41,7 @@ class GoogleTasks:
         for lst in resp.json().get("items", []):
             if lst.get("title") == YESBOSS_LIST_NAME:
                 return lst.get("id")
-        create = await self._request("POST", f"{TASKS_API_URL}/lists", token, json={"title": YESBOSS_LIST_NAME})
+        create = await self._request("POST", f"{TASKS_API_URL}/users/@me/lists", token, json={"title": YESBOSS_LIST_NAME})
         if create.status_code == 200:
             return create.json().get("id")
         return None
