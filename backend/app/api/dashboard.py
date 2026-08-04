@@ -418,9 +418,12 @@ async def get_dashboard_kpi(
         raise HTTPException(status_code=400, detail="Organization ID required")
 
     cache_key_data = {"org_id": org_id}
+    if email:
+        cache_key_data["email"] = email.lower().strip()
     if accepted_kpis:
         cache_key_data["accepted_kpis"] = accepted_kpis
-    cached = cache.get("kpi", cache_key_data)
+    use_response_cache = not accepted_kpis
+    cached = cache.get("kpi", cache_key_data) if use_response_cache else None
     if cached is not None:
         return cached
 
@@ -430,7 +433,11 @@ async def get_dashboard_kpi(
 
     if email:
         user_email = email.lower().strip()
-        user_filter = {"organization_id": org_id, "$or": [{"assignee_email": user_email}, {"assigned_to": user_email}]}
+        user_filter = {"organization_id": org_id, "$or": [
+            {"assignee_email": user_email},
+            {"assigned_to": user_email},
+            {"assignee_id": user_email},
+        ]}
         goal_filter = {"organization_id": org_id, "assignee_email": user_email}
 
         total_goals, active_goals, completed_goals = await asyncio.gather(
@@ -604,7 +611,8 @@ async def get_dashboard_kpi(
                     )
                 )
 
-    cache.set("kpi", cache_key_data, kpi_response)
+    if use_response_cache:
+        cache.set("kpi", cache_key_data, kpi_response)
 
     return kpi_response
 

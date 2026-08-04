@@ -53,7 +53,7 @@ function BookingCard({ params, onBook }: { params: BookingParams; onBook: (time:
         </div>
         <p className="text-sm text-foreground font-medium">{r?.title || "Meeting"}</p>
         <p className="text-xs text-text-muted">
-          {(r?.start as string)?.slice(8, 14) || ""} â€“ {(r?.end as string)?.slice(8, 14) || ""}
+          {(r?.start as string)?.slice(8, 14) || ""} – {(r?.end as string)?.slice(8, 14) || ""}
         </p>
         <p className="text-xs text-text-muted">
           {r?.attendees?.length || 0} attendee(s)
@@ -76,7 +76,7 @@ function BookingCard({ params, onBook }: { params: BookingParams; onBook: (time:
             onClick={() => onBook(slot.start)}
             className="px-3 py-2 rounded-lg bg-primary/10 hover:bg-primary/20 border border-primary/20 text-sm font-medium text-primary transition-all cursor-pointer"
           >
-            {slot.start.slice(0, 5)} â€“ {slot.end.slice(0, 5)}
+            {slot.start.slice(0, 5)} – {slot.end.slice(0, 5)}
           </button>
         ))}
       </div>
@@ -641,7 +641,7 @@ function QuestionCard({ question, onAnswer, onSkip, disabled }: QuestionCardProp
               disabled={disabled}
               className="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg border border-dashed border-border hover:border-primary/30 text-sm text-text-muted hover:text-foreground transition-all disabled:opacity-50 cursor-pointer"
             >
-              <span className="w-6 h-6 rounded-full bg-surface-light text-text-muted text-xs flex items-center justify-center">âœï¸</span>
+              <span className="w-6 h-6 rounded-full bg-surface-light text-text-muted text-xs flex items-center justify-center">✏️</span>
               <span>Type my own answer</span>
             </button>
           )}

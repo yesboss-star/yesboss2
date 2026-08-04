@@ -186,9 +186,9 @@ export default function ForgotPasswordPage() {
 
           <div className="space-y-6">
             {[
-              { icon: Mail, text: "Weâ€™ll send a 6-digit code to your email or phone" },
-              { icon: ShieldCheck, text: "Your account stays secure â€” only you can reset it" },
-              { icon: CheckCircle, text: "Choose a new password and youâ€™re back in" },
+              { icon: Mail, text: "We’ll send a 6-digit code to your email or phone" },
+              { icon: ShieldCheck, text: "Your account stays secure — only you can reset it" },
+              { icon: CheckCircle, text: "Choose a new password and you’re back in" },
             ].map((item, i) => (
               <div key={i} className="flex items-center gap-4">
                 <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -294,7 +294,7 @@ export default function ForgotPasswordPage() {
                 {resendTimer > 0 ? `Resend code in ${resendTimer}s` : (
                   <button onClick={handleSendOtp} disabled={loading} className="text-primary hover:underline cursor-pointer">Resend code</button>
                 )}
-                <span className="mx-2">Â·</span>
+                <span className="mx-2">·</span>
                 <button onClick={() => { setStage("send"); setError(""); setOtp(""); }} className="text-text-muted hover:text-foreground cursor-pointer">Change {contactKind === "email" ? "email" : "phone"}</button>
               </div>
             </div>

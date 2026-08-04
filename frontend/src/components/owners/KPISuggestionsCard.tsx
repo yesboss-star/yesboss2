@@ -136,7 +136,7 @@ function buildSuggestionPrompt(args: {
     `Documents uploaded & analyzed: ${documentCount}`,
   ];
   if (triggerDetail) {
-    ctxLines.push(`Recent event: ${triggerSource || "ai"} â€” ${triggerDetail}`);
+    ctxLines.push(`Recent event: ${triggerSource || "ai"} — ${triggerDetail}`);
   }
   if (focusKpi && focusKpiTitle) {
     ctxLines.push(`focus_kpi: The user uploaded data specifically to track "${focusKpiTitle}" (${focusKpi}). If the new document data supports this KPI, PRIORITIZE suggesting it.`);
@@ -147,11 +147,11 @@ function buildSuggestionPrompt(args: {
 
   return `You are a KPI strategist for an executive dashboard.
 
-Step 1 â€” ANALYZE the DOCUMENTS section of the context block above. Scan all document content thoroughly, including row-level data (invoice line items, opportunity rows, etc.), column headers, and any numbers present. The data likely contains transactional details with embedded numeric values. Extract the meaningful KPIs from whatever data exists â€” even row-level transactional data contains revenue, sales amounts, customer names, and deal values you can aggregate.
+Step 1 — ANALYZE the DOCUMENTS section of the context block above. Scan all document content thoroughly, including row-level data (invoice line items, opportunity rows, etc.), column headers, and any numbers present. The data likely contains transactional details with embedded numeric values. Extract the meaningful KPIs from whatever data exists — even row-level transactional data contains revenue, sales amounts, customer names, and deal values you can aggregate.
 
 Set data_sufficient to true if documents exist and contain any numeric or financial data at all (including invoice amounts, opportunity sizes, line-item totals, quantities, dates, customer names). Only set data_sufficient to false if every document is completely empty or contains zero numbers.
 
-Step 2 â€” OUTPUT a single JSON object (no prose, no markdown) with this exact shape:
+Step 2 — OUTPUT a single JSON object (no prose, no markdown) with this exact shape:
 
 {
   "data_sufficient": true | false,
@@ -917,7 +917,7 @@ export default function KPISuggestionsCard() {
           <div className="flex items-center gap-2 p-2.5 rounded-lg bg-surface/40 border border-border/40">
             <Plus className="w-3.5 h-3.5 text-text-muted flex-shrink-0" />
             <p className="text-[11px] text-text-muted">
-              Upload a document or update a goal â€” the AI will proactively suggest new KPIs to track.
+              Upload a document or update a goal — the AI will proactively suggest new KPIs to track.
             </p>
             <Button
               size="sm"

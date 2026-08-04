@@ -28,10 +28,10 @@ const PIPELINE_LABELS: Record<string, { label: string; color: string }> = {
 };
 
 const MOOD_OPTIONS = [
-  { value: "great", emoji: "ðŸŒŸ", label: "Great" },
-  { value: "good", emoji: "ðŸ˜Š", label: "Good" },
-  { value: "okay", emoji: "ðŸ™‚", label: "Okay" },
-  { value: "bad", emoji: "ðŸ˜”", label: "Bad" },
+  { value: "great", emoji: "🌟", label: "Great" },
+  { value: "good", emoji: "😊", label: "Good" },
+  { value: "okay", emoji: "🙂", label: "Okay" },
+  { value: "bad", emoji: "😔", label: "Bad" },
 ];
 
 const TYPE_OPTIONS = [
@@ -164,7 +164,7 @@ function EntryCard({ entry, onDelete, orgId }: { entry: any; onDelete: (id: stri
         <div className="mt-3 p-3 rounded-lg bg-gradient-to-r from-primary/5 to-purple-500/5 border border-primary/10">
           <div className="flex items-center gap-1.5 text-xs text-primary font-medium mb-1.5">
             <Sparkles className="w-3 h-3" />
-            AI Analysis â€” {entry.ai_analysis.category}
+            AI Analysis — {entry.ai_analysis.category}
           </div>
           <p className="text-xs text-text-muted mb-2">{entry.ai_analysis.summary}</p>
           {entry.ai_analysis.actionable_items && entry.ai_analysis.actionable_items.length > 0 && (

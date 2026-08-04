@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from ..api.websocket import manager as ws_manager
 from ..core.database import get_database
 from ..core.email_service import is_email_configured, send_notification_email
+from ..core.ws_bridge import safe_ws
 
 logger = logging.getLogger("yesboss.notification_service")
 
@@ -132,7 +133,7 @@ async def create_and_deliver(
         result = db.notifications.insert_one(notif_doc)
         notif_doc["_id"] = str(result.inserted_id)
 
-        asyncio.create_task(ws_manager.send_personal_message(
+        safe_ws(lambda: ws_manager.send_personal_message(
             {"type": "notification", "data": notif_doc},
             resolved_uid,
         ))

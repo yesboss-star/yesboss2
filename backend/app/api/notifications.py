@@ -102,7 +102,7 @@ async def list_notifications(
 
 
 @router.get("/unread-count")
-async def unread_notification_count(current_user = Depends(get_current_user_optional)):
+async def unread_notification_count(organization_id: str | None = None, current_user = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -111,7 +111,11 @@ async def unread_notification_count(current_user = Depends(get_current_user_opti
     if not user_id:
         return {"count": 0}
 
-    count = db.notifications.count_documents({"user_id": user_id, "read": False})
+    query = {"user_id": user_id, "read": False}
+    if organization_id:
+        query["organization_id"] = organization_id
+
+    count = db.notifications.count_documents(query)
     return {"count": count}
 
 

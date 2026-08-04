@@ -253,7 +253,7 @@ export default function SettingsPage() {
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="text-primary mt-0.5">&bull;</span>
-                      Only one provider can be active â€” connecting Google disconnects Zoho
+                      Only one provider can be active — connecting Google disconnects Zoho
                     </li>
                   </ul>
                 </div>

@@ -352,7 +352,7 @@ export default function CalendarBooking({ onClose }: { onClose?: () => void }) {
           <div className="space-y-4">
             <div className="flex items-center justify-between text-sm">
               <span className="text-text-muted">
-                {date} | {fromTime}â€“{toTime}
+                {date} | {fromTime}–{toTime}
                 <span className="ml-2 text-emerald-400 text-xs">Available</span>
               </span>
               <button onClick={() => setStep("select")} className="text-primary hover:underline cursor-pointer text-xs">
@@ -366,7 +366,7 @@ export default function CalendarBooking({ onClose }: { onClose?: () => void }) {
                 <div className="flex flex-wrap gap-1">
                   {busy.map((b, i) => (
                     <span key={i} className="px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 text-[10px] border border-rose-500/30">
-                      {b.start}â€“{b.end}
+                      {b.start}–{b.end}
                     </span>
                   ))}
                 </div>
@@ -421,7 +421,7 @@ export default function CalendarBooking({ onClose }: { onClose?: () => void }) {
             <p className="text-sm font-medium">Meeting Booked!</p>
             <div className="p-3 rounded-xl bg-surface border border-border/50 text-xs text-left space-y-1">
               <p><strong>Title:</strong> {result.title}</p>
-              <p><strong>Time:</strong> {date} | {fromTime} â€“ {toTime}</p>
+              <p><strong>Time:</strong> {date} | {fromTime} – {toTime}</p>
               <p><strong>Attendees:</strong> {result.attendees?.map((a: any) => a.email || a).join(", ")}</p>
             </div>
             {attendeeResults.length > 0 && (

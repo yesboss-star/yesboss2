@@ -85,7 +85,7 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
 
   useEffect(() => {
     if (!open || !organization?.id) {
-      console.log("[MeetingUploadModal] skip goals fetch â€” open:", open, "orgId:", organization?.id);
+      console.log("[MeetingUploadModal] skip goals fetch — open:", open, "orgId:", organization?.id);
       return;
     }
     console.log("[MeetingUploadModal] fetching goals for org:", organization.id);
@@ -380,11 +380,11 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
         ) : preview ? (
           <div className="space-y-4">
             <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/20">
-              <p className="text-sm font-medium text-blue-400">Review & Confirm â€” {preview.task_count} tasks extracted</p>
+              <p className="text-sm font-medium text-blue-400">Review & Confirm — {preview.task_count} tasks extracted</p>
             </div>
             <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
               {editableTasks.length === 0 ? (
-                <p className="text-sm text-text-muted text-center py-4">No tasks found â€” the AI may not have extracted any tasks from this meeting.</p>
+                <p className="text-sm text-text-muted text-center py-4">No tasks found — the AI may not have extracted any tasks from this meeting.</p>
               ) : (
                 editableTasks.map((t: any, i: number) => (
                 <div key={i} className="p-4 rounded-xl bg-surface border border-border/50">
@@ -501,7 +501,7 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
                           <div className="min-w-0">
                             <p className="text-sm font-medium truncate">{m.full_name}</p>
                             <p className="text-xs text-text-muted truncate">
-                              {[m.role, m.department].filter(Boolean).join(" Â· ") || m.email}
+                              {[m.role, m.department].filter(Boolean).join(" · ") || m.email}
                             </p>
                           </div>
                         </div>
@@ -521,7 +521,7 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
                 className="w-full px-3 py-2 rounded-xl bg-surface border border-border/50 text-sm focus:outline-none focus:border-primary transition-colors"
                 disabled={loading}
               >
-                <option value="">â€” No goal â€”</option>
+                <option value="">— No goal —</option>
                 {goals.map((g) => (
                   <option key={g.id} value={g.id}>{g.title}</option>
                 ))}

@@ -36,7 +36,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Phone login state â€” real Firebase phone+OTP sign-in, no password.
+  // Phone login state — real Firebase phone+OTP sign-in, no password.
   const [phoneOtpLoading, setPhoneOtpLoading] = useState(false);
   const [phoneOtpSent, setPhoneOtpSent] = useState(false);
   const [phoneOtp, setPhoneOtp] = useState("");
@@ -165,7 +165,7 @@ export default function LoginPage() {
       const sessionUser = sessionData.user || {};
 
       if (sessionUser.account_exists === false) {
-        // This phone number was never linked to any account â€” signing in
+        // This phone number was never linked to any account — signing in
         // with it just created a blank Firebase-only identity. Undo it
         // entirely rather than leaving/landing on an empty dashboard.
         try { await firebaseSignOut(auth); } catch {}

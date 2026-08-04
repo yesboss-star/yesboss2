@@ -64,11 +64,11 @@ export function useWebSocket(options: UseWebSocketOptions) {
     const baseWsUrl = rawUrl.replace(/^http/, "ws");
 
     let wsUrl = "";
+    const token = typeof window !== "undefined" ? localStorage.getItem("yesboss_id_token") : "";
     if (options.organizationId) {
-      wsUrl = `${baseWsUrl}/ws/${options.organizationId}`;
-      if (options.userId) wsUrl += `?user_id=${encodeURIComponent(options.userId)}`;
+      wsUrl = `${baseWsUrl}/ws/${encodeURIComponent(options.organizationId)}?user_id=${encodeURIComponent(options.userId || "")}&token=${encodeURIComponent(token || "")}`;
     } else if (options.userId) {
-      wsUrl = `${baseWsUrl}/ws/user/${encodeURIComponent(options.userId)}`;
+      wsUrl = `${baseWsUrl}/ws/user/${encodeURIComponent(options.userId)}?token=${encodeURIComponent(token || "")}`;
     }
 
     if (!wsUrl) return;
@@ -93,6 +93,7 @@ export function useWebSocket(options: UseWebSocketOptions) {
             case "notification": onNotificationRef.current?.(msg.data); break;
             case "goal_created": onGoalCreatedRef.current?.(msg.data); break;
             case "task_created": onTaskCreatedRef.current?.(msg.data); break;
+            case "task_assigned": onTaskCreatedRef.current?.(msg.data); break;
             case "task_updated": onTaskUpdatedRef.current?.(msg.data); break;
           }
         } catch { /* ignore */ }

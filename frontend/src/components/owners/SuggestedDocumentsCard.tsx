@@ -23,7 +23,7 @@ function shorten(text: string, max: number): string {
   if (t.length <= max) return t;
   const slice = t.slice(0, max);
   const lastSpace = slice.lastIndexOf(" ");
-  return (lastSpace > max * 0.6 ? slice.slice(0, lastSpace) : slice) + "â€¦";
+  return (lastSpace > max * 0.6 ? slice.slice(0, lastSpace) : slice) + "…";
 }
 
 const PRIORITY_STYLES: Record<string, string> = {

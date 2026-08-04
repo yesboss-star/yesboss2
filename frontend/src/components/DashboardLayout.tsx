@@ -48,7 +48,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname();
   const [isMobile, setIsMobile] = useState(false);
 
-  // Load avatar from DB on mount â€” always source from API, not stale local state
+  // Load avatar from DB on mount — always source from API, not stale local state
   useEffect(() => {
     if (!user?.email) return;
     // Clean up stale blob URLs from previous sessions

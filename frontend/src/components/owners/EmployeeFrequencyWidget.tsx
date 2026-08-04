@@ -68,7 +68,7 @@ export default function EmployeeFrequencyWidget({ orgId }: { orgId?: string }) {
                 />
               </div>
               {emp.categories?.length > 0 && (
-                <p className="text-[10px] text-text-muted truncate">{emp.categories.join(" Â· ")}</p>
+                <p className="text-[10px] text-text-muted truncate">{emp.categories.join(" · ")}</p>
               )}
             </div>
           );

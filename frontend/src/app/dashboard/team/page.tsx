@@ -100,7 +100,7 @@ export default function TeamPage() {
                       <p className="text-sm font-medium">{member.full_name || "Unknown"}</p>
                       <p className="text-xs text-text-muted">{member.role || member.email}</p>
                     </div>
-                    <div className="hidden sm:block text-sm text-text-muted">{member.department || "â€”"}</div>
+                    <div className="hidden sm:block text-sm text-text-muted">{member.department || "—"}</div>
                   </div>
                 ))}
               </div>

@@ -243,6 +243,15 @@ def _normalize_assignee_ids(v):
     result = list(v)
     return [x for x in result if x is not None]
 
+
+def _normalize_due_date(value):
+    if not value:
+        return value
+    v = str(value).strip().replace("Z", "").replace("+00:00", "").replace("T00:00:00.000", "")
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", v):
+        v = v + "T00:00:00"
+    return v
+
 class TaskCreate(BaseModel):
     title: str
     description: str | None = None
@@ -295,7 +304,7 @@ async def create_task(task: TaskCreate, organization_id: str | None = None, curr
         "assignee_id": assignee_ids,
         "assignee_email": task.assignee_email,
         "department": task.department,
-        "due_date": task.due_date,
+        "due_date": _normalize_due_date(task.due_date),
         "dependencies": task.dependencies or [],
         "reviewers": task.reviewers or [],
         "organization_id": org_id,
@@ -317,9 +326,12 @@ async def create_task(task: TaskCreate, organization_id: str | None = None, curr
     asyncio.create_task(sync_task_to_provider(db, task_doc, org_id))
 
     for aid in assignee_ids:
+        from ..core.notification_service import resolve_uid
+
+        target = resolve_uid(aid)
         asyncio.create_task(ws_manager.send_personal_message(
             {"type": "task_assigned", "data": task_doc},
-            aid
+            target,
         ))
         asyncio.create_task(create_notification(
             user_id=aid,
@@ -366,8 +378,8 @@ async def list_tasks(
     if status:
         query["status"] = status
     if overdue:
-        now = datetime.utcnow()
-        query["due_date"] = {"$lt": now.isoformat()}
+        now = datetime.utcnow().replace(microsecond=0).isoformat()
+        query["due_date"] = {"$lt": now}
         query["status"] = {"$nin": ["completed", "approved"]}
     if priority:
         query["priority"] = priority
@@ -386,6 +398,7 @@ async def list_tasks(
                 {"created_by": current_user.id},
                 {"assignee_email": user_email},
                 {"assigned_to": user_email},
+                {"assignee_id": user_email},
             ]
 
     tasks = list(db.tasks.find(query).sort("created_at", -1))
@@ -461,6 +474,8 @@ async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get
             update_data[k] = _normalize_assignee_ids(v) or []
         elif k == "assignee_name":
             update_data[k] = _normalize_assignee_ids(v) or []
+        elif k == "due_date":
+            update_data[k] = _normalize_due_date(v)
         else:
             update_data[k] = v
     update_data["updated_at"] = datetime.utcnow()
@@ -498,9 +513,12 @@ async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get
 
         for aid in new_assignees:
             if aid != user_id:
+                from ..core.notification_service import resolve_uid
+
+                target = resolve_uid(aid)
                 asyncio.create_task(ws_manager.send_personal_message(
                     {"type": "task_assigned", "data": task_obj},
-                    aid
+                    target,
                 ))
                 asyncio.create_task(create_notification(
                     user_id=aid, org_id=org_id,
@@ -625,6 +643,19 @@ async def approve_task(task_id: str, current_user = Depends(get_current_user_opt
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
 
+        if current_user and getattr(current_user, "id", None):
+            t_org_id = task.get("organization_id", "")
+            if not await _is_org_owner(db, t_org_id, current_user.id):
+                user_email = (getattr(current_user, "email", "") or "").lower().strip()
+                assignee_ids = [str(a).lower().strip() for a in (task.get("assignee_id") or [])]
+                if (
+                    task.get("created_by") != current_user.id
+                    and (task.get("assignee_email") or "").lower().strip() != user_email
+                    and (task.get("assigned_to") or "").lower().strip() != user_email
+                    and user_email not in assignee_ids
+                ):
+                    raise HTTPException(status_code=403, detail="Access denied")
+
         user_id = getattr(current_user, 'id', None) or str(current_user) if current_user else None
 
         db.tasks.update_one(
@@ -736,6 +767,19 @@ async def complete_task(task_id: str, current_user = Depends(get_current_user_op
         task = db.tasks.find_one({"_id": ObjectId(task_id)})
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
+
+        if current_user and getattr(current_user, "id", None):
+            t_org_id = task.get("organization_id", "")
+            if not await _is_org_owner(db, t_org_id, current_user.id):
+                user_email = (getattr(current_user, "email", "") or "").lower().strip()
+                assignee_ids = [str(a).lower().strip() for a in (task.get("assignee_id") or [])]
+                if (
+                    task.get("created_by") != current_user.id
+                    and (task.get("assignee_email") or "").lower().strip() != user_email
+                    and (task.get("assigned_to") or "").lower().strip() != user_email
+                    and user_email not in assignee_ids
+                ):
+                    raise HTTPException(status_code=403, detail="Access denied")
 
         db.tasks.update_one(
             {"_id": ObjectId(task_id)},

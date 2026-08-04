@@ -1,6 +1,7 @@
 ﻿import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { getAuthHeaders } from "@/lib/utils";
+import { useOrganizationStore } from "@/stores/organizationStore";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
@@ -355,3 +356,12 @@ export const useTaskStore = create<TaskState>()(
     }
   )
 );
+
+let lastOrgId: string | undefined;
+useOrganizationStore.subscribe((state) => {
+  const orgId = state.organization?.id;
+  if (orgId !== lastOrgId) {
+    lastOrgId = orgId;
+    if (orgId) useTaskStore.setState({ tasks: [], currentTask: null, comments: [] });
+  }
+});

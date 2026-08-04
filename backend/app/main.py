@@ -150,6 +150,11 @@ async def lifespan(app: FastAPI):
     create_collection("conversations", 1536)
     create_collection("workflows", 1536)
 
+    import asyncio
+
+    from .core.ws_bridge import bind_main_loop
+    bind_main_loop(asyncio.get_running_loop())
+
     scheduler_thread = None
     try:
         from .core.scheduler import start_scheduler

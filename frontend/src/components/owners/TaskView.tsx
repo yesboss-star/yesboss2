@@ -108,7 +108,7 @@ export default function TaskView({ goals: propGoals }: { goals?: any[] }) {
   const { tasks, fetchTasks, updateTask } = useTaskStore();
   const { members, fetchOrgMembers } = useOrgChartStore();
   const orgId = organization?.id;
-  const userId = (user as any)?.email || (user as any)?.id;
+  const userId = (user as any)?.uid || (user as any)?.id;
 
   const [showGoalModal, setShowGoalModal] = useState(false);
   const [realtimeNotif, setRealtimeNotif] = useState<{ type: string; message: string } | null>(null);
@@ -151,16 +151,6 @@ export default function TaskView({ goals: propGoals }: { goals?: any[] }) {
     try { await updateTask(taskId, { status } as any); } catch {}
   };
 
-  const handleWsGoalUpdate = useCallback((data: any) => {
-    if (!data) return;
-    const item = { ...data, id: data._id || data.id };
-    const { goals: gs } = useGoalStore.getState();
-    if (!item.id) return;
-    if (gs.find((g: any) => g.id === item.id)) {
-      useGoalStore.setState({ goals: gs.map((g: any) => g.id === item.id ? item : g) });
-    }
-  }, []);
-
   const handleWsGoalCreated = useCallback((data: any) => {
     if (!data) return;
     const goal = { ...data, id: data._id || data.id };
@@ -181,11 +171,16 @@ export default function TaskView({ goals: propGoals }: { goals?: any[] }) {
     useTaskStore.setState({ tasks: [task, ...ts] });
   }, []);
 
+  const handleWsTaskUpdated = useCallback((data: any) => {
+    if (!data) return;
+    useTaskStore.getState().updateTaskFromWs(data);
+  }, []);
+
   const { isConnected } = useWebSocket({
     organizationId: orgId, userId,
     onGoalCreated: handleWsGoalCreated,
     onTaskCreated: handleWsTaskCreated,
-    onTaskUpdated: handleWsGoalUpdate,
+    onTaskUpdated: handleWsTaskUpdated,
   });
 
   useEffect(() => {

@@ -36,29 +36,55 @@ class ConnectionManager:
 
     async def send_personal_message(self, message: dict, user_id: str):
         if user_id in self.user_connections:
-            stale = set()
-            for connection in self.user_connections[user_id]:
+            for connection in list(self.user_connections[user_id]):
                 try:
                     await connection.send_json(message)
-                except Exception:
-                    stale.add(connection)
-            self.user_connections[user_id] -= stale
+                except Exception as e:
+                    logger.warning("WS send failed (kept alive): %s", e)
 
     async def broadcast_to_organization(self, message: dict, organization_id: str):
         if organization_id in self.active_connections:
-            stale = set()
-            for connection in self.active_connections[organization_id]:
+            for connection in list(self.active_connections[organization_id]):
                 try:
                     await connection.send_json(message)
-                except Exception:
-                    stale.add(connection)
-            self.active_connections[organization_id] -= stale
+                except Exception as e:
+                    logger.warning("WS send failed (kept alive): %s", e)
 
 manager = ConnectionManager()
 
 @router.websocket("/ws/{organization_id}")
-async def websocket_endpoint(websocket: WebSocket, organization_id: str, user_id: str = None):
-    await manager.connect(websocket, organization_id, user_id)
+async def websocket_endpoint(websocket: WebSocket, organization_id: str, user_id: str = None, token: str = None):
+    from ..core.database import get_database
+    from ..core.firebase_admin import verify_id_token
+
+    if not token:
+        await websocket.close(code=4001, reason="Missing token")
+        return
+    auth_user = verify_id_token(token)
+    if not auth_user:
+        await websocket.close(code=4001, reason="Invalid token")
+        return
+
+    db = get_database()
+    org = None
+    if db is not None:
+        from bson import ObjectId
+        org = db.organizations.find_one(
+            {"_id": ObjectId(organization_id) if ObjectId.is_valid(organization_id) else organization_id},
+            {"owner_id": 1, "co_owners": 1},
+        )
+    owners = set(org.get("co_owners") or []) | {org.get("owner_id")} if org else set()
+    uid = auth_user.id
+    is_owner = uid in owners
+    is_employee = False
+    if db is not None and not is_owner:
+        emp = db.users.find_one({"uid": uid, "organization_id": organization_id})
+        is_employee = emp is not None
+    if org is None or not (is_owner or is_employee):
+        await websocket.close(code=4003, reason="Not a member")
+        return
+
+    await manager.connect(websocket, organization_id, auth_user.id)
     try:
         while True:
             data = await websocket.receive_text()
@@ -83,12 +109,22 @@ async def websocket_endpoint(websocket: WebSocket, organization_id: str, user_id
             except json.JSONDecodeError:
                 pass
     except WebSocketDisconnect:
-        manager.disconnect(websocket, organization_id, user_id)
+        manager.disconnect(websocket, organization_id, auth_user.id)
         logger.info(f"WebSocket disconnected. Org: {organization_id}")
 
 @router.websocket("/ws/user/{user_id}")
-async def user_websocket_endpoint(websocket: WebSocket, user_id: str):
-    await manager.connect(websocket, user_id=user_id)
+async def user_websocket_endpoint(websocket: WebSocket, user_id: str, token: str = None):
+    from ..core.firebase_admin import verify_id_token
+
+    if not token:
+        await websocket.close(code=4001, reason="Missing token")
+        return
+    auth_user = verify_id_token(token)
+    if not auth_user or auth_user.id != user_id:
+        await websocket.close(code=4001, reason="Invalid token")
+        return
+
+    await manager.connect(websocket, user_id=auth_user.id)
     try:
         while True:
             data = await websocket.receive_text()
@@ -99,5 +135,5 @@ async def user_websocket_endpoint(websocket: WebSocket, user_id: str):
             except json.JSONDecodeError:
                 pass
     except WebSocketDisconnect:
-        manager.disconnect(websocket, user_id=user_id)
+        manager.disconnect(websocket, user_id=auth_user.id)
         logger.info(f"User WebSocket disconnected: {user_id}")

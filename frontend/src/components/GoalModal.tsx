@@ -469,7 +469,7 @@ export default function GoalModal({ isOpen, onClose, onBack }: GoalModalProps) {
 
           <div ref={parentRef} className="relative">
             <label className="block text-sm font-medium mb-2"><GitBranch className="w-4 h-4 inline mr-1" />
-              {formData.goal_type === "short_term" ? "Link under a Long-Term Goal (optional)" : "Parent Goal (optional â€” makes this a sub-goal)"}
+              {formData.goal_type === "short_term" ? "Link under a Long-Term Goal (optional)" : "Parent Goal (optional — makes this a sub-goal)"}
             </label>
             {formData.goal_type === "short_term" && !formData.parent_goal_id && (
               <div className="mb-2 p-2.5 rounded-lg bg-primary/5 border border-primary/20 text-[11px] text-text-muted flex items-center gap-2">

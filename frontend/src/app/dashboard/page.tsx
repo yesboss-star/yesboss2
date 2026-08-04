@@ -105,7 +105,7 @@ export default function DashboardPage() {
 
   const { isConnected } = useWebSocket({
     organizationId: organization?.id,
-    userId: (user as any)?.email || (user as any)?.id,
+    userId: (user as any)?.uid || (user as any)?.id,
     onTaskCreated: handleWsTaskCreated,
   });
 
@@ -189,6 +189,33 @@ export default function DashboardPage() {
       fetchEmployeeData();
     }
   }, [role, organization?.id]);
+
+  const handleApproveReview = async (reviewId: string) => {
+    try {
+      const res = await fetch(`${API_URL}/tasks/${reviewId}/approve`, {
+        method: "POST",
+        headers: { ...getAuthHeaders() },
+      });
+      if (res.ok) {
+        setPendingReviews((prev) => prev.filter((r) => r.id !== reviewId && r._id !== reviewId));
+        const data = await res.json();
+        if (data?.task) {
+          setAssignedTasks((prev) => prev.map((t) =>
+            t.id === reviewId || t._id === reviewId ? { ...t, status: "approved" } : t
+          ));
+        }
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        console.error("Approve failed:", res.status, errData);
+      }
+    } catch (e) {
+      console.error("Approve error:", e);
+    }
+  };
+
+  const handleReviewDetails = (reviewId: string) => {
+    router.push(`/tasks/${reviewId}`);
+  };
 
   const handleDeleteMeeting = async (meetingId: string) => {
     try {
@@ -390,8 +417,8 @@ export default function DashboardPage() {
                       </div>
                     </div>
                     <div className="flex gap-2">
-                      <Button size="sm" variant="outline" className="cursor-pointer">Approve</Button>
-                      <Button size="sm" variant="ghost" className="cursor-pointer">Details</Button>
+                      <Button size="sm" variant="outline" onClick={() => handleApproveReview(review.id || review._id || "")} className="cursor-pointer">Approve</Button>
+                      <Button size="sm" variant="ghost" onClick={() => handleReviewDetails(review.id || review._id || "")} className="cursor-pointer">Details</Button>
                     </div>
                   </div>
                 ))}
@@ -508,7 +535,7 @@ export default function DashboardPage() {
                                 <div key={m.id || m._id || mi} className="flex items-center gap-3 px-3 py-2.5 pl-12 bg-surface/50 border-b border-border/30 last:border-0">
                                   <div className="flex-1 min-w-0">
                                     <p className="text-xs text-text-muted">
-                                      {m.task_count || 0} tasks Â· {m.created_at ? new Date(m.created_at).toLocaleDateString() : ""}
+                                      {m.task_count || 0} tasks · {m.created_at ? new Date(m.created_at).toLocaleDateString() : ""}
                                     </p>
                                   </div>
                                   <Badge variant="outline" className="text-[10px] flex-shrink-0">{m.task_count || 0}</Badge>
@@ -545,8 +572,8 @@ export default function DashboardPage() {
           <CardContent>
             <div className="space-y-3">
               {(role === "employee" ? getEmployeeInsights() : [
-                { text: kpiData?.completion_rate ? `${kpiData.completion_rate.formatted} task completion rate â€” ${kpiData.completion_rate.change}` : "Loading insights...", type: "info" as const },
-                {text: kpiData?.goal_completion_rate ? `Goal completion at ${kpiData.goal_completion_rate.formatted} â€” ${kpiData.goal_completion_rate.change}` : null, type: "success" as const},
+                { text: kpiData?.completion_rate ? `${kpiData.completion_rate.formatted} task completion rate — ${kpiData.completion_rate.change}` : "Loading insights...", type: "info" as const },
+                {text: kpiData?.goal_completion_rate ? `Goal completion at ${kpiData.goal_completion_rate.formatted} — ${kpiData.goal_completion_rate.change}` : null, type: "success" as const},
                 {text: kpiData?.team_size ? `${kpiData.team_size.formatted} team members ${kpiData.team_size.change}` : null, type: "info" as const},
               ].filter(i => i.text !== null) as { text: string; type: "success" | "warning" | "info" }[]).map((insight, i) => (
                 <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-surface">

@@ -28,7 +28,7 @@ interface NotificationState {
   setError: (error: string | null) => void;
   fetchNotifications: (params?: { read?: boolean; type?: string; limit?: number; organization_id?: string }) => Promise<void>;
   fetchUnreadCount: () => Promise<number>;
-  refreshUnreadCount: () => Promise<void>;
+  refreshUnreadCount: (organization_id?: string) => Promise<void>;
   markAsRead: (notificationId: string) => Promise<void>;
   markAllAsRead: (organization_id?: string) => Promise<void>;
   deleteNotification: (notificationId: string) => Promise<void>;
@@ -63,7 +63,15 @@ export const useNotificationStore = create<NotificationState>()((set, get) => ({
         ...n,
         id: n._id || n.id,
       }));
-      set({ notifications, loading: false });
+      set((state) => {
+        const byId = new Map<string, Notification>();
+        for (const n of state.notifications) byId.set(n.id, n);
+        for (const n of notifications) byId.set(n.id, n);
+        const merged = Array.from(byId.values()).sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+        return { notifications: merged, loading: false };
+      });
     } catch (error: any) {
       set({ error: error.message, loading: false });
     }
@@ -82,9 +90,10 @@ export const useNotificationStore = create<NotificationState>()((set, get) => ({
     }
   },
 
-  refreshUnreadCount: async () => {
+  refreshUnreadCount: async (organization_id?: string) => {
     try {
-      const response = await fetch(`${API_URL}/notifications/unread-count`, {
+      const params = organization_id ? `?organization_id=${encodeURIComponent(organization_id)}` : "";
+      const response = await fetch(`${API_URL}/notifications/unread-count${params}`, {
         headers: { ...getAuthHeaders() },
       });
       if (!response.ok) return;

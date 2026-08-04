@@ -86,7 +86,7 @@ function ReviewActions({ goalId, goalTitle, onReviewComplete }: { goalId: string
     <div className="p-4 rounded-xl bg-amber-500/5 border border-amber-500/20 space-y-3">
       <p className="text-sm font-medium flex items-center gap-2">
         <Clock className="w-4 h-4 text-amber-400" />
-        <span>Review Required â€” <span className="text-amber-400">"{goalTitle}"</span> is marked as complete</span>
+        <span>Review Required — <span className="text-amber-400">"{goalTitle}"</span> is marked as complete</span>
       </p>
       <div className="flex gap-2">
         <button
@@ -94,20 +94,20 @@ function ReviewActions({ goalId, goalTitle, onReviewComplete }: { goalId: string
           disabled={submitting}
           className="flex-1 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium transition-all cursor-pointer disabled:opacity-50"
         >
-          {submitting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "âœ“ Approve"}
+          {submitting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "✔ Approve"}
         </button>
         <button
           onClick={() => handleReview("reject")}
           disabled={submitting || !feedback.trim()}
           className="flex-1 py-2 rounded-lg bg-rose-500 hover:bg-rose-600 text-white text-sm font-medium transition-all cursor-pointer disabled:opacity-50"
         >
-          {submitting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "âœ— Send Back"}
+          {submitting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "✗ Send Back"}
         </button>
       </div>
       <textarea
         value={feedback}
         onChange={(e) => setFeedback(e.target.value)}
-        placeholder="Optional feedback â€” why are you sending this back?"
+        placeholder="Optional feedback — why are you sending this back?"
         rows={2}
         className="w-full px-3 py-2 rounded-lg bg-surface border border-border focus:border-primary focus:outline-none text-sm resize-none"
       />
@@ -145,7 +145,7 @@ function RequestReviewButton({ goalId, goalTitle, onReviewRequested }: { goalId:
         className="w-full py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
       >
         {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-        {submitting ? "Submitting..." : "Mark as Complete â€” Request Review"}
+        {submitting ? "Submitting..." : "Mark as Complete — Request Review"}
       </button>
       <p className="text-xs text-text-muted mt-2 text-center">The owner will review and approve your completion</p>
     </div>
@@ -304,7 +304,7 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
 
   const loadTasks = useCallback(() => {
     setLoading(true);
-    fetch(`${API_URL}/goals/${goal.id}`)
+    fetch(`${API_URL}/goals/${goal.id}`, { headers: getAuthHeaders() })
       .then((r) => r.json())
       .then((data) => {
         const normalizeList = (v: any) => Array.isArray(v) ? v : (v ? [v] : []);
@@ -441,12 +441,12 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
                 )}
               </div>
 
-              {/* Approve/Reject â€” shown when goal is pending_review and current user is the owner */}
+              {/* Approve/Reject — shown when goal is pending_review and current user is the owner */}
               {goal.status === "pending_review" && user?.uid === goal.created_by && (
                 <ReviewActions goalId={goal.id || goal._id} goalTitle={goal.title} onReviewComplete={() => { loadTasks(); if (propOrgId) fetchGoals(propOrgId); }} />
               )}
 
-              {/* Request Review â€” shown when goal is active and current user is NOT the owner (assignee side) */}
+              {/* Request Review — shown when goal is active and current user is NOT the owner (assignee side) */}
               {goal.status === "active" && user?.uid !== goal.created_by && (
                 <RequestReviewButton goalId={goal.id || goal._id} goalTitle={goal.title} onReviewRequested={() => { loadTasks(); if (propOrgId) fetchGoals(propOrgId); }} />
               )}
@@ -932,7 +932,7 @@ function TaskRow({
         >
           <span className="flex items-center gap-1 truncate">
             <User className="w-3 h-3 flex-shrink-0" />
-            {selected ? <span className="truncate">{selected}</span> : <span className="text-text-muted/60">Assignâ€¦</span>}
+            {selected ? <span className="truncate">{selected}</span> : <span className="text-text-muted/60">Assign…</span>}
           </span>
           <ChevronDown className="w-3 h-3 flex-shrink-0" />
         </button>
@@ -1052,7 +1052,7 @@ function InlinePersonPicker({
       >
         <User className="w-3 h-3 flex-shrink-0" />
         <span className="truncate flex-1 text-left">
-          {selected || `${label}â€¦`}
+          {selected || `${label}…`}
         </span>
         {saving ? <Loader2 className="w-3 h-3 animate-spin flex-shrink-0" /> : <ChevronDown className="w-3 h-3 flex-shrink-0 opacity-60" />}
       </button>
@@ -1294,7 +1294,7 @@ function DepartmentGoalsModal({
               <div className="flex flex-col">
                 <span>{department.name} Goals</span>
                 <span className="text-[10px] text-text-muted font-normal">
-                  {goals.length} goal{goals.length === 1 ? "" : "s"} Â· {activeCount} active Â· {completedCount} done Â· {unassignedCount} unassigned
+                  {goals.length} goal{goals.length === 1 ? "" : "s"} · {activeCount} active · {completedCount} done · {unassignedCount} unassigned
                 </span>
               </div>
             </div>
@@ -2883,7 +2883,7 @@ function DataCharts({ goals, tasks }: { goals: any[]; tasks?: any[] }) {
 
   useEffect(() => {
     if (!organization?.id) return;
-    fetch(`${API_URL}/tasks?organization_id=${organization.id}`)
+    fetch(`${API_URL}/tasks?organization_id=${organization.id}`, { headers: getAuthHeaders() })
       .then((r) => r.json())
       .then((data) => setChartTasks(data.tasks || []))
       .catch(() => {});
@@ -3197,7 +3197,7 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
     if (!orgId) return;
     setEscalationsLoading(true);
     try {
-      const res = await fetch(`${API_URL}/tasks?organization_id=${orgId}&overdue=true&escalation_level=2`);
+      const res = await fetch(`${API_URL}/tasks?organization_id=${orgId}&overdue=true&escalation_level=2`, { headers: getAuthHeaders() });
       if (res.ok) {
         const data = await res.json();
         setEscalatedTasks(data.tasks || []);
@@ -3230,7 +3230,7 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
     if (!orgId) return;
     setMeetingHistoryLoading(true);
     try {
-      const res = await fetch(`${API_URL}/meetings/history?organization_id=${orgId}&limit=50`);
+      const res = await fetch(`${API_URL}/meetings/history?organization_id=${orgId}&limit=50`, { headers: getAuthHeaders() });
       if (res.ok) {
         const data = await res.json();
         setMeetingHistory(data.meetings || []);
@@ -3353,7 +3353,7 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
           </h1>
           <p className="text-text-muted mt-1">
             {organization?.name
-              ? `${organization.name} â€” ${organization.industry || "Business"}${organization.micro_vertical ? ` â€” ${organization.micro_vertical}` : ""}`
+              ? `${organization.name} — ${organization.industry || "Business"}${organization.micro_vertical ? ` — ${organization.micro_vertical}` : ""}`
               : "Your business command center"}
           </p>
         </div>
@@ -3522,7 +3522,7 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
                             <div key={m.id} className="flex items-center gap-3 px-3 py-2.5 pl-12 bg-surface/50 border-b border-border/30 last:border-0">
                               <div className="flex-1 min-w-0">
                                 <p className="text-xs text-text-muted">
-                                  {m.task_count || 0} tasks Â· {m.created_at ? new Date(m.created_at).toLocaleDateString() : ""}
+                                  {m.task_count || 0} tasks · {m.created_at ? new Date(m.created_at).toLocaleDateString() : ""}
                                 </p>
                               </div>
                               <Badge variant="outline" className="text-[10px] flex-shrink-0">{m.task_count || 0}</Badge>
@@ -3570,7 +3570,7 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
               </div>
               <Badge variant="warning" className="text-xs">{escalatedTasks.length} escalated</Badge>
             </div>
-            <CardDescription>Tasks escalated to owner â€” overdue 3+ days</CardDescription>
+            <CardDescription>Tasks escalated to owner — overdue 3+ days</CardDescription>
           </CardHeader>
           <CardContent>
             {escalationsLoading ? (
@@ -3593,7 +3593,7 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium truncate">{task.title}</p>
                         <p className="text-xs text-text-muted">
-                          {assignee} Â· {daysOverdue}d overdue
+                          {assignee} · {daysOverdue}d overdue
                         </p>
                       </div>
                       <Button

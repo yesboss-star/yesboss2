@@ -5,7 +5,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1
 
 /**
  * Choose the calendar API base for the user's connected provider.
- * Google takes precedence (either/or model â€” only one is connected at a time).
+ * Google takes precedence (either/or model — only one is connected at a time).
  */
 export function getCalendarBase(): string {
   const google = useGoogleStore.getState();

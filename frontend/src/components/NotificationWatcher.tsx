@@ -56,7 +56,8 @@ export function NotificationWatcher({ children }: { children: React.ReactNode })
 
     const rawUrl = (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1").replace(/\/api\/v1\/?$/, "");
     const baseWsUrl = rawUrl.replace(/^http/, "ws");
-    const wsUrl = `${baseWsUrl}/ws/${encodeURIComponent(orgId)}?user_id=${encodeURIComponent(userId)}`;
+    const token = typeof window !== "undefined" ? localStorage.getItem("yesboss_id_token") : "";
+    const wsUrl = `${baseWsUrl}/ws/${encodeURIComponent(orgId)}?user_id=${encodeURIComponent(userId)}&token=${encodeURIComponent(token || "")}`;
 
     try {
       const ws = new WebSocket(wsUrl);
@@ -120,12 +121,12 @@ export function NotificationWatcher({ children }: { children: React.ReactNode })
     if (orgId) {
       fetchNotifications({ limit: 50, organization_id: orgId });
     }
-    refreshUnreadCount();
+    refreshUnreadCount(orgId);
     connect();
     registerPushNotifications();
 
     const pollInterval = setInterval(() => {
-      refreshUnreadCount();
+      refreshUnreadCount(orgId);
       if (organization?.id) {
         fetchNotifications({ limit: 10, organization_id: organization.id });
       }
