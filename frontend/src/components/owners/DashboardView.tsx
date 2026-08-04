@@ -32,7 +32,7 @@ import {
   PieChart as RePieChart, Pie, Cell, LineChart as ReLineChart, Line,
   AreaChart, Area, Legend
 } from "recharts";
-import { getAuthHeaders } from "@/lib/utils";
+import { fetchDeduped, getAuthHeaders } from "@/lib/utils";
 import KPISuggestionsCard from "@/components/owners/KPISuggestionsCard";
 import AcceptedKPIBanner from "@/components/owners/AcceptedKPIBanner";
 import AISummaryChat from "@/components/AISummaryChat";
@@ -3027,7 +3027,7 @@ function RevenueRiskRadar() {
   const fetchRisk = useCallback(() => {
     if (!organization?.id) return;
     setLoading(true);
-    fetch(`${API_URL}/dashboard/kpi?organization_id=${organization.id}`)
+    fetchDeduped(`${API_URL}/dashboard/kpi?organization_id=${organization.id}`)
       .then((r) => r.json())
       .then((data) => {
         const computed = [];

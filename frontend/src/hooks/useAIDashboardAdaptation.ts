@@ -99,7 +99,7 @@ export function useAIDashboardAdaptation() {
   useEffect(() => {
     if (orgId) {
       fetchGoals(orgId);
-      fetchOrgMembers();
+      fetchOrgMembers(orgId);
       fetchTasks(orgId);
     }
   }, [orgId, fetchGoals, fetchOrgMembers, fetchTasks]);

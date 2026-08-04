@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import logging
@@ -22,6 +23,9 @@ logger = logging.getLogger("yesboss.dashboard")
 # TTL: 600s (10 min) to avoid calling AI on every 30s refresh
 _ai_kpi_cache: dict[str, tuple[float, dict]] = {}
 _AI_KPI_CACHE_TTL = 600
+
+# Track in-flight background KPI extraction per org so we never double-fire
+_ai_kpi_inflight: set[str] = set()
 
 
 def get_user_org_id(user) -> str | None:
@@ -332,6 +336,72 @@ async def get_dashboard_modules(
     }
 
 
+async def _count(db, collection: str, query: dict) -> int:
+    return await asyncio.to_thread(getattr(db, collection).count_documents, query)
+
+
+async def _fetch_missing_kpis_async(
+    db,
+    org_id: str,
+    org_industry: str,
+    org_micro_vertical: str,
+    missing_kpis: list,
+    ai_cache_key: str,
+) -> None:
+    """Compute missing accepted-KPI values from uploaded docs and seed the AI cache.
+
+    Runs as a background task so the /kpi request returns immediately.
+    """
+    try:
+        from ..core.ai_client import get_ai_response
+        from ..core.prompt_engine import PERSONA_INSTRUCTIONS
+        kpi_persona = PERSONA_INSTRUCTIONS.get("kpi_analyst", "You are a business analytics expert. Return ONLY valid JSON.")
+
+        doc_previews = []
+        docs = list(db.documents.find({"org_id": org_id}).sort("created_at", -1).limit(5))
+        for d in docs:
+            preview = (d.get("text", "") or "")[:5000]
+            doc_previews.append(f"{d.get('filename', 'unknown')}: {preview}")
+        doc_context = "\n".join(doc_previews) if doc_previews else "No document content available."
+
+        kpi_descriptions = "\n".join(f'- {k["key"]} ({k.get("title", k["key"])})' for k in missing_kpis)
+        ai_prompt = (
+            f"Organization in the {org_industry} industry"
+            + (f" ({org_micro_vertical})" if org_micro_vertical else "")
+            + f".\n\nUploaded document content:\n{doc_context}\n\n"
+            "The user has accepted the following KPIs and needs current values computed from their uploaded data:\n"
+            + kpi_descriptions
+            + "\n\nFor each KPI listed above, extract the most current value from the uploaded document content. "
+            "Return ONLY a JSON object where keys are the KPI key names and values are objects with: "
+            "'value' (number or string), 'formatted' (string for display, e.g. '$1.2M', '450 customers', '23%'), "
+            "'change' (trend description), 'trend' ('up'/'down'/'neutral'), "
+            "'label' (human-readable display name), 'description' (short detail), 'icon' (lucide icon name: TrendingUp, BarChart3, Target, DollarSign, Users, Activity, Zap, Flag, FileText). "
+            "If a KPI cannot be computed from available data, set value to null and formatted to 'Data pending — upload more data'."
+        )
+        ai_result = await get_ai_response(
+            prompt=ai_prompt,
+            system_prompt=kpi_persona,
+            provider="xai",
+            temperature=0.3,
+            max_tokens=1000,
+        )
+        json_match = re.search(r'\{.*\}', ai_result, re.DOTALL)
+        if json_match:
+            parsed_json = json.loads(json_match.group())
+            if isinstance(parsed_json, dict):
+                needed_keys = {k["key"] for k in missing_kpis}
+                ai_values = {}
+                for key, val in parsed_json.items():
+                    if isinstance(val, dict) and key in needed_keys:
+                        ai_values[key] = val
+                if ai_values:
+                    _ai_kpi_cache[ai_cache_key] = (time.time(), ai_values)
+    except Exception as e:
+        logger.warning(f"AI accepted KPI value extraction failed: {e}")
+    finally:
+        _ai_kpi_inflight.discard(ai_cache_key)
+
+
 @router.get("/kpi")
 async def get_dashboard_kpi(
     organization_id: str | None = Query(None),
@@ -347,7 +417,14 @@ async def get_dashboard_kpi(
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
 
-    org = db.organizations.find_one({"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id})
+    cache_key_data = {"org_id": org_id}
+    if accepted_kpis:
+        cache_key_data["accepted_kpis"] = accepted_kpis
+    cached = cache.get("kpi", cache_key_data)
+    if cached is not None:
+        return cached
+
+    org = await asyncio.to_thread(db.organizations.find_one, {"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id})
     org_industry = org.get("industry", "") if org else ""
     org_micro_vertical = org.get("micro_vertical", "") if org else ""
 
@@ -356,38 +433,46 @@ async def get_dashboard_kpi(
         user_filter = {"organization_id": org_id, "$or": [{"assignee_email": user_email}, {"assigned_to": user_email}]}
         goal_filter = {"organization_id": org_id, "assignee_email": user_email}
 
-        total_goals = db.goals.count_documents(goal_filter)
-        active_goals = db.goals.count_documents({**goal_filter, "status": "active"})
-        completed_goals = db.goals.count_documents({**goal_filter, "status": "completed"})
+        total_goals, active_goals, completed_goals = await asyncio.gather(
+            _count(db, "goals", goal_filter),
+            _count(db, "goals", {**goal_filter, "status": "active"}),
+            _count(db, "goals", {**goal_filter, "status": "completed"}),
+        )
 
-        total_tasks = db.tasks.count_documents(user_filter)
-        completed_tasks = db.tasks.count_documents({**user_filter, "status": "completed"})
-        in_progress_tasks = db.tasks.count_documents({**user_filter, "status": "in_progress"})
-        pending_tasks = db.tasks.count_documents({**user_filter, "status": "pending"})
+        total_tasks, completed_tasks, in_progress_tasks, pending_tasks = await asyncio.gather(
+            _count(db, "tasks", user_filter),
+            _count(db, "tasks", {**user_filter, "status": "completed"}),
+            _count(db, "tasks", {**user_filter, "status": "in_progress"}),
+            _count(db, "tasks", {**user_filter, "status": "pending"}),
+        )
 
-        member = db.org_chart_members.find_one({"organization_id": org_id, "email": user_email})
+        member = await asyncio.to_thread(db.org_chart_members.find_one, {"organization_id": org_id, "email": user_email})
         emp_dept = member.get("department", "") if member else ""
-        dept_members = db.org_chart_members.count_documents({"organization_id": org_id, "department": emp_dept}) if emp_dept else 0
-        total_members = db.org_chart_members.count_documents({"organization_id": org_id})
-        departments = db.org_chart_members.distinct("department", {"organization_id": org_id})
+        dept_members, total_members, departments = await asyncio.gather(
+            _count(db, "org_chart_members", {"organization_id": org_id, "department": emp_dept}) if emp_dept else asyncio.sleep(0, result=0),
+            _count(db, "org_chart_members", {"organization_id": org_id}),
+            asyncio.to_thread(db.org_chart_members.distinct, "department", {"organization_id": org_id}),
+        )
         dept_count = len(departments)
     else:
-        total_goals = db.goals.count_documents({"organization_id": org_id})
-        active_goals = db.goals.count_documents({"organization_id": org_id, "status": "active"})
-        completed_goals = db.goals.count_documents({"organization_id": org_id, "status": "completed"})
-
-        total_tasks = db.tasks.count_documents({"organization_id": org_id})
-        completed_tasks = db.tasks.count_documents({"organization_id": org_id, "status": "completed"})
-        in_progress_tasks = db.tasks.count_documents({"organization_id": org_id, "status": "in_progress"})
-        pending_tasks = db.tasks.count_documents({"organization_id": org_id, "status": "pending"})
-
-        total_members = db.org_chart_members.count_documents({"organization_id": org_id})
-        departments = db.org_chart_members.distinct("department", {"organization_id": org_id})
+        total_goals, active_goals, completed_goals, total_tasks, completed_tasks, in_progress_tasks, pending_tasks, total_members = await asyncio.gather(
+            _count(db, "goals", {"organization_id": org_id}),
+            _count(db, "goals", {"organization_id": org_id, "status": "active"}),
+            _count(db, "goals", {"organization_id": org_id, "status": "completed"}),
+            _count(db, "tasks", {"organization_id": org_id}),
+            _count(db, "tasks", {"organization_id": org_id, "status": "completed"}),
+            _count(db, "tasks", {"organization_id": org_id, "status": "in_progress"}),
+            _count(db, "tasks", {"organization_id": org_id, "status": "pending"}),
+            _count(db, "org_chart_members", {"organization_id": org_id}),
+        )
+        departments = await asyncio.to_thread(db.org_chart_members.distinct, "department", {"organization_id": org_id})
         dept_count = len(departments)
 
     completion_rate = round((completed_tasks / total_tasks * 100) if total_tasks > 0 else 0, 1)
-    total_files = db.files.count_documents({"organization_id": org_id})
-    total_docs = db.documents.count_documents({"org_id": org_id})
+    total_files, total_docs = await asyncio.gather(
+        _count(db, "files", {"organization_id": org_id}),
+        _count(db, "documents", {"org_id": org_id}),
+    )
 
     kpi_response = {}
 
@@ -506,58 +591,19 @@ async def get_dashboard_kpi(
             cached_ai = _ai_kpi_cache.get(ai_cache_key)
             if cached_ai and (now - cached_ai[0]) < _AI_KPI_CACHE_TTL:
                 kpi_response.update(cached_ai[1])
-            else:
-                try:
-                    from ..core.ai_client import get_ai_response
-                    from ..core.prompt_engine import PERSONA_INSTRUCTIONS
-                    kpi_persona = PERSONA_INSTRUCTIONS.get("kpi_analyst", "You are a business analytics expert. Return ONLY valid JSON.")
-
-                    doc_previews = []
-                    docs = list(db.documents.find({"org_id": org_id}).sort("created_at", -1).limit(5))
-                    for d in docs:
-                        preview = (d.get("text", "") or "")[:5000]
-                        doc_previews.append(f"{d.get('filename', 'unknown')}: {preview}")
-                    doc_context = "\n".join(doc_previews) if doc_previews else "No document content available."
-
-                    kpi_descriptions = "\n".join(f'- {k["key"]} ({k.get("title", k["key"])})' for k in missing_kpis)
-                    ai_prompt = (
-                        f"Organization in the {org_industry} industry"
-                        + (f" ({org_micro_vertical})" if org_micro_vertical else "")
-                        + f".\n\nUploaded document content:\n{doc_context}\n\n"
-                        "The user has accepted the following KPIs and needs current values computed from their uploaded data:\n"
-                        + kpi_descriptions
-                        + "\n\nFor each KPI listed above, extract the most current value from the uploaded document content. "
-                        "Return ONLY a JSON object where keys are the KPI key names and values are objects with: "
-                        "'value' (number or string), 'formatted' (string for display, e.g. '$1.2M', '450 customers', '23%'), "
-                        "'change' (trend description), 'trend' ('up'/'down'/'neutral'), "
-                        "'label' (human-readable display name), 'description' (short detail), 'icon' (lucide icon name: TrendingUp, BarChart3, Target, DollarSign, Users, Activity, Zap, Flag, FileText). "
-                        "If a KPI cannot be computed from available data, set value to null and formatted to 'Data pending — upload more data'."
+            elif ai_cache_key not in _ai_kpi_inflight:
+                _ai_kpi_inflight.add(ai_cache_key)
+                asyncio.create_task(
+                    _fetch_missing_kpis_async(
+                        db,
+                        org_id,
+                        org_industry,
+                        org_micro_vertical,
+                        missing_kpis,
+                        ai_cache_key,
                     )
-                    ai_result = await get_ai_response(
-                        prompt=ai_prompt,
-                        system_prompt=kpi_persona,
-                        provider="xai",
-                        temperature=0.3,
-                        max_tokens=1000,
-                    )
-                    json_match = re.search(r'\{.*\}', ai_result, re.DOTALL)
-                    if json_match:
-                        parsed_json = json.loads(json_match.group())
-                        if isinstance(parsed_json, dict):
-                            needed_keys = {k["key"] for k in missing_kpis}
-                            ai_values = {}
-                            for key, val in parsed_json.items():
-                                if isinstance(val, dict) and key in needed_keys:
-                                    kpi_response[key] = val
-                                    ai_values[key] = val
-                            if ai_values:
-                                _ai_kpi_cache[ai_cache_key] = (now, ai_values)
-                except Exception as e:
-                    logger.warning(f"AI accepted KPI value extraction failed: {e}")
+                )
 
-    cache_key_data = {"org_id": org_id}
-    if accepted_kpis:
-        cache_key_data["accepted_kpis"] = accepted_kpis
     cache.set("kpi", cache_key_data, kpi_response)
 
     return kpi_response

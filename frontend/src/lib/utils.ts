@@ -16,3 +16,16 @@ export function getAuthHeaders(): Record<string, string> {
   }
   return headers;
 }
+
+const inflightFetches = new Map<string, Promise<Response>>();
+
+export function fetchDeduped(url: string, init?: RequestInit): Promise<Response> {
+  const key = `${init?.method || "GET"}|${url}`;
+  const existing = inflightFetches.get(key);
+  if (existing) return existing;
+  const promise = fetch(url, init).finally(() => {
+    inflightFetches.delete(key);
+  });
+  inflightFetches.set(key, promise);
+  return promise;
+}

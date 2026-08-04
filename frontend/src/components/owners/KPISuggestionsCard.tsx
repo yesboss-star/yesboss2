@@ -31,6 +31,7 @@ import { useOrganizationStore } from "@/stores/organizationStore";
 import { useGoalStore } from "@/stores/goalStore";
 import { useTaskStore } from "@/stores/taskStore";
 import { useOrgChartStore } from "@/stores/orgChartStore";
+import { fetchDeduped } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
@@ -540,7 +541,7 @@ export default function KPISuggestionsCard() {
       if (accepted.length > 0) {
         url += `&accepted_kpis=${encodeURIComponent(JSON.stringify(accepted.map(k => ({ key: k.key, title: k.title }))))}`;
       }
-      const res = await fetch(url);
+      const res = await fetchDeduped(url);
       if (!res.ok) {
         console.warn(`[KPI] fetchValues API returned ${res.status}`);
         return;

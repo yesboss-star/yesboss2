@@ -15,7 +15,7 @@ import CalendarBooking from "@/components/owners/CalendarBooking";
 import MeetingUploadModal from "@/components/owners/MeetingUploadModal";
 import AISummaryChat from "@/components/AISummaryChat";
 import { useWebSocket } from "@/hooks/useWebSocket";
-import { getAuthHeaders } from "@/lib/utils";
+import { fetchDeduped, getAuthHeaders } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
@@ -144,7 +144,7 @@ export default function DashboardPage() {
     setKpiError(false);
     try {
       const emailParam = role === "employee" && user?.email ? `&email=${encodeURIComponent(user.email)}` : "";
-      const res = await fetch(`${API_URL}/dashboard/kpi?organization_id=${organization.id}${emailParam}`, { headers: getAuthHeaders() });
+      const res = await fetchDeduped(`${API_URL}/dashboard/kpi?organization_id=${organization.id}${emailParam}`, { headers: getAuthHeaders() });
       if (res.ok) {
         const data = await res.json();
         setKpiData(data);
