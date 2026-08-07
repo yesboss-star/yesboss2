@@ -22,6 +22,24 @@ def get_user_email(user) -> str:
     return getattr(user, "email", "")
 
 
+def _request_origin(request: Request) -> str:
+    """Return the public origin (scheme://netloc) of this request.
+
+    The app sits behind nginx which terminates TLS, so the upstream request uvicorn
+    sees is plain http — request.base_url is therefore http://vsllp.live. For any
+    non-loopback host, upgrade to https so OAuth redirect URIs match the registered
+    public https URLs. Loopback hosts (localhost / 127.0.0.1) are normalized to
+    localhost and left as http (local dev).
+    """
+    base = str(request.base_url).rstrip("/")
+    base = base.replace("://127.0.0.1", "://localhost", 1)
+    host = (request.url.hostname or "").lower()
+    loopback = host in ("localhost", "127.0.0.1", "::1", "0.0.0.0", "testserver")
+    if not loopback and base.startswith("http://"):
+        base = "https://" + base[len("http://"):]
+    return base
+
+
 @router.get("/auth-url")
 async def get_auth_url(
     request: Request,
@@ -32,9 +50,7 @@ async def get_auth_url(
         raise HTTPException(status_code=401, detail="Not authenticated")
     google = GoogleOAuth(get_database())
     try:
-        redirect_uri = f"{str(request.base_url).rstrip('/')}/api/v1/google/callback"
-        # Normalize loopback host so the derived URI matches the registered one.
-        redirect_uri = redirect_uri.replace("://127.0.0.1", "://localhost", 1)
+        redirect_uri = f"{_request_origin(request)}/api/v1/google/callback"
         url = google.get_auth_url(state=user_id, redirect_uri=redirect_uri)
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -61,8 +77,7 @@ async def google_callback(
         db = get_database()
         google = GoogleOAuth(db)
 
-        redirect_uri = str(request.url).split("?", 1)[0]
-        redirect_uri = redirect_uri.replace("://127.0.0.1", "://localhost", 1)
+        redirect_uri = f"{_request_origin(request)}/api/v1/google/callback"
 
         token_data = await google.exchange_code(code, redirect_uri=redirect_uri)
         if not token_data:
@@ -123,8 +138,8 @@ async def google_callback(
 
         from ..core.config import settings
         frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
-        # Prefer the request's own origin (reliable behind nginx) over the env value.
-        request_origin = str(request.base_url).rstrip("/")
+        # Prefer the request's own public origin (reliable behind nginx) over the env value.
+        request_origin = _request_origin(request)
         if request_origin and "localhost" not in request_origin:
             frontend_url = request_origin
         redirect_url = f"{frontend_url}/dashboard/settings?google=connected"

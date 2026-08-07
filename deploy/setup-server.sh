@@ -117,6 +117,15 @@ else
   printf "export API_URL=https://%s/api/v1\n" "$DOMAIN" >> "$ENV_FILE"
 fi
 
+# ZOHO_REDIRECT_URI / GOOGLE_REDIRECT_URI (must match the OAuth consoles)
+for var in ZOHO_REDIRECT_URI GOOGLE_REDIRECT_URI; do
+  if grep -q "^${var}=" "$ENV_FILE" 2>/dev/null; then
+    sed -i "s|^${var}=.*|${var}=https://$DOMAIN/api/v1/$(echo "$var" | sed 's/_REDIRECT_URI//' | tr 'A-Z' 'a-z')/callback|" "$ENV_FILE"
+  else
+    printf "export %s=https://%s/api/v1/%s/callback\n" "$var" "$DOMAIN" "$(echo "$var" | sed 's/_REDIRECT_URI//' | tr 'A-Z' 'a-z')" >> "$ENV_FILE"
+  fi
+done
+
 echo ""
 echo "=== Server setup complete ==="
 echo "Site:     https://$DOMAIN"
