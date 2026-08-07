@@ -437,7 +437,7 @@ async def list_goals(
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
-    from ..dependencies.scope import is_org_member
+    from ..dependencies.scope import is_org_member, is_org_owner
 
     org_id = organization_id or get_user_org_id(current_user)
     if not org_id:
@@ -446,9 +446,11 @@ async def list_goals(
     if not await is_org_member(db, org_id, current_user):
         raise HTTPException(status_code=403, detail="Access denied")
 
-    # Auto-seed 5 default goals if none exist for this organization
+    is_owner = await is_org_owner(db, org_id, current_user)
+
+    # Auto-seed 5 default goals if none exist for this organization (owners only)
     total_goals = db.goals.count_documents({"organization_id": org_id})
-    if total_goals == 0:
+    if is_owner and total_goals == 0:
         try:
             org = db.organizations.find_one({"_id": ObjectId(org_id)}) if ObjectId.is_valid(org_id) else None
             if org:
@@ -498,6 +500,18 @@ async def list_goals(
         query["parent_goal_id"] = parent_goal_id
     if is_default is not None:
         query["is_default"] = is_default
+
+    # Employees only see goals they're involved in (created, assigned, or reviewed).
+    if not is_owner:
+        uid = getattr(current_user, "id", None)
+        email = (getattr(current_user, "email", "") or "").strip().lower()
+        query["$or"] = [
+            {"created_by": uid},
+            {"assignee_id": {"$in": [uid, email]}},
+            {"assignee_email": email},
+            {"reviewer_id": {"$in": [uid, email]}},
+            {"reviewer_email": email},
+        ]
 
     goals = list(db.goals.find(query).sort("created_at", -1))
 
@@ -678,8 +692,22 @@ async def get_goal(goal_id: str, current_user = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Goal not found")
 
     user_email = (getattr(current_user, 'email', '') or '').lower().strip()
+    uid = getattr(current_user, "id", None)
     is_owner = await is_org_owner(db, goal.get("organization_id"), current_user)
-    if not is_owner and goal.get("created_by") != current_user.id and goal.get("assignee_email") != user_email:
+
+    def _id_field_matches(field: str) -> bool:
+        raw = goal.get(field)
+        values = raw if isinstance(raw, list) else ([raw] if raw else [])
+        return uid in values or user_email in values
+
+    involved = (
+        goal.get("created_by") == uid
+        or goal.get("assignee_email") == user_email
+        or goal.get("reviewer_email") == user_email
+        or _id_field_matches("assignee_id")
+        or _id_field_matches("reviewer_id")
+    )
+    if not is_owner and not involved:
         raise HTTPException(status_code=403, detail="Access denied")
 
     goal["_id"] = str(goal["_id"])

@@ -1,4 +1,5 @@
 import asyncio
+import re
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -112,7 +113,8 @@ async def create_organization(request: OrganizationCreate, current_user: dict | 
 
 @router.get("/me")
 async def get_my_organization(current_user = Depends(get_current_user_optional)):
-    """Return the organization for the current user by looking up owner_id or co_owners."""
+    """Return the organization for the current user — as owner/co-owner, or as an
+    org_chart_member (employee)."""
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -135,6 +137,14 @@ async def get_my_organization(current_user = Depends(get_current_user_optional))
         raise HTTPException(status_code=401, detail="Authentication required")
 
     org = db.organizations.find_one(query)
+    if not org and user_email:
+        # Employees are org_chart_members (not owners) — resolve their org by email.
+        member = db.org_chart_members.find_one(
+            {"email": {"$regex": f"^{re.escape(user_email)}$", "$options": "i"}}
+        )
+        if member and member.get("organization_id"):
+            org = db.organizations.find_one({"_id": member["organization_id"]})
+
     if not org:
         raise HTTPException(status_code=404, detail="No organization found for this user")
 

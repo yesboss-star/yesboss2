@@ -1,5 +1,4 @@
 ﻿import { create } from "zustand";
-import { persist } from "zustand/middleware";
 import { getAuthHeaders } from "@/lib/utils";
 import { useOrganizationStore } from "@/stores/organizationStore";
 
@@ -67,8 +66,7 @@ interface TaskState {
 }
 
 export const useTaskStore = create<TaskState>()(
-  persist(
-    (set, get) => ({
+  (set, get) => ({
       tasks: [],
       currentTask: null,
       comments: [],
@@ -368,12 +366,8 @@ export const useTaskStore = create<TaskState>()(
           throw error;
         }
       },
-    }),
-    {
-      name: "yesboss-tasks",
-    }
-  )
-);
+    })
+  );
 
 let lastOrgId: string | undefined;
 useOrganizationStore.subscribe((state) => {

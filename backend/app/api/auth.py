@@ -145,6 +145,44 @@ def _user_to_response(user, db_user: dict | None = None) -> UserResponse:
     )
 
 
+async def _resolve_user_role(db, user) -> str:
+    """Authoritative role resolution for a Firebase user.
+
+    Order: Firebase custom claims -> db.users.role -> org ownership (owner /
+    co-owner of any org) -> "employee". Never defaults to "owner" (least privilege).
+    """
+    claims = getattr(user, "custom_claims", {}) or {}
+    role = claims.get("role")
+    if role in ("owner", "employee"):
+        return role
+
+    if db is not None:
+        try:
+            db_user = db.users.find_one({"uid": user.uid})
+            stored = db_user.get("role") if db_user else None
+            if stored in ("owner", "employee"):
+                return stored
+        except Exception as e:
+            logger.warning("Role resolution (db.users) failed: %s", e)
+
+        try:
+            uid = getattr(user, "id", None) or getattr(user, "uid", None)
+            email = (getattr(user, "email", "") or "").strip().lower()
+            q: dict = {"$or": []}
+            if uid:
+                q["$or"].append({"owner_id": uid})
+                q["$or"].append({"co_owners": uid})
+            if email:
+                q["$or"].append({"owner_id": email})
+                q["$or"].append({"co_owners": email})
+            if q["$or"] and db.organizations.find_one(q, {"_id": 1}):
+                return "owner"
+        except Exception as e:
+            logger.warning("Role resolution (org ownership) failed: %s", e)
+
+    return "employee"
+
+
 @router.post("/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 async def signup(request: SignupRequest):
     try:
@@ -218,13 +256,12 @@ async def login(request: LoginRequest):
                 detail="Invalid email or password",
             )
 
-        claims = getattr(user, "custom_claims", {}) or {}
-        role = claims.get("role", "owner")
-
         db = get_database()
         db_user = None
         if db is not None:
             db_user = db.users.find_one({"uid": user.uid})
+
+        role = await _resolve_user_role(db, user)
 
         _audit_log("user.login", user.uid, f"email={request.email}")
         logger.info("User logged in: %s", request.email)
@@ -238,7 +275,7 @@ async def login(request: LoginRequest):
                 email=user.email,
                 full_name=getattr(user, "display_name", None),
                 phone=getattr(user, "phone_number", None),
-                role=db_user.get("role", role) if db_user else role,
+                role=role,
                 organization_id=db_user.get("organization_id") if db_user else None,
             ),
         )
@@ -373,16 +410,14 @@ async def get_me(current_user = Depends(get_current_user)):
                 detail="User not found",
             )
 
-        claims = getattr(user, "custom_claims", {}) or {}
-        role = claims.get("role", "owner")
-
         db = get_database()
         db_user = None
         if db is not None:
             db_user = db.users.find_one({"uid": uid})
 
+        role = await _resolve_user_role(db, user)
         resp = _user_to_response(user, db_user)
-        resp.role = db_user.get("role", role) if db_user else role
+        resp.role = role
         resp.organization_id = db_user.get("organization_id") if db_user else None
         return AuthResponse(success=True, message="User retrieved", user=resp)
 
@@ -459,19 +494,23 @@ async def set_session(request: SetSessionRequest):
 
     _audit_log("session.create", user.uid, f"email={getattr(user, 'email', '')}")
     claims = getattr(user, "custom_claims", {}) or {}
-    role = claims.get("role")
 
     db = get_database()
     db_user = None
     if db is not None:
         db_user = db.users.find_one({"uid": user.uid})
 
-    # Prefer custom claims, then the DB role (custom claims may not be set for
-    # users who signed up before claims were written, or via flows that don't set them).
-    if not role:
-        role = db_user.get("role") if db_user else None
-    if not role:
-        role = "owner"
+    # Authoritative role: custom claims -> db.users.role -> org ownership -> employee.
+    role = await _resolve_user_role(db, user)
+
+    # Self-heal: persist the resolved role as custom claims so future ID tokens
+    # (and frontend role checks) resolve it directly.
+    if not claims.get("role"):
+        try:
+            set_custom_user_claims(user.uid, {"role": role})
+            logger.info("Self-healed custom claims for %s: role=%s", user.uid, role)
+        except Exception as e:
+            logger.warning("Failed to self-heal custom claims for %s: %s", user.uid, e)
 
     full_name = getattr(user, "display_name", "")
     email = getattr(user, "email", "")

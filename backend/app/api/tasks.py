@@ -626,12 +626,13 @@ async def list_tasks(
         query["escalation_level"] = escalation_level
 
     if not await is_org_owner(db, org_id, current_user):
+        uid = getattr(current_user, 'id', None) or getattr(current_user, 'uid', None)
         user_email = (getattr(current_user, 'email', '') or '').lower().strip()
         query["$or"] = [
-            {"created_by": current_user.id},
+            {"created_by": uid},
             {"assignee_email": user_email},
             {"assigned_to": user_email},
-            {"assignee_id": user_email},
+            {"assignee_id": {"$in": [uid, user_email]}},
         ]
 
     tasks = list(db.tasks.find(query).sort("created_at", -1))

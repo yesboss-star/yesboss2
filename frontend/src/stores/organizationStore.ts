@@ -1,5 +1,4 @@
 ﻿import { create } from "zustand";
-import { persist } from "zustand/middleware";
 import { getAuthHeaders } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
@@ -55,8 +54,7 @@ interface OrganizationState {
 }
 
 export const useOrganizationStore = create<OrganizationState>()(
-  persist(
-    (set, get) => ({
+  (set, get) => ({
       organization: null,
       organizations: [],
       loading: false,
@@ -214,9 +212,5 @@ export const useOrganizationStore = create<OrganizationState>()(
           return null;
         }
       },
-    }),
-    {
-      name: "yesboss-organization",
-    }
-  )
-);
+    })
+  );

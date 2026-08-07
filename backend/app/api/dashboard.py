@@ -35,6 +35,22 @@ def get_user_org_id(user) -> str | None:
     return None
 
 
+def _user_scope_filter(user) -> dict:
+    """Mongo filter restricting goals/tasks to those a user is involved in
+    (created, assigned, or reviewed). Used so employees only see their own data."""
+    uid = getattr(user, "id", None) or getattr(user, "uid", None)
+    email = (getattr(user, "email", "") or "").strip().lower()
+    return {
+        "$or": [
+            {"created_by": uid},
+            {"assignee_id": {"$in": [uid, email]}},
+            {"assignee_email": email},
+            {"reviewer_id": {"$in": [uid, email]}},
+            {"reviewer_email": email},
+        ]
+    }
+
+
 class InsightResponse(BaseModel):
     id: str
     type: str
@@ -292,6 +308,9 @@ async def get_dashboard_insights(
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
 
+    if not await is_org_member(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
+
     organization = db.organizations.find_one({"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id})
     org_industry = industry or (organization.get("industry") if organization else None)
 
@@ -317,6 +336,8 @@ async def get_dashboard_modules(
 
     org_id = organization_id or get_user_org_id(current_user)
     if org_id:
+        if not await is_org_member(db, org_id, current_user):
+            raise HTTPException(status_code=403, detail="Access denied")
         organization = db.organizations.find_one({"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id})
         org_industry = industry or (organization.get("industry") if organization else None)
     else:
@@ -641,6 +662,8 @@ async def get_module_metrics(
 
     org_id = organization_id or get_user_org_id(current_user)
     if org_id:
+        if not await is_org_member(db, org_id, current_user):
+            raise HTTPException(status_code=403, detail="Access denied")
         organization = db.organizations.find_one({"_id": org_id})
         org_industry = organization.get("industry") if organization else None
     else:
@@ -649,15 +672,20 @@ async def get_module_metrics(
     industry = org_industry or "default"
     module_config = INDUSTRY_MODULES.get(industry.lower(), INDUSTRY_MODULES["default"]).get(module, {})
 
+    # Employees only see counts for data they're involved in.
+    is_owner = (await is_org_owner(db, org_id, current_user)) if org_id else False
+    scope = {} if is_owner else _user_scope_filter(current_user)
+    base_q = {"organization_id": org_id, **scope}
+
     # Real metrics from DB
-    total_goals = db.goals.count_documents({"organization_id": org_id})
-    active_goals = db.goals.count_documents({"organization_id": org_id, "status": "active"})
-    completed_goals = db.goals.count_documents({"organization_id": org_id, "status": "completed"})
-    total_tasks = db.tasks.count_documents({"organization_id": org_id})
-    completed_tasks = db.tasks.count_documents({"organization_id": org_id, "status": "completed"})
-    in_progress_tasks = db.tasks.count_documents({"organization_id": org_id, "status": "in_progress"})
-    pending_tasks = db.tasks.count_documents({"organization_id": org_id, "status": "pending"})
-    total_members = db.org_chart_members.count_documents({"organization_id": org_id})
+    total_goals = db.goals.count_documents(base_q)
+    active_goals = db.goals.count_documents({**base_q, "status": "active"})
+    completed_goals = db.goals.count_documents({**base_q, "status": "completed"})
+    total_tasks = db.tasks.count_documents(base_q)
+    completed_tasks = db.tasks.count_documents({**base_q, "status": "completed"})
+    in_progress_tasks = db.tasks.count_documents({**base_q, "status": "in_progress"})
+    pending_tasks = db.tasks.count_documents({**base_q, "status": "pending"})
+    total_members = db.org_chart_members.count_documents({"organization_id": org_id}) if is_owner else 0
 
     real_metrics = {}
     for metric in module_config.get("metrics", []):
@@ -708,10 +736,14 @@ async def get_module_trends(
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
 
+    if not await is_org_member(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
+
     from datetime import timedelta
     since = datetime.utcnow() - timedelta(days=min(days, 90))
+    scope = {} if await is_org_owner(db, org_id, current_user) else _user_scope_filter(current_user)
     tasks = list(db.tasks.find(
-        {"organization_id": org_id, "updated_at": {"$gte": since}},
+        {"organization_id": org_id, "updated_at": {"$gte": since}, **scope},
         {"updated_at": 1, "status": 1}
     ).sort("updated_at", 1))
 
@@ -757,6 +789,8 @@ async def get_document_count(
     org_id = organization_id or get_user_org_id(current_user)
     if not org_id:
         return {"count": 0}
+    if not await is_org_member(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
     try:
         total_files = db.files.count_documents({"organization_id": org_id})
         total_docs = db.documents.count_documents({"org_id": org_id})

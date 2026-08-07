@@ -69,18 +69,35 @@ export default function LoginPage() {
   };
 
   const finalizeLogin = async (uid: string, email: string) => {
-    const storedUser = localStorage.getItem("yesboss_user");
-    let userData = storedUser ? JSON.parse(storedUser) : { uid, email };
-    userData = { ...userData, uid: userData.uid || uid, email: userData.email || email };
+    // Never trust localStorage for identity — it's shared across accounts/sessions
+    // and can carry a previous (owner) user's uid/role. Always use the freshly
+    // signed-in user, and take the role from the backend.
+    let storedName = "";
+    try {
+      const storedUser = localStorage.getItem("yesboss_user");
+      if (storedUser) {
+        const parsed = JSON.parse(storedUser);
+        if (parsed?.uid === uid) storedName = parsed.full_name || "";
+      }
+    } catch {}
+
+    const userData: {
+      uid: string;
+      email: string;
+      full_name: string;
+      role: string;
+      phone_verified: boolean;
+    } = { uid, email, full_name: storedName, role: "", phone_verified: true };
 
     try {
       const syncRes = await fetch(`${API_URL}/auth/sync-user`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uid: userData.uid, email: userData.email, full_name: userData.full_name || "", role: userData.role || "", phone_verified: true }),
+        body: JSON.stringify({ uid, email, full_name: storedName, role: "", phone_verified: true }),
       });
       const syncData = await syncRes.json();
       if (syncData?.user?.role) userData.role = syncData.user.role;
+      if (syncData?.user?.full_name) userData.full_name = syncData.user.full_name;
     } catch {}
 
     localStorage.setItem("yesboss_user", JSON.stringify(userData));

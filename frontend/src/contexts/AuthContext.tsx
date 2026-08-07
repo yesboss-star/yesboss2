@@ -55,6 +55,35 @@ async function clearAuthCookies() {
   document.cookie = "yesboss_role=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax";
 }
 
+// User-scoped data persisted by zustand stores. localStorage is shared across
+// accounts/sessions on the same browser, so stale values leak another user's
+// org/goals/tasks into the next sign-in. We wipe them whenever the signed-in
+// user changes (and on sign-out).
+const USER_SCOPED_STORAGE_KEYS = [
+  "yesboss_id_token",
+  "yesboss_user",
+  "yesboss_role",
+  "yesboss_token",
+  "yesboss-organization",
+  "yesboss-goals",
+  "yesboss-tasks",
+  "yesboss-journal",
+  "yesboss-user",
+  "yesboss-ui",
+  "yesboss-assistant-sessions",
+  "yesboss-kpi-suggestions",
+];
+
+function clearUserScopedStorage() {
+  USER_SCOPED_STORAGE_KEYS.forEach((key) => {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // ignore storage access errors
+    }
+  });
+}
+
 async function clearSession() {
   // Clear the client-side cookies first so the proxy stops treating this
   // browser as authenticated right away (no /login -> /dashboard loop), then
@@ -119,6 +148,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         lastUidRef.current = firebaseUser.uid;
 
+        // New user signed in — wipe any previous user's persisted org/goals/tasks/
+        // journal so their data can never leak into this session.
+        clearUserScopedStorage();
+        useOrganizationStore.getState().clearOrganization();
+
         const token = await getIdToken(firebaseUser);
         localStorage.setItem("yesboss_id_token", token);
         const result = await establishSession(token);
@@ -128,15 +162,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (result.user) {
             localStorage.setItem("yesboss_user", JSON.stringify(result.user));
           }
-          setRole(result.user?.role || "owner");
+          setRole(result.user?.role === "owner" ? "owner" : "employee");
           setLastLoginAt(new Date().toISOString());
           await resolveOrganization(token);
         } else {
           const cached = localStorage.getItem("yesboss_role");
-          setRole(cached === "owner" || cached === "employee" ? cached : "owner");
+          setRole(cached === "owner" ? "owner" : "employee");
         }
       } else {
         lastUidRef.current = null;
+        clearUserScopedStorage();
         await clearSession();
         setRole(null);
       }
@@ -149,9 +184,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     await firebaseSignOut(auth);
-    localStorage.removeItem("yesboss_user");
-    localStorage.removeItem("yesboss_role");
-    localStorage.removeItem("yesboss_id_token");
+    clearUserScopedStorage();
     useOrganizationStore.getState().clearOrganization();
     await clearSession();
     window.location.href = "/login";
