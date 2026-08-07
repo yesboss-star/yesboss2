@@ -178,25 +178,28 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVE
 
 async def generate_embeddings(texts: list[str], provider: str | None = None) -> list[list[float]]:
     from .config import settings
-    resolved_provider = provider or settings.DEFAULT_AI_PROVIDER
 
     embeddings = []
 
     try:
+        # Gemini preferred (real embeddings); falls back to OpenAI/xAI. This is
+        # independent of DEFAULT_AI_PROVIDER because DeepSeek/Grok can't embed.
+        embed_provider = provider or settings.EMBEDDINGS_PROVIDER or "gemini"
+
+        if embed_provider == "gemini" and settings.GEMINI_API_KEY:
+            return await _gemini_embed_batch(texts)
+
         from openai import AsyncOpenAI
 
-        if resolved_provider == "xai":
-            api_key = settings.XAI_API_KEY
-            base_url = settings.XAI_BASE_URL
-        elif resolved_provider == "openai":
+        if embed_provider == "openai":
             api_key = settings.OPENAI_API_KEY
             base_url = None
-        elif resolved_provider == "qwen":
+        elif embed_provider == "qwen":
             api_key = settings.QWEN_API_KEY
             base_url = settings.QWEN_BASE_URL
-        else:
-            api_key = None
-            base_url = None
+        else:  # xai or fallback
+            api_key = settings.OPENAI_API_KEY or settings.XAI_API_KEY
+            base_url = None if settings.OPENAI_API_KEY else (settings.XAI_BASE_URL if settings.XAI_API_KEY else None)
 
         if api_key:
             client = AsyncOpenAI(api_key=api_key, base_url=base_url)
@@ -210,11 +213,37 @@ async def generate_embeddings(texts: list[str], provider: str | None = None) -> 
             for text in texts:
                 embeddings.append([0.0] * 1536)
     except Exception as e:
-        logger.error(f"Embedding failed with {resolved_provider}: {e}")
+        logger.error(f"Embedding failed with {provider or settings.EMBEDDINGS_PROVIDER}: {e}")
         for text in texts:
             embeddings.append([0.0] * 1536)
 
     return embeddings
+
+
+async def _gemini_embed_batch(texts: list[str], model: str = "gemini-embedding-2", dim: int = 1536) -> list[list[float]]:
+    """Batch Gemini embeddings via the batchEmbedContents endpoint."""
+    import httpx
+
+    from .config import settings
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:batchEmbedContents"
+    requests = [
+        {
+            "model": f"models/{model}",
+            "content": {"parts": [{"text": text[:8000]}]},
+            "outputDimensionality": dim,
+        }
+        for text in texts
+    ]
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(
+            url,
+            params={"key": settings.GEMINI_API_KEY},
+            json={"requests": requests},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    return [e["values"] for e in data.get("embeddings", [])]
 
 
 async def store_embeddings_in_qdrant(

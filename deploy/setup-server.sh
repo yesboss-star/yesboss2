@@ -135,6 +135,25 @@ for var in ZOHO_REDIRECT_URI GOOGLE_REDIRECT_URI; do
   fi
 done
 
+# AI provider: DeepSeek primary + Gemini embeddings (DeepSeek/Grok cannot embed).
+# Keys are NOT written here — the user pastes them into backend/.env.live once.
+# Set/append non-secret config and empty key placeholders.
+for var in DEFAULT_AI_PROVIDER DEEPSEEK_BASE_URL DEEPSEEK_MODEL EMBEDDINGS_PROVIDER; do
+  if grep -q "^${var}=" "$ENV_FILE" 2>/dev/null; then
+    :
+  else
+    printf "export %s=%s\n" "$var" "$(echo "$var" | sed -e 's/^DEFAULT_AI_PROVIDER$/deepseek/' -e 's/^DEEPSEEK_BASE_URL$/https:\/\/api.deepseek.com/' -e 's/^DEEPSEEK_MODEL$/deepseek-v4-flash/' -e 's/^EMBEDDINGS_PROVIDER$/gemini/')" >> "$ENV_FILE"
+  fi
+done
+if grep -q "^DEFAULT_AI_PROVIDER=" "$ENV_FILE" 2>/dev/null && ! grep -q "^DEFAULT_AI_PROVIDER=deepseek" "$ENV_FILE"; then
+  sed -i "s|^DEFAULT_AI_PROVIDER=.*|DEFAULT_AI_PROVIDER=deepseek|" "$ENV_FILE"
+fi
+for key in DEEPSEEK_API_KEY GEMINI_API_KEY; do
+  if ! grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
+    printf "export %s=\n" "$key" >> "$ENV_FILE"
+  fi
+done
+
 echo ""
 echo "=== Server setup complete ==="
 echo "Site:     https://$DOMAIN"

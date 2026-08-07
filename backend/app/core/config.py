@@ -23,7 +23,21 @@ class Settings:
     XAI_BASE_URL: str = os.getenv("XAI_BASE_URL", "https://api.x.ai/v1")
     XAI_MODEL: str = os.getenv("XAI_MODEL", "grok-3")
 
-    DEFAULT_AI_PROVIDER: str = os.getenv("DEFAULT_AI_PROVIDER", "xai")
+    DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
+    DEEPSEEK_BASE_URL: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+    DEEPSEEK_MODEL: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+
+    # Chat provider used for all LLM features. DeepSeek is the default when its
+    # key is configured; falls back to xAI otherwise.
+    DEFAULT_AI_PROVIDER: str = (
+        os.getenv("DEFAULT_AI_PROVIDER", "")
+        or ("deepseek" if os.getenv("DEEPSEEK_API_KEY") else "xai")
+    )
+
+    # Embeddings provider for semantic search (Qdrant). DeepSeek/Grok cannot do
+    # embeddings, so this is independent of DEFAULT_AI_PROVIDER. Options:
+    # gemini | openai | xai. Gemini is preferred when its key is set.
+    EMBEDDINGS_PROVIDER: str = os.getenv("EMBEDDINGS_PROVIDER", "gemini")
 
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
@@ -107,6 +121,7 @@ class Settings:
         provider = self.DEFAULT_AI_PROVIDER
         provider_key_map = {
             "xai": ("XAI_API_KEY", self.XAI_API_KEY),
+            "deepseek": ("DEEPSEEK_API_KEY", self.DEEPSEEK_API_KEY),
             "openai": ("OPENAI_API_KEY", self.OPENAI_API_KEY),
             "anthropic": ("ANTHROPIC_API_KEY", self.ANTHROPIC_API_KEY),
             "gemini": ("GEMINI_API_KEY", self.GEMINI_API_KEY),

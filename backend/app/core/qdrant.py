@@ -13,22 +13,53 @@ client: Optional[QdrantClient] = None
 
 
 def get_embedding(text: str) -> list[float]:
-    try:
-        api_key = settings.XAI_API_KEY or settings.OPENAI_API_KEY
-        base_url = settings.XAI_BASE_URL if settings.XAI_API_KEY else None
-        if not api_key:
-            return generate_fallback_embedding(text)
+    """Embed a single text using the configured EMBEDDINGS_PROVIDER.
 
-        from openai import OpenAI
-        client = OpenAI(api_key=api_key, base_url=base_url)
-        response = client.embeddings.create(
-            model="text-embedding-3-small",
-            input=text
-        )
-        return response.data[0].embedding
+    Gemini is preferred (real embeddings); falls back to OpenAI, then xAI, then a
+    deterministic hash vector. DeepSeek/Grok cannot do embeddings, so this is
+    independent of DEFAULT_AI_PROVIDER.
+    """
+    try:
+        if settings.EMBEDDINGS_PROVIDER == "gemini" and settings.GEMINI_API_KEY:
+            return _gemini_embed_sync(text)
+
+        api_key = settings.OPENAI_API_KEY or settings.XAI_API_KEY
+        base_url = None
+        if api_key and settings.OPENAI_API_KEY:
+            pass  # default OpenAI base
+        elif api_key and settings.XAI_API_KEY:
+            base_url = settings.XAI_BASE_URL
+        if api_key:
+            from openai import OpenAI
+            client = OpenAI(api_key=api_key, base_url=base_url)
+            response = client.embeddings.create(
+                model="text-embedding-3-small",
+                input=text
+            )
+            return response.data[0].embedding
     except Exception as e:
         logger.warning(f"Embedding failed, using fallback: {e}")
-        return generate_fallback_embedding(text)
+    return generate_fallback_embedding(text)
+
+
+def _gemini_embed_sync(text: str, model: str = "gemini-embedding-2", dim: int = 1536) -> list[float]:
+    """Single-text Gemini embedding via the embedContent endpoint."""
+    import httpx
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:embedContent"
+    payload = {
+        "model": f"models/{model}",
+        "content": {"parts": [{"text": text[:8000]}]},
+        "outputDimensionality": dim,
+    }
+    resp = httpx.post(
+        url,
+        params={"key": settings.GEMINI_API_KEY},
+        json=payload,
+        timeout=30.0,
+    )
+    resp.raise_for_status()
+    return resp.json()["embedding"]["values"]
 
 
 def generate_fallback_embedding(text: str, dim: int = 1536) -> list[float]:

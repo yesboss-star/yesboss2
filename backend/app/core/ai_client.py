@@ -22,6 +22,15 @@ class AIClient:
             base_url=settings.XAI_BASE_URL,
         )
 
+    def _get_deepseek_client(self):
+        if not settings.DEEPSEEK_API_KEY:
+            raise ValueError("DEEPSEEK_API_KEY not configured")
+        from openai import AsyncOpenAI
+        return AsyncOpenAI(
+            api_key=settings.DEEPSEEK_API_KEY,
+            base_url=settings.DEEPSEEK_BASE_URL,
+        )
+
     def _get_openai_client(self):
         if not settings.OPENAI_API_KEY:
             raise ValueError("OPENAI_API_KEY not configured")
@@ -42,6 +51,8 @@ class AIClient:
     ) -> dict[str, Any]:
         if self.provider == "xai":
             return await self._xai_complete(messages, model or settings.XAI_MODEL, temperature, max_tokens)
+        elif self.provider == "deepseek":
+            return await self._deepseek_complete(messages, model or settings.DEEPSEEK_MODEL, temperature, max_tokens)
         elif self.provider == "gemini":
             return await self._gemini_complete(messages, model, temperature, max_tokens)
         elif self.provider == "openai":
@@ -73,6 +84,37 @@ class AIClient:
             "content": response.choices[0].message.content,
             "model": model,
             "provider": "xai",
+            "usage": response.usage.model_dump() if response.usage else {}
+        }
+
+    async def _deepseek_complete(
+        self,
+        messages: list[dict[str, str]],
+        model: str = "deepseek-v4-flash",
+        temperature: float = 0.7,
+        max_tokens: int = 2000,
+    ) -> dict[str, Any]:
+        client = self._get_deepseek_client()
+
+        response = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+
+        message = response.choices[0].message
+        content = getattr(message, "content", None)
+        # deepseek-v4-flash is a reasoning model: the final answer lands in
+        # `content`, but if it is empty (short max_tokens) fall back to the
+        # reasoning text so we never return a blank reply.
+        if not content:
+            content = getattr(message, "reasoning_content", "") or ""
+
+        return {
+            "content": content,
+            "model": model,
+            "provider": "deepseek",
             "usage": response.usage.model_dump() if response.usage else {}
         }
 
@@ -262,6 +304,9 @@ class AIClient:
         if self.provider == "xai":
             async for token in self._xai_stream(messages, model or settings.XAI_MODEL, temperature, max_tokens):
                 yield token
+        elif self.provider == "deepseek":
+            async for token in self._deepseek_stream(messages, model or settings.DEEPSEEK_MODEL, temperature, max_tokens):
+                yield token
         elif self.provider == "openai":
             async for token in self._openai_stream(messages, model or "gpt-4o", temperature, max_tokens):
                 yield token
@@ -291,6 +336,27 @@ class AIClient:
             delta = chunk.choices[0].delta if chunk.choices else None
             if delta and delta.content:
                 yield delta.content
+
+    async def _deepseek_stream(
+        self,
+        messages: list[dict[str, str]],
+        model: str = "deepseek-v4-flash",
+        temperature: float = 0.7,
+        max_tokens: int = 2000,
+    ) -> AsyncGenerator[str, None]:
+        client = self._get_deepseek_client()
+        stream = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,
+        )
+        async for chunk in stream:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            content = getattr(delta, "content", None)
+            if delta and content:
+                yield content
 
     async def _openai_stream(
         self,

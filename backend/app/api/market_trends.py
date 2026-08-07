@@ -182,7 +182,6 @@ Return a JSON array. Example:
         response = await get_ai_response(
             prompt=user_prompt,
             system_prompt=system_prompt,
-            provider="xai",
             temperature=0.7,
             max_tokens=2000,
         )

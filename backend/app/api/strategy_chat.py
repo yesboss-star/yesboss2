@@ -199,7 +199,6 @@ async def strategy_chat(request: ChatRequest, current_user = Depends(get_current
     try:
         ai_response = await get_chat_response(
             messages=messages,
-            provider="xai",
             temperature=0.7,
             max_tokens=2000,
         )

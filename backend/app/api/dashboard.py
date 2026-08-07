@@ -403,7 +403,6 @@ async def _fetch_missing_kpis_async(
         ai_result = await get_ai_response(
             prompt=ai_prompt,
             system_prompt=kpi_persona,
-            provider="xai",
             temperature=0.3,
             max_tokens=1000,
         )
