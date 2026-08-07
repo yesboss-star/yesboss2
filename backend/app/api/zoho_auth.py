@@ -168,7 +168,8 @@ async def zoho_callback(
         request_origin = _request_origin(request)
         if request_origin and "localhost" not in request_origin:
             frontend_url = request_origin
-        redirect_url = f"{frontend_url}/dashboard/settings?zoho=connected"
+        # Land on a public success page (no auth) that auto-closes the OAuth popup.
+        redirect_url = f"{frontend_url}/oauth/connected?provider=zoho"
 
         from fastapi.responses import RedirectResponse
         return RedirectResponse(url=redirect_url, status_code=302)

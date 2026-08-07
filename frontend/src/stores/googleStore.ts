@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { create } from "zustand";
+import { useUIStore } from "@/stores/uiStore";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
@@ -80,7 +81,15 @@ export const useGoogleStore = create<GoogleState>()((set, get) => ({
         if (!popup || popup.closed) {
           window.clearInterval(pollTimer);
           set({ connecting: false });
-          get().checkStatus();
+          get().checkStatus().then(() => {
+            if (get().connected) {
+              useUIStore.getState().addNotification({
+                type: "success",
+                title: "Google Connected",
+                message: "Your Google account has been connected successfully.",
+              });
+            }
+          });
         }
       }, 500);
     } catch (err) {
