@@ -62,11 +62,20 @@ if command -v firewall-cmd >/dev/null 2>&1 && sudo firewall-cmd --state >/dev/nu
   sudo firewall-cmd --reload
 fi
 
-# --- 5. Issue / renew SSL certificate (skip if it already exists) ---
-echo "[5/6] Checking SSL certificate..."
+# --- 5. Issue / renew SSL certificate (idempotent) ---
+echo "[5/6] Ensuring SSL certificate + nginx HTTPS block..."
 if sudo test -d "/etc/letsencrypt/live/$DOMAIN"; then
-  echo "Certificate exists — renewing if needed..."
-  sudo certbot renew --quiet || true
+  echo "Certificate exists — re-installing HTTPS block (renews only if due)..."
+  # This script copies an HTTP-only nginx config above, which would drop the
+  # certbot HTTPS server block (port 443). Re-running the certbot nginx installer
+  # (with --keep-until-expiring) re-adds the 443 block on every deploy without
+  # needlessly re-issuing a valid certificate.
+  sudo certbot --nginx \
+    -d "$DOMAIN" \
+    -d "$WWW_DOMAIN" \
+    --redirect \
+    --non-interactive \
+    --keep-until-expiring || true
 else
   echo "Issuing new certificate for $DOMAIN + $WWW_DOMAIN..."
   # Back up the clean HTTP config so we can restore it if issuance fails
