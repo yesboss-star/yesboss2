@@ -376,7 +376,8 @@ async def _push_to_provider_todo(db, org_id: str, task_doc: dict, assignee_email
     receive the task there.
     """
     await _push_google_todo(db, org_id, task_doc, assignee_emails)
-    await _push_to_zoho_todo(db, org_id, task_doc, assignee_emails)
+    from .tasks import sync_task_to_zoho
+    await sync_task_to_zoho(db, task_doc, org_id)
 
 
 async def create_task_from_meeting(

@@ -23,6 +23,12 @@ export interface Task {
   reviewers: string[];
   created_at: string;
   updated_at: string;
+  zoho_sync_status?: string;
+  zoho_sync_error?: string;
+  zoho_personal_task_id?: string;
+  zoho_group_task_id?: string;
+  google_sync_status?: string;
+  google_sync_error?: string;
 }
 
 export interface TaskComment {

@@ -1089,6 +1089,44 @@ async def sync_pending_google_tasks(limit: int = 50):
         logger.warning(f"sync_pending_google_tasks error: {e}")
 
 
+async def sync_pending_zoho_tasks(limit: int = 50):
+    """Retry tasks that failed to push to Zoho (zoho_sync_status is 'pending' or
+    'error'). Each sync_task_to_zoho call honours its own max-attempts cap via the
+    task's zoho_sync_attempts field, so retries are bounded.
+
+    This also serves as a backfill: tasks recorded as pending because an assignee
+    had no Zoho token get pushed automatically once that assignee connects Zoho.
+    """
+    try:
+        from ..api.tasks import sync_task_to_zoho
+        from ..core.database import get_database as _gd
+
+        db = _gd()
+        if db is None:
+            return
+        pending = list(
+            db.tasks.find(
+                {
+                    "zoho_sync_status": {"$in": ["pending", "error"]},
+                    "zoho_sync_attempts": {"$lt": 5},
+                }
+            ).limit(limit)
+        )
+        for task_doc in pending:
+            task_doc["_id"] = str(task_doc["_id"])
+            org_id = task_doc.get("organization_id", "")
+            if not org_id:
+                continue
+            try:
+                await sync_task_to_zoho(db, task_doc, org_id)
+            except Exception as e:
+                logger.warning("Retry of pending zoho task %s failed: %s", task_doc["_id"], e)
+        if pending:
+            logger.info("Retried %s pending zoho tasks", len(pending))
+    except Exception as e:
+        logger.warning(f"sync_pending_zoho_tasks error: {e}")
+
+
 async def sync_google_calendar():
     try:
         from datetime import datetime, timedelta
@@ -1415,6 +1453,7 @@ async def scheduler_loop():
                 await check_owner_check_ins()
 
             await sync_zoho_tasks()
+            await sync_pending_zoho_tasks()
             if google_sync_counter % google_sync_every == 0:
                 await sync_google_tasks()
                 await sync_pending_google_tasks()

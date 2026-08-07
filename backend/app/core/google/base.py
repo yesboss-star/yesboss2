@@ -43,14 +43,15 @@ class GoogleOAuth:
     def _creds_configured(self) -> bool:
         return bool(_GOOGLE_CLIENT_ID and _GOOGLE_CLIENT_SECRET)
 
-    def get_auth_url(self, state: str | None = None) -> str:
+    def get_auth_url(self, state: str | None = None, redirect_uri: str | None = None) -> str:
         if not self._creds_configured():
             raise RuntimeError("GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set in environment variables")
         state = state or secrets.token_urlsafe(32)
         from urllib.parse import quote
+        rd = redirect_uri or _GOOGLE_REDIRECT_URI
         params = (
             f"client_id={_GOOGLE_CLIENT_ID}"
-            f"&redirect_uri={quote(_GOOGLE_REDIRECT_URI, safe='')}"
+            f"&redirect_uri={quote(rd, safe='')}"
             f"&scope={quote(FULL_SCOPE, safe='')}"
             f"&response_type=code"
             f"&access_type=offline"
@@ -77,12 +78,12 @@ class GoogleOAuth:
             logger.error("Google token request error: %s", e)
             return None
 
-    async def exchange_code(self, code: str) -> dict[str, Any] | None:
+    async def exchange_code(self, code: str, redirect_uri: str | None = None) -> dict[str, Any] | None:
         return await self._post_token({
             "code": code,
             "client_id": _GOOGLE_CLIENT_ID,
             "client_secret": _GOOGLE_CLIENT_SECRET,
-            "redirect_uri": _GOOGLE_REDIRECT_URI,
+            "redirect_uri": redirect_uri or _GOOGLE_REDIRECT_URI,
             "grant_type": "authorization_code",
         })
 

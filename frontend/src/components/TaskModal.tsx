@@ -6,7 +6,7 @@ import { useGoalStore } from "@/stores/goalStore";
 import { useOrgChartStore } from "@/stores/orgChartStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { useAuth } from "@/contexts/AuthContext";
-import { X, Loader2, Sparkles, Calendar, Users, Flag, CheckSquare, ChevronDown, Check, Clock, AlertTriangle, Zap, ArrowLeft } from "lucide-react";
+import { X, Loader2, Sparkles, Calendar, Users, Flag, CheckSquare, ChevronDown, Check, Clock, AlertTriangle, Zap, ArrowLeft, Info } from "lucide-react";
 
 function PersonMultiSelect({ label, valueIds, valueNames, members, filterDept, onChange }: {
   label: string;
@@ -377,6 +377,12 @@ export default function TaskModal({ isOpen, onClose, goalId, onBack }: TaskModal
               >
                 Assign to myself
               </button>
+            )}
+            {formData.assignee_id.length > 0 && (
+              <p className="text-[11px] text-text-muted flex items-start gap-1.5 mt-1">
+                <Info className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                The assigned person will also see this task in their Zoho Mail To-Do once they connect Zoho (Settings &rarr; Integrations).
+              </p>
             )}
 
             {Object.entries(workloadWarnings).map(([email, w]: [string, any]) => (

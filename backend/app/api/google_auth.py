@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from ..core.database import get_database
 from ..core.google import GoogleOAuth
@@ -24,6 +24,7 @@ def get_user_email(user) -> str:
 
 @router.get("/auth-url")
 async def get_auth_url(
+    request: Request,
     current_user=Depends(get_current_user_optional),
 ):
     user_id = get_user_id(current_user)
@@ -31,7 +32,10 @@ async def get_auth_url(
         raise HTTPException(status_code=401, detail="Not authenticated")
     google = GoogleOAuth(get_database())
     try:
-        url = google.get_auth_url(state=user_id)
+        redirect_uri = f"{str(request.base_url).rstrip('/')}/api/v1/google/callback"
+        # Normalize loopback host so the derived URI matches the registered one.
+        redirect_uri = redirect_uri.replace("://127.0.0.1", "://localhost", 1)
+        url = google.get_auth_url(state=user_id, redirect_uri=redirect_uri)
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
     return {"url": url}
@@ -39,6 +43,7 @@ async def get_auth_url(
 
 @router.get("/callback")
 async def google_callback(
+    request: Request,
     code: str = Query(...),
     state: str | None = Query(None),
     error: str | None = Query(None),
@@ -56,7 +61,10 @@ async def google_callback(
         db = get_database()
         google = GoogleOAuth(db)
 
-        token_data = await google.exchange_code(code)
+        redirect_uri = str(request.url).split("?", 1)[0]
+        redirect_uri = redirect_uri.replace("://127.0.0.1", "://localhost", 1)
+
+        token_data = await google.exchange_code(code, redirect_uri=redirect_uri)
         if not token_data:
             logger.error("Google exchange_code returned None — check client_id/secret match Google Cloud console")
             raise HTTPException(status_code=502, detail="Failed to exchange authorization code. Verify the Client ID and Secret match what's in the Google Cloud console")
@@ -115,6 +123,10 @@ async def google_callback(
 
         from ..core.config import settings
         frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+        # Prefer the request's own origin (reliable behind nginx) over the env value.
+        request_origin = str(request.base_url).rstrip("/")
+        if request_origin and "localhost" not in request_origin:
+            frontend_url = request_origin
         redirect_url = f"{frontend_url}/dashboard/settings?google=connected"
 
         from fastapi.responses import RedirectResponse

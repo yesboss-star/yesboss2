@@ -1,6 +1,7 @@
 import logging
+import re
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from ..core.database import get_database
 from ..core.zoho import ZohoOAuth
@@ -24,18 +25,23 @@ def get_user_email(user) -> str:
 
 @router.get("/auth-url")
 async def get_auth_url(
+    request: Request,
     current_user=Depends(get_current_user_optional),
 ):
     user_id = get_user_id(current_user)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
     zoho = ZohoOAuth(get_database())
-    url = zoho.get_auth_url(state=user_id)
+    redirect_uri = f"{str(request.base_url).rstrip('/')}/api/v1/zoho/callback"
+    # Normalize loopback host so the derived URI matches the registered one.
+    redirect_uri = redirect_uri.replace("://127.0.0.1", "://localhost", 1)
+    url = zoho.get_auth_url(state=user_id, redirect_uri=redirect_uri)
     return {"url": url}
 
 
 @router.get("/callback")
 async def zoho_callback(
+    request: Request,
     code: str = Query(...),
     state: str | None = Query(None),
     error: str | None = Query(None),
@@ -53,7 +59,12 @@ async def zoho_callback(
         db = get_database()
         zoho = ZohoOAuth(db)
 
-        token_data = await zoho.exchange_code(code)
+        # The redirect URI must exactly match the one used in the auth URL — derive
+        # it from this callback's own URL so it works on any host/env.
+        redirect_uri = str(request.url).split("?", 1)[0]
+        redirect_uri = redirect_uri.replace("://127.0.0.1", "://localhost", 1)
+
+        token_data = await zoho.exchange_code(code, redirect_uri=redirect_uri)
         if not token_data:
             logger.error("Zoho exchange_code returned None — check client_id/secret match global console")
             raise HTTPException(status_code=502, detail="Failed to exchange authorization code. Verify the Client ID and Secret match what's on api-console.zoho.com")
@@ -110,8 +121,38 @@ async def zoho_callback(
             except Exception as e:
                 logger.warning("Either/or: could not remove Google token for user_id=%s: %s", user_id, e)
 
+        # Backfill: push any pending YesBoss tasks assigned to this user to Zoho
+        # now that they're connected. Normally the retry scheduler handles this,
+        # but doing it immediately populates their Zoho To-Do right away.
+        try:
+            import asyncio
+
+            from ..api.tasks import sync_task_to_zoho
+
+            match_email = (user_email or "").strip().lower()
+            if match_email and db is not None:
+                pending_tasks = list(db.tasks.find({
+                    "zoho_sync_status": {"$ne": "synced"},
+                    "$or": [
+                        {"assignee_email": {"$regex": f"^{re.escape(match_email)}$", "$options": "i"}},
+                        {"assignee_id": match_email},
+                    ],
+                }))
+                for t in pending_tasks:
+                    t_org = t.get("organization_id", "")
+                    if t_org:
+                        asyncio.create_task(sync_task_to_zoho(db, t, t_org))
+                if pending_tasks:
+                    logger.info("Scheduled Zoho backfill for %s pending tasks of %s", len(pending_tasks), match_email)
+        except Exception as e:
+            logger.warning("Zoho backfill scheduling failed: %s", e)
+
         from ..core.config import settings
         frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+        # Prefer the request's own origin (reliable behind nginx) over the env value.
+        request_origin = str(request.base_url).rstrip("/")
+        if request_origin and "localhost" not in request_origin:
+            frontend_url = request_origin
         redirect_url = f"{frontend_url}/dashboard/settings?zoho=connected"
 
         from fastapi.responses import RedirectResponse

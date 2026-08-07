@@ -42,8 +42,42 @@ async def create_notification(user_id: str, org_id: str, type: str, title: str, 
     await create_and_deliver(user_id, org_id, type, title, message, link, actor_id, actor_name, metadata, email=email)
 
 
-async def sync_task_to_zoho(db, task_doc: dict, org_id: str, old_data: dict = None):
+def _write_zoho_sync_state(db, task_doc: dict, status: str, *, error: str = "", attempts: int | None = None):
+    """Persist zoho sync status/error/attempts on a task. Bumps attempts if not given and status != synced."""
+    updates: dict = {
+        "zoho_sync_status": status,
+        "zoho_last_synced_at": datetime.utcnow().isoformat(),
+    }
+    updates["zoho_sync_error"] = error
+    if attempts is not None:
+        updates["zoho_sync_attempts"] = attempts
+    else:
+        current = task_doc.get("zoho_sync_attempts") or 0
+        updates["zoho_sync_attempts"] = current + 1
+    raw_id = task_doc.get("_id")
+    oid = raw_id if isinstance(raw_id, ObjectId) else (ObjectId(raw_id) if ObjectId.is_valid(str(raw_id)) else None)
+    if oid is None:
+        return
+    db.tasks.update_one({"_id": oid}, {"$set": updates})
+    task_doc.update(updates)
+
+
+async def sync_task_to_zoho(db, task_doc: dict, org_id: str, old_data: dict = None, max_attempts: int = 5):
+    """Push a task out to Zoho Mail To-Do.
+
+    Two destinations, both always attempted:
+      1. Owner-side group task under the "YesBoss - {org}" task group — gives the
+         owner visibility in their own Zoho Mail even when the assignee isn't
+         Zoho-connected.
+      2. A personal task in each Zoho-connected assignee's own To-Do (the actual
+         assignment channel).
+
+    Assignees without a connected Zoho token are recorded as pending so the
+    scheduler can retry/backfill once they connect. Attempts are capped.
+    """
     try:
+        from ..api.meetings import _resolve_token_for_email
+
         zmt = ZohoMailTasks(db)
         zoho = ZohoOAuth(db)
         assignee_emails = task_doc.get("assignee_id") or []
@@ -60,69 +94,102 @@ async def sync_task_to_zoho(db, task_doc: dict, org_id: str, old_data: dict = No
             owner_id = owner.get("owner_id", "")
             owner_token = await zoho.get_valid_token(owner_id)
 
+        attempts = (task_doc.get("zoho_sync_attempts") or 0) + 1
+        if attempts > max_attempts:
+            _write_zoho_sync_state(db, task_doc, "error", error="Max retry attempts reached", attempts=attempts)
+            return "error"
+
+        existing_group_id = task_doc.get("zoho_group_task_id")
+        existing_personal_id = task_doc.get("zoho_personal_task_id")
+        task_zgid = task_doc.get("zoho_zgid") or (old_data or {}).get("zoho_zgid")
+
+        # ── 1. Owner-side group task (owner visibility in Zoho Mail) ──────────
+        zgid = None
+        if owner_token and org_name:
+            zgid = await zmt.ensure_group(org_name, owner_token)
+
+        group_id = existing_group_id
+        if owner_token and zgid:
+            if not group_id:
+                group_id = await zmt.create_group_task(owner_token, zgid, task_doc)
+            elif task_zgid:
+                changes = {}
+                for f in ("title", "description", "priority", "status", "due_date"):
+                    if task_doc.get(f) != (old_data or {}).get(f):
+                        changes[f] = task_doc.get(f)
+                if changes:
+                    await zmt.update_task(owner_token, existing_group_id, changes, is_group=True, zgid=task_zgid)
+
+        # ── 2. Per-assignee personal tasks (assignee's own Zoho To-Do) ────────
+        per_assignee = dict(task_doc.get("zoho_task_ids") or {})
+        failures: list[str] = []
+
         for email in assignee_emails:
             if not email:
                 continue
-            from ..api.meetings import _resolve_token_for_email
-            assignee_token = await _resolve_token_for_email(db, email, org_id)
-            if not assignee_token:
-                continue
+            try:
+                assignee_token = await _resolve_token_for_email(db, email, org_id)
+                if not assignee_token:
+                    failures.append(f"{email}: no connected Zoho token")
+                    continue
 
-            existing_group_id = task_doc.get("zoho_group_task_id")
-            existing_personal_id = task_doc.get("zoho_personal_task_id")
-
-            if old_data is None:
-                zgid = None
-                if owner_token and org_name:
-                    zgid = await zmt.ensure_group(org_name, owner_token)
-
-                group_id = None
-                if zgid and owner_token:
-                    assignee_zoho_id = await zmt.get_zoho_user_id(assignee_token)
-                    group_id = await zmt.create_group_task(owner_token, zgid, task_doc, assignee_zoho_id)
-
-                personal_id = await zmt.create_personal_task(assignee_token, task_doc)
-
-                updates = {}
-                if group_id:
-                    updates["zoho_group_task_id"] = group_id
-                if zgid:
-                    updates["zoho_zgid"] = zgid
-                if personal_id:
-                    updates["zoho_personal_task_id"] = personal_id
-                if updates:
-                    updates["zoho_sync_status"] = "synced"
-                    updates["zoho_last_synced_at"] = datetime.utcnow().isoformat()
-                    db.tasks.update_one({"_id": task_doc["_id"] if isinstance(task_doc["_id"], ObjectId) else ObjectId(task_doc["_id"])}, {"$set": updates})
-            else:
-                task_zgid = task_doc.get("zoho_zgid") or old_data.get("zoho_zgid")
-                if existing_group_id and owner_token and task_zgid:
+                per_id = per_assignee.get(email) or existing_personal_id
+                if not per_id:
+                    personal_id = await zmt.create_personal_task(assignee_token, task_doc)
+                    if personal_id:
+                        per_assignee[email] = personal_id
+                    else:
+                        failures.append(f"{email}: Zoho create_personal_task returned no id")
+                else:
                     changes = {}
                     for f in ("title", "description", "priority", "status", "due_date"):
-                        if task_doc.get(f) != old_data.get(f):
+                        if task_doc.get(f) != (old_data or {}).get(f):
                             changes[f] = task_doc.get(f)
                     if changes:
-                        await zmt.update_task(owner_token, existing_group_id, changes, is_group=True, zgid=task_zgid)
-                if existing_personal_id:
-                    changes = {}
-                    for f in ("title", "description", "priority", "status", "due_date"):
-                        if task_doc.get(f) != old_data.get(f):
-                            changes[f] = task_doc.get(f)
-                    if changes:
-                        await zmt.update_task(assignee_token, existing_personal_id, changes)
+                        ok = await zmt.update_task(assignee_token, per_id, changes)
+                        if not ok:
+                            failures.append(f"{email}: Zoho update_task failed")
+            except Exception as e:
+                failures.append(f"{email}: {e}")
+                logger.warning("Zoho sync error for %s (task %s): %s", email, task_doc.get("_id"), e, exc_info=True)
+
+        # ── Persist linkage ids ────────────────────────────────────────────────
+        updates: dict = {}
+        if group_id:
+            updates["zoho_group_task_id"] = group_id
+        if zgid:
+            updates["zoho_zgid"] = zgid
+        if per_assignee:
+            updates["zoho_task_ids"] = per_assignee
+            updates["zoho_personal_task_id"] = next(iter(per_assignee.values()))
+        raw_id = task_doc.get("_id")
+        oid = raw_id if isinstance(raw_id, ObjectId) else (ObjectId(raw_id) if ObjectId.is_valid(str(raw_id)) else None)
+        if oid is not None and updates:
+            db.tasks.update_one({"_id": oid}, {"$set": updates})
+
+        if not failures:
+            _write_zoho_sync_state(db, task_doc, "synced", error="", attempts=attempts)
+            return "synced"
+        _write_zoho_sync_state(db, task_doc, "pending", error="; ".join(failures), attempts=attempts)
+        logger.warning("Zoho sync partial/errored for task %s: %s", task_doc.get("_id"), "; ".join(failures))
+        return "pending"
     except Exception as e:
-        logger = __import__("logging").getLogger("yesboss.tasks")
-        logger.warning("Zoho sync failed: %s", e)
+        logger.error("Zoho sync failed for task %s: %s", task_doc.get("_id"), e, exc_info=True)
+        try:
+            _write_zoho_sync_state(db, task_doc, "pending", error=str(e)[:500])
+        except Exception:
+            pass
+        return "pending"
 
 
 async def delete_zoho_task(task: dict, org_id: str):
     try:
+        from ..api.meetings import _resolve_token_for_email
         from ..core.database import get_database as _get_db
         db = _get_db()
         zmt = ZohoMailTasks(db)
         zoho = ZohoOAuth(db)
         zoho_group_id = task.get("zoho_group_task_id")
-        zoho_personal_id = task.get("zoho_personal_task_id")
         zgid = task.get("zoho_zgid")
         assignee_emails = task.get("assignee_id") or []
         if isinstance(assignee_emails, str):
@@ -131,11 +198,18 @@ async def delete_zoho_task(task: dict, org_id: str):
         owner_token = await zoho.get_valid_token(owner.get("owner_id", "")) if owner else None
         if zoho_group_id and owner_token:
             await zmt.delete_task(owner_token, zoho_group_id, is_group=True, zgid=zgid)
+        per_assignee = task.get("zoho_task_ids") or {}
+        if not isinstance(per_assignee, dict):
+            per_assignee = {}
         for email in assignee_emails:
-            if email:
-                token = await zoho.get_valid_token(email)
-                if token and zoho_personal_id:
-                    await zmt.delete_task(token, zoho_personal_id)
+            if not email:
+                continue
+            token = await _resolve_token_for_email(db, email, org_id)
+            if not token:
+                continue
+            personal_id = per_assignee.get(email) or task.get("zoho_personal_task_id")
+            if personal_id:
+                await zmt.delete_task(token, personal_id)
     except Exception as e:
         logger = __import__("logging").getLogger("yesboss.tasks")
         logger.warning("Zoho delete sync failed: %s", e)
@@ -314,6 +388,26 @@ async def sync_google_completions(db, email: str, token: str | None = None, org_
                         if isinstance(ids, dict) and gid in ids.values():
                             existing = t
                             break
+                if not existing:
+                    # Fallback when google_task_id linkage is broken/stale: match a
+                    # pending yesboss task by title + assignee + org, so completions
+                    # made in Google Tasks always reflect back to yesboss.
+                    title = (gt.get("title") or "").strip().lower()
+                    if title:
+                        base = {"status": {"$ne": "completed"}, "title": title}
+                        if org_id:
+                            base["organization_id"] = org_id
+                        for cand in db.tasks.find(base).limit(10):
+                            cand_emails = cand.get("assignee_email") or ""
+                            cand_ids = cand.get("assignee_id") or []
+                            if isinstance(cand_ids, str):
+                                cand_ids = [cand_ids]
+                            matches = (email and email.lower() in str(cand_emails).lower()) or any(
+                                email and email.lower() == str(c).lower() for c in cand_ids
+                            )
+                            if matches:
+                                existing = cand
+                                break
                 if not existing:
                     continue
                 if existing.get("status") != "completed":

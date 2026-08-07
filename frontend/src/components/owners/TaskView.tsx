@@ -227,6 +227,32 @@ export default function TaskView({ goals: propGoals }: { goals?: any[] }) {
     }
   };
 
+  const getZohoBadge = (task: any) => {
+    const st = task.zoho_sync_status;
+    if (st === "synced") {
+      return (
+        <span title="Synced to Zoho Mail To-Do" className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-400 flex-shrink-0">
+          Zoho ✓
+        </span>
+      );
+    }
+    if (st === "pending" || st === "error") {
+      return (
+        <span title={task.zoho_sync_error || "Zoho sync pending — retrying"} className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-400 flex-shrink-0">
+          Zoho pending
+        </span>
+      );
+    }
+    if (st || task.zoho_personal_task_id || task.zoho_group_task_id) {
+      return (
+        <span title="Zoho sync status unknown" className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-500/10 text-gray-400 flex-shrink-0">
+          Zoho —
+        </span>
+      );
+    }
+    return null;
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -444,6 +470,7 @@ export default function TaskView({ goals: propGoals }: { goals?: any[] }) {
                                 <p className="text-sm font-medium truncate">{task.title}</p>
                                 <div className="flex items-center gap-2 mt-0.5">
                                   <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${getPriorityColor(task.priority)}`}>{task.priority}</span>
+                                  {getZohoBadge(task)}
                                 </div>
                               </div>
                               <div className="flex items-center gap-1 flex-shrink-0">

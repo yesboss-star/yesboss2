@@ -281,8 +281,9 @@ class ZohoMailTasks:
         return None
 
     def _map_priority(self, p: str) -> str:
-        mapping = {"high": "High", "medium": "Normal", "low": "Low"}
-        return mapping.get(p.lower(), "Normal")
+        # Zoho Mail Tasks API expects lowercase values: high | medium | low
+        mapping = {"high": "high", "medium": "medium", "low": "low"}
+        return mapping.get((p or "").lower(), "medium")
 
     @staticmethod
     def map_zoho_status(zoho_status: str) -> str:

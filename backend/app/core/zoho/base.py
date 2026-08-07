@@ -2,6 +2,7 @@ import logging
 import secrets
 from datetime import datetime, timedelta
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -35,11 +36,12 @@ class ZohoOAuth:
 
     # ── Public helpers ──────────────────────────────────────────────
 
-    def get_auth_url(self, state: str | None = None) -> str:
+    def get_auth_url(self, state: str | None = None, redirect_uri: str | None = None) -> str:
         state = state or secrets.token_urlsafe(32)
+        rd = redirect_uri or _ZOHO_REDIRECT_URI
         params = (
             f"client_id={_ZOHO_CLIENT_ID}"
-            f"&redirect_uri={_ZOHO_REDIRECT_URI}"
+            f"&redirect_uri={quote(rd, safe='')}"
             f"&scope={FULL_SCOPE}"
             f"&response_type=code"
             f"&access_type=offline"
@@ -70,12 +72,12 @@ class ZohoOAuth:
             logger.error("Zoho token request error: %s", e)
             return None
 
-    async def exchange_code(self, code: str) -> dict[str, Any] | None:
+    async def exchange_code(self, code: str, redirect_uri: str | None = None) -> dict[str, Any] | None:
         return await self._post_token({
             "code": code,
             "client_id": _ZOHO_CLIENT_ID,
             "client_secret": _ZOHO_CLIENT_SECRET,
-            "redirect_uri": _ZOHO_REDIRECT_URI,
+            "redirect_uri": redirect_uri or _ZOHO_REDIRECT_URI,
             "grant_type": "authorization_code",
         })
 
