@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
@@ -179,7 +179,7 @@ export default function LoginPage() {
             body: JSON.stringify({ id_token: idToken }),
           });
         } catch {}
-        setError("This phone number isn't linked to any account yet. Please log in with your email and password, then verify this number in Settings â†’ Profile.");
+        setError("This phone number isn't linked to any account yet. Please log in with your email and password, then verify this number in Settings → Profile.");
         setPhoneOtpSent(false);
         setPhoneOtp("");
         setConfirmationResult(null);

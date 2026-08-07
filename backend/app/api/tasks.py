@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from ..api.websocket import manager as ws_manager
 from ..core.database import get_database
 from ..core.zoho import ZohoMailTasks, ZohoOAuth
-from ..dependencies.auth import get_current_user_optional
+from ..dependencies.auth import get_current_user, get_current_user_optional
 
 router = APIRouter()
 
@@ -141,60 +141,198 @@ async def delete_zoho_task(task: dict, org_id: str):
         logger.warning("Zoho delete sync failed: %s", e)
 
 
-async def sync_task_to_google(db, task_doc: dict, org_id: str, old_data: dict = None):
+def _write_google_sync_state(db, task_doc: dict, status: str, *, error: str = "", attempts: int | None = None):
+    """Persist google sync status/error/attempts on a task. Bumps attempts if not given and status != synced."""
+    updates = {
+        "google_sync_status": status,
+        "google_last_synced_at": datetime.utcnow().isoformat(),
+    }
+    updates["google_sync_error"] = error
+    if attempts is not None:
+        updates["google_sync_attempts"] = attempts
+    else:
+        current = task_doc.get("google_sync_attempts") or 0
+        updates["google_sync_attempts"] = current + 1
+    raw_id = task_doc.get("_id")
+    oid = raw_id if isinstance(raw_id, ObjectId) else (ObjectId(raw_id) if ObjectId.is_valid(str(raw_id)) else None)
+    if oid is None:
+        return
+    db.tasks.update_one({"_id": oid}, {"$set": updates})
+    task_doc.update(updates)
+
+
+async def sync_task_to_google(db, task_doc: dict, org_id: str, old_data: dict = None, max_attempts: int = 5):
     try:
         from ..core.google import GoogleTasks
         from ..core.providers import _resolve_google_token
 
         gtasks = GoogleTasks(db)
+        task_logger = __import__("logging").getLogger("yesboss.tasks")
         assignee_emails = task_doc.get("assignee_id") or []
         if isinstance(assignee_emails, str):
             assignee_emails = [assignee_emails]
         if not assignee_emails:
             assignee_emails = [task_doc.get("assignee_email")] if task_doc.get("assignee_email") else []
 
+        attempts = (task_doc.get("google_sync_attempts") or 0) + 1
+        if attempts > max_attempts:
+            task_logger.error(
+                "Google sync giving up on task %s after %s attempts — assignees=%s",
+                task_doc.get("_id"), max_attempts, assignee_emails,
+            )
+            _write_google_sync_state(db, task_doc, "error", error="Max retry attempts reached", attempts=attempts)
+            return "error"
+
+        failures: list[str] = []
+        synced_any = False
+
         for email in assignee_emails:
             if not email:
                 continue
-            assignee_token = await _resolve_google_token(db, email, org_id, include_org_fallback=False)
-            if not assignee_token:
-                continue
-
-            list_id = await gtasks.ensure_list(assignee_token)
-            if not list_id:
-                continue
-
-            existing_task_id = task_doc.get("google_task_id")
-
-            if old_data is None:
-                task_id = await gtasks.create_task(assignee_token, list_id, task_doc)
-                updates = {
-                    "google_sync_status": "synced" if task_id else "pending",
-                    "google_last_synced_at": datetime.utcnow().isoformat(),
-                }
-                if task_id:
-                    updates["google_task_id"] = task_id
-                    updates["google_task_list_id"] = list_id
-                db.tasks.update_one(
-                    {"_id": task_doc["_id"] if isinstance(task_doc["_id"], ObjectId) else ObjectId(task_doc["_id"])},
-                    {"$set": updates},
-                )
-            else:
-                if not existing_task_id:
+            try:
+                assignee_token = await _resolve_google_token(db, email, org_id, include_org_fallback=False)
+                if not assignee_token:
+                    failures.append(f"{email}: no connected Google token")
+                    task_logger.info("Google sync skip assignee %s for task %s — no token", email, task_doc.get("_id"))
                     continue
-                changes = {}
-                for f in ("title", "description", "status", "due_date"):
-                    if task_doc.get(f) != old_data.get(f):
-                        changes[f] = task_doc.get(f)
-                if changes:
-                    await gtasks.update_task(assignee_token, list_id, existing_task_id, changes)
-                    db.tasks.update_one(
-                        {"_id": task_doc["_id"] if isinstance(task_doc["_id"], ObjectId) else ObjectId(task_doc["_id"])},
-                        {"$set": {"google_sync_status": "synced", "google_last_synced_at": datetime.utcnow().isoformat()}},
-                    )
+
+                google_list_id = await gtasks.ensure_list(assignee_token)
+                if not google_list_id:
+                    failures.append(f"{email}: could not find/create YesBoss task list")
+                    task_logger.error("Google sync ensure_list failed for %s (task %s)", email, task_doc.get("_id"))
+                    continue
+
+                existing_task_id = task_doc.get("google_task_id")
+
+                if old_data is None:
+                    task_id = await gtasks.create_task(assignee_token, google_list_id, task_doc)
+                    if task_id:
+                        synced_any = True
+                        _write_google_sync_state(db, task_doc, "synced",
+                                                 error="",
+                                                 attempts=attempts)
+                        per_assignee = dict(task_doc.get("google_task_ids") or {})
+                        per_assignee[email] = task_id
+                        updates = {
+                            "google_task_id": task_id,
+                            "google_task_list_id": google_list_id,
+                            "google_task_ids": per_assignee,
+                        }
+                        task_doc["google_task_ids"] = per_assignee
+                        _id = task_doc.get("_id")
+                        oid = _id if isinstance(_id, ObjectId) else (ObjectId(_id) if ObjectId.is_valid(str(_id)) else None)
+                        if oid is not None:
+                            db.tasks.update_one({"_id": oid}, {"$set": updates})
+                        # Instant reverse sync: if the assignee already completed it in
+                        # Google, reflect that back in yesboss right away.
+                        await sync_google_completions(db, email, token=assignee_token, org_id=org_id)
+                    else:
+                        failures.append(f"{email}: Google create_task returned no id (see Google Tasks API logs)")
+                        task_logger.error("Google sync create_task failed for %s (task %s)", email, task_doc.get("_id"))
+                else:
+                    if not existing_task_id:
+                        failures.append(f"{email}: task not previously pushed to Google (no google_task_id)")
+                        continue
+                    changes = {}
+                    for f in ("title", "description", "status", "due_date"):
+                        if task_doc.get(f) != old_data.get(f):
+                            changes[f] = task_doc.get(f)
+                    if changes:
+                        ok = await gtasks.update_task(assignee_token, google_list_id, existing_task_id, changes)
+                        if ok:
+                            synced_any = True
+                            _write_google_sync_state(db, task_doc, "synced", error="", attempts=attempts)
+                        else:
+                            failures.append(f"{email}: Google update_task returned error")
+                            task_logger.error("Google sync update_task failed for %s (task %s)", email, task_doc.get("_id"))
+            except Exception as e:
+                failures.append(f"{email}: {e}")
+                task_logger.error("Google sync error for %s (task %s): %s", email, task_doc.get("_id"), e, exc_info=True)
+
+        if not failures:
+            # all assignees synced or skipped with no hard failure
+            if synced_any or not assignee_emails:
+                _write_google_sync_state(db, task_doc, "synced", error="", attempts=attempts)
+            return "synced" if (synced_any or not assignee_emails) else "error"
+        # some assignees failed — mark pending so the scheduler can retry
+        _write_google_sync_state(db, task_doc, "pending", error="; ".join(failures), attempts=attempts)
+        task_logger.warning("Google sync partial/errored for task %s: %s", task_doc.get("_id"), "; ".join(failures))
+        return "pending"
     except Exception as e:
         logger = __import__("logging").getLogger("yesboss.tasks")
-        logger.warning("Google sync failed: %s", e)
+        logger.error("Google sync failed for task %s: %s", task_doc.get("_id"), e, exc_info=True)
+        try:
+            _write_google_sync_state(db, task_doc, "pending", error=str(e)[:500])
+        except Exception:
+            pass
+        return "pending"
+
+
+_reverse_inflight: set = set()
+
+
+async def sync_google_completions(db, email: str, token: str | None = None, org_id: str = "") -> int:
+    """Pull completed Google tasks for a user and mark matching yesboss tasks completed.
+
+    Scans ALL of the user's Google task lists (not just 'YesBoss'), matching each
+    completed task back to a yesboss task by google_task_id OR the per-assignee
+    google_task_ids map. Returns the number of yesboss tasks flipped to completed.
+    """
+    if not email or db is None:
+        return 0
+    if token is None:
+        from ..core.providers import _resolve_google_token
+        token = await _resolve_google_token(db, email, org_id, include_org_fallback=False)
+    if not token:
+        return 0
+    key = f"{email}|{org_id}"
+    if key in _reverse_inflight:
+        return 0
+    _reverse_inflight.add(key)
+    try:
+        from ..core.google import GoogleTasks
+
+        task_logger = __import__("logging").getLogger("yesboss.tasks")
+        gtasks = GoogleTasks(db)
+
+        flipped = 0
+        lists = await gtasks.list_all_task_lists(token)
+        for tlist in lists:
+            list_id = tlist.get("id")
+            if not list_id:
+                continue
+            items = await gtasks.list_tasks_in_list(token, list_id, show_completed=True)
+            for gt in items:
+                if gt.get("status") != "completed":
+                    continue
+                gid = gt.get("id")
+                existing = db.tasks.find_one({"google_task_id": gid})
+                if not existing and gid:
+                    # Per-assignee map: google_task_ids = {"email": "gid", ...}
+                    for t in db.tasks.find({"google_task_ids": {"$ne": None}}):
+                        ids = t.get("google_task_ids") or {}
+                        if isinstance(ids, dict) and gid in ids.values():
+                            existing = t
+                            break
+                if not existing:
+                    continue
+                if existing.get("status") != "completed":
+                    db.tasks.update_one(
+                        {"_id": existing["_id"]},
+                        {"$set": {"status": "completed", "updated_at": datetime.utcnow()}},
+                    )
+                    flipped += 1
+                    task_logger.info(
+                        "Google completion sync: marked yesboss task %s completed (google %s, list %s)",
+                        existing.get("_id"), gid, list_id,
+                    )
+        return flipped
+    except Exception as e:
+        task_logger = __import__("logging").getLogger("yesboss.tasks")
+        task_logger.warning("Google completion sync error for %s: %s", email, e)
+        return 0
+    finally:
+        _reverse_inflight.discard(key)
 
 
 async def delete_google_task(task: dict):
@@ -221,15 +359,15 @@ async def delete_google_task(task: dict):
 
 
 async def sync_task_to_provider(db, task_doc: dict, org_id: str, old_data: dict = None):
-    """Dispatch a task sync to the org's connected provider (Google or Zoho)."""
-    try:
-        from ..core.providers import get_org_provider
+    """Sync a task out to BOTH connected providers (Google and Zoho).
 
-        provider = get_org_provider(db, org_id)
-        if provider == "google":
-            await sync_task_to_google(db, task_doc, org_id, old_data)
-        else:
-            await sync_task_to_zoho(db, task_doc, org_id, old_data)
+    Each provider sync is self-skipping: assignees without a valid token for
+    that provider are simply skipped, so a user connected to only one provider
+    only receives the task there.
+    """
+    try:
+        await sync_task_to_google(db, task_doc, org_id, old_data)
+        await sync_task_to_zoho(db, task_doc, org_id, old_data)
     except Exception as e:
         logger = __import__("logging").getLogger("yesboss.tasks")
         logger.warning("Provider task sync dispatch failed: %s", e)
@@ -360,15 +498,20 @@ async def list_tasks(
     organization_id: str | None = None,
     overdue: bool = Query(False),
     escalation_level: int | None = Query(None),
-    current_user = Depends(get_current_user_optional)
+    current_user = Depends(get_current_user)
 ):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
+    from ..dependencies.scope import is_org_member, is_org_owner
+
     org_id = organization_id or get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
+
+    if not await is_org_member(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
 
     query = {"organization_id": org_id}
     if goal_id:
@@ -379,7 +522,7 @@ async def list_tasks(
         query["status"] = status
     if overdue:
         now = datetime.utcnow().replace(microsecond=0).isoformat()
-        query["due_date"] = {"$lt": now}
+        query["due_date"] = {"$gt": "", "$lt": now}
         query["status"] = {"$nin": ["completed", "approved"]}
     if priority:
         query["priority"] = priority
@@ -388,18 +531,14 @@ async def list_tasks(
     if escalation_level is not None:
         query["escalation_level"] = escalation_level
 
-    if current_user and getattr(current_user, 'id', None):
-        from bson import ObjectId
-        org = db.organizations.find_one({"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id}, {"owner_id": 1})
-        is_owner = org and org.get("owner_id") == current_user.id
-        if not is_owner:
-            user_email = (getattr(current_user, 'email', '') or '').lower().strip()
-            query["$or"] = [
-                {"created_by": current_user.id},
-                {"assignee_email": user_email},
-                {"assigned_to": user_email},
-                {"assignee_id": user_email},
-            ]
+    if not await is_org_owner(db, org_id, current_user):
+        user_email = (getattr(current_user, 'email', '') or '').lower().strip()
+        query["$or"] = [
+            {"created_by": current_user.id},
+            {"assignee_email": user_email},
+            {"assigned_to": user_email},
+            {"assignee_id": user_email},
+        ]
 
     tasks = list(db.tasks.find(query).sort("created_at", -1))
 
@@ -420,20 +559,22 @@ async def list_tasks(
 
 
 @router.get("/{task_id}")
-async def get_task(task_id: str, current_user = Depends(get_current_user_optional)):
+async def get_task(task_id: str, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+
+    from ..dependencies.scope import is_org_owner
 
     task = db.tasks.find_one({"_id": ObjectId(task_id)})
 
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    if current_user and getattr(current_user, 'id', None):
-        user_email = (getattr(current_user, 'email', '') or '').lower().strip()
-        if task.get("created_by") != current_user.id and task.get("assignee_email") != user_email and task.get("assigned_to") != user_email:
-            raise HTTPException(status_code=403, detail="Access denied")
+    user_email = (getattr(current_user, 'email', '') or '').lower().strip()
+    is_owner = await is_org_owner(db, task.get("organization_id"), current_user)
+    if not is_owner and task.get("created_by") != current_user.id and task.get("assignee_email") != user_email and task.get("assigned_to") != user_email:
+        raise HTTPException(status_code=403, detail="Access denied")
 
     task["_id"] = str(task["_id"])
     raw = task.get("assignee_id")
@@ -450,21 +591,22 @@ async def get_task(task_id: str, current_user = Depends(get_current_user_optiona
 
 
 @router.put("/{task_id}")
-async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get_current_user_optional)):
+async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+
+    from ..dependencies.scope import is_org_owner
 
     old_obj = db.tasks.find_one({"_id": ObjectId(task_id)})
     if not old_obj:
         raise HTTPException(status_code=404, detail="Task not found")
 
     org_id = old_obj.get("organization_id", "")
-    if current_user and getattr(current_user, 'id', None):
-        if not await _is_org_owner(db, org_id, current_user.id):
-            user_email = (getattr(current_user, 'email', '') or '').lower().strip()
-            if old_obj.get("created_by") != current_user.id and old_obj.get("assignee_email") != user_email and old_obj.get("assigned_to") != user_email:
-                raise HTTPException(status_code=403, detail="Access denied")
+    if not await is_org_owner(db, org_id, current_user):
+        user_email = (getattr(current_user, 'email', '') or '').lower().strip()
+        if old_obj.get("created_by") != current_user.id and old_obj.get("assignee_email") != user_email and old_obj.get("assigned_to") != user_email:
+            raise HTTPException(status_code=403, detail="Access denied")
 
     update_data = {}
     for k, v in task.model_dump().items():

@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from ..core.cache import cache
 from ..core.database import get_database
 from ..dependencies.auth import get_current_user, get_current_user_optional
+from ..dependencies.scope import is_org_member, is_org_owner
 
 router = APIRouter()
 logger = logging.getLogger("yesboss.dashboard")
@@ -416,6 +417,16 @@ async def get_dashboard_kpi(
     org_id = organization_id or get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
+
+    # KPI data is org-wide; only authenticated org members may read it.
+    if not await is_org_member(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Employees may only request their OWN per-person KPIs.
+    if email:
+        caller_email = (getattr(current_user, "email", "") or "").lower().strip()
+        if not await is_org_owner(db, org_id, current_user) and email.lower().strip() != caller_email:
+            raise HTTPException(status_code=403, detail="Access denied")
 
     cache_key_data = {"org_id": org_id}
     if email:

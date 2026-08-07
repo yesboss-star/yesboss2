@@ -1,10 +1,29 @@
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from ..core.database import get_database
 from ..core.learning import learning
+from ..dependencies.auth import get_current_user_optional
+from ..dependencies.scope import is_org_member, is_org_owner
 
 router = APIRouter()
+
+
+async def _require_member(user, org_id: str):
+    db = get_database()
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not await is_org_member(db, org_id, user):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+
+async def _require_owner(user, org_id: str):
+    db = get_database()
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not await is_org_owner(db, org_id, user):
+        raise HTTPException(status_code=403, detail="Owner access required")
 
 
 class WorkflowRecord(BaseModel):
@@ -75,7 +94,8 @@ class GoalOutcomeRecord(BaseModel):
 
 
 @router.post("/workflow")
-async def record_workflow(request: WorkflowRecord):
+async def record_workflow(request: WorkflowRecord, current_user = Depends(get_current_user_optional)):
+    await _require_member(current_user, request.organization_id)
     return learning.record_workflow(
         organization_id=request.organization_id,
         workflow_data=request.model_dump()
@@ -83,7 +103,8 @@ async def record_workflow(request: WorkflowRecord):
 
 
 @router.post("/task-outcome")
-async def record_task_outcome(request: TaskOutcomeRecord):
+async def record_task_outcome(request: TaskOutcomeRecord, current_user = Depends(get_current_user_optional)):
+    await _require_member(current_user, request.organization_id)
     return learning.record_task_outcome(
         organization_id=request.organization_id,
         task_data=request.model_dump()
@@ -91,7 +112,8 @@ async def record_task_outcome(request: TaskOutcomeRecord):
 
 
 @router.post("/bottleneck")
-async def record_bottleneck(request: BottleneckRecord):
+async def record_bottleneck(request: BottleneckRecord, current_user = Depends(get_current_user_optional)):
+    await _require_member(current_user, request.organization_id)
     return learning.record_bottleneck(
         organization_id=request.organization_id,
         bottleneck_data=request.model_dump()
@@ -99,7 +121,8 @@ async def record_bottleneck(request: BottleneckRecord):
 
 
 @router.post("/pattern")
-async def record_pattern(request: PatternRecord):
+async def record_pattern(request: PatternRecord, current_user = Depends(get_current_user_optional)):
+    await _require_member(current_user, request.organization_id)
     return learning.record_pattern(
         organization_id=request.organization_id,
         pattern_data=request.model_dump()
@@ -107,22 +130,26 @@ async def record_pattern(request: PatternRecord):
 
 
 @router.get("/workflow/analysis/{organization_id}")
-async def get_workflow_analysis(organization_id: str, days: int = 30):
+async def get_workflow_analysis(organization_id: str, days: int = 30, current_user = Depends(get_current_user_optional)):
+    await _require_member(current_user, organization_id)
     return learning.analyze_workflow_efficiency(organization_id, days)
 
 
 @router.get("/bottlenecks/{organization_id}")
-async def get_bottlenecks(organization_id: str):
+async def get_bottlenecks(organization_id: str, current_user = Depends(get_current_user_optional)):
+    await _require_member(current_user, organization_id)
     return {"bottlenecks": learning.get_bottlenecks(organization_id)}
 
 
 @router.get("/patterns/{organization_id}")
-async def get_patterns(organization_id: str, pattern_type: str | None = None):
+async def get_patterns(organization_id: str, pattern_type: str | None = None, current_user = Depends(get_current_user_optional)):
+    await _require_member(current_user, organization_id)
     return {"patterns": learning.get_patterns(organization_id, pattern_type)}
 
 
 @router.get("/frequencies/{organization_id}")
-async def get_employee_frequencies(organization_id: str):
+async def get_employee_frequencies(organization_id: str, current_user = Depends(get_current_user_optional)):
+    await _require_owner(current_user, organization_id)
     import hashlib
 
     from ..core.database import get_database
@@ -137,7 +164,8 @@ async def get_employee_frequencies(organization_id: str):
 
 
 @router.post("/goal-outcome")
-async def record_goal_outcome(request: GoalOutcomeRecord):
+async def record_goal_outcome(request: GoalOutcomeRecord, current_user = Depends(get_current_user_optional)):
+    await _require_member(current_user, request.organization_id)
     return learning.record_goal_outcome(
         organization_id=request.organization_id,
         outcome_data=request.model_dump()
@@ -155,20 +183,24 @@ async def get_recommendations(industry: str, micro_vertical: str | None = None):
 
 
 @router.get("/workload-analysis/{organization_id}")
-async def get_workload_analysis(organization_id: str):
+async def get_workload_analysis(organization_id: str, current_user = Depends(get_current_user_optional)):
+    await _require_owner(current_user, organization_id)
     return learning.workload_analysis(organization_id)
 
 
 @router.get("/estimate-deadline/{organization_id}")
-async def estimate_deadline(organization_id: str, work_category: str | None = None):
+async def estimate_deadline(organization_id: str, work_category: str | None = None, current_user = Depends(get_current_user_optional)):
+    await _require_member(current_user, organization_id)
     return learning.estimate_deadline(organization_id, work_category)
 
 
 @router.post("/performance-snapshot/{organization_id}")
-async def trigger_performance_snapshot(organization_id: str):
+async def trigger_performance_snapshot(organization_id: str, current_user = Depends(get_current_user_optional)):
+    await _require_owner(current_user, organization_id)
     return learning.record_performance_snapshot(organization_id)
 
 
 @router.get("/performance-trends/{organization_id}")
-async def get_performance_trends(organization_id: str, weeks: int = 8):
+async def get_performance_trends(organization_id: str, weeks: int = 8, current_user = Depends(get_current_user_optional)):
+    await _require_owner(current_user, organization_id)
     return {"trends": learning.get_performance_trends(organization_id, weeks)}

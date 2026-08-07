@@ -40,7 +40,7 @@ function buildAdaptation(stage: OrgStage, goalCount: number, memberCount: number
     showSetupWizard: stage === "new" || stage === "onboarding",
     showExecutiveKPIs: stage === "growing" || stage === "established",
     showGrokInsights: true,
-    showRevenueRisk: stage === "established",
+    showRevenueRisk: stage === "growing" || stage === "established",
     emptyStateMessage: "",
     suggestedFocus: [],
     insights: [],

@@ -22,6 +22,20 @@ def _days_overdue(due_date):
         return None
 
 
+def _first_assignee(task) -> str:
+    """Return a single assignee identifier (email preferred, else first uid)."""
+    email = task.get("assignee_email")
+    if email:
+        return email
+    aids = task.get("assignee_id")
+    if isinstance(aids, str) and aids:
+        return aids
+    if isinstance(aids, list) and aids:
+        first = aids[0]
+        return first if isinstance(first, str) else str(first)
+    return ""
+
+
 def start_scheduler() -> threading.Thread:
     """Run the scheduler on its own daemon thread + event loop.
 
@@ -158,7 +172,7 @@ async def check_deadline_reminders():
         }))
 
         for task in tasks_due_soon:
-            assignee_id = task.get("assignee_id") or task.get("assignee_email")
+            assignee_id = _first_assignee(task)
             if not assignee_id:
                 continue
             await create_and_deliver(
@@ -199,7 +213,7 @@ async def check_deadline_reminders():
         }))
 
         for task in tasks_due_3:
-            assignee_id = task.get("assignee_id") or task.get("assignee_email")
+            assignee_id = _first_assignee(task)
             if not assignee_id:
                 continue
             await create_and_deliver(
@@ -233,13 +247,13 @@ async def check_deadline_reminders():
                 )
 
         tasks_overdue = list(db.tasks.find({
-            "due_date": {"$lt": now},
+            "due_date": {"$gt": "", "$lt": now},
             "status": {"$nin": ["completed", "approved"]},
             "overdue_notified": {"$ne": True},
         }))
 
         for task in tasks_overdue:
-            assignee_id = task.get("assignee_id") or task.get("assignee_email")
+            assignee_id = _first_assignee(task)
             if not assignee_id:
                 continue
             await create_and_deliver(
@@ -273,13 +287,13 @@ async def check_deadline_reminders():
                 )
 
         tasks_3d_overdue = list(db.tasks.find({
-            "due_date": {"$lt": days_3_ago},
+            "due_date": {"$gt": "", "$lt": days_3_ago},
             "status": {"$nin": ["completed", "approved"]},
             "escalation_level": {"$lt": 2},
         }))
 
         for task in tasks_3d_overdue:
-            assignee_id = task.get("assignee_id") or task.get("assignee_email")
+            assignee_id = _first_assignee(task)
             org_id = task.get("organization_id", "")
             if not assignee_id or not org_id:
                 continue
@@ -322,7 +336,7 @@ async def check_deadline_reminders():
             )
 
         tasks_7d_overdue = list(db.tasks.find({
-            "due_date": {"$lt": days_7_ago},
+            "due_date": {"$gt": "", "$lt": days_7_ago},
             "status": {"$nin": ["completed", "approved"]},
             "escalation_level": {"$lt": 3},
         }))
@@ -339,7 +353,7 @@ async def check_deadline_reminders():
                 continue
             all_overdue = list(db.tasks.find({
                 "organization_id": org_id,
-                "due_date": {"$lt": now},
+                "due_date": {"$gt": "", "$lt": now},
                 "status": {"$nin": ["completed", "approved"]},
             }).sort("due_date", 1))
             summary_lines = []
@@ -390,7 +404,7 @@ async def check_deadline_reminders():
                 from ..core.zoho.taz import send_task_reminder as taz_remind
                 asyncio.create_task(taz_remind(
                     task_title=task.get("title", ""), due_date=str(task.get("due_date", ""))[:10],
-                    assignee_email=task.get("assignee_id") or task.get("assignee_email", ""),
+                    assignee_email=_first_assignee(task),
                     task_id=str(task.get("_id", "")), reminder_type="overdue",
                 ))
                 db.tasks.update_one(
@@ -495,7 +509,7 @@ async def check_goal_deadlines(db):
                 )
 
         goals_overdue = list(db.goals.find({
-            "due_date": {"$lt": now},
+            "due_date": {"$gt": "", "$lt": now},
             "status": {"$ne": "completed"},
             "goal_overdue_notified": {"$ne": True},
         }))
@@ -534,7 +548,7 @@ async def check_goal_deadlines(db):
                 )
 
         goals_3d_overdue = list(db.goals.find({
-            "due_date": {"$lt": days_3_ago},
+            "due_date": {"$gt": "", "$lt": days_3_ago},
             "status": {"$ne": "completed"},
             "goal_escalation_level": {"$lt": 2},
         }))
@@ -582,7 +596,7 @@ async def check_goal_deadlines(db):
             )
 
         goals_7d_overdue = list(db.goals.find({
-            "due_date": {"$lt": days_7_ago},
+            "due_date": {"$gt": "", "$lt": days_7_ago},
             "status": {"$ne": "completed"},
             "goal_escalation_level": {"$lt": 3},
         }))
@@ -599,7 +613,7 @@ async def check_goal_deadlines(db):
                 continue
             all_overdue = list(db.goals.find({
                 "organization_id": org_id,
-                "due_date": {"$lt": now},
+                "due_date": {"$gt": "", "$lt": now},
                 "status": {"$ne": "completed"},
             }).sort("due_date", 1))
             summary_lines = []
@@ -969,6 +983,15 @@ async def sync_google_tasks():
                 continue
 
             gtasks = GoogleTasks(db)
+
+            # Reverse sync: scan all of this user's lists so a task completed in any
+            # Google list reflects back in yesboss as completed.
+            from ..api.tasks import sync_google_completions
+            email = token_doc.get("email", "")
+            await sync_google_completions(db, email or user_id, token=token, org_id=org_id)
+
+            # Forward-ish: pull in tasks created directly in Google Tasks (not pushed by
+            # yesboss), limited to the 'YesBoss' list to avoid importing unrelated tasks.
             list_id = await gtasks.ensure_list(token)
             if not list_id:
                 continue
@@ -981,7 +1004,7 @@ async def sync_google_tasks():
                     updates = {}
                     google_status = gt.get("status", "")
                     mapped = GoogleTasks.map_google_status(google_status)
-                    if mapped != existing.get("status"):
+                    if mapped not in ("completed", "") and mapped != existing.get("status"):
                         updates["status"] = mapped
                     new_title = gt.get("title", "")
                     if new_title and new_title != existing.get("title"):
@@ -1032,6 +1055,38 @@ async def sync_google_tasks():
             )
     except Exception as e:
         logger.warning(f"Google task sync error: {e}")
+
+
+async def sync_pending_google_tasks(limit: int = 50):
+    """Retry tasks that failed to push to Google Tasks (google_sync_status is
+    'pending' or 'error'). Each sync_task_to_google call honours its own max-attempts
+    cap via the task's google_sync_attempts field, so retries are bounded."""
+    try:
+        from ..api.tasks import sync_task_to_google
+        from ..core.database import get_database as _gd
+
+        db = _gd()
+        if db is None:
+            return
+        pending = list(
+            db.tasks.find(
+                {
+                    "google_sync_status": {"$in": ["pending", "error"]},
+                    "google_sync_attempts": {"$lt": 5},
+                }
+            ).limit(limit)
+        )
+        for task_doc in pending:
+            task_doc["_id"] = str(task_doc["_id"])
+            org_id = task_doc.get("organization_id", "")
+            try:
+                await sync_task_to_google(db, task_doc, org_id)
+            except Exception as e:
+                logger.warning("Retry of pending google task %s failed: %s", task_doc["_id"], e)
+        if pending:
+            logger.info("Retried %s pending google tasks", len(pending))
+    except Exception as e:
+        logger.warning(f"sync_pending_google_tasks error: {e}")
 
 
 async def sync_google_calendar():
@@ -1328,6 +1383,10 @@ async def scheduler_loop():
     logger.info("Scheduler started")
     deadline_counter = 0
     cal_sync_counter = 0
+    google_sync_counter = 0
+    import os
+    is_dev = os.getenv("ENVIRONMENT", "development").lower() in ("development", "dev", "")
+    google_sync_every = 1 if is_dev else 6  # every 60s in dev, every ~5 min in prod
     # Defer the first heavy cycle so the API is responsive right after startup.
     await asyncio.sleep(30)
     while not _scheduler_stop.is_set():
@@ -1356,14 +1415,19 @@ async def scheduler_loop():
                 await check_owner_check_ins()
 
             await sync_zoho_tasks()
-            await sync_google_tasks()
+            if google_sync_counter % google_sync_every == 0:
+                await sync_google_tasks()
+                await sync_pending_google_tasks()
+                google_sync_counter = 0
 
             if cal_sync_counter % 3 == 0:  # every ~15 min (stub until G3)
                 await sync_zoho_calendar()
                 await sync_google_calendar()
 
             deadline_counter += 1
+            google_sync_counter += 1
             cal_sync_counter += 1
         except Exception as e:
             logger.error(f"Scheduler cycle error: {e}")
         await asyncio.sleep(CHECK_INTERVAL)
+

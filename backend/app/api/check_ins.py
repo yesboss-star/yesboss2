@@ -12,6 +12,7 @@ from ..core.check_in_service import (
 )
 from ..core.database import get_database
 from ..dependencies.auth import get_current_user_optional
+from ..dependencies.scope import is_org_owner
 
 router = APIRouter()
 
@@ -26,10 +27,14 @@ class CheckInResponse(BaseModel):
 
 
 @router.get("/{org_id}/check-ins")
-async def list_check_ins(org_id: str, limit: int = 10):
+async def list_check_ins(org_id: str, limit: int = 10, current_user=Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+
+    # Check-ins are owner-driven; only owners may list them.
+    if not await is_org_owner(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
 
     check_ins = list(db.check_ins.find({"org_id": org_id}).sort("check_in_date", -1).limit(limit))
     for c in check_ins:
@@ -44,6 +49,9 @@ async def get_pending_check_in(org_id: str, current_user=Depends(get_current_use
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+
+    if not await is_org_owner(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
 
     from bson import ObjectId
     org = db.organizations.find_one({"_id": ObjectId(org_id)})
@@ -71,6 +79,9 @@ async def trigger_check_in(org_id: str, current_user=Depends(get_current_user_op
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
+    if not await is_org_owner(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
+
     from bson import ObjectId
     org = db.organizations.find_one({"_id": ObjectId(org_id)})
     if not org:
@@ -95,6 +106,9 @@ async def respond_to_check_in(org_id: str, check_in_id: str, request: CheckInRes
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+
+    if not await is_org_owner(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
 
     from bson import ObjectId
     org = db.organizations.find_one({"_id": ObjectId(org_id)})

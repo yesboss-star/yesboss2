@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from ..api.websocket import manager as ws_manager
 from ..core.database import get_database
@@ -128,7 +128,7 @@ async def create_and_deliver(
             "actor_name": actor_name,
             "metadata": metadata or {},
             "read": False,
-            "created_at": datetime.now(timezone.utc),
+            "created_at": datetime.now(UTC),
         }
         result = db.notifications.insert_one(notif_doc)
         notif_doc["_id"] = str(result.inserted_id)

@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from ..api.websocket import manager as ws_manager
 from ..core.database import get_database
 from ..core.zoho import ZohoMailTasks, ZohoOAuth
-from ..dependencies.auth import get_current_user_optional
+from ..dependencies.auth import get_current_user, get_current_user_optional
 
 logger = logging.getLogger("yesboss.meetings")
 
@@ -369,17 +369,14 @@ async def _push_google_todo(db, org_id: str, task_doc: dict, assignee_emails: li
 
 
 async def _push_to_provider_todo(db, org_id: str, task_doc: dict, assignee_emails: list):
-    """Dispatch task push by the org's connected provider (Google or Zoho).
+    """Push a task out to BOTH connected providers (Google and Zoho).
 
-    Per-org either/or model: the owner's provider decides for everyone.
+    Each provider push is self-skipping: assignees without a valid token for
+    that provider are skipped, so users connected to only one provider only
+    receive the task there.
     """
-    from ..core.providers import get_org_provider
-
-    provider = get_org_provider(db, org_id)
-    if provider == "google":
-        await _push_google_todo(db, org_id, task_doc, assignee_emails)
-    else:
-        await _push_to_zoho_todo(db, org_id, task_doc, assignee_emails)
+    await _push_google_todo(db, org_id, task_doc, assignee_emails)
+    await _push_to_zoho_todo(db, org_id, task_doc, assignee_emails)
 
 
 async def create_task_from_meeting(
@@ -503,8 +500,6 @@ async def process_meeting(
     org_id = organization_id or await get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
-
-    user_id = getattr(current_user, 'id', None) or str(current_user) if current_user else None
 
     raw_text = ""
     participant_list = []
@@ -862,23 +857,33 @@ async def list_meetings(
     organization_id: str | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
     email: str | None = Query(None),
-    current_user=Depends(get_current_user_optional),
+    current_user=Depends(get_current_user),
 ):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
+    from ..dependencies.scope import is_org_member, is_org_owner
+
     org_id = organization_id or await get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
 
+    if not await is_org_member(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
+
     query: dict = {"organization_id": org_id}
     if email:
         clean_email = email.lower().strip()
+        # Non-owners may only view their own meeting history.
+        if not await is_org_owner(db, org_id, current_user):
+            own_email = (getattr(current_user, "email", "") or "").lower().strip()
+            if clean_email != own_email:
+                raise HTTPException(status_code=403, detail="Access denied")
         query["$or"] = [
             {"participants": clean_email},
             {"attendees": clean_email},
-            {"created_by": current_user.id if current_user else clean_email},
+            {"created_by": clean_email},
         ]
 
     meetings = list(

@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from ..core.database import get_database
 from ..core.file_processor import (
@@ -9,9 +9,18 @@ from ..core.file_processor import (
     process_file,
     search_documents,
 )
+from ..dependencies.auth import get_current_user
+from ..dependencies.scope import is_org_member
 
 logger = logging.getLogger("yesboss.file_processing_api")
 router = APIRouter()
+
+
+async def _require_org_member(db, org_id: str, current_user) -> None:
+    if not org_id or org_id == "temp":
+        return
+    if not await is_org_member(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
 
 
 def _fetch_org_context(org_id: str) -> dict:
@@ -46,7 +55,10 @@ async def process_uploaded_file(
     company_name: str | None = Form(None),
     industry: str | None = Form(None),
     micro_vertical: str | None = Form(None),
+    current_user = Depends(get_current_user),
 ):
+    await _require_org_member(get_database(), org_id, current_user)
+
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required")
 
@@ -96,7 +108,10 @@ async def batch_process_files(
     company_name: str | None = Form(None),
     industry: str | None = Form(None),
     micro_vertical: str | None = Form(None),
+    current_user = Depends(get_current_user),
 ):
+    await _require_org_member(get_database(), org_id, current_user)
+
     if len(files) > 10:
         raise HTTPException(status_code=400, detail="Maximum 10 files at once")
 
@@ -142,7 +157,10 @@ async def search_org_documents(
     limit: int = 5,
     provider: str | None = None,
     user_id: str | None = None,
+    current_user = Depends(get_current_user),
 ):
+    await _require_org_member(get_database(), org_id, current_user)
+
     if not org_id or not query:
         raise HTTPException(status_code=400, detail="org_id and query are required")
 
@@ -154,7 +172,10 @@ async def search_org_documents(
 async def get_document_types(
     org_id: str,
     user_id: str | None = None,
+    current_user = Depends(get_current_user),
 ):
+    await _require_org_member(get_database(), org_id, current_user)
+
     from ..core.qdrant import get_qdrant_client
 
     try:
@@ -186,9 +207,12 @@ async def get_organization_document_context(
     org_id: str,
     max_docs: int = 20,
     user_id: str | None = None,
+    current_user = Depends(get_current_user),
 ):
     """Return the structured context (summaries, metrics, decisions) of all
     analyzed documents for an organization. Powers dashboard widgets."""
+    await _require_org_member(get_database(), org_id, current_user)
+
     if not org_id:
         raise HTTPException(status_code=400, detail="org_id is required")
     return await get_org_document_context(org_id, max_docs=max_docs, user_id=user_id)
@@ -206,18 +230,20 @@ class AskDocumentsRequest(_BaseModel):
 
 
 @router.post("/ask")
-async def ask_documents(request: AskDocumentsRequest):
+async def ask_documents(request: AskDocumentsRequest, current_user = Depends(get_current_user)):
     """Ask a question and get an AI answer based on the org's uploaded documents.
 
     1. Semantic search the org's document chunks in Qdrant (deep search).
     2. Also pull the structured summary + metrics from MongoDB (overview).
     3. Ask Grok to answer using both.
     """
+    from ..core.database import get_database
+    await _require_org_member(get_database(), request.org_id, current_user)
+
     if not request.org_id or not request.question:
         raise HTTPException(status_code=400, detail="org_id and question are required")
 
     from ..core.ai_client import get_ai_response
-    from ..core.database import get_database
     from ..core.file_processor import get_org_document_context
     from ..core.intelligence import extract_document_insights as _unused  # noqa: F401
 

@@ -9,10 +9,10 @@ from xml.etree import ElementTree
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from ..api.websocket import manager as ws_manager
 from ..core.ai_client import get_ai_response
 from ..core.database import get_database
 from ..dependencies.auth import get_current_user_optional
-from ..api.websocket import manager as ws_manager
 
 
 async def create_notification(user_id: str, org_id: str, type: str, title: str, message: str, link: str = None, actor_id: str = None, actor_name: str = None, metadata: dict = None, email: str = None):

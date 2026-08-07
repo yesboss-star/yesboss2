@@ -67,8 +67,10 @@ export default function EmployeeOnboarding() {
   const [roleSuggestions, setRoleSuggestions] = useState<string[]>([]);
   const [showRoleSuggestions, setShowRoleSuggestions] = useState(false);
   const [selectedSubordinates, setSelectedSubordinates] = useState<Employee[]>([]);
-  const [orgSearchResults, setOrgSearchResults] = useState<{_id: string; name: string; domain: string; industry: string}[]>([]);
-  const [orgSearchLoading, setOrgSearchLoading] = useState(false);
+  const [allOrgs, setAllOrgs] = useState<{_id: string; name: string; domain: string; industry: string}[]>([]);
+  const [orgListLoading, setOrgListLoading] = useState(false);
+  const [orgQuery, setOrgQuery] = useState("");
+  const [showOrgDropdown, setShowOrgDropdown] = useState(false);
   interface PersonaQuestion {
     question: string;
     options: string[];
@@ -182,69 +184,6 @@ export default function EmployeeOnboarding() {
     }
   };
 
-  const handleDetectOrg = async () => {
-    setLoading(true);
-    try {
-      const email = user?.email || "";
-      const domain = email.split("@")[1] || "";
-      
-      const res = await fetch(`${API_URL}/organizations/by-domain/${domain}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.organization) {
-          setEmpData((prev) => ({
-            ...prev,
-            orgName: data.organization.name,
-            orgDomain: data.organization.domain || domain,
-            orgId: data.organization._id,
-          }));
-          fetchOrgChartData(data.organization._id);
-        } else {
-          setEmpData((prev) => ({
-            ...prev,
-            orgName: "Acme Corporation",
-            orgDomain: domain,
-          }));
-        }
-      } else {
-        setEmpData((prev) => ({
-          ...prev,
-          orgName: "Acme Corporation",
-          orgDomain: domain,
-        }));
-      }
-    } catch {
-      setEmpData((prev) => ({
-        ...prev,
-        orgName: "Acme Corporation",
-        orgDomain: "acme.com",
-      }));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const searchOrganizations = async (query: string) => {
-    if (query.length < 2) {
-      setOrgSearchResults([]);
-      return;
-    }
-    setOrgSearchLoading(true);
-    try {
-      const res = await fetch(`${API_URL}/organizations?search=${encodeURIComponent(query)}`);
-      if (res.ok) {
-        const data = await res.json();
-        setOrgSearchResults(data.organizations || []);
-      } else {
-        setOrgSearchResults([]);
-      }
-    } catch {
-      setOrgSearchResults([]);
-    } finally {
-      setOrgSearchLoading(false);
-    }
-  };
-
   const handleOrgSelect = (org: {_id: string; name: string; domain: string; industry: string}) => {
     setEmpData((prev) => ({
       ...prev,
@@ -252,18 +191,9 @@ export default function EmployeeOnboarding() {
       orgName: org.name,
       orgDomain: org.domain,
     }));
-    setOrgSearchResults([]);
+    setOrgQuery(org.name);
+    setShowOrgDropdown(false);
     fetchOrgChartData(org._id);
-  };
-
-  const handleCreateNewOrg = () => {
-    if (!empData.orgName) return;
-    setEmpData({
-      ...empData,
-      orgId: "",
-      orgDomain: empData.orgDomain || empData.orgName.toLowerCase().replace(/\s+/g, "") + ".com",
-    });
-    setOrgSearchResults([]);
   };
 
   const fetchOrgChartData = async (orgId: string) => {
@@ -462,27 +392,11 @@ export default function EmployeeOnboarding() {
                 orgDomain: data.organization.domain || domain,
                 orgId: data.organization._id,
               }));
+              setOrgQuery(data.organization.name);
               fetchOrgChartData(data.organization._id);
-            } else {
-              setEmpData((prev) => ({
-                ...prev,
-                orgName: "Acme Corporation",
-                orgDomain: domain,
-              }));
             }
-          } else {
-            setEmpData((prev) => ({
-              ...prev,
-              orgName: "Acme Corporation",
-              orgDomain: domain,
-            }));
           }
         } catch {
-          setEmpData((prev) => ({
-            ...prev,
-            orgName: "Acme Corporation",
-            orgDomain: "acme.com",
-          }));
         } finally {
           setLoading(false);
         }
@@ -490,6 +404,25 @@ export default function EmployeeOnboarding() {
       runDetect();
     }
   }, [step, user?.email]);
+
+  useEffect(() => {
+    if (step === "org-detect" && allOrgs.length === 0) {
+      const loadOrgs = async () => {
+        setOrgListLoading(true);
+        try {
+          const res = await fetch(`${API_URL}/organizations?limit=200`);
+          if (res.ok) {
+            const data = await res.json();
+            setAllOrgs(data.organizations || []);
+          }
+        } catch {
+        } finally {
+          setOrgListLoading(false);
+        }
+      };
+      loadOrgs();
+    }
+  }, [step, allOrgs.length]);
 
   useEffect(() => {
     if (step === "manager" && empData.orgId && !managerAutoFetched) {
@@ -509,7 +442,15 @@ export default function EmployeeOnboarding() {
     }
   }, [step, empData.orgId, managerAutoFetched]);
 
-
+  const filteredOrgs = allOrgs.filter((org) => {
+    const q = orgQuery.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      org.name?.toLowerCase().includes(q) ||
+      org.domain?.toLowerCase().includes(q) ||
+      org.industry?.toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div className="min-h-screen bg-background">
@@ -578,27 +519,7 @@ export default function EmployeeOnboarding() {
                 <span className="font-medium text-sm">AI Detection</span>
               </div>
 
-              {!empData.orgName ? (
-                <div className="space-y-4">
-                  <p className="text-sm text-text-muted">
-                    Based on your email domain, we found a potential match:
-                  </p>
-                  <button
-                    onClick={handleDetectOrg}
-                    disabled={loading}
-                    className="w-full py-3 rounded-xl bg-primary/20 hover:bg-primary/30 text-primary font-medium transition-all cursor-pointer flex items-center justify-center gap-2"
-                  >
-                    {loading ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      <>
-                        <Sparkles className="w-5 h-5" />
-                        Detect Organization
-                      </>
-                    )}
-                  </button>
-                </div>
-              ) : (
+              {empData.orgId ? (
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
                     <Building2 className="w-6 h-6 text-primary" />
@@ -609,69 +530,83 @@ export default function EmployeeOnboarding() {
                   </div>
                   <CheckCircle className="w-6 h-6 text-emerald-400 ml-auto" />
                 </div>
+              ) : loading ? (
+                <div className="flex items-center gap-3 text-sm text-text-muted">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Checking your email domain...
+                </div>
+              ) : (
+                <p className="text-sm text-text-muted">
+                  No organization found for your email domain. Select your company from the list below.
+                </p>
               )}
             </div>
 
-            <div className="relative mb-6">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-border" />
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-4 bg-background text-text-muted">or search manually</span>
-              </div>
-            </div>
-
+            <label className="block text-sm font-medium mb-2">Select your company</label>
             <div className="relative">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
               <input
                 type="text"
-                value={empData.orgName}
+                value={orgQuery}
                 onChange={(e) => {
-                  setEmpData({ ...empData, orgName: e.target.value, orgId: "" });
-                  searchOrganizations(e.target.value);
+                  setOrgQuery(e.target.value);
+                  setEmpData((prev) => ({ ...prev, orgId: "", orgName: "", orgDomain: "" }));
+                  setShowOrgDropdown(true);
                 }}
+                onFocus={() => setShowOrgDropdown(true)}
                 placeholder="Search for your company..."
                 className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none transition-colors text-sm"
               />
-              {orgSearchLoading && (
-                <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 animate-spin text-text-muted" />
+              {empData.orgId && (
+                <CheckCircle className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-emerald-400" />
               )}
             </div>
 
-            {orgSearchResults.length > 0 && (
-              <div className="mt-2 border border-border rounded-xl max-h-64 overflow-y-auto">
-                {orgSearchResults.map((org) => (
-                  <button
-                    key={org._id}
-                    onClick={() => handleOrgSelect(org)}
-                    className="w-full px-4 py-3 text-left hover:bg-surface-light transition-colors flex items-center gap-3 cursor-pointer"
-                  >
-                    <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                      <Building2 className="w-5 h-5 text-primary" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium">{org.name}</p>
-                      <p className="text-xs text-text-muted">{org.domain}</p>
-                    </div>
-                    {org.industry && (
-                      <span className="text-xs px-2 py-1 rounded bg-primary/10 text-primary">
-                        {org.industry}
-                      </span>
-                    )}
-                  </button>
-                ))}
+            {orgListLoading ? (
+              <div className="mt-2 p-4 flex items-center justify-center text-sm text-text-muted">
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                Loading companies...
               </div>
-            )}
-
-            {empData.orgName && orgSearchResults.length === 0 && !orgSearchLoading && (
-              <div className="mt-1">
-              </div>
-            )}
+            ) : allOrgs.length === 0 ? (
+              <p className="mt-2 text-sm text-text-muted">No companies are registered on YesBoss yet.</p>
+            ) : showOrgDropdown ? (
+              filteredOrgs.length > 0 ? (
+                <div className="mt-2 border border-border rounded-xl max-h-64 overflow-y-auto">
+                  {filteredOrgs.map((org) => (
+                    <button
+                      key={org._id}
+                      onClick={() => handleOrgSelect(org)}
+                      className={`w-full px-4 py-3 text-left hover:bg-surface-light transition-colors flex items-center gap-3 cursor-pointer ${
+                        empData.orgId === org._id ? "bg-primary/10" : ""
+                      }`}
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                        <Building2 className="w-5 h-5 text-primary" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium">{org.name}</p>
+                        <p className="text-xs text-text-muted">{org.domain}</p>
+                      </div>
+                      {org.industry && (
+                        <span className="text-xs px-2 py-1 rounded bg-primary/10 text-primary">
+                          {org.industry}
+                        </span>
+                      )}
+                      {empData.orgId === org._id && (
+                        <CheckCircle className="w-5 h-5 text-emerald-400" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2 text-sm text-text-muted">No companies match &quot;{orgQuery}&quot;.</p>
+              )
+            ) : null}
 
             <div className="flex gap-3">
               <button
                 onClick={() => setStep("department")}
-                disabled={!empData.orgName}
+                disabled={!empData.orgId}
                 className="flex-1 py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 Continue

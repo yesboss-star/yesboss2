@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from ..agents.frequency_agent import analyze_content
 from ..core.database import get_database
 from ..dependencies.auth import get_current_user_optional
+from ..dependencies.scope import is_org_member
 
 logger = logging.getLogger("yesboss.smart_suggestions")
 router = APIRouter()
@@ -14,6 +15,14 @@ router = APIRouter()
 
 def _get_org_ref(org_id: str) -> str:
     return hashlib.sha256(org_id.encode()).hexdigest()[:16]
+
+
+async def _require_member(user, org_id: str):
+    db = get_database()
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not await is_org_member(db, org_id, user):
+        raise HTTPException(status_code=403, detail="Access denied")
 
 
 @router.post("/suggest-assignees")
@@ -33,6 +42,8 @@ async def suggest_assignees(
             org_id = current_user.user_metadata.get("organization_id")
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
+
+    await _require_member(current_user, org_id)
 
     org_ref = _get_org_ref(org_id)
 
@@ -139,7 +150,8 @@ async def suggest_deadline(request: DeadlineSuggestionRequest):
 
 
 @router.get("/check-workload/{org_id}/{email}")
-async def check_workload(org_id: str, email: str):
+async def check_workload(org_id: str, email: str, current_user = Depends(get_current_user_optional)):
+    await _require_member(current_user, org_id)
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -160,7 +172,8 @@ async def check_workload(org_id: str, email: str):
 
 
 @router.get("/skill-gaps/{org_id}")
-async def skill_gaps(org_id: str):
+async def skill_gaps(org_id: str, current_user = Depends(get_current_user_optional)):
+    await _require_member(current_user, org_id)
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")

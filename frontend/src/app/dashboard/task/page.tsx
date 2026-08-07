@@ -73,6 +73,15 @@ export default function TaskPage() {
     }
   }, [organization?.id, role, fetchGoals, fetchTasks, fetchOrgMembers]);
 
+  // Refresh tasks from the backend when the user returns to this tab, so statuses
+  // flipped by the Google Tasks sync-back reflect immediately.
+  useEffect(() => {
+    if (!organization?.id) return;
+    const onFocus = () => fetchTasks(organization.id);
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [organization?.id, fetchTasks]);
+
   const visibleTasks = useMemo(() => {
     if (role === "owner") return tasks;
     if (taskView === "my") {

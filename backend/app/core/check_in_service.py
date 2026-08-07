@@ -50,6 +50,8 @@ async def generate_check_in(db, org_id: str, owner_id: str) -> dict:
                 {"$and": [
                     {"$ne": ["$status", "completed"]},
                     {"$ne": ["$status", "approved"]},
+                    {"$ne": ["$due_date", None]},
+                    {"$ne": ["$due_date", ""]},
                     {"$lt": ["$due_date", now]},
                 ]}, 1, 0
             ]}},
@@ -70,6 +72,8 @@ async def generate_check_in(db, org_id: str, owner_id: str) -> dict:
                 {"$and": [
                     {"$ne": ["$status", "completed"]},
                     {"$ne": ["$status", "approved"]},
+                    {"$ne": ["$due_date", None]},
+                    {"$ne": ["$due_date", ""]},
                     {"$lt": ["$due_date", now]},
                 ]}, 1, 0
             ]}},
@@ -77,7 +81,13 @@ async def generate_check_in(db, org_id: str, owner_id: str) -> dict:
         }},
         {"$sort": {"overdue": -1}},
     ]))
-    behind_assignees = [a["_id"] for a in assignee_stats if a.get("overdue", 0) > 0]
+    behind_assignees = []
+    for a in assignee_stats:
+        if a.get("overdue", 0) > 0:
+            ident = a["_id"]
+            if isinstance(ident, list):
+                ident = ident[0] if ident else ""
+            behind_assignees.append(str(ident) if ident else "Unassigned")
 
     for g in active_goals:
         gid = str(g["_id"])

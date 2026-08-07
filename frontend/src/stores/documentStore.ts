@@ -1,4 +1,5 @@
 ﻿import { create } from "zustand";
+import { getAuthHeaders } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
@@ -82,7 +83,9 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
     if (!orgId) return null;
     set({ contextLoading: true });
     try {
-      const res = await fetch(`${API_URL}/files/context?org_id=${encodeURIComponent(orgId)}`);
+      const res = await fetch(`${API_URL}/files/context?org_id=${encodeURIComponent(orgId)}`, {
+        headers: getAuthHeaders(),
+      });
       if (!res.ok) {
         set({ contextLoading: false });
         return null;
@@ -132,7 +135,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
     try {
       const res = await fetch(`${API_URL}/files/ask`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({ org_id: orgId, question, top_k: 5 }),
       });
       if (!res.ok) return null;

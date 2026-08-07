@@ -1,10 +1,11 @@
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from ..core.chatbot import OnboardingChatbot, get_conversation, store_conversation, store_conversation_embedding
+from ..dependencies.auth import get_current_user
 
 router = APIRouter()
 
@@ -209,9 +210,13 @@ class ChatResponse(BaseModel):
 
 
 @router.post("/start")
-async def start_conversation(request: StartChatRequest):
+async def start_conversation(request: StartChatRequest, current_user = Depends(get_current_user)):
     if not request.user_id:
         raise HTTPException(status_code=400, detail="user_id is required")
+
+    # Users can only start conversations as themselves.
+    if current_user.id != request.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
 
     chatbot = OnboardingChatbot(provider=request.provider)
     result = await chatbot.start_conversation(request.company_profile)
@@ -249,9 +254,12 @@ async def start_conversation(request: StartChatRequest):
 
 
 @router.post("/message", response_model=ChatResponse)
-async def send_message(request: ChatMessageRequest):
+async def send_message(request: ChatMessageRequest, current_user = Depends(get_current_user)):
     if not all([request.user_id, request.conversation_id, request.message]):
         raise HTTPException(status_code=400, detail="user_id, conversation_id, and message are required")
+
+    if current_user.id != request.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
 
     chatbot = OnboardingChatbot(provider=request.provider)
 
@@ -288,16 +296,22 @@ async def send_message(request: ChatMessageRequest):
 
 
 @router.get("/conversation/{conversation_id}")
-async def get_conversation_by_id(conversation_id: str):
+async def get_conversation_by_id(conversation_id: str, current_user = Depends(get_current_user)):
     conv = await get_conversation(conversation_id)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    if conv.get("user_id") != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
     return conv
 
 
 @router.get("/user/{user_id}")
-async def get_user_conversations(user_id: str):
+async def get_user_conversations(user_id: str, current_user = Depends(get_current_user)):
     from ..core.database import get_database
+
+    # Users can only list their own conversations.
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
 
     db = get_database()
 

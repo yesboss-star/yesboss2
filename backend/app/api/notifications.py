@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from ..api.websocket import manager as ws_manager
 from ..core.database import get_database
-from ..dependencies.auth import get_current_user_optional
+from ..dependencies.auth import get_current_user, get_current_user_optional
 
 router = APIRouter()
 
@@ -35,10 +35,18 @@ class NotificationUpdate(BaseModel):
 
 
 @router.post("")
-async def create_notification(notification: NotificationCreate, current_user = Depends(get_current_user_optional)):
+async def create_notification(notification: NotificationCreate, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+
+    # A user may only create notifications for themselves in their own org.
+    from ..dependencies.scope import resolve_user_org_ids
+    my_orgs = await resolve_user_org_ids(db, current_user)
+    if notification.organization_id and str(notification.organization_id).lower() not in {o.lower() for o in my_orgs}:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if notification.user_id not in (getattr(current_user, "id", None), getattr(current_user, "uid", None)):
+        raise HTTPException(status_code=403, detail="Access denied")
 
     notif_doc = {
         "type": notification.type,
@@ -51,7 +59,7 @@ async def create_notification(notification: NotificationCreate, current_user = D
         "actor_name": notification.actor_name,
         "metadata": notification.metadata or {},
         "read": False,
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
     }
 
     result = db.notifications.insert_one(notif_doc)
@@ -78,14 +86,12 @@ async def list_notifications(
         raise HTTPException(status_code=500, detail="Database not configured")
 
     org_id = organization_id or get_user_org_id(current_user)
-    user_id = getattr(current_user, 'id', None) or str(current_user) if current_user else None
+    user_id = getattr(current_user, 'id', None) or getattr(current_user, 'uid', None) if current_user else None
 
-    if not user_id and not org_id:
+    if not user_id:
         return {"notifications": [], "total": 0}
 
-    query = {}
-    if user_id:
-        query["user_id"] = user_id
+    query = {"user_id": user_id}
     if org_id:
         query["organization_id"] = org_id
     if read is not None:
@@ -128,6 +134,10 @@ async def get_notification(notification_id: str, current_user = Depends(get_curr
     notif = db.notifications.find_one({"_id": ObjectId(notification_id)})
     if not notif:
         raise HTTPException(status_code=404, detail="Notification not found")
+    user_id = getattr(current_user, 'id', None) or getattr(current_user, 'uid', None) if current_user else None
+    # Only the notification's own user may read it.
+    if not user_id or notif.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
 
     notif["_id"] = str(notif["_id"])
     return {"notification": notif}
@@ -139,8 +149,12 @@ async def mark_notification_read(notification_id: str, current_user = Depends(ge
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
+    user_id = getattr(current_user, 'id', None) or getattr(current_user, 'uid', None) if current_user else None
+    if not user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
     db.notifications.update_one(
-        {"_id": ObjectId(notification_id)},
+        {"_id": ObjectId(notification_id), "user_id": user_id},
         {"$set": {"read": True, "read_at": datetime.utcnow()}}
     )
 
@@ -179,5 +193,11 @@ async def delete_notification(notification_id: str, current_user = Depends(get_c
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
-    db.notifications.delete_one({"_id": ObjectId(notification_id)})
+    user_id = getattr(current_user, 'id', None) or getattr(current_user, 'uid', None) if current_user else None
+    if not user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    result = db.notifications.delete_one({"_id": ObjectId(notification_id), "user_id": user_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Notification not found")
     return {"success": True, "message": "Notification deleted"}

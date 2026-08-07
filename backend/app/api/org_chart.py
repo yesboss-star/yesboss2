@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from ..core.database import get_database
-from ..dependencies.auth import get_current_user_optional
+from ..dependencies.auth import get_current_user
 
 router = APIRouter()
 logger = logging.getLogger("yesboss.org_chart")
@@ -67,15 +67,20 @@ def normalize_columns(row: dict) -> dict:
 async def upload_org_chart(
     file: UploadFile = File(...),
     organization_id: str | None = Form(None),
-    current_user = Depends(get_current_user_optional)
+    current_user = Depends(get_current_user)
 ):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
+    from ..dependencies.scope import is_org_owner
+
     org_id = organization_id or get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
+
+    if not await is_org_owner(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
 
     content = await file.read()
     errors = []
@@ -143,15 +148,20 @@ async def upload_org_chart(
 async def add_org_member(
     member: OrgMemberCreate,
     organization_id: str | None = None,
-    current_user = Depends(get_current_user_optional)
+    current_user = Depends(get_current_user)
 ):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
+    from ..dependencies.scope import is_org_owner
+
     org_id = organization_id or get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
+
+    if not await is_org_owner(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
 
     doc = {
         "organization_id": org_id,
@@ -170,14 +180,19 @@ async def add_org_member(
     return {"member": doc}
 
 @router.get("/tree")
-async def get_org_tree(organization_id: str | None = None, current_user = Depends(get_current_user_optional)):
+async def get_org_tree(organization_id: str | None = None, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
+    from ..dependencies.scope import is_org_member
+
     org_id = organization_id or get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
+
+    if not await is_org_member(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
 
     members = list(db.org_chart_members.find({"organization_id": org_id}))
     for m in members:
@@ -247,15 +262,20 @@ async def get_org_tree(organization_id: str | None = None, current_user = Depend
 async def search_org_members(
     q: str = "",
     organization_id: str | None = None,
-    current_user = Depends(get_current_user_optional)
+    current_user = Depends(get_current_user)
 ):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
+    from ..dependencies.scope import is_org_member
+
     org_id = organization_id or get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
+
+    if not await is_org_member(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
 
     if not q:
         return {"members": []}
@@ -276,14 +296,19 @@ async def search_org_members(
     return {"members": members}
 
 @router.get("/members")
-async def list_org_members(organization_id: str | None = None, current_user = Depends(get_current_user_optional)):
+async def list_org_members(organization_id: str | None = None, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
+    from ..dependencies.scope import is_org_member
+
     org_id = organization_id or get_user_org_id(current_user)
     if not org_id:
         return {"members": [], "total": 0}
+
+    if not await is_org_member(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
 
     members = list(db.org_chart_members.find({"organization_id": org_id}).sort("full_name", 1))
     for m in members:
@@ -294,11 +319,19 @@ async def list_org_members(organization_id: str | None = None, current_user = De
 async def update_org_member(
     member_id: str,
     update: OrgMemberUpdate,
-    current_user = Depends(get_current_user_optional)
+    current_user = Depends(get_current_user)
 ):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+
+    from ..dependencies.scope import is_org_owner
+
+    member = db.org_chart_members.find_one({"_id": ObjectId(member_id)})
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+    if not await is_org_owner(db, member.get("organization_id"), current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
 
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}
     update_data["updated_at"] = datetime.utcnow()
@@ -315,10 +348,18 @@ async def update_org_member(
     return {"member": member}
 
 @router.delete("/members/{member_id}")
-async def delete_org_member(member_id: str, current_user = Depends(get_current_user_optional)):
+async def delete_org_member(member_id: str, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+
+    from ..dependencies.scope import is_org_owner
+
+    member = db.org_chart_members.find_one({"_id": ObjectId(member_id)})
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+    if not await is_org_owner(db, member.get("organization_id"), current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
 
     db.org_chart_members.delete_one({"_id": ObjectId(member_id)})
     return {"success": True}
@@ -477,12 +518,18 @@ GENERIC_TITLES = {
 @router.post("/role-register")
 async def register_custom_role(
     role: str,
-    organization_id: str | None = None
+    organization_id: str | None = None,
+    current_user = Depends(get_current_user)
 ):
     """Save a custom role that wasn't in the common list so it appears in future suggestions."""
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+
+    if organization_id:
+        from ..dependencies.scope import is_org_member
+        if not await is_org_member(db, organization_id, current_user):
+            raise HTTPException(status_code=403, detail="Access denied")
 
     role = role.strip().lower()
     if not role or len(role) < 2:
@@ -518,13 +565,17 @@ async def register_custom_role(
 async def get_role_suggestions(
     q: str = "",
     organization_id: str | None = None,
-    current_user = Depends(get_current_user_optional)
+    current_user = Depends(get_current_user)
 ):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
+    from ..dependencies.scope import is_org_member
+
     org_id = organization_id or get_user_org_id(current_user)
+    if org_id and not await is_org_member(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
     suggestions = []
 
     if not q:

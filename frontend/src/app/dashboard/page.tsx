@@ -74,7 +74,22 @@ export default function DashboardPage() {
       router.push("/login");
     }
   }, [user, loading, router]);
-  
+
+  useEffect(() => {
+    if (loading || !user || organization) return;
+    const existingPersist = localStorage.getItem("yesboss-organization");
+    if (existingPersist) {
+      try {
+        const parsed = JSON.parse(existingPersist);
+        if (parsed?.state?.organization) {
+          useOrganizationStore.getState().setOrganization(parsed.state.organization);
+          return;
+        }
+      } catch {}
+    }
+    useOrganizationStore.getState().fetchOrganizationByEmail(user.email!);
+  }, [user, loading, organization]);
+
   const [assignedTasks, setAssignedTasks] = useState<Task[]>([]);
   const [pendingReviews, setPendingReviews] = useState<PendingReview[]>([]);
   const [teamUpdates, setTeamUpdates] = useState<TeamUpdate[]>([]);

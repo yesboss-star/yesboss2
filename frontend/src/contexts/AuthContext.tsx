@@ -43,7 +43,23 @@ async function establishSession(idToken: string) {
   }
 }
 
+async function clearAuthCookies() {
+  // The login/signup pages set client-side auth cookies so the proxy lets
+  // protected routes through. These are NOT the httpOnly backend cookie, and
+  // the backend's clear-session can't remove them. If we leave them behind
+  // after sign-out (or when Firebase reports no user), the proxy still sees
+  // hasAuth=true and bounces /login -> /dashboard -> /login forever, leaving
+  // the dashboard stuck on "Redirecting to login...".
+  document.cookie = "yesboss_token=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax";
+  document.cookie = "yesboss_user=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax";
+  document.cookie = "yesboss_role=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax";
+}
+
 async function clearSession() {
+  // Clear the client-side cookies first so the proxy stops treating this
+  // browser as authenticated right away (no /login -> /dashboard loop), then
+  // best-effort clear the backend's httpOnly cookie.
+  clearAuthCookies();
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);

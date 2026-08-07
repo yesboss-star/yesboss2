@@ -3,6 +3,8 @@ import { getAuthHeaders } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
+const goalFetchInFlight = new Map<string, Promise<any>>();
+
 export interface Goal {
   id: string;
   title: string;
@@ -145,27 +147,38 @@ export const useGoalStore = create<GoalState>()(
       },
 
       fetchGoals: async (orgId) => {
+        const key = `/goals?organization_id=${orgId}`;
+        const inflight = goalFetchInFlight.get(key);
+        if (inflight) { try { await inflight; } catch {} return; }
         set({ loading: true, error: null });
+        const p = (async () => {
+          try {
+            const response = await fetch(`${API_URL}/goals?organization_id=${orgId}`, {
+              headers: { ...getAuthHeaders() },
+            });
+            if (!response.ok) throw new Error("Failed to fetch goals");
+            const result = await response.json();
+            const goals = (result.goals || []).map((g: any) => {
+              const normalizeField = (v: any) => Array.isArray(v) ? v : (v ? [v] : []);
+              return {
+                ...g,
+                id: g._id || g.id,
+                assignee_id: normalizeField(g.assignee_id),
+                assignee_name: normalizeField(g.assignee_name),
+                reviewer_id: normalizeField(g.reviewer_id),
+                reviewer_name: normalizeField(g.reviewer_name),
+              };
+            });
+            set({ goals, loading: false });
+          } catch (error: any) {
+            set({ error: error.message, loading: false });
+          }
+        })();
+        goalFetchInFlight.set(key, p);
         try {
-          const response = await fetch(`${API_URL}/goals?organization_id=${orgId}`, {
-            headers: { ...getAuthHeaders() },
-          });
-          if (!response.ok) throw new Error("Failed to fetch goals");
-          const result = await response.json();
-          const goals = (result.goals || []).map((g: any) => {
-            const normalizeField = (v: any) => Array.isArray(v) ? v : (v ? [v] : []);
-            return {
-              ...g,
-              id: g._id || g.id,
-              assignee_id: normalizeField(g.assignee_id),
-              assignee_name: normalizeField(g.assignee_name),
-              reviewer_id: normalizeField(g.reviewer_id),
-              reviewer_name: normalizeField(g.reviewer_name),
-            };
-          });
-          set({ goals, loading: false });
-        } catch (error: any) {
-          set({ error: error.message, loading: false });
+          await p;
+        } finally {
+          goalFetchInFlight.delete(key);
         }
       },
 

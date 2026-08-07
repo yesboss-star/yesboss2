@@ -1,13 +1,18 @@
+import logging
 import os
 from datetime import datetime
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from bson import ObjectId
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ..core.database import get_database
+from ..dependencies.auth import get_current_user
+from ..dependencies.scope import is_org_member, is_org_owner
 
 router = APIRouter()
+logger = logging.getLogger("yesboss.employees")
 
 class EmployeeCreate(BaseModel):
     email: str
@@ -25,14 +30,28 @@ class EmployeeUpdate(BaseModel):
     manager_id: str | None = None
 
 @router.get("")
-async def list_employees(org_id: str | None = None, search: str | None = None):
+async def list_employees(
+    org_id: str | None = None,
+    search: str | None = None,
+    current_user = Depends(get_current_user),
+):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
+    from ..dependencies.scope import resolve_user_org_ids
+
+    user_org_ids = await resolve_user_org_ids(db, current_user)
+    if not user_org_ids:
+        raise HTTPException(status_code=403, detail="Access denied")
+
     query = {}
     if org_id:
+        if str(org_id) not in {str(o) for o in user_org_ids}:
+            raise HTTPException(status_code=403, detail="Access denied")
         query["organization_id"] = org_id
+    else:
+        query["organization_id"] = {"$in": [str(o) for o in user_org_ids]}
     if search:
         query["$or"] = [
             {"full_name": {"$regex": search, "$options": "i"}},
@@ -49,10 +68,20 @@ async def list_employees(org_id: str | None = None, search: str | None = None):
     return {"employees": employees}
 
 @router.get("/tasks")
-async def get_employee_tasks(org_id: str, email: str | None = None):
+async def get_employee_tasks(
+    org_id: str,
+    email: str | None = None,
+    current_user = Depends(get_current_user),
+):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+
+    # Non-owners may only view their own task list.
+    if not await is_org_owner(db, org_id, current_user):
+        own_email = getattr(current_user, "email", None)
+        if not own_email or not email or email.lower().strip() != own_email.lower().strip():
+            raise HTTPException(status_code=403, detail="Access denied")
 
     query = {"organization_id": org_id}
     if email:
@@ -91,12 +120,25 @@ async def get_employee_tasks(org_id: str, email: str | None = None):
         return {"tasks": [], "pending_reviews": [], "team_updates": []}
 
 @router.get("/by-email/{email}")
-async def find_employee_by_email(email: str):
+async def find_employee_by_email(email: str, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
     clean_email = email.lower().strip()
+
+    # Look up the org for this employee and require membership.
+    from ..dependencies.scope import resolve_user_org_ids
+
+    user_org_ids = {str(o).lower() for o in await resolve_user_org_ids(db, current_user)}
+    emp_org_ids: set[str] = set()
+    for org_id in db.employees.distinct("organization_id", {"email": clean_email}):
+        emp_org_ids.add(str(org_id).lower())
+    for org_id in db.org_chart_members.distinct("organization_id", {"email": clean_email}):
+        emp_org_ids.add(str(org_id).lower())
+    if not emp_org_ids & user_org_ids:
+        raise HTTPException(status_code=403, detail="Access denied")
+
     employee = db.employees.find_one({"email": clean_email})
 
     if employee:
@@ -116,12 +158,21 @@ async def find_employee_by_email(email: str):
     return {"employee": None}
 
 @router.get("/by-domain/{domain}")
-async def find_employee_by_domain(domain: str):
+async def find_employee_by_domain(domain: str, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
-    employees = list(db.employees.find({"email": {"$regex": f"@{domain}$"}}))
+    from ..dependencies.scope import resolve_user_org_ids
+
+    user_org_ids = {str(o) for o in await resolve_user_org_ids(db, current_user)}
+    if not user_org_ids:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    employees = list(db.employees.find({
+        "email": {"$regex": f"@{domain}$"},
+        "organization_id": {"$in": list(user_org_ids)},
+    }))
 
     for emp in employees:
         emp["_id"] = str(emp["_id"])
@@ -129,7 +180,7 @@ async def find_employee_by_domain(domain: str):
     return {"employees": employees, "domain": domain}
 
 @router.get("/{employee_id}")
-async def get_employee(employee_id: str):
+async def get_employee(employee_id: str, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -140,14 +191,21 @@ async def get_employee(employee_id: str):
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
 
+    if not await is_org_member(db, employee.get("organization_id"), current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
+
     employee["_id"] = str(employee["_id"])
     return {"employee": employee}
 
 @router.post("")
-async def create_employee(request: EmployeeCreate):
+async def create_employee(request: EmployeeCreate, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+
+    # Only owners can add employees to the org.
+    if not await is_org_owner(db, request.organization_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
 
     emp_doc = {
         "email": request.email,
@@ -167,12 +225,20 @@ async def create_employee(request: EmployeeCreate):
     return {"employee": emp_doc}
 
 @router.put("/{employee_id}")
-async def update_employee(employee_id: str, request: EmployeeUpdate):
+async def update_employee(employee_id: str, request: EmployeeUpdate, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
     from bson import ObjectId
+    employee = db.employees.find_one({"_id": ObjectId(employee_id)})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    # Only owners can edit employee records.
+    if not await is_org_owner(db, employee.get("organization_id"), current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
+
     update_data = {k: v for k, v in request.model_dump().items() if v is not None}
     update_data["updated_at"] = datetime.utcnow()
 
@@ -187,12 +253,20 @@ async def update_employee(employee_id: str, request: EmployeeUpdate):
     return {"employee": employee}
 
 @router.delete("/{employee_id}")
-async def delete_employee(employee_id: str):
+async def delete_employee(employee_id: str, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
     from bson import ObjectId
+    employee = db.employees.find_one({"_id": ObjectId(employee_id)})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    # Only owners can delete employee records.
+    if not await is_org_owner(db, employee.get("organization_id"), current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
+
     db.employees.delete_one({"_id": ObjectId(employee_id)})
 
     return {"success": True, "message": "Employee deleted"}
@@ -213,14 +287,65 @@ class EmployeePersonaRequest(BaseModel):
     avatar_style: str | None = None
 
 
+def _resolve_manager_email(db, manager_id: str | None) -> str | None:
+    """Resolve the reporting manager's email from org_chart_members or employees."""
+    if not manager_id:
+        return None
+    try:
+        if ObjectId.is_valid(manager_id):
+            mgr = db.org_chart_members.find_one({"_id": ObjectId(manager_id)})
+            if not mgr:
+                mgr = db.employees.find_one({"_id": ObjectId(manager_id)})
+            if mgr:
+                return mgr.get("email")
+        if "@" in manager_id:
+            return manager_id
+    except Exception:
+        pass
+    return None
+
+
+def _sync_to_org_chart(db, request: EmployeePersonaRequest) -> None:
+    """Keep org_chart_members in sync with the employee's onboarding data so the
+    selected reporting manager shows up in the organization chart."""
+    if not request.email or not request.organization_id:
+        return
+    try:
+        manager_email = _resolve_manager_email(db, request.manager_id)
+        now = datetime.utcnow()
+        doc = {
+            "organization_id": request.organization_id,
+            "email": request.email,
+            "full_name": request.full_name or request.email.split("@")[0],
+            "role": (request.role or "employee").strip().lower(),
+            "department": request.department or "",
+            "manager_email": manager_email,
+            "title": request.role or "",
+            "updated_at": now,
+        }
+        db.org_chart_members.update_one(
+            {"organization_id": request.organization_id, "email": request.email},
+            {"$set": doc, "$setOnInsert": {"created_at": now}},
+            upsert=True,
+        )
+    except Exception as e:
+        logger.warning("Failed to sync employee %s to org chart: %s", request.email, e)
+
+
 @router.post("/persona")
-async def save_employee_persona(request: EmployeePersonaRequest):
+async def save_employee_persona(request: EmployeePersonaRequest, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
     if not request.email:
         raise HTTPException(status_code=400, detail="Email is required")
+
+    # Non-owners may only save their own persona.
+    if request.organization_id and not await is_org_owner(db, request.organization_id, current_user):
+        own_email = getattr(current_user, "email", None)
+        if not own_email or request.email.lower().strip() != own_email.lower().strip():
+            raise HTTPException(status_code=403, detail="Access denied")
 
     existing = db.employees.find_one({"email": request.email})
 
@@ -249,6 +374,7 @@ async def save_employee_persona(request: EmployeePersonaRequest):
             {"$set": update_doc}
         )
         existing["_id"] = str(existing["_id"])
+        _sync_to_org_chart(db, request)
         return {"employee": existing, "message": "Persona updated"}
     else:
         emp_doc = {
@@ -275,6 +401,8 @@ async def save_employee_persona(request: EmployeePersonaRequest):
         result = db.employees.insert_one(emp_doc)
         emp_doc["_id"] = str(result.inserted_id)
 
+        _sync_to_org_chart(db, request)
+
         return {"employee": emp_doc, "message": "Persona saved"}
 
 
@@ -287,12 +415,21 @@ MAX_AVATAR_SIZE = 2 * 1024 * 1024  # 2MB
 async def upload_avatar(
     email: str = Form(...),
     file: UploadFile = File(...),
+    current_user = Depends(get_current_user),
 ):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
     clean_email = email.lower().strip()
+    own_email = getattr(current_user, "email", None)
+
+    # Anyone may set their own avatar; owners/admins may set any avatar in their org.
+    is_self = bool(own_email and clean_email == own_email.lower().strip())
+    target_org = db.employees.find_one({"email": clean_email}, {"organization_id": 1})
+    is_admin = bool(target_org and await is_org_owner(db, target_org.get("organization_id"), current_user))
+    if not (is_self or is_admin):
+        raise HTTPException(status_code=403, detail="Access denied")
 
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in ALLOWED_EXTENSIONS:

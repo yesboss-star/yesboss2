@@ -5,6 +5,8 @@ import { useOrganizationStore } from "@/stores/organizationStore";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
+const taskFetchInFlight = new Map<string, Promise<any>>();
+
 export interface Task {
   id: string;
   _id?: string;
@@ -105,30 +107,40 @@ export const useTaskStore = create<TaskState>()(
       },
 
       fetchTasks: async (orgId, filters = {}) => {
+        const params = new URLSearchParams({ organization_id: orgId });
+        if (filters.goal_id) params.append("goal_id", filters.goal_id);
+        if (filters.assignee_id) params.append("assignee_id", filters.assignee_id);
+        if (filters.status) params.append("status", filters.status);
+        const key = `/tasks?${params}`;
+        const inflight = taskFetchInFlight.get(key);
+        if (inflight) { try { await inflight; } catch {} return; }
         set({ loading: true, error: null });
+        const p = (async () => {
+          try {
+            const response = await fetch(`${API_URL}/tasks?${params}`, {
+              headers: { ...getAuthHeaders() },
+            });
+            if (!response.ok) throw new Error("Failed to fetch tasks");
+            const result = await response.json();
+            const tasks = (result.tasks || []).map((t: any) => {
+              const raw = t.assignee_id;
+              return {
+                ...t,
+                id: t._id || t.id,
+                assignee_id: Array.isArray(raw) ? raw : (raw ? [raw] : []),
+              };
+            });
+            const deduped = tasks.filter((t: any, i: number, a: any[]) => a.findIndex((x: any) => x.id === t.id) === i);
+            set({ tasks: deduped, loading: false });
+          } catch (error: any) {
+            set({ error: error.message, loading: false });
+          }
+        })();
+        taskFetchInFlight.set(key, p);
         try {
-          const params = new URLSearchParams({ organization_id: orgId });
-          if (filters.goal_id) params.append("goal_id", filters.goal_id);
-          if (filters.assignee_id) params.append("assignee_id", filters.assignee_id);
-          if (filters.status) params.append("status", filters.status);
-          
-          const response = await fetch(`${API_URL}/tasks?${params}`, {
-            headers: { ...getAuthHeaders() },
-          });
-          if (!response.ok) throw new Error("Failed to fetch tasks");
-          const result = await response.json();
-          const tasks = (result.tasks || []).map((t: any) => {
-            const raw = t.assignee_id;
-            return {
-              ...t,
-              id: t._id || t.id,
-              assignee_id: Array.isArray(raw) ? raw : (raw ? [raw] : []),
-            };
-          });
-          const deduped = tasks.filter((t: any, i: number, a: any[]) => a.findIndex((x: any) => x.id === t.id) === i);
-          set({ tasks: deduped, loading: false });
-        } catch (error: any) {
-          set({ error: error.message, loading: false });
+          await p;
+        } finally {
+          taskFetchInFlight.delete(key);
         }
       },
 

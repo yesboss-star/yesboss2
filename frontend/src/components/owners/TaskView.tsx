@@ -184,8 +184,12 @@ export default function TaskView({ goals: propGoals }: { goals?: any[] }) {
   });
 
   useEffect(() => {
-    if (orgId) { fetchGoals(orgId); fetchTasks(orgId); fetchOrgMembers(orgId); }
-  }, [orgId, fetchGoals, fetchTasks, fetchOrgMembers]);
+    if (orgId) {
+      if (!propGoals) fetchGoals(orgId);
+      fetchTasks(orgId);
+      fetchOrgMembers(orgId);
+    }
+  }, [orgId, propGoals, fetchGoals, fetchTasks, fetchOrgMembers]);
 
   const startEdit = (g: Goal) => {
     setEditingGoal(g.id);

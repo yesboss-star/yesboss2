@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from ..api.websocket import manager as ws_manager
 from ..core.database import get_database
-from ..dependencies.auth import get_current_user_optional
+from ..dependencies.auth import get_current_user, get_current_user_optional
 
 router = APIRouter()
 
@@ -117,15 +117,15 @@ async def sync_goal_to_zoho(db, goal_doc: dict, org_id: str):
 
 
 async def sync_goal_to_provider(db, goal_doc: dict, org_id: str):
-    """Dispatch a goal task push to the org's connected provider (Google or Zoho)."""
-    try:
-        from ..core.providers import get_org_provider
+    """Sync a goal out to BOTH connected providers (Google and Zoho).
 
-        provider = get_org_provider(db, org_id)
-        if provider == "google":
-            await _sync_goal_to_google(db, goal_doc, org_id)
-        else:
-            await sync_goal_to_zoho(db, goal_doc, org_id)
+    Each provider sync is self-skipping: assignees without a valid token for
+    that provider are skipped, so users connected to only one provider only
+    receive the goal there.
+    """
+    try:
+        await _sync_goal_to_google(db, goal_doc, org_id)
+        await sync_goal_to_zoho(db, goal_doc, org_id)
     except Exception as e:
         logger = __import__("logging").getLogger("yesboss.goals")
         logger.warning("Goal provider sync dispatch failed: %s", e)
@@ -431,15 +431,20 @@ async def list_goals(
     parent_goal_id: str | None = None,
     is_default: bool | None = None,
     organization_id: str | None = None,
-    current_user = Depends(get_current_user_optional)
+    current_user = Depends(get_current_user)
 ):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
+    from ..dependencies.scope import is_org_member
+
     org_id = organization_id or get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
+
+    if not await is_org_member(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
 
     # Auto-seed 5 default goals if none exist for this organization
     total_goals = db.goals.count_documents({"organization_id": org_id})
@@ -593,16 +598,21 @@ class BulkDeleteDefaultGoalsRequest(BaseModel):
 @router.get("/defaults")
 async def get_or_generate_default_goals(
     organization_id: str | None = None,
-    current_user = Depends(get_current_user_optional)
+    current_user = Depends(get_current_user)
 ):
     """Return existing default goals for the org, or generate them on-demand if none exist."""
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
+    from ..dependencies.scope import is_org_member
+
     org_id = organization_id or get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
+
+    if not await is_org_member(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
 
     existing = list(db.goals.find(
         {"organization_id": org_id, "is_default": True}
@@ -655,20 +665,22 @@ async def get_or_generate_default_goals(
 
 
 @router.get("/{goal_id}")
-async def get_goal(goal_id: str, current_user = Depends(get_current_user_optional)):
+async def get_goal(goal_id: str, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+
+    from ..dependencies.scope import is_org_owner
 
     goal = db.goals.find_one({"_id": ObjectId(goal_id)})
 
     if not goal:
         raise HTTPException(status_code=404, detail="Goal not found")
 
-    if current_user and getattr(current_user, 'id', None):
-        user_email = (getattr(current_user, 'email', '') or '').lower().strip()
-        if goal.get("created_by") != current_user.id and goal.get("assignee_email") != user_email:
-            raise HTTPException(status_code=403, detail="Access denied")
+    user_email = (getattr(current_user, 'email', '') or '').lower().strip()
+    is_owner = await is_org_owner(db, goal.get("organization_id"), current_user)
+    if not is_owner and goal.get("created_by") != current_user.id and goal.get("assignee_email") != user_email:
+        raise HTTPException(status_code=403, detail="Access denied")
 
     goal["_id"] = str(goal["_id"])
     for f in ("assignee_id", "assignee_name", "reviewer_id", "reviewer_name"):

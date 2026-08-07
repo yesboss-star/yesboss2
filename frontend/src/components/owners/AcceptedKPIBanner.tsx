@@ -6,7 +6,7 @@ import { Button, Badge } from "@/components/ui";
 import { useKPIStore } from "@/stores/kpiStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { AcceptedKPITile } from "./AcceptedKPITile";
-import { fetchDeduped } from "@/lib/utils";
+import { fetchDeduped, getAuthHeaders } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
@@ -57,7 +57,7 @@ export default function AcceptedKPIBanner() {
       if (accepted.length > 0) {
         url += `&accepted_kpis=${encodeURIComponent(JSON.stringify(accepted.map(k => ({ key: k.key, title: k.title }))))}`;
       }
-      const res = await fetchDeduped(url);
+      const res = await fetchDeduped(url, { headers: getAuthHeaders() });
       if (!res.ok) return;
       const data = await res.json();
       if (mountedRef.current) setValues(data || {});

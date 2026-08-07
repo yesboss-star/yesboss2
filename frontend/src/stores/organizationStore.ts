@@ -1,5 +1,6 @@
 ﻿import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { getAuthHeaders } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
@@ -172,15 +173,36 @@ export const useOrganizationStore = create<OrganizationState>()(
       fetchOrganizationByEmail: async (email: string) => {
         set({ loading: true, error: null });
         try {
-          const domain = email.split("@")[1];
-          const response = await fetch(`${API_URL}/organizations/by-domain/${domain}`);
-          if (!response.ok) throw new Error("Organization not found");
-          const result = await response.json();
-          if (result.organization) {
+          let orgData: any = null;
+
+          // Prefer the authenticated user's own org (owner_id / co_owners match).
+          // Domain-based lookup below fails when the user's email domain differs from
+          // the org domain (e.g. a gmail owner of a company with its own domain).
+          try {
+            const meResponse = await fetch(`${API_URL}/organizations/me`, {
+              headers: getAuthHeaders(),
+            });
+            if (meResponse.ok) {
+              const me = await meResponse.json();
+              if (me.organization) orgData = me.organization;
+            }
+          } catch {}
+
+          // Fall back to domain-based lookup for employees / non-owners.
+          if (!orgData && email) {
+            const domain = email.split("@")[1];
+            const response = await fetch(`${API_URL}/organizations/by-domain/${domain}`);
+            if (response.ok) {
+              const result = await response.json();
+              if (result.organization) orgData = result.organization;
+            }
+          }
+
+          if (orgData) {
             const org = {
-              id: result.organization._id,
-              ...result.organization,
-              createdAt: result.organization.created_at,
+              id: orgData._id,
+              ...orgData,
+              createdAt: orgData.created_at,
             };
             set({ organization: org, loading: false });
             return org;

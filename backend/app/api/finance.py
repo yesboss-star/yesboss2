@@ -1,11 +1,10 @@
 import logging
 from datetime import datetime
 
-from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException
 
 from ..core.database import get_database
-from ..core.financial_parser import extract_financial_metrics, compute_trend
+from ..core.financial_parser import compute_trend, extract_financial_metrics
 from ..dependencies.auth import get_current_user_optional
 
 logger = logging.getLogger("yesboss.finance")

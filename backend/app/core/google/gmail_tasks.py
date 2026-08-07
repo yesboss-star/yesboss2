@@ -46,6 +46,29 @@ class GoogleTasks:
             return create.json().get("id")
         return None
 
+    async def list_all_task_lists(self, token: str) -> list[dict]:
+        """Return every task list the user owns: [{id, title}, ...]."""
+        resp = await self._request("GET", f"{TASKS_API_URL}/users/@me/lists", token)
+        if resp.status_code != 200:
+            return []
+        return [
+            {"id": lst.get("id"), "title": lst.get("title", "")}
+            for lst in resp.json().get("items", [])
+            if lst.get("id")
+        ]
+
+    async def list_tasks_in_list(self, token: str, list_id: str, show_completed: bool = True) -> list[dict]:
+        """List tasks from an explicit list id (no ensure/create)."""
+        resp = await self._request(
+            "GET",
+            f"{TASKS_API_URL}/lists/{list_id}/tasks",
+            token,
+            params={"maxResults": 100, "showCompleted": "true" if show_completed else "false"},
+        )
+        if resp.status_code != 200:
+            return []
+        return resp.json().get("items", [])
+
     async def create_task(self, token: str, list_id: str, task_data: dict) -> str | None:
         title = task_data.get("title", "Untitled")
         notes = str(task_data.get("description") or "").strip()

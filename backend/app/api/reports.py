@@ -12,8 +12,10 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from ..core.cache import cache
 from ..core.database import get_database
 from ..dependencies.auth import get_current_user_optional
+from ..dependencies.scope import is_org_member, is_org_owner
 
 router = APIRouter()
 logger = logging.getLogger("yesboss.reports")
@@ -73,7 +75,7 @@ def build_report_content(db, org_id: str, request: ReportRequest) -> dict[str, A
     for m in members:
         email = m.get("email", "")
         name = m.get("full_name", email)
-        emp_tasks = [t for t in tasks if t.get("assignee_email") == email or t.get("assignee_id") == email]
+        emp_tasks = [t for t in tasks if t.get("assignee_email") == email or email in (t.get("assignee_id") or [])]
         emp_completed = len([t for t in emp_tasks if t.get("status") == "completed"])
         emp_pending = len([t for t in emp_tasks if t.get("status") == "pending"])
         emp_in_progress = len([t for t in emp_tasks if t.get("status") == "in_progress"])
@@ -400,6 +402,10 @@ async def generate_report(
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
 
+    # Org-wide business reports are visible to any org member.
+    if not await is_org_member(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
+
     goals_count = db.goals.count_documents({"organization_id": org_id})
     tasks_count = db.tasks.count_documents({"organization_id": org_id})
 
@@ -468,6 +474,9 @@ async def list_reports(
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
 
+    if not await is_org_member(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
+
     query = {"organization_id": org_id}
     if current_user and getattr(current_user, 'id', None):
         query["created_by"] = current_user.id
@@ -493,6 +502,14 @@ async def generate_employee_report_endpoint(
     org_id = request.organization_id or get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
+
+    # Non-owners may only generate reports about themselves.
+    if not await is_org_owner(db, org_id, current_user):
+        employee_email = getattr(current_user, 'email', None)
+        if not employee_email:
+            raise HTTPException(status_code=403, detail="Access denied")
+        if request.organization_id and request.organization_id.lower() != employee_email.lower():
+            raise HTTPException(status_code=403, detail="Access denied")
 
     from ..core.report_generator import generate_employee_report
 
@@ -525,6 +542,10 @@ async def generate_all_employee_reports(
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
 
+    # Per-employee reports across the whole org are owner-only.
+    if not await is_org_owner(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
+
     from ..core.report_generator import generate_employee_report
 
     members = list(db.org_chart_members.find({"organization_id": org_id}))
@@ -553,9 +574,17 @@ async def get_org_health(
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
+    if not await is_org_owner(db, organization_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    cached = cache.get("org_health", {"organization_id": organization_id})
+    if cached is not None:
+        return {"health": cached}
+
     from ..core.report_generator import generate_org_health
 
     health = await generate_org_health(db, organization_id)
+    cache.set("org_health", {"organization_id": organization_id}, health)
     return {"health": health}
 
 
@@ -786,8 +815,12 @@ async def download_report(
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
 
-    content = report.get("content", {})
     org_id = report.get("organization_id")
+    # Reports are org-internal; require membership to download.
+    if not await is_org_member(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    content = report.get("content", {})
     org = db.organizations.find_one({"_id": org_id}) if org_id else None
     org_name = org.get("name", "YesBoss") if org else "YesBoss"
 

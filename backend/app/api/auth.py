@@ -459,12 +459,19 @@ async def set_session(request: SetSessionRequest):
 
     _audit_log("session.create", user.uid, f"email={getattr(user, 'email', '')}")
     claims = getattr(user, "custom_claims", {}) or {}
-    role = claims.get("role", "owner")
+    role = claims.get("role")
 
     db = get_database()
     db_user = None
     if db is not None:
         db_user = db.users.find_one({"uid": user.uid})
+
+    # Prefer custom claims, then the DB role (custom claims may not be set for
+    # users who signed up before claims were written, or via flows that don't set them).
+    if not role:
+        role = db_user.get("role") if db_user else None
+    if not role:
+        role = "owner"
 
     full_name = getattr(user, "display_name", "")
     email = getattr(user, "email", "")
@@ -598,6 +605,14 @@ async def sync_user(request: SyncUserRequest):
             db.users.insert_one(user_doc)
             logger.info("User synced (created): %s", request.email)
             actual_role = role_val
+
+        # Write the role to Firebase custom claims so /set-session and
+        # frontend role checks resolve the correct role (not the "owner" default).
+        try:
+            set_custom_user_claims(request.uid, {"role": actual_role})
+            logger.info("Custom claims set for %s: role=%s", request.uid, actual_role)
+        except Exception as e:
+            logger.warning("Failed to set custom claims for %s: %s", request.uid, e)
 
         return AuthResponse(
             success=True,

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -1679,7 +1679,7 @@ function DepartmentDrillView({
     );
   };
 
-  // â”€â”€â”€ Level 1: Goals (Long-term goals list) â”€â”€â”€
+  // ─── Level 1: Goals (Long-term goals list) ───
   const renderGoalsList = () => (
     <div className="space-y-2 max-h-[55vh] overflow-y-auto custom-scrollbar pr-1">
       {parentGoals.length === 0 && orphanGoals.length === 0 ? (
@@ -1725,7 +1725,7 @@ function DepartmentDrillView({
     </div>
   );
 
-  // â”€â”€â”€ Level 2: Sub-goals of a parent â”€â”€â”€
+  // ─── Level 2: Sub-goals of a parent ───
   const renderSubgoalsView = () => {
     if (!parentGoal) return null;
     const pid = parentGoal.id || parentGoal._id;
@@ -1855,7 +1855,7 @@ function DepartmentDrillView({
     );
   };
 
-  // â”€â”€â”€ Level 3: Tasks of a sub-goal â”€â”€â”€
+  // ─── Level 3: Tasks of a sub-goal ───
   const renderTasksView = () => {
     if (!subGoal) return null;
     const gid = subGoal.id || subGoal._id;
@@ -3027,7 +3027,7 @@ function RevenueRiskRadar() {
   const fetchRisk = useCallback(() => {
     if (!organization?.id) return;
     setLoading(true);
-    fetchDeduped(`${API_URL}/dashboard/kpi?organization_id=${organization.id}`)
+    fetchDeduped(`${API_URL}/dashboard/kpi?organization_id=${organization.id}`, { headers: getAuthHeaders() })
       .then((r) => r.json())
       .then((data) => {
         const computed = [];
@@ -3325,7 +3325,12 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
 
   useEffect(() => {
     if (adaptation.stage !== "new") {
-      getAISummary().then(setAiSummary);
+      const run = () => getAISummary().then(setAiSummary);
+      if (typeof (window as any).requestIdleCallback === "function") {
+        (window as any).requestIdleCallback(run, { timeout: 3000 });
+      } else {
+        setTimeout(run, 0);
+      }
     }
   }, [adaptation.stage, getAISummary]);
 

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { Suspense, useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -195,7 +195,7 @@ function AssistantInner() {
           timestamp: Date.now(),
         });
       } else if (data.type === "meeting_booking") {
-        let answer = data.answer || "";
+        const answer = data.answer || "";
         const bp = data.booking_params;
         updateLastMessage(activeSession.id, {
           role: "assistant",
@@ -283,7 +283,7 @@ function AssistantInner() {
           timestamp: Date.now(),
         });
       } else if (data.type === "meeting_booking") {
-        let answer = data.answer || "";
+        const answer = data.answer || "";
         const bp = data.booking_params;
         updateLastMessage(activeSession.id, {
           role: "assistant",
@@ -654,7 +654,7 @@ function QuestionCard({ question, onAnswer, onSkip, disabled }: QuestionCardProp
           disabled={disabled}
           className="text-[10px] text-text-muted hover:text-foreground cursor-pointer disabled:opacity-50"
         >
-          Skip this question â†’
+          Skip this question →
         </button>
       </div>
     </div>

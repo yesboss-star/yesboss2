@@ -1,6 +1,5 @@
 import io
 import logging
-from typing import Any
 
 from docx import Document
 

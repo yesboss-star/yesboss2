@@ -1037,8 +1037,21 @@ async def handle_meeting_booking(booking_params: dict, db, org_id: str, user_id:
     }
 
 
-async def _gather_org_snapshot(db, org_id: str) -> dict[str, Any]:
-    """Collect a small JSON snapshot of everything we know about the org."""
+def _resolve_identity(current_user) -> tuple[str | None, str | None]:
+    """Return (user_id, user_email) from an optional verified auth user."""
+    if not current_user:
+        return None, None
+    user_id = getattr(current_user, "uid", None) or getattr(current_user, "id", None)
+    user_email = getattr(current_user, "email", None)
+    return user_id, user_email
+
+
+async def _gather_org_snapshot(db, org_id: str, user_id: str | None = None, user_email: str | None = None) -> dict[str, Any]:
+    """Collect a small JSON snapshot of everything we know about the org.
+
+    `recent_insights` are scoped to the authenticated user (user_id / user_email)
+    so one person's chat takeaways never leak into another user's prompt.
+    """
     if db is None or not org_id:
         return {}
 
@@ -1127,8 +1140,16 @@ async def _gather_org_snapshot(db, org_id: str) -> dict[str, Any]:
         snap["team_updates"] = []
 
     try:
+        insights_query: dict[str, Any] = {"organization_id": org_id, "status": "open"}
+        if user_id:
+            insights_query["user_id"] = user_id
+        elif user_email:
+            insights_query["user_email"] = user_email
+        else:
+            # No verified identity — must not return anyone else's insights.
+            insights_query["user_id"] = "__unauthenticated__"
         insights_list = list(
-            db.session_insights.find({"organization_id": org_id, "status": "open"})
+            db.session_insights.find(insights_query)
             .sort("created_at", -1)
             .limit(5)
         )
@@ -1142,8 +1163,12 @@ async def _gather_org_snapshot(db, org_id: str) -> dict[str, Any]:
     return snap
 
 
-async def _store_session_insight(db, org_id: str | None, session_id: str | None, answer_text: str, insight_type: str = "insight"):
-    """Extract a one-line summary from the assistant's answer and store it as a session insight."""
+async def _store_session_insight(db, org_id: str | None, session_id: str | None, answer_text: str, insight_type: str = "insight", user_id: str | None = None, user_email: str | None = None):
+    """Extract a one-line summary from the assistant's answer and store it as a session insight.
+
+    Insights are stored scoped to the authenticated user so they never surface
+    in another user's conversation.
+    """
     if db is None or not org_id or not answer_text or len(answer_text) < 15:
         return
     try:
@@ -1154,6 +1179,8 @@ async def _store_session_insight(db, org_id: str | None, session_id: str | None,
         db.session_insights.insert_one({
             "organization_id": org_id,
             "session_id": session_id or "",
+            "user_id": user_id,
+            "user_email": user_email,
             "summary": summary,
             "type": insight_type,
             "status": "open",
@@ -1163,13 +1190,20 @@ async def _store_session_insight(db, org_id: str | None, session_id: str | None,
         logger.warning(f"Failed to store session insight: {e}")
 
 
-async def _confirm_insight_by_summary(db, org_id: str | None, summary: str):
-    """Mark session insights matching the summary as done."""
+async def _confirm_insight_by_summary(db, org_id: str | None, summary: str, user_id: str | None = None):
+    """Mark session insights matching the summary as done, scoped to the user."""
     if db is None or not org_id or not summary:
         return
     try:
+        query: dict[str, Any] = {
+            "organization_id": org_id,
+            "summary": {"$regex": re.escape(summary[:100]), "$options": "i"},
+            "status": "open",
+        }
+        if user_id:
+            query["user_id"] = user_id
         db.session_insights.update_many(
-            {"organization_id": org_id, "summary": {"$regex": re.escape(summary[:100]), "$options": "i"}, "status": "open"},
+            query,
             {"$set": {"status": "done", "confirmed_at": datetime.utcnow()}},
         )
     except Exception as e:
@@ -1210,6 +1244,8 @@ async def _build_ask_prompt(
     session_context: dict[str, Any],
     conversation_history: list[dict[str, str]] | None,
     proactive: bool,
+    user_id: str | None = None,
+    user_email: str | None = None,
 ) -> tuple[str, str, dict[str, Any]]:
     """Shared prompt + system choice for smart_ask and ask_stream.
 
@@ -1218,7 +1254,7 @@ async def _build_ask_prompt(
     snap: dict[str, Any] = {}
     if db is not None and org_id:
         try:
-            snap = await _gather_org_snapshot(db, org_id)
+            snap = await _gather_org_snapshot(db, org_id, user_id=user_id, user_email=user_email)
         except Exception as e:
             logger.warning("_build_ask_prompt: snapshot failed: %s", e)
 
@@ -1437,7 +1473,7 @@ Tone: warm, direct, confident, no fluff. The owner is busy.
 
 
 @router.post("/chat")
-async def assistant_chat(request: ChatRequest):
+async def assistant_chat(request: ChatRequest, current_user = Depends(get_current_user_optional)):
     """Intelligent chat. Diagnoses data first; if data is missing, asks for
     specific uploads. If data is partial, gives a partial answer and asks for
     the missing piece. If data is complete, gives a deep, specific answer."""
@@ -1445,7 +1481,10 @@ async def assistant_chat(request: ChatRequest):
     if not text:
         raise HTTPException(status_code=400, detail="message is required")
 
+    user_id, user_email = _resolve_identity(current_user)
     context = request.context or ChatContext()
+    if not context.user_email and user_email:
+        context.user_email = user_email
     org_id = context.organization_id
 
     history = (request.conversation_history or [])[-8:]
@@ -1496,7 +1535,7 @@ async def assistant_chat(request: ChatRequest):
     snap: dict[str, Any] = {}
     if db is not None and org_id:
         try:
-            snap = await _gather_org_snapshot(db, org_id)
+            snap = await _gather_org_snapshot(db, org_id, user_id=user_id, user_email=user_email)
         except Exception as e:
             logger.warning("chat: snapshot failed: %s", e)
 
@@ -1926,13 +1965,16 @@ class AskResponse(BaseModel):
 
 
 @router.post("/ask", response_model=AskResponse)
-async def smart_ask(request: AskRequest):
+async def smart_ask(request: AskRequest, current_user = Depends(get_current_user_optional)):
     """Ask a question. Understands intent → checks uploaded docs → answers directly or asks for missing info."""
     text = (request.message or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="message is required")
 
+    user_id, user_email = _resolve_identity(current_user)
     ctx = request.context or ChatContext()
+    if not ctx.user_email and user_email:
+        ctx.user_email = user_email
     org_id = ctx.organization_id
     db = get_database()
 
@@ -1945,6 +1987,8 @@ async def smart_ask(request: AskRequest):
         session_context=session_context,
         conversation_history=request.conversation_history,
         proactive=request.proactive,
+        user_id=user_id,
+        user_email=user_email,
     )
 
     fallback_question = {
@@ -2097,12 +2141,12 @@ async def smart_ask(request: AskRequest):
             if suggestions and not isinstance(suggestions, list):
                 suggestions = None
             asyncio.create_task(
-                _store_session_insight(db, org_id, request.session_id, answer_text)
+                _store_session_insight(db, org_id, request.session_id, answer_text, user_id=user_id, user_email=user_email)
             )
             confirmation = parsed.get("confirmation")
             if confirmation and isinstance(confirmation, dict) and confirmation.get("status") == "done":
                 asyncio.create_task(
-                    _confirm_insight_by_summary(db, org_id, confirmation.get("insight_summary", ""))
+                    _confirm_insight_by_summary(db, org_id, confirmation.get("insight_summary", ""), user_id=user_id)
                 )
             return AskResponse(
                 type="answer",
@@ -2187,7 +2231,10 @@ async def ask_stream(request: AskRequest, user: dict = Depends(get_current_user_
     if not text:
         raise HTTPException(status_code=400, detail="message is required")
 
+    user_id, user_email = _resolve_identity(user)
     ctx = request.context or ChatContext()
+    if not ctx.user_email and user_email:
+        ctx.user_email = user_email
     org_id = ctx.organization_id
     db = get_database()
 
@@ -2200,6 +2247,8 @@ async def ask_stream(request: AskRequest, user: dict = Depends(get_current_user_
         session_context=session_context,
         conversation_history=request.conversation_history,
         proactive=request.proactive,
+        user_id=user_id,
+        user_email=user_email,
     )
 
     async def event_stream():
@@ -2231,7 +2280,7 @@ async def ask_stream(request: AskRequest, user: dict = Depends(get_current_user_
         except Exception as e:
             logger.warning(f"ask_stream: AI streaming failed: {e}")
             yield f"data: {json.dumps({'token': f'I encountered an error: {e}'})}\n\n"
-            yield f"event: done\ndata: [DONE]\n\n"
+            yield "event: done\ndata: [DONE]\n\n"
             return
 
         # Parse the full JSON response
@@ -2313,16 +2362,16 @@ async def ask_stream(request: AskRequest, user: dict = Depends(get_current_user_
         # Fire-and-forget insight storage for answer type
         if metadata["type"] == "answer" and metadata.get("answer"):
             asyncio.create_task(
-                _store_session_insight(db, org_id, request.session_id, metadata["answer"])
+                _store_session_insight(db, org_id, request.session_id, metadata["answer"], user_id=user_id, user_email=user_email)
             )
         # Handle confirmation
         if metadata.get("confirmation") and metadata["confirmation"].get("status") == "done":
             asyncio.create_task(
-                _confirm_insight_by_summary(db, org_id, metadata["confirmation"].get("insight_summary", ""))
+                _confirm_insight_by_summary(db, org_id, metadata["confirmation"].get("insight_summary", ""), user_id=user_id)
             )
 
         yield f"event: metadata\ndata: {json.dumps(metadata)}\n\n"
-        yield f"event: done\ndata: [DONE]\n\n"
+        yield "event: done\ndata: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

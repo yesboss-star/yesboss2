@@ -28,10 +28,10 @@ export function fetchDeduped(url: string, init?: RequestInit): Promise<Response>
   const body = init?.body ? JSON.stringify(init.body) : "";
   const key = `${init?.method || "GET"}|${url}|${body}|${auth ? "auth" : "noauth"}`;
   const existing = inflightFetches.get(key);
-  if (existing) return existing;
+  if (existing) return existing.then((r) => r.clone());
   const promise = fetch(url, init).finally(() => {
     inflightFetches.delete(key);
   });
   inflightFetches.set(key, promise);
-  return promise;
+  return promise.then((r) => r.clone());
 }

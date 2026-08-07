@@ -1,6 +1,9 @@
 ﻿import { create } from "zustand";
+import { getAuthHeaders } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
+
+const memberFetchInFlight = new Map<string, Promise<any>>();
 
 export interface OrgMember {
   id: string;
@@ -46,7 +49,7 @@ export const useOrgChartStore = create<OrgChartState>()(
       set({ loading: true, error: null });
       try {
         const params = orgId ? `?organization_id=${orgId}` : "";
-        const response = await fetch(`${API_URL}/org-chart/tree${params}`);
+        const response = await fetch(`${API_URL}/org-chart/tree${params}`, { headers: getAuthHeaders() });
         if (!response.ok) throw new Error("Failed to fetch org tree");
         const result = await response.json();
         set({
@@ -60,15 +63,26 @@ export const useOrgChartStore = create<OrgChartState>()(
     },
 
     fetchOrgMembers: async (orgId?: string) => {
+      const params = orgId ? `?organization_id=${orgId}` : "";
+      const key = `/org-chart/members${params}`;
+      const inflight = memberFetchInFlight.get(key);
+      if (inflight) { try { await inflight; } catch {} return; }
       set({ loading: true, error: null });
+      const p = (async () => {
+        try {
+          const response = await fetch(`${API_URL}/org-chart/members${params}`, { headers: getAuthHeaders() });
+          if (!response.ok) throw new Error("Failed to fetch members");
+          const result = await response.json();
+          set({ members: result.members || [], loading: false });
+        } catch (error: any) {
+          set({ error: error.message, loading: false });
+        }
+      })();
+      memberFetchInFlight.set(key, p);
       try {
-        const params = orgId ? `?organization_id=${orgId}` : "";
-        const response = await fetch(`${API_URL}/org-chart/members${params}`);
-        if (!response.ok) throw new Error("Failed to fetch members");
-        const result = await response.json();
-        set({ members: result.members || [], loading: false });
-      } catch (error: any) {
-        set({ error: error.message, loading: false });
+        await p;
+      } finally {
+        memberFetchInFlight.delete(key);
       }
     },
 
@@ -78,8 +92,10 @@ export const useOrgChartStore = create<OrgChartState>()(
         const formData = new FormData();
         formData.append("file", file);
         if (orgId) formData.append("organization_id", orgId);
+        const { "Content-Type": _ct, ...authHeaders } = getAuthHeaders();
         const response = await fetch(`${API_URL}/org-chart/upload`, {
           method: "POST",
+          headers: authHeaders,
           body: formData,
         });
         if (!response.ok) throw new Error("Failed to upload file");
@@ -98,7 +114,7 @@ export const useOrgChartStore = create<OrgChartState>()(
       try {
         const response = await fetch(`${API_URL}/org-chart/members${orgId ? `?organization_id=${orgId}` : ""}`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getAuthHeaders() },
           body: JSON.stringify(data),
         });
         if (!response.ok) throw new Error("Failed to add member");
@@ -115,7 +131,7 @@ export const useOrgChartStore = create<OrgChartState>()(
       try {
         const response = await fetch(`${API_URL}/org-chart/members/${memberId}`, {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getAuthHeaders() },
           body: JSON.stringify(data),
         });
         if (!response.ok) throw new Error("Failed to update member");
@@ -132,6 +148,7 @@ export const useOrgChartStore = create<OrgChartState>()(
       try {
         const response = await fetch(`${API_URL}/org-chart/members/${memberId}`, {
           method: "DELETE",
+          headers: getAuthHeaders(),
         });
         if (!response.ok) throw new Error("Failed to delete member");
         await get().fetchOrgTree(orgId);

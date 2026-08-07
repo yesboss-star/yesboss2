@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -201,7 +201,7 @@ function QuestionCard({ question, onAnswer, onSkip, disabled, questionNumber, to
             disabled={disabled}
             className="text-[10px] text-text-muted hover:text-foreground cursor-pointer disabled:opacity-50"
           >
-            Skip this question â†’
+            Skip this question →
           </button>
         </div>
       )}
@@ -710,7 +710,7 @@ export default function AISummaryChat() {
             updateSessionContext(s.id, { recently_uploaded_file: fileName, file_text_preview: result.textPreview || "" });
           }
         } catch (err: any) {
-          const errMsg: SessionMessage = { role: "assistant", content: `âŒ Upload failed: ${err.message || "Unknown error"}`, timestamp: Date.now() };
+          const errMsg: SessionMessage = { role: "assistant", content: `❌ Upload failed: ${err.message || "Unknown error"}`, timestamp: Date.now() };
           setMessages((prev) => [...prev, errMsg]);
           addMessage(s.id, errMsg);
         } finally {
@@ -720,7 +720,7 @@ export default function AISummaryChat() {
       }
     }
 
-    // If file uploaded with text + question pending â†’ answer it
+    // If file uploaded with text + question pending → answer it
     if (pendingQuestion) {
       setPendingQuestion(null);
       await handleAnswerQuestion(pendingQuestion.field_id, userMsg, userMsg, s);
@@ -1048,7 +1048,7 @@ export default function AISummaryChat() {
     } catch (err: any) {
       const errMsg: SessionMessage = {
         role: "assistant",
-        content: `âŒ Import failed: ${err.message}`,
+        content: `❌ Import failed: ${err.message}`,
         timestamp: Date.now(),
       };
       const session = activeSession || sessions[0];
@@ -1160,7 +1160,7 @@ export default function AISummaryChat() {
           }
         }
       } catch (err: any) {
-        const errMsg: SessionMessage = { role: "assistant", content: `âŒ Re-analysis failed: ${err.message}`, timestamp: Date.now() };
+        const errMsg: SessionMessage = { role: "assistant", content: `❌ Re-analysis failed: ${err.message}`, timestamp: Date.now() };
         const session = activeSession || sessions[0];
         if (session) {
           setMessages((prev) => [...prev, errMsg]);
@@ -1215,7 +1215,7 @@ export default function AISummaryChat() {
     } catch (err: any) {
       const errMsg: SessionMessage = {
         role: "assistant",
-        content: `âŒ Failed to create goal: ${err.message}`,
+        content: `❌ Failed to create goal: ${err.message}`,
         timestamp: Date.now(),
       };
       const session = activeSession || sessions[0];
@@ -1256,7 +1256,7 @@ export default function AISummaryChat() {
     } catch (err: any) {
       const errMsg: SessionMessage = {
         role: "assistant",
-        content: `âŒ Failed to create goal: ${err.message}`,
+        content: `❌ Failed to create goal: ${err.message}`,
         timestamp: Date.now(),
       };
       const session = activeSession || sessions[0];
@@ -1318,7 +1318,7 @@ export default function AISummaryChat() {
     } catch (err: any) {
       const errMsg: SessionMessage = {
         role: "assistant",
-        content: `âŒ Failed to create tasks: ${err.message}`,
+        content: `❌ Failed to create tasks: ${err.message}`,
         timestamp: Date.now(),
       };
       const session = activeSession || sessions[0];
@@ -1511,7 +1511,7 @@ export default function AISummaryChat() {
                           title="Dismiss"
                           aria-label={`Dismiss insight: ${(insight.summary || "").slice(0, 60)}`}
                         >
-                          <span className="text-[11px] font-bold leading-none" aria-hidden="true">Ã—</span>
+                          <span className="text-[11px] font-bold leading-none" aria-hidden="true">×</span>
                         </button>
                       </div>
                     </div>
@@ -1818,7 +1818,7 @@ export default function AISummaryChat() {
                 {importSuggestion.tasks_without_dates_count > 0 && (
                   <div className="p-2 rounded-lg border bg-amber-500/5 border-amber-500/20">
                     <p className="text-xs">
-                      â° <span className="font-medium">{importSuggestion.tasks_without_dates_count} task{importSuggestion.tasks_without_dates_count !== 1 ? "s" : ""}</span> {importSuggestion.tasks_without_dates_count !== 1 ? "have" : "has"} no due date — consider setting deadlines to keep things on track.
+                      ⏰ <span className="font-medium">{importSuggestion.tasks_without_dates_count} task{importSuggestion.tasks_without_dates_count !== 1 ? "s" : ""}</span> {importSuggestion.tasks_without_dates_count !== 1 ? "have" : "has"} no due date — consider setting deadlines to keep things on track.
                     </p>
                   </div>
                 )}
@@ -2075,7 +2075,7 @@ export default function AISummaryChat() {
                         {isActive && (
                           <div className="flex items-center gap-1 flex-shrink-0">
                             <kbd className="text-[9px] px-1.5 py-0.5 rounded border border-border/60 bg-surface text-text-muted font-mono">
-                              â†µ
+                              ↵
                             </kbd>
                           </div>
                         )}
@@ -2085,9 +2085,9 @@ export default function AISummaryChat() {
                 </ul>
                 <div className="px-3 py-1.5 flex items-center justify-between border-t border-border/60 bg-surface-light/30 text-[10px] text-text-muted/70">
                   <div className="flex items-center gap-2">
-                    <kbd className="px-1 py-0.5 rounded border border-border/60 bg-surface font-mono">â†‘â†“</kbd>
+                    <kbd className="px-1 py-0.5 rounded border border-border/60 bg-surface font-mono">↑↓</kbd>
                     <span>navigate</span>
-                    <kbd className="px-1 py-0.5 rounded border border-border/60 bg-surface font-mono ml-1">â†µ</kbd>
+                    <kbd className="px-1 py-0.5 rounded border border-border/60 bg-surface font-mono ml-1">↵</kbd>
                     <span>select</span>
                   </div>
                   <kbd className="px-1 py-0.5 rounded border border-border/60 bg-surface font-mono">esc</kbd>

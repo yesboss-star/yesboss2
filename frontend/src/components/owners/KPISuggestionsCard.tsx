@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -31,7 +31,7 @@ import { useOrganizationStore } from "@/stores/organizationStore";
 import { useGoalStore } from "@/stores/goalStore";
 import { useTaskStore } from "@/stores/taskStore";
 import { useOrgChartStore } from "@/stores/orgChartStore";
-import { fetchDeduped } from "@/lib/utils";
+import { fetchDeduped, getAuthHeaders } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
@@ -180,7 +180,7 @@ Step 2 — OUTPUT a single JSON object (no prose, no markdown) with this exact s
 
 Rules:
 - If data_sufficient is false, return an EMPTY kpis array and populate data_needs with the 2-4 most impactful missing data sources.
-- For each data_needs item, specify what specific KPI it would unlock. Example: uploading revenue data â†’ suggested_kpi: "revenue_growth_rate", suggested_kpi_title: "Revenue Growth Rate". Be specific to this business's actual industry and context.
+- For each data_needs item, specify what specific KPI it would unlock. Example: uploading revenue data → suggested_kpi: "revenue_growth_rate", suggested_kpi_title: "Revenue Growth Rate". Be specific to this business's actual industry and context.
 - If data_sufficient is true, return 2-3 NEW KPIs in the kpis array and leave data_needs as an empty array.
 - Each KPI must be specific, measurable, and meaningful for a ${industry || "general"} business at this stage. No generic vanity metrics.
 - Do NOT repeat keys from: ${existingKpiKeys.length ? existingKpiKeys.join(", ") : "(none yet)"}.
@@ -287,7 +287,7 @@ function KPISuggestionCard({
             <p className="text-lg font-bold text-foreground mt-0.5">{suggestion.formatted}</p>
           )}
           {suggestion.sourceDetail && (
-            <p className="text-[10px] text-text-muted/70 mt-1 truncate">â†³ {suggestion.sourceDetail}</p>
+            <p className="text-[10px] text-text-muted/70 mt-1 truncate">↳ {suggestion.sourceDetail}</p>
           )}
           <div className="flex items-center gap-2 mt-2.5">
             <Button
@@ -541,7 +541,7 @@ export default function KPISuggestionsCard() {
       if (accepted.length > 0) {
         url += `&accepted_kpis=${encodeURIComponent(JSON.stringify(accepted.map(k => ({ key: k.key, title: k.title }))))}`;
       }
-      const res = await fetchDeduped(url);
+      const res = await fetchDeduped(url, { headers: getAuthHeaders() });
       if (!res.ok) {
         console.warn(`[KPI] fetchValues API returned ${res.status}`);
         return;

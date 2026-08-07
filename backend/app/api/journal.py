@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from ..core.database import get_database
 from ..dependencies.auth import get_current_user
+from ..dependencies.scope import is_org_owner
 
 logger = logging.getLogger("yesboss.journal")
 router = APIRouter()
@@ -91,6 +92,9 @@ async def list_journal_entries(
     query: dict[str, Any] = {"org_id": resolved_org}
     if type:
         query["type"] = type
+    # Non-owners only see their own journal entries.
+    if not await is_org_owner(db, resolved_org, current_user):
+        query["user_id"] = current_user.uid
 
     total = db.journal_entries.count_documents(query)
     entries = list(db.journal_entries.find(query).sort("created_at", -1).skip(skip).limit(limit))
@@ -113,6 +117,9 @@ async def get_journal_entry(
     entry = db.journal_entries.find_one({"_id": ObjectId(entry_id)})
     if not entry:
         raise HTTPException(status_code=404, detail="Entry not found")
+    # Only the author or an org owner may read the entry.
+    if entry.get("user_id") != current_user.uid and not await is_org_owner(db, entry.get("org_id", ""), current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
     entry["_id"] = str(entry["_id"])
     return {"entry": entry}
 
@@ -178,6 +185,9 @@ async def analyze_journal_entry(
     entry = db.journal_entries.find_one({"_id": ObjectId(entry_id)})
     if not entry:
         raise HTTPException(status_code=404, detail="Entry not found")
+    # Only the author or an org owner may analyze the entry.
+    if entry.get("user_id") != current_user.uid and not await is_org_owner(db, entry.get("org_id", ""), current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
 
     from ..agents.journal_agent import analyze_entry
     analysis = await analyze_entry(
@@ -209,6 +219,12 @@ async def update_pipeline_status(
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
     from bson import ObjectId
+    entry = db.journal_entries.find_one({"_id": ObjectId(entry_id)})
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    # Only the author or an org owner may update pipeline status.
+    if entry.get("user_id") != current_user.uid and not await is_org_owner(db, entry.get("org_id", ""), current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
     result = db.journal_entries.update_one(
         {"_id": ObjectId(entry_id), "org_id": {"$exists": True}},
         {"$set": {"pipeline_status": status, "updated_at": datetime.utcnow()}},
@@ -230,6 +246,9 @@ async def share_journal_entry(
     entry = db.journal_entries.find_one({"_id": ObjectId(entry_id)})
     if not entry:
         raise HTTPException(status_code=404, detail="Entry not found")
+    # Only the author or an org owner may share the entry.
+    if entry.get("user_id") != current_user.uid and not await is_org_owner(db, entry.get("org_id", ""), current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
     org_id = entry.get("org_id")
     if not org_id:
         raise HTTPException(status_code=400, detail="Entry has no organization")
@@ -269,11 +288,15 @@ async def get_mood_trends(
     if not resolved_org:
         raise HTTPException(status_code=400, detail="Organization ID required")
     cutoff = datetime.utcnow() - timedelta(days=days)
-    entries = list(db.journal_entries.find({
+    query: dict[str, Any] = {
         "org_id": resolved_org,
         "mood": {"$nin": [None, ""]},
         "created_at": {"$gte": cutoff},
-    }).sort("created_at", 1))
+    }
+    # Non-owners only see their own mood trends.
+    if not await is_org_owner(db, resolved_org, current_user):
+        query["user_id"] = current_user.uid
+    entries = list(db.journal_entries.find(query).sort("created_at", 1))
     daily: dict[str, dict[str, int]] = {}
     for e in entries:
         day = e["created_at"].strftime("%Y-%m-%d") if hasattr(e["created_at"], "strftime") else str(e["created_at"])[:10]

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent, Badge, Button } from "@/components/ui";
@@ -9,9 +9,9 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1
 
 function formatValue(val: number | null): string {
   if (val == null) return "—";
-  if (val >= 10000000) return `â‚¹${(val / 10000000).toFixed(1)}Cr`;
-  if (val >= 100000) return `â‚¹${(val / 100000).toFixed(1)}L`;
-  return `â‚¹${val.toLocaleString("en-IN")}`;
+  if (val >= 10000000) return `₹${(val / 10000000).toFixed(1)}Cr`;
+  if (val >= 100000) return `₹${(val / 100000).toFixed(1)}L`;
+  return `₹${val.toLocaleString("en-IN")}`;
 }
 
 function TrendIndicator({ trend }: { trend: { change_pct: number; direction: string } | undefined }) {

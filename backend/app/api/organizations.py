@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from ..core.database import get_database
-from ..dependencies.auth import get_current_user_optional
+from ..dependencies.auth import get_current_user, get_current_user_optional
+from ..dependencies.scope import is_org_member, is_org_owner
 
 router = APIRouter()
 
@@ -141,7 +142,7 @@ async def get_my_organization(current_user = Depends(get_current_user_optional))
     return {"organization": org}
 
 @router.get("/{org_id}")
-async def get_organization(org_id: str):
+async def get_organization(org_id: str, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -152,16 +153,23 @@ async def get_organization(org_id: str):
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
+    if not await is_org_member(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
+
     org["_id"] = str(org["_id"])
     return {"organization": org}
 
 @router.put("/{org_id}")
-async def update_organization(org_id: str, request: OrganizationUpdate):
+async def update_organization(org_id: str, request: OrganizationUpdate, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
     from bson import ObjectId
+
+    if not await is_org_owner(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
+
     update_data = {k: v for k, v in request.model_dump().items() if v is not None}
     update_data["updated_at"] = datetime.utcnow()
 
@@ -228,12 +236,16 @@ class AddOwnerRequest(BaseModel):
     uid: str
 
 @router.post("/{org_id}/add-owner")
-async def add_owner(org_id: str, request: AddOwnerRequest):
+async def add_owner(org_id: str, request: AddOwnerRequest, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
     from bson import ObjectId
+
+    if not await is_org_owner(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
+
     org = db.organizations.find_one({"_id": ObjectId(org_id)})
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
@@ -262,7 +274,7 @@ class GenerateDefaultGoalsRequest(BaseModel):
 async def generate_default_goals(
     org_id: str,
     request: GenerateDefaultGoalsRequest,
-    current_user = Depends(get_current_user_optional)
+    current_user = Depends(get_current_user)
 ):
     from bson import ObjectId
 
@@ -275,6 +287,9 @@ async def generate_default_goals(
     org = db.organizations.find_one({"_id": ObjectId(org_id)})
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
+
+    if not await is_org_owner(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
 
     industry = request.industry or org.get("industry", "General")
     micro_vertical = request.micro_vertical or org.get("micro_vertical", "")
@@ -315,12 +330,16 @@ async def generate_default_goals(
 
 
 @router.get("/{org_id}/owners")
-async def get_organization_owners(org_id: str):
+async def get_organization_owners(org_id: str, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
     from bson import ObjectId
+
+    if not await is_org_member(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
+
     org = db.organizations.find_one({"_id": ObjectId(org_id)})
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
@@ -352,10 +371,13 @@ async def get_organization_owners(org_id: str):
 
 
 @router.get("/{org_id}/employees")
-async def get_organization_employees(org_id: str):
+async def get_organization_employees(org_id: str, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+
+    if not await is_org_member(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
 
     employees = list(db.employees.find({"organization_id": org_id}))
 
@@ -365,12 +387,16 @@ async def get_organization_employees(org_id: str):
     return {"employees": employees}
 
 @router.delete("/{org_id}")
-async def delete_organization(org_id: str):
+async def delete_organization(org_id: str, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
     from bson import ObjectId
+
+    if not await is_org_owner(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
+
     db.organizations.delete_one({"_id": ObjectId(org_id)})
 
     return {"success": True, "message": "Organization deleted"}
