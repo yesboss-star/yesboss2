@@ -96,26 +96,38 @@ class AIClient:
     ) -> dict[str, Any]:
         client = self._get_deepseek_client()
 
-        response = await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
+        def _call(budget: int):
+            return client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                # DeepSeek is a reasoning model: use max_completion_tokens so the
+                # output budget is separate from the reasoning budget. With
+                # max_tokens, reasoning (chain-of-thought) eats the whole budget
+                # and content comes back empty.
+                max_completion_tokens=budget,
+            )
 
+        response = await _call(max_tokens)
         message = response.choices[0].message
-        content = getattr(message, "content", None)
-        # deepseek-v4-flash is a reasoning model: the final answer lands in
-        # `content`, but if it is empty (short max_tokens) fall back to the
-        # reasoning text so we never return a blank reply.
-        if not content:
-            content = getattr(message, "reasoning_content", "") or ""
+        content = getattr(message, "content", None) or ""
+        finish_reason = getattr(response.choices[0], "finish_reason", None)
+
+        # Reasoning models can still truncate: retry once with a larger budget.
+        # (reasoning_content stays internal-only — never leak it to the user.)
+        if (not content.strip()) or finish_reason == "length":
+            retry_budget = max(max_tokens, 2000) + 3000
+            response = await _call(retry_budget)
+            message = response.choices[0].message
+            content = getattr(message, "content", None) or ""
+            finish_reason = getattr(response.choices[0], "finish_reason", None)
 
         return {
             "content": content,
             "model": model,
             "provider": "deepseek",
-            "usage": response.usage.model_dump() if response.usage else {}
+            "usage": response.usage.model_dump() if response.usage else {},
+            "finish_reason": finish_reason,
         }
 
     async def _gemini_complete(
@@ -349,7 +361,8 @@ class AIClient:
             model=model,
             messages=messages,
             temperature=temperature,
-            max_tokens=max_tokens,
+            # Same reasoning-budget separation as _deepseek_complete.
+            max_completion_tokens=max_tokens,
             stream=True,
         )
         async for chunk in stream:

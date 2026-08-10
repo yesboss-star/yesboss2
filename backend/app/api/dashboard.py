@@ -404,7 +404,7 @@ async def _fetch_missing_kpis_async(
             prompt=ai_prompt,
             system_prompt=kpi_persona,
             temperature=0.3,
-            max_tokens=1000,
+            max_tokens=2000,
         )
         json_match = re.search(r'\{.*\}', ai_result, re.DOTALL)
         if json_match:

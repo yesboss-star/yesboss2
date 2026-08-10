@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUIStore } from "@/stores/uiStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
-import { useSessionStore, type ChatSession, type SessionMessage, type ClarifyingQuestion, type BookingParams } from "@/stores/sessionStore";
+import { useSessionStore, type ChatSession, type SessionMessage, type ClarifyingQuestion, type BookingParams, type DelegateParams, type GeneratedSubTask } from "@/stores/sessionStore";
 import { getAuthHeaders } from "@/lib/utils";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, Button } from "@/components/ui";
@@ -85,6 +85,87 @@ function BookingCard({ params, onBook }: { params: BookingParams; onBook: (time:
   );
 }
 
+function DelegatePreviewCard({
+  params,
+  subTasks,
+  onConfirm,
+  disabled,
+}: {
+  params: DelegateParams;
+  subTasks: GeneratedSubTask[];
+  onConfirm: (selected: GeneratedSubTask[]) => void;
+  disabled?: boolean;
+}) {
+  const [selected, setSelected] = useState<boolean[]>(subTasks.map(() => true));
+
+  const typeLabel =
+    params.item_type === "goal" ? "Goal" : params.item_type === "both" ? "Task + Goal" : "Task";
+
+  const toggle = (idx: number) => {
+    setSelected((prev) => prev.map((v, i) => (i === idx ? !v : v)));
+  };
+
+  const checked = selected.filter((v) => v).length;
+
+  return (
+    <div className="rounded-2xl bg-surface border border-primary/20 p-4 space-y-3 min-w-[300px] max-w-[420px]">
+      <div className="flex items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-semibold uppercase tracking-wider">
+          <Sparkles className="w-3 h-3" />
+          {typeLabel}
+        </span>
+        <span className="text-[10px] text-text-muted">Assign to {params.assignee_name}</span>
+      </div>
+
+      <div>
+        <p className="text-sm text-foreground font-semibold">{params.title}</p>
+        {params.description && <p className="text-xs text-text-muted mt-1">{params.description}</p>}
+      </div>
+
+      {subTasks.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-medium text-text-muted uppercase tracking-wider">
+            AI-suggested sub-steps ({checked}/{subTasks.length})
+          </p>
+          {subTasks.map((st, idx) => (
+            <label
+              key={idx}
+              className="flex items-start gap-2 px-3 py-2 rounded-lg bg-surface-light border border-border cursor-pointer"
+            >
+              <input
+                type="checkbox"
+                checked={selected[idx]}
+                onChange={() => toggle(idx)}
+                disabled={disabled}
+                className="mt-0.5"
+              />
+              <span className="flex-1 text-xs text-foreground">{st.title}</span>
+            </label>
+          ))}
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        <Button
+          onClick={() => onConfirm(subTasks.filter((_, i) => selected[i]))}
+          disabled={disabled || (subTasks.length > 0 && checked === 0)}
+          className="cursor-pointer"
+        >
+          Assign selected
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => onConfirm([])}
+          disabled={disabled}
+          className="cursor-pointer"
+        >
+          {subTasks.length > 0 ? "Assign without sub-steps" : "Assign"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function AssistantInner() {
   const { user, role, loading: authLoading } = useAuth();
   const router = useRouter();
@@ -121,12 +202,15 @@ function AssistantInner() {
   useEffect(() => {
     if (!initialized.current && organization?.id) {
       initialized.current = true;
-      fetchSessions(organization.id);
-      if (!activeSessionId) {
-        createSession(organization.id, "New Chat");
-      }
+      const init = async () => {
+        await fetchSessions(organization.id);
+        if (!useSessionStore.getState().activeSessionId) {
+          createSession(organization.id, "New Chat");
+        }
+      };
+      init();
     }
-  }, [organization?.id, fetchSessions, createSession, activeSessionId]);
+  }, [organization?.id, fetchSessions, createSession]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -202,6 +286,16 @@ function AssistantInner() {
           content: answer,
           is_booking: true,
           booking_params: bp,
+          timestamp: Date.now(),
+        });
+      } else if (data.type === "delegate_preview" && data.delegate_params) {
+        updateLastMessage(activeSession.id, {
+          role: "assistant",
+          content: data.answer || "",
+          is_delegate: true,
+          delegate_params: data.delegate_params,
+          generated_sub_tasks: data.generated_sub_tasks || [],
+          is_loading: false,
           timestamp: Date.now(),
         });
       } else {
@@ -292,6 +386,16 @@ function AssistantInner() {
           booking_params: bp,
           timestamp: Date.now(),
         });
+      } else if (data.type === "delegate_preview" && data.delegate_params) {
+        updateLastMessage(activeSession.id, {
+          role: "assistant",
+          content: data.answer || "",
+          is_delegate: true,
+          delegate_params: data.delegate_params,
+          generated_sub_tasks: data.generated_sub_tasks || [],
+          is_loading: false,
+          timestamp: Date.now(),
+        });
       } else {
         updateLastMessage(activeSession.id, {
           role: "assistant",
@@ -347,11 +451,85 @@ function AssistantInner() {
         let answer = data.answer;
         if (data.follow_up) answer += "\n\n" + data.follow_up;
         updateLastMessage(activeSession.id, { role: "assistant", content: answer, is_answer: true, timestamp: Date.now() });
+      } else if (data.type === "delegate_preview" && data.delegate_params) {
+        updateLastMessage(activeSession.id, {
+          role: "assistant",
+          content: data.answer || "",
+          is_delegate: true,
+          delegate_params: data.delegate_params,
+          generated_sub_tasks: data.generated_sub_tasks || [],
+          is_loading: false,
+          timestamp: Date.now(),
+        });
       } else {
         updateLastMessage(activeSession.id, { role: "assistant", content: data.answer || "Done! Check your calendar.", is_answer: true, timestamp: Date.now() });
       }
     } catch {
       updateLastMessage(activeSession.id, { role: "assistant", content: "Couldn't book. Try again?", is_loading: false, timestamp: Date.now() });
+    } finally {
+      setIsAsking(false);
+    }
+  };
+
+  const confirmDelegate = async (selected: GeneratedSubTask[]) => {
+    if (!activeSession || isAsking) return;
+    const lastMsg = activeSession.messages[activeSession.messages.length - 1];
+    const params = lastMsg?.delegate_params;
+    if (!params) return;
+
+    setIsAsking(true);
+    try {
+      const res = await fetch(`${API_URL}/assistant/delegate`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          title: params.title,
+          description: params.description ?? null,
+          assignee_id: params.assignee_id,
+          assignee_name: params.assignee_name,
+          priority: params.priority,
+          item_type: params.item_type,
+          department: params.department ?? null,
+          sub_tasks: selected,
+          context: {
+            user_email: user?.email,
+            organization_id: organization?.id,
+          },
+        }),
+      });
+      if (!res.ok) throw new Error("Delegate failed");
+      await res.json();
+
+      const typeLabel =
+        params.item_type === "goal"
+          ? "goal"
+          : params.item_type === "both"
+            ? "goal and task"
+            : "task";
+      const summary = selected.length
+        ? `✅ **"${params.title}"** assigned to **${params.assignee_name}** as a ${typeLabel} with ${selected.length} sub-task${selected.length > 1 ? "s" : ""}.`
+        : `✅ **"${params.title}"** assigned to **${params.assignee_name}** as a ${typeLabel}.`;
+
+      updateLastMessage(activeSession.id, {
+        role: "assistant",
+        content: summary,
+        is_delegate: false,
+        delegate_params: null,
+        generated_sub_tasks: undefined,
+        is_answer: true,
+        is_loading: false,
+        timestamp: Date.now(),
+      });
+    } catch {
+      updateLastMessage(activeSession.id, {
+        role: "assistant",
+        content: "Couldn't assign that right now. Please try again.",
+        is_delegate: false,
+        delegate_params: null,
+        generated_sub_tasks: undefined,
+        is_loading: false,
+        timestamp: Date.now(),
+      });
     } finally {
       setIsAsking(false);
     }
@@ -512,6 +690,13 @@ function AssistantInner() {
                     <BookingCard
                       params={msg.booking_params}
                       onBook={(time) => bookSlot(time)}
+                    />
+                  ) : msg.is_delegate && msg.delegate_params ? (
+                    <DelegatePreviewCard
+                      params={msg.delegate_params}
+                      subTasks={msg.generated_sub_tasks || []}
+                      onConfirm={(selected) => confirmDelegate(selected)}
+                      disabled={isAsking}
                     />
                   ) : (
                     <div className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${

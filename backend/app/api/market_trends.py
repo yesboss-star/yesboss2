@@ -183,7 +183,7 @@ Return a JSON array. Example:
             prompt=user_prompt,
             system_prompt=system_prompt,
             temperature=0.7,
-            max_tokens=2000,
+            max_tokens=3000,
         )
 
         articles = parse_articles_from_ai(response)

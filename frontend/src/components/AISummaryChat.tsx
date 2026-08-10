@@ -7,7 +7,7 @@ import { useGoalStore } from "@/stores/goalStore";
 import { useTaskStore } from "@/stores/taskStore";
 import { useKPIStore } from "@/stores/kpiStore";
 import { useOrgChartStore } from "@/stores/orgChartStore";
-import { useSessionStore, type SessionMessage, type ClarifyingQuestion } from "@/stores/sessionStore";
+import { useSessionStore, type SessionMessage, type ClarifyingQuestion, type DelegateParams, type GeneratedSubTask } from "@/stores/sessionStore";
 import {
   Sparkles, MessageSquare, Plus, Edit3, Trash2, Paperclip, AtSign,
   Loader2, Send, Lightbulb, Check, ArrowRight, ChevronLeft,
@@ -252,7 +252,6 @@ export default function AISummaryChat() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const mentionListRef = useRef<HTMLDivElement>(null);
-  const proactiveTriggeredRef = useRef<string | null>(null);
   const { user, role } = useAuth();
   const { organization } = useOrganizationStore();
   const { goals } = useGoalStore();
@@ -352,41 +351,6 @@ export default function AISummaryChat() {
     } catch { /* ignore */ }
   }, [suggestions, organization?.id]);
 
-  useEffect(() => {
-    if (!activeSession || !organization?.id) return;
-    if (proactiveTriggeredRef.current === activeSession.id) return;
-    if (activeSession.messages.length > 0) return;
-    proactiveTriggeredRef.current = activeSession.id;
-
-    const doProactive = async () => {
-      const s = activeSession;
-      const loadingMsg: SessionMessage = { role: "assistant", content: "", is_loading: true, timestamp: Date.now() };
-      setMessages([loadingMsg]);
-      try {
-        const data = await apiAsk("Analyze my business", undefined, true);
-        if (!data) return;
-        let content = data.answer || data.response || "";
-        const followUp = data.follow_up || "";
-        if (followUp) content += "\n\n" + followUp;
-        const resultMsg: SessionMessage = { role: "assistant", content, is_answer: true, timestamp: Date.now() };
-        setMessages([resultMsg]);
-        addMessage(s.id, resultMsg);
-        if (data.suggestions && Array.isArray(data.suggestions) && data.suggestions.length > 0) {
-          setSuggestions(data.suggestions);
-        }
-        if (data.action_items && Array.isArray(data.action_items) && data.action_items.length > 0) {
-          const capped = data.action_items.slice(0, 5);
-          setActionItems(capped);
-          setSelectedActionIndices(new Set(capped.map((_: any, i: number) => i)));
-          setActionItemsCreated(false);
-        }
-      } catch {
-        setMessages([]);
-      }
-    };
-    doProactive();
-  }, [activeSession?.id, organization?.id]);
-
   const ensureSession = async () => {
     if (activeSession) return activeSession;
     if (!organization?.id) return null;
@@ -394,7 +358,7 @@ export default function AISummaryChat() {
     return s || null;
   };
 
-  const apiAsk = async (text: string, ctx?: Record<string, string>, proactive?: boolean) => {
+  const apiAsk = async (text: string, ctx?: Record<string, string>) => {
     const s = activeSession || await ensureSession();
     if (!s) return null;
     const mergedCtx = ctx ? { ...s.context, ...ctx } : s.context;
@@ -418,7 +382,6 @@ export default function AISummaryChat() {
       },
       conversation_history: history.slice(-10),
     };
-    if (proactive) body.proactive = true;
     const res = await fetch(`${API_URL}/assistant/ask`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -432,7 +395,6 @@ export default function AISummaryChat() {
     text: string,
     onToken: (token: string) => void,
     ctx?: Record<string, string>,
-    proactive?: boolean,
   ): Promise<any> => {
     const s = activeSession || await ensureSession();
     if (!s) return null;
@@ -457,7 +419,6 @@ export default function AISummaryChat() {
       },
       conversation_history: history.slice(-10),
     };
-    if (proactive) body.proactive = true;
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000);
@@ -816,6 +777,19 @@ export default function AISummaryChat() {
         } else {
           setSuggestions(null);
         }
+      } else if (data.type === "delegate_preview" && data.delegate_params) {
+        setIsStreaming(false);
+        setSuggestions(null);
+        const delMsg: SessionMessage = {
+          role: "assistant",
+          content: data.answer || "",
+          is_delegate: true,
+          delegate_params: data.delegate_params,
+          generated_sub_tasks: data.generated_sub_tasks || [],
+          timestamp: Date.now(),
+        };
+        setMessages([...updated, delMsg]);
+        addMessage(s.id, delMsg);
       } else {
         setIsStreaming(false);
         setSuggestions(null);
@@ -903,6 +877,18 @@ export default function AISummaryChat() {
         } else {
           setSuggestions(null);
         }
+      } else if (data.type === "delegate_preview" && data.delegate_params) {
+        const delMsg: SessionMessage = {
+          role: "assistant",
+          content: data.answer || "",
+          is_delegate: true,
+          delegate_params: data.delegate_params,
+          generated_sub_tasks: data.generated_sub_tasks || [],
+          timestamp: Date.now(),
+        };
+        setMessages([...updated, delMsg]);
+        addMessage(s.id, delMsg);
+        setSuggestions(null);
       } else {
         const fallbackMsg: SessionMessage = { role: "assistant", content: "Thanks! Let me know if you have more questions.", timestamp: Date.now() };
         setMessages([...updated, fallbackMsg]);
@@ -1090,6 +1076,66 @@ export default function AISummaryChat() {
   const dismissImportSuggestion = () => {
     setImportSuggestion(null);
     setSuggestionGoalCreated(false);
+  };
+
+  const confirmDelegate = async (msg: SessionMessage, selected: GeneratedSubTask[]) => {
+    const params = msg.delegate_params;
+    if (!params || !organization?.id) return;
+    const session = activeSession || sessions[0];
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/assistant/delegate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: params.title,
+          description: params.description ?? null,
+          assignee_id: params.assignee_id,
+          assignee_name: params.assignee_name,
+          priority: params.priority,
+          item_type: params.item_type,
+          department: params.department ?? null,
+          sub_tasks: selected,
+          context: {
+            user_email: user?.email,
+            organization_id: organization?.id,
+          },
+        }),
+      });
+      if (!res.ok) throw new Error("Delegate failed");
+      await res.json();
+
+      const typeLabel =
+        params.item_type === "goal"
+          ? "goal"
+          : params.item_type === "both"
+            ? "goal and task"
+            : "task";
+      const summary = selected.length
+        ? `✅ **"${params.title}"** assigned to **${params.assignee_name}** as a ${typeLabel} with ${selected.length} sub-task${selected.length > 1 ? "s" : ""}.`
+        : `✅ **"${params.title}"** assigned to **${params.assignee_name}** as a ${typeLabel}.`;
+      const doneMsg: SessionMessage = {
+        role: "assistant",
+        content: summary,
+        is_answer: true,
+        is_delegate: false,
+        delegate_params: null,
+        generated_sub_tasks: undefined,
+        timestamp: Date.now(),
+      };
+      setMessages((prev) => prev.map((m) => (m === msg ? doneMsg : m)));
+      if (session) updateLastMessage(session.id, doneMsg);
+    } catch {
+      const errMsg: SessionMessage = {
+        role: "assistant",
+        content: "Couldn't assign that right now. Please try again.",
+        timestamp: Date.now(),
+      };
+      setMessages((prev) => prev.map((m) => (m === msg ? errMsg : m)));
+      if (session) updateLastMessage(session.id, errMsg);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleMissingDataUpload = async () => {
@@ -1617,7 +1663,16 @@ export default function AISummaryChat() {
                     }`}
                   >
                     {msg.role === "assistant" ? (
-                      <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                      msg.is_delegate && msg.delegate_params ? (
+                        <DelegatePreviewCard
+                          params={msg.delegate_params}
+                          subTasks={msg.generated_sub_tasks || []}
+                          onConfirm={(selected) => confirmDelegate(msg, selected)}
+                          disabled={loading}
+                        />
+                      ) : (
+                        <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                      )
                     ) : (
                       msg.content
                     )}
@@ -2150,5 +2205,88 @@ export default function AISummaryChat() {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function DelegatePreviewCard({
+  params,
+  subTasks,
+  onConfirm,
+  disabled,
+}: {
+  params: DelegateParams;
+  subTasks: GeneratedSubTask[];
+  onConfirm: (selected: GeneratedSubTask[]) => void;
+  disabled?: boolean;
+}) {
+  const [selected, setSelected] = useState<boolean[]>(subTasks.map(() => true));
+
+  const typeLabel =
+    params.item_type === "goal" ? "Goal" : params.item_type === "both" ? "Task + Goal" : "Task";
+
+  const toggle = (idx: number) => {
+    setSelected((prev) => prev.map((v, i) => (i === idx ? !v : v)));
+  };
+
+  const checked = selected.filter((v) => v).length;
+
+  return (
+    <div className="rounded-2xl bg-surface border border-primary/20 p-4 space-y-3 min-w-[300px] max-w-[420px]">
+      <div className="flex items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-semibold uppercase tracking-wider">
+          <Sparkles className="w-3 h-3" />
+          {typeLabel}
+        </span>
+        <span className="text-[10px] text-text-muted">Assign to {params.assignee_name}</span>
+      </div>
+
+      <div>
+        <p className="text-sm text-foreground font-semibold">{params.title}</p>
+        {params.description && <p className="text-xs text-text-muted mt-1">{params.description}</p>}
+      </div>
+
+      {subTasks.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-medium text-text-muted uppercase tracking-wider">
+            AI-suggested sub-steps ({checked}/{subTasks.length})
+          </p>
+          {subTasks.map((st, idx) => (
+            <label
+              key={idx}
+              className="flex items-start gap-2 px-3 py-2 rounded-lg bg-surface-light border border-border cursor-pointer"
+            >
+              <input
+                type="checkbox"
+                checked={selected[idx]}
+                onChange={() => toggle(idx)}
+                disabled={disabled}
+                className="mt-0.5"
+              />
+              <span className="flex-1 text-xs text-foreground">{st.title}</span>
+            </label>
+          ))}
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        <Button
+          onClick={() => onConfirm(subTasks.filter((_, i) => selected[i]))}
+          disabled={disabled || (subTasks.length > 0 && checked === 0)}
+          className="cursor-pointer"
+          size="sm"
+        >
+          Assign selected
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onConfirm([])}
+          disabled={disabled}
+          className="cursor-pointer"
+        >
+          {subTasks.length > 0 ? "Assign without sub-steps" : "Assign"}
+        </Button>
+      </div>
+    </div>
   );
 }

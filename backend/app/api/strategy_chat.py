@@ -200,7 +200,7 @@ async def strategy_chat(request: ChatRequest, current_user = Depends(get_current
         ai_response = await get_chat_response(
             messages=messages,
             temperature=0.7,
-            max_tokens=2000,
+            max_tokens=3000,
         )
     except Exception as e:
         logger.error(f"AI chat failed: {e}")
@@ -928,7 +928,7 @@ async def unified_ask(request: AskRequest, current_user = Depends(get_current_us
         prompt=request.message,
         system_prompt=system_prompt,
         temperature=0.5,
-        max_tokens=1500,
+        max_tokens=3000,
     )
 
     return AskResponse(type="answer", response=raw, session_id=request.session_id)

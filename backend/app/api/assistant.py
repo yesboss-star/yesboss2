@@ -88,8 +88,10 @@ class DelegateRequest(BaseModel):
     due_date: str | None = None
     department: str | None = None
     context: ChatContext | None = None
+    item_type: str = "task"  # "task" | "goal" | "both" — what to actually create
     create_tasks: bool = True
     task_count: int = 3
+    sub_tasks: list[dict[str, Any]] | None = None  # user-confirmed sub-tasks to create
 
 
 class PersonSearchRequest(BaseModel):
@@ -164,7 +166,7 @@ async def analyze_intent(request: IntentRequest):
             prompt=prompt,
             system_prompt=INTENT_SYSTEM,
             temperature=0.2,
-            max_tokens=120,
+            max_tokens=800,
         )
         cleaned = raw.strip()
         if cleaned.startswith("```"):
@@ -464,7 +466,10 @@ def _resolve_assignee(db, org_id: str, assignee_id: str | None, assignee_name: s
 
 @router.post("/delegate")
 async def delegate_task(request: DelegateRequest):
-    """Create a goal AND a task assigned to the named team member.
+    """Create a task and/or goal assigned to the named team member.
+
+    item_type controls what is created: "task" creates only a task,
+    "goal" creates only a goal, "both" creates a goal AND a task.
 
     Used when the owner says something like:
       "Prepare the Q4 investor deck and allocate to Sarah"
@@ -504,52 +509,88 @@ async def delegate_task(request: DelegateRequest):
             department = emp.get("department") or "General"
 
     now = datetime.utcnow()
+    item_type = (request.item_type or "task").strip().lower()
+    if item_type not in ("task", "goal", "both"):
+        item_type = "task"
+    create_goal = item_type in ("goal", "both")
+    create_task = item_type in ("task", "both")
 
-    # 1) Goal
-    goal_doc = {
-        "title": title,
-        "description": request.description,
-        "priority": request.priority or "medium",
-        "timeline": request.timeline,
-        "department": department,
-        "assignee_id": str(emp["_id"]),
-        "assignee_name": emp.get("full_name") or emp.get("email"),
-        "assignee_email": emp.get("email"),
-        "organization_id": org_id,
-        "created_by": (request.context.user_email if request.context else None),
-        "status": "active",
-        "source": "assistant_delegation",
-        "created_at": now,
-        "updated_at": now,
-    }
-    goal_result = db.goals.insert_one(goal_doc)
-    goal_id = str(goal_result.inserted_id)
-    goal_doc["_id"] = goal_id
+    goal_doc: dict[str, Any] | None = None
+    goal_id: str | None = None
 
-    # 2) Task (the actual deliverable that lands on the assignee's dashboard)
-    task_doc = {
-        "title": title,
-        "description": request.description,
-        "priority": request.priority or "medium",
-        "status": "pending",
-        "goal_id": goal_id,
-        "assignee_id": str(emp["_id"]),
-        "assignee_email": emp.get("email"),
-        "department": department,
-        "due_date": request.due_date,
-        "organization_id": org_id,
-        "created_by": (request.context.user_email if request.context else None),
-        "source": "assistant_delegation",
-        "created_at": now,
-        "updated_at": now,
-    }
-    task_result = db.tasks.insert_one(task_doc)
-    task_id = str(task_result.inserted_id)
-    task_doc["_id"] = task_id
+    # 1) Goal (only when the user asked for a goal)
+    if create_goal:
+        goal_doc = {
+            "title": title,
+            "description": request.description,
+            "priority": request.priority or "medium",
+            "timeline": request.timeline,
+            "department": department,
+            "assignee_id": str(emp["_id"]),
+            "assignee_name": emp.get("full_name") or emp.get("email"),
+            "assignee_email": emp.get("email"),
+            "organization_id": org_id,
+            "created_by": (request.context.user_email if request.context else None),
+            "status": "active",
+            "source": "assistant_delegation",
+            "created_at": now,
+            "updated_at": now,
+        }
+        goal_result = db.goals.insert_one(goal_doc)
+        goal_id = str(goal_result.inserted_id)
+        goal_doc["_id"] = goal_id
 
-    # 3) Optional sub-tasks (AI-generated)
+    task_doc: dict[str, Any] | None = None
+    task_id: str | None = None
+
+    # 2) Task (only when the user asked for a task)
+    if create_task:
+        task_doc = {
+            "title": title,
+            "description": request.description,
+            "priority": request.priority or "medium",
+            "status": "pending",
+            "goal_id": goal_id,
+            "assignee_id": str(emp["_id"]),
+            "assignee_email": emp.get("email"),
+            "department": department,
+            "due_date": request.due_date,
+            "organization_id": org_id,
+            "created_by": (request.context.user_email if request.context else None),
+            "source": "assistant_delegation",
+            "created_at": now,
+            "updated_at": now,
+        }
+        task_result = db.tasks.insert_one(task_doc)
+        task_id = str(task_result.inserted_id)
+        task_doc["_id"] = task_id
+
+    # 3) Sub-tasks: insert the user-confirmed selection; otherwise keep the
+    #    legacy auto-generate path (used by the guided delegate flow).
     sub_tasks: list[dict[str, Any]] = []
-    if request.create_tasks:
+    confirmed = request.sub_tasks or []
+    if confirmed:
+        for st in confirmed[:8]:
+            sub_doc = {
+                "title": (st.get("title") or "").strip() or "Sub-task",
+                "description": st.get("description", ""),
+                "priority": st.get("priority", "medium"),
+                "status": "pending",
+                "goal_id": goal_id,
+                "parent_task_id": task_id,
+                "assignee_id": str(emp["_id"]),
+                "assignee_email": emp.get("email"),
+                "department": department,
+                "due_date": request.due_date,
+                "organization_id": org_id,
+                "source": "assistant_delegation_subtask",
+                "created_at": now,
+                "updated_at": now,
+            }
+            sr = db.tasks.insert_one(sub_doc)
+            sub_doc["_id"] = str(sr.inserted_id)
+            sub_tasks.append(sub_doc)
+    elif request.create_tasks and create_task:
         try:
             from ..core.intelligence import generate_tasks_from_goal
             generated = await generate_tasks_from_goal(
@@ -583,8 +624,9 @@ async def delegate_task(request: DelegateRequest):
     # 4) Provider ToDo sync
     try:
         from .tasks import sync_task_to_provider
-        zoho_task = {**task_doc, "assignee_id": emp.get("email")}
-        asyncio.create_task(sync_task_to_provider(db, zoho_task, org_id))
+        if task_doc:
+            zoho_task = {**task_doc, "assignee_id": emp.get("email")}
+            asyncio.create_task(sync_task_to_provider(db, zoho_task, org_id))
         for st in sub_tasks:
             st_zoho = {**st, "assignee_id": emp.get("email")}
             asyncio.create_task(sync_task_to_provider(db, st_zoho, org_id))
@@ -594,39 +636,44 @@ async def delegate_task(request: DelegateRequest):
     # 5) Real-time push + notifications
     user_id = (request.context.user_email if request.context else None)
     try:
-        asyncio.create_task(ws_manager.broadcast_to_organization(
-            {"type": "goal_created", "data": goal_doc}, org_id
-        ))
-        asyncio.create_task(ws_manager.broadcast_to_organization(
-            {"type": "task_created", "data": task_doc}, org_id
-        ))
-        if emp.get("email"):
-            asyncio.create_task(ws_manager.send_personal_message(
-                {"type": "task_assigned", "data": task_doc}, emp["email"]
+        if goal_doc:
+            asyncio.create_task(ws_manager.broadcast_to_organization(
+                {"type": "goal_created", "data": goal_doc}, org_id
             ))
+        if task_doc:
+            asyncio.create_task(ws_manager.broadcast_to_organization(
+                {"type": "task_created", "data": task_doc}, org_id
+            ))
+            if emp.get("email"):
+                asyncio.create_task(ws_manager.send_personal_message(
+                    {"type": "task_assigned", "data": task_doc}, emp["email"]
+                ))
     except Exception as e:
         logger.warning("WebSocket broadcast failed in delegate: %s", e)
 
     try:
         # In-app + email notification for the assignee
         assignee_id = str(emp["_id"])
-        asyncio.create_task(create_notification(
-            user_id=assignee_id, org_id=org_id, type="goal_assigned",
-            title="New Goal Assigned", message=f"Goal assigned: {title}",
-            link=f"/goals/{goal_id}",
-            actor_id=user_id, email=emp.get("email"),
-        ))
-        asyncio.create_task(create_notification(
-            user_id=assignee_id, org_id=org_id, type="task_assigned",
-            title="New Task Assigned", message=f"You have been assigned: {title}",
-            link=f"/tasks/{task_id}",
-            actor_id=user_id, email=emp.get("email"),
-        ))
+        if goal_doc:
+            asyncio.create_task(create_notification(
+                user_id=assignee_id, org_id=org_id, type="goal_assigned",
+                title="New Goal Assigned", message=f"Goal assigned: {title}",
+                link=f"/goals/{goal_id}",
+                actor_id=user_id, email=emp.get("email"),
+            ))
+        if task_doc:
+            asyncio.create_task(create_notification(
+                user_id=assignee_id, org_id=org_id, type="task_assigned",
+                title="New Task Assigned", message=f"You have been assigned: {title}",
+                link=f"/tasks/{task_id}",
+                actor_id=user_id, email=emp.get("email"),
+            ))
     except Exception as e:
         logger.warning("Notification delivery failed in delegate: %s", e)
 
     return {
         "success": True,
+        "item_type": item_type,
         "goal": goal_doc,
         "task": task_doc,
         "sub_tasks": sub_tasks,
@@ -638,6 +685,57 @@ async def delegate_task(request: DelegateRequest):
             "department": emp.get("department"),
         },
     }
+
+
+async def _build_delegate_preview(parsed: dict, db, org_id: str | None):
+    """Build a delegate confirmation payload WITHOUT creating anything.
+
+    Returns (delegate_params, generated_sub_tasks, error) where error is a
+    user-facing message string when we can't proceed, else None.
+    """
+    assignee_name = (parsed.get("assignee_name") or "").strip()
+    title = (parsed.get("title") or "").strip()
+    if not title or not assignee_name:
+        return None, [], "I need a bit more detail — who should I assign this to, and what's the task?"
+
+    item_type = (parsed.get("item_type") or "task").strip().lower()
+    if item_type not in ("task", "goal", "both"):
+        item_type = "task"
+
+    emp = _resolve_assignee(db, org_id, parsed.get("assignee_id"), assignee_name) if org_id else None
+    if not emp:
+        return None, [], (
+            f"Couldn't find '{assignee_name}' in your team. "
+            "Add them to the org first, then try again."
+        )
+
+    generated_sub_tasks: list[dict[str, Any]] = []
+    try:
+        from ..core.intelligence import generate_tasks_from_goal
+        generated = await generate_tasks_from_goal(
+            goal_title=title,
+            goal_description=parsed.get("description") or "",
+            count=4,
+        )
+        for st in (generated or [])[:4]:
+            generated_sub_tasks.append({
+                "title": st.get("title", "Sub-task"),
+                "description": st.get("description", ""),
+                "priority": st.get("priority", "medium"),
+            })
+    except Exception as e:
+        logger.warning("Delegate preview sub-task generation failed: %s", e)
+
+    delegate_params = {
+        "title": title,
+        "description": parsed.get("description"),
+        "assignee_id": str(emp["_id"]),
+        "assignee_name": emp.get("full_name") or emp.get("email"),
+        "priority": parsed.get("priority", "medium"),
+        "item_type": item_type,
+        "department": emp.get("department"),
+    }
+    return delegate_params, generated_sub_tasks, None
 
 
 # ---------------------------------------------------------------------------
@@ -1419,7 +1517,7 @@ async def diagnose_data(request: DiagnoseRequest):
             prompt=prompt,
             system_prompt=DATA_DIAGNOSE_SYSTEM,
             temperature=0.2,
-            max_tokens=600,
+            max_tokens=2000,
         )
         cleaned = raw.strip()
         if cleaned.startswith("```"):
@@ -1557,7 +1655,7 @@ async def assistant_chat(request: ChatRequest, current_user = Depends(get_curren
                 prompt=general_prompt,
                 system_prompt=CHAT_DEEP_SYSTEM,
                 temperature=0.6,
-                max_tokens=900,
+                max_tokens=3000,
                 provider=request.provider,
             )
             if not response or not response.strip():
@@ -1677,7 +1775,7 @@ async def assistant_chat(request: ChatRequest, current_user = Depends(get_curren
             prompt=prompt,
             system_prompt=CHAT_DEEP_SYSTEM,
             temperature=0.55,
-            max_tokens=900,
+            max_tokens=3000,
             provider=request.provider,
         )
         if not response or not response.strip():
@@ -1814,8 +1912,10 @@ For answers: {"type":"answer","answer":"your answer here (max 8 lines)","follow_
 
 For questions: {"type":"question","question":{"id":"q_xxx","field_id":"field_name","text":"one clear question","options":[{"value":"opt1","label":"Option 1"},...],"allow_custom":true},"answer":null}
 
-For delegation (when user wants to assign a task to someone AND you have enough context):
-{"type":"delegate","assignee_name":"full name of person","assignee_email":"their email if known","title":"short task title (2-8 words)","description":"optional detail about the task","priority":"medium|high|low","answer":"confirmation message to show the user (1-2 sentences)"}
+For delegation (when user wants to assign a task or goal to someone AND you have enough context):
+{"type":"delegate","item_type":"task|goal|both","assignee_name":"full name of person","assignee_email":"their email if known","title":"short title (2-8 words)","description":"optional detail","priority":"medium|high|low","answer":"confirmation of intent to show the user (1-2 sentences)"}
+
+For item_type: use "task" when the user says "assign as a task" / "create a task and assign" / just says assign something to do; use "goal" when they say "assign as a goal" / "set a goal for" someone; use "both" when the request is ambiguous or clearly implies both a goal and a task. Never create both unless the user's words imply both.
 
 ## ACTION ITEMS (OPTIONAL)
 After answering, if the conversation reveals clear next steps or action items the user hasn't explicitly delegated, include an "action_items" array in your JSON response. Each action item should have a title, optional description, priority, and optional assignee_name (if the user mentioned someone who should own it).
@@ -1962,6 +2062,8 @@ class AskResponse(BaseModel):
     missing_data: dict[str, str] | None = None  # {"doc_type": "...", "reason": "..."}
     confirmation: dict[str, str] | None = None  # {"insight_summary": "...", "status": "done"}
     suggestions: list[dict[str, str]] | None = None  # [{"label": "...", "action": "..."}]
+    delegate_params: dict[str, Any] | None = None  # pre-filled DelegateRequest fields for confirmation
+    generated_sub_tasks: list[dict[str, Any]] | None = None  # AI-suggested sub-tasks awaiting selection
 
 
 @router.post("/ask", response_model=AskResponse)
@@ -2013,7 +2115,7 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
             prompt=prompt,
             system_prompt=system,
             temperature=0.5,
-            max_tokens=1100,
+            max_tokens=3000,
         )
         cleaned = raw.strip()
         if cleaned.startswith("```"):
@@ -2026,29 +2128,30 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
         parsed_type = parsed.get("type", "question")
 
         if parsed_type == "delegate":
-            # Create task via delegate logic
-            assignee_name = parsed.get("assignee_name", "").strip()
-            task_title = parsed.get("title", "").strip()
-            if not task_title or not assignee_name:
-                return AskResponse(**fallback_question)
+            # Build a confirmation preview — nothing is created until the user
+            # confirms which sub-tasks to assign via POST /assistant/delegate.
             try:
-                delegate_req = DelegateRequest(
-                    title=task_title,
-                    description=parsed.get("description"),
-                    assignee_name=assignee_name,
-                    priority=parsed.get("priority", "medium"),
-                    create_tasks=True,
-                    task_count=3,
-                    context=ctx,
+                delegate_params, generated_sub_tasks, preview_error = await _build_delegate_preview(
+                    parsed, db, org_id
                 )
-                delegate_result = await delegate_task(delegate_req)
-                answer_text = parsed.get("answer") or f"✅ Task **\"{task_title}\"** created and assigned to **{assignee_name}**."
-                if delegate_result.get("sub_tasks"):
-                    answer_text += f"\n\nI also broke it into {len(delegate_result['sub_tasks'])} smaller steps."
+                if preview_error:
+                    return AskResponse(
+                        type="answer",
+                        answer=preview_error,
+                        session_id=request.session_id,
+                    )
+                answer_text = parsed.get("answer") or (
+                    f"I can assign **\"{delegate_params['title']}\"** as a "
+                    f"{'goal' if delegate_params['item_type'] == 'goal' else 'task'}"
+                    f"{' and goal' if delegate_params['item_type'] == 'both' else ''} to "
+                    f"**{delegate_params['assignee_name']}**."
+                )
                 return AskResponse(
-                    type="answer",
+                    type="delegate_preview",
                     answer=answer_text,
                     session_id=request.session_id,
+                    delegate_params=delegate_params,
+                    generated_sub_tasks=generated_sub_tasks,
                 )
             except Exception as e:
                 logger.warning(f"delegate from ask failed: {e}")
@@ -2263,7 +2366,7 @@ async def ask_stream(request: AskRequest, user: dict = Depends(get_current_user_
         looks_like_json = None  # None = undetermined, True = JSON envelope, False = plain prose
         client = AIClient()
         try:
-            async for token in client.chat_complete_stream(messages, temperature=0.5, max_tokens=1100):
+            async for token in client.chat_complete_stream(messages, temperature=0.5, max_tokens=3000):
                 full_content += token
                 if looks_like_json is None:
                     stripped = full_content.lstrip()
@@ -2299,6 +2402,8 @@ async def ask_stream(request: AskRequest, user: dict = Depends(get_current_user_
             "missing_data": None,
             "confirmation": None,
             "suggestions": None,
+            "delegate_params": None,
+            "generated_sub_tasks": None,
         }
         try:
             parsed = json.loads(cleaned)
@@ -2328,32 +2433,28 @@ async def ask_stream(request: AskRequest, user: dict = Depends(get_current_user_
                 q.setdefault("options", [{"value": "tell_me_more", "label": "Tell me more"}])
                 metadata["question"] = q
             elif parsed_type == "delegate":
-                assignee_name = (parsed.get("assignee_name") or "").strip()
-                task_title = (parsed.get("title") or "").strip()
-                if not task_title or not assignee_name:
-                    metadata["type"] = "answer"
-                    metadata["answer"] = parsed.get("answer") or "I need a bit more detail — who should I assign this to, and what's the task?"
-                else:
-                    try:
-                        delegate_req = DelegateRequest(
-                            title=task_title,
-                            description=parsed.get("description"),
-                            assignee_name=assignee_name,
-                            priority=parsed.get("priority", "medium"),
-                            create_tasks=True,
-                            task_count=3,
-                            context=ctx,
+                try:
+                    delegate_params, generated_sub_tasks, preview_error = await _build_delegate_preview(
+                        parsed, db, org_id
+                    )
+                    if preview_error:
+                        metadata["type"] = "answer"
+                        metadata["answer"] = preview_error
+                    else:
+                        answer_text = parsed.get("answer") or (
+                            f"I can assign **\"{delegate_params['title']}\"** as a "
+                            f"{'goal' if delegate_params['item_type'] == 'goal' else 'task'}"
+                            f"{' and goal' if delegate_params['item_type'] == 'both' else ''} to "
+                            f"**{delegate_params['assignee_name']}**."
                         )
-                        delegate_result = await delegate_task(delegate_req)
-                        answer_text = parsed.get("answer") or f"✅ Task \"{task_title}\" created and assigned to {assignee_name}."
-                        if delegate_result.get("sub_tasks"):
-                            answer_text += f"\n\nI also broke it into {len(delegate_result['sub_tasks'])} smaller steps."
-                        metadata["type"] = "answer"
+                        metadata["type"] = "delegate_preview"
                         metadata["answer"] = answer_text
-                    except Exception as e:
-                        logger.warning(f"ask_stream: delegate failed: {e}")
-                        metadata["type"] = "answer"
-                        metadata["answer"] = f"I couldn't create that task right now. The system said: {e}. Want to try again?"
+                        metadata["delegate_params"] = delegate_params
+                        metadata["generated_sub_tasks"] = generated_sub_tasks
+                except Exception as e:
+                    logger.warning(f"ask_stream: delegate failed: {e}")
+                    metadata["type"] = "answer"
+                    metadata["answer"] = f"I couldn't create that task right now. The system said: {e}. Want to try again?"
         except json.JSONDecodeError:
             logger.warning("ask_stream: could not parse AI output as JSON, using raw text as answer")
             metadata["type"] = "answer"

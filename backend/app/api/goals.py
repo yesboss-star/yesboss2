@@ -1671,7 +1671,7 @@ async def goal_breakdown_chat(
         ai_response = await get_chat_response(
             messages=messages,
             temperature=0.4,
-            max_tokens=500,
+            max_tokens=2000,
         )
     except Exception as e:
         logger = logging.getLogger("yesboss.goals")

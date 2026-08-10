@@ -26,6 +26,22 @@ export interface BookingParams {
   booking_result?: Record<string, any>;
 }
 
+export interface DelegateParams {
+  title: string;
+  description?: string | null;
+  assignee_id: string;
+  assignee_name: string;
+  priority: string;
+  item_type: "task" | "goal" | "both";
+  department?: string | null;
+}
+
+export interface GeneratedSubTask {
+  title: string;
+  description?: string;
+  priority: string;
+}
+
 export interface SessionMessage {
   role: "user" | "assistant";
   content: string;
@@ -34,6 +50,9 @@ export interface SessionMessage {
   is_answer?: boolean;
   is_booking?: boolean;
   booking_params?: BookingParams;
+  is_delegate?: boolean;
+  delegate_params?: DelegateParams | null;
+  generated_sub_tasks?: GeneratedSubTask[];
   is_loading?: boolean;
   is_streaming?: boolean;
   timestamp: number;
@@ -89,7 +108,7 @@ export const useSessionStore = create<SessionState>()(
           const res = await fetch(`${API_URL}/assistant/sessions?organization_id=${orgId}`, { headers: getAuthHeaders() });
           if (res.ok) {
             const data = await res.json();
-            const mapped = (data.sessions || []).map((s: any) => ({
+            const mapped: ChatSession[] = (data.sessions || []).map((s: any) => ({
               id: s._id || s.id,
               title: s.title || "New Chat",
               organization_id: s.organization_id || orgId,
@@ -98,7 +117,13 @@ export const useSessionStore = create<SessionState>()(
               created_at: s.created_at,
               updated_at: s.updated_at,
             }));
-            set({ sessions: mapped });
+            set((s) => {
+              const currentStillValid = s.activeSessionId && mapped.some((m) => m.id === s.activeSessionId);
+              return {
+                sessions: mapped,
+                activeSessionId: currentStillValid ? s.activeSessionId : (mapped[0]?.id ?? null),
+              };
+            });
           }
         } catch {
           // Use local sessions as fallback
