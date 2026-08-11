@@ -16,21 +16,29 @@ router = APIRouter()
 
 
 def resolve_mentions(text: str, db, org_id: str) -> list[str]:
-    names = re.findall(r'@(\w[\w\s.-]+?)(?:\s|$|[,;:.!?])', text + " ")
+    """Resolve @mentions in text to org member emails.
+
+    Matches each org member's FULL name after an '@' (e.g. "@Sarah Shah"),
+    falling back to a first-name match ("@Sarah"). Matching is member-driven
+    so multi-word names resolve correctly regardless of spacing/punctuation.
+    """
+    if not text or db is None:
+        return []
     resolved = []
     seen = set()
-    for name in names:
-        name = name.strip()
-        if not name or name.lower() in seen:
+    for member in db.org_chart_members.find({"organization_id": org_id}):
+        name = (member.get("full_name") or "").strip()
+        email = (member.get("email") or "").lower()
+        if not name or not email or email in seen:
             continue
-        seen.add(name.lower())
-        member = db.org_chart_members.find_one({
-            "organization_id": org_id,
-            "full_name": {"$regex": f"^{re.escape(name)}$", "$options": "i"},
-        })
-        if member:
-            resolved.append(member.get("email", "").lower())
-    return list(set(resolved))
+        words = name.split()
+        first = words[0] if words else name
+        full_pat = re.compile(rf"@\s*{re.escape(name)}\b", re.IGNORECASE)
+        first_pat = re.compile(rf"@\s*{re.escape(first)}\b", re.IGNORECASE)
+        if full_pat.search(text) or first_pat.search(text):
+            seen.add(email)
+            resolved.append(email)
+    return resolved
 
 
 async def create_notification(user_id: str, org_id: str, type: str, title: str, message: str, link: str = None, actor_id: str = None, actor_name: str = None, metadata: dict = None, email: str = None):
@@ -876,7 +884,7 @@ async def update_goal(goal_id: str, goal: GoalUpdate, current_user = Depends(get
                 message=f"You have been assigned: {goal_doc.get('title')}",
                 link=f"/goals/{goal_id}",
                 actor_id=user_id,
-                email=aid,
+                email=aid if "@" in aid else None,
             ))
 
     for rid in new_reviewers:
@@ -1228,6 +1236,17 @@ async def generate_tasks_from_goal(request: TaskGenerate, current_user = Depends
                     assign_person
                 ))
 
+        if assign_person:
+            asyncio.create_task(create_notification(
+                user_id=assign_person,
+                org_id=org_id,
+                type="task_assigned",
+                title="New Task Assigned",
+                message=f"You have been assigned: {task_doc.get('title')}",
+                link=f"/tasks/{task_doc['_id']}",
+                email=assign_person if "@" in assign_person else None,
+            ))
+
     return {"tasks": created_tasks}
 
 
@@ -1372,10 +1391,17 @@ async def select_strategy(
         ]
 
     org_id = goal.get("organization_id", "")
+    goal_assignee_ids = goal.get("assignee_id") or []
+    goal_reviewer_ids = goal.get("reviewer_id") or []
+    if isinstance(goal_assignee_ids, str):
+        goal_assignee_ids = [goal_assignee_ids]
+    if isinstance(goal_reviewer_ids, str):
+        goal_reviewer_ids = [goal_reviewer_ids]
     created_tasks = []
     for i, td in enumerate(tasks_data[:10]):
         combined = f"{td.get('title', '')} {td.get('description', '')}"
         mention_emails = resolve_mentions(combined, db, org_id)
+        assign_person = (mention_emails or [None])[0] if mention_emails else ((goal_assignee_ids or [None])[0] if i % 2 == 0 else (goal_reviewer_ids or [None])[0])
         task_doc = {
             "title": td.get("title", "Untitled Task"),
             "description": td.get("description", ""),
@@ -1384,8 +1410,8 @@ async def select_strategy(
             "goal_id": goal_id,
             "organization_id": org_id,
             "department": td.get("suggested_department", goal.get("department", "")),
-            "assignee_id": mention_emails,
-            "assignee_email": mention_emails[0] if mention_emails else None,
+            "assignee_id": [assign_person] if assign_person else [],
+            "assignee_email": assign_person if (assign_person and "@" in assign_person) else None,
             "reviewers": [],
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow(),
@@ -1409,6 +1435,17 @@ async def select_strategy(
             ))
             from ..api.tasks import sync_task_to_provider
             asyncio.create_task(sync_task_to_provider(db, task_doc, org_id))
+
+        if assign_person:
+            asyncio.create_task(create_notification(
+                user_id=assign_person,
+                org_id=org_id,
+                type="task_assigned",
+                title="New Task Assigned",
+                message=f"You have been assigned: {task_doc.get('title')}",
+                link=f"/tasks/{task_doc['_id']}",
+                email=assign_person if "@" in assign_person else None,
+            ))
 
     db.goals.update_one(
         {"_id": ObjectId(goal_id)},
@@ -1487,6 +1524,17 @@ async def create_tasks_from_suggestions(
                     {"type": "task_assigned", "data": task_doc},
                     assign_person
                 ))
+
+        if assign_person:
+            asyncio.create_task(create_notification(
+                user_id=assign_person,
+                org_id=org_id,
+                type="task_assigned",
+                title="New Task Assigned",
+                message=f"You have been assigned: {task_doc.get('title')}",
+                link=f"/tasks/{task_doc['_id']}",
+                email=assign_person if "@" in assign_person else None,
+            ))
 
     return {"tasks": created_tasks}
 

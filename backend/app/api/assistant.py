@@ -542,6 +542,7 @@ async def delegate_task(request: DelegateRequest):
 
     task_doc: dict[str, Any] | None = None
     task_id: str | None = None
+    confirmed = request.sub_tasks or []
 
     # 2) Task (only when the user asked for a task)
     if create_task:
@@ -565,10 +566,33 @@ async def delegate_task(request: DelegateRequest):
         task_id = str(task_result.inserted_id)
         task_doc["_id"] = task_id
 
+    # 2b) Goal-only delegation with sub-tasks: also create the main task so the
+    #     sub-tasks can be linked to it (parent_task_id) and the goal renders as
+    #     a proper goal -> task -> sub-task chain in the drill-down flow.
+    elif create_goal and (confirmed or request.create_tasks):
+        task_doc = {
+            "title": title,
+            "description": request.description,
+            "priority": request.priority or "medium",
+            "status": "pending",
+            "goal_id": goal_id,
+            "assignee_id": str(emp["_id"]),
+            "assignee_email": emp.get("email"),
+            "department": department,
+            "due_date": request.due_date,
+            "organization_id": org_id,
+            "created_by": (request.context.user_email if request.context else None),
+            "source": "assistant_delegation",
+            "created_at": now,
+            "updated_at": now,
+        }
+        task_result = db.tasks.insert_one(task_doc)
+        task_id = str(task_result.inserted_id)
+        task_doc["_id"] = task_id
+
     # 3) Sub-tasks: insert the user-confirmed selection; otherwise keep the
     #    legacy auto-generate path (used by the guided delegate flow).
     sub_tasks: list[dict[str, Any]] = []
-    confirmed = request.sub_tasks or []
     if confirmed:
         for st in confirmed[:8]:
             sub_doc = {
@@ -590,7 +614,7 @@ async def delegate_task(request: DelegateRequest):
             sr = db.tasks.insert_one(sub_doc)
             sub_doc["_id"] = str(sr.inserted_id)
             sub_tasks.append(sub_doc)
-    elif request.create_tasks and create_task:
+    elif request.create_tasks:
         try:
             from ..core.intelligence import generate_tasks_from_goal
             generated = await generate_tasks_from_goal(
@@ -666,6 +690,13 @@ async def delegate_task(request: DelegateRequest):
                 user_id=assignee_id, org_id=org_id, type="task_assigned",
                 title="New Task Assigned", message=f"You have been assigned: {title}",
                 link=f"/tasks/{task_id}",
+                actor_id=user_id, email=emp.get("email"),
+            ))
+        for st in sub_tasks:
+            asyncio.create_task(create_notification(
+                user_id=assignee_id, org_id=org_id, type="task_assigned",
+                title="New Sub-Task Assigned", message=f"You have been assigned: {st.get('title', 'Sub-task')}",
+                link=f"/tasks/{st.get('_id', task_id)}",
                 actor_id=user_id, email=emp.get("email"),
             ))
     except Exception as e:

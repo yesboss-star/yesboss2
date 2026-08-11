@@ -52,9 +52,10 @@ export const useOrgChartStore = create<OrgChartState>()(
         const response = await fetch(`${API_URL}/org-chart/tree${params}`, { headers: getAuthHeaders() });
         if (!response.ok) throw new Error("Failed to fetch org tree");
         const result = await response.json();
+        const normalize = (m: any) => ({ ...m, id: m.id || m._id });
         set({
-          tree: result.tree || [],
-          members: result.members || [],
+          tree: (result.tree || []).map(normalize),
+          members: (result.members || []).map(normalize),
           loading: false,
         });
       } catch (error: any) {
@@ -73,7 +74,7 @@ export const useOrgChartStore = create<OrgChartState>()(
           const response = await fetch(`${API_URL}/org-chart/members${params}`, { headers: getAuthHeaders() });
           if (!response.ok) throw new Error("Failed to fetch members");
           const result = await response.json();
-          set({ members: result.members || [], loading: false });
+          set({ members: (result.members || []).map((m: any) => ({ ...m, id: m.id || m._id })), loading: false });
         } catch (error: any) {
           set({ error: error.message, loading: false });
         }

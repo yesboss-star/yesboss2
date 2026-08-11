@@ -10,6 +10,7 @@ import { useOrgChartStore } from "@/stores/orgChartStore";
 import { useMarketTrendsStore } from "@/stores/marketTrendsStore";
 import { useReportStore } from "@/stores/reportStore";
 import { useAIDashboardAdaptation } from "@/hooks/useAIDashboardAdaptation";
+import { useWebSocket } from "@/hooks/useWebSocket";
 import GoalModal from "@/components/GoalModal";
 import TaskModal from "@/components/TaskModal";
 
@@ -353,7 +354,7 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
   const handleTaskAssigneeChange = async (task: any, member: { id: string; full_name: string; email: string } | null) => {
     const taskId = task._id || task.id;
     if (!taskId) return;
-    const nextAssigneeIds = member?.id ? [member.id] : [];
+    const nextAssigneeIds = (member?.email || member?.id) ? [member?.email || member?.id] : [];
     const nextAssigneeName = member?.full_name ?? "";
     setTasks((prev) => prev.map((t) => (t._id === taskId || t.id === taskId ? { ...t, assignee_id: nextAssigneeIds, assignee_name: nextAssigneeName } : t)));
     try {
@@ -737,7 +738,7 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
                                   <span className="flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Added</span>
                                 ) : (
                                   <span className="flex items-center gap-1"><Plus className="w-3 h-3" /> Add</span>
-                                )}
+)}
                               </button>
                             </div>
                           </div>
@@ -1088,7 +1089,7 @@ function InlinePersonPicker({
                 <button
                   key={m.id || m.email}
                   type="button"
-                  onClick={() => { onChange({ id: m.id, full_name: m.full_name, email: m.email }); setOpen(false); setQuery(""); }}
+                  onClick={() => { onChange({ id: m.id || m.email, full_name: m.full_name, email: m.email }); setOpen(false); setQuery(""); }}
                   className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-primary/10 flex items-center gap-2"
                 >
                   <span className="w-5 h-5 rounded-full bg-primary/15 text-primary text-[9px] font-medium flex items-center justify-center flex-shrink-0">
@@ -1480,6 +1481,13 @@ function DepartmentDrillView({
     } catch {}
   };
 
+  useEffect(() => {
+    if (level === "subgoals" && parentGoal) {
+      loadGoalTasks(parentGoal.id || parentGoal._id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [level, parentGoal]);
+
   const suggestSubgoals = async () => {
     if (!parentGoal || !orgId) return;
     setLoadingSubgoals(true);
@@ -1499,8 +1507,9 @@ function DepartmentDrillView({
     }
   };
 
-  const suggestTasks = async () => {
-    if (!subGoal) return;
+  const suggestTasks = async (target?: any) => {
+    const goal = target || subGoal;
+    if (!goal) return;
     setLoadingTasks(true);
     setSuggestionError("");
     setSuggestedTasks([]);
@@ -1510,12 +1519,12 @@ function DepartmentDrillView({
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({
-          title: subGoal.title,
-          description: subGoal.description || "",
-          industry: subGoal.industry || "",
-          micro_vertical: subGoal.micro_vertical || "",
-          goal_type: subGoal.goal_type || "short_term",
-          department: subGoal.department || departmentName,
+          title: goal.title,
+          description: goal.description || "",
+          industry: goal.industry || "",
+          micro_vertical: goal.micro_vertical || "",
+          goal_type: goal.goal_type || "short_term",
+          department: goal.department || departmentName,
           organization_id: orgId,
         }),
       });
@@ -1566,11 +1575,12 @@ function DepartmentDrillView({
     setAddingSubgoals(false);
   };
 
-  const addSelectedTasks = async () => {
-    if (!subGoal || !orgId) return;
+  const addSelectedTasks = async (target?: any) => {
+    const goal = target || subGoal;
+    if (!goal || !orgId) return;
     setAddingTasks(true);
     const items = suggestedTasks.filter((_, i) => selectedTaskSuggestionIds.has(i));
-    const gid = subGoal.id || subGoal._id;
+    const gid = goal.id || goal._id;
     const results = await Promise.allSettled(
       items.map((s) =>
         createTask({
@@ -1598,9 +1608,10 @@ function DepartmentDrillView({
     setAddingTasks(false);
   };
 
-  const handleCreateTask = async () => {
-    if (!newTaskTitle.trim() || !subGoal || !orgId) return;
-    const gid = subGoal.id || subGoal._id;
+  const handleCreateTask = async (target?: any) => {
+    const goal = target || subGoal;
+    if (!newTaskTitle.trim() || !goal || !orgId) return;
+    const gid = goal.id || goal._id;
     try {
       await createTask({ title: newTaskTitle.trim(), goal_id: gid, organization_id: orgId } as any);
       setNewTaskTitle("");
@@ -1661,9 +1672,9 @@ function DepartmentDrillView({
     const handleAssignLocal = async (g: any, role: "defaulter" | "reviewer", member: { id: string; full_name: string; email: string } | null) => {
       const ggid = g.id || g._id;
       if (role === "defaulter") {
-        setSubgoalOptimistic((prev) => ({ ...prev, [ggid]: { ...prev[ggid], assignee_id: member?.id ? [member.id] : [], assignee_name: member?.full_name || "" } }));
+        setSubgoalOptimistic((prev) => ({ ...prev, [ggid]: { ...prev[ggid], assignee_id: (member?.email || member?.id) ? [member?.email || member?.id] : [], assignee_name: member?.full_name || "" } }));
       } else {
-        setSubgoalOptimistic((prev) => ({ ...prev, [ggid]: { ...prev[ggid], reviewer_id: member?.id ? [member.id] : [], reviewer_name: member?.full_name || "" } }));
+        setSubgoalOptimistic((prev) => ({ ...prev, [ggid]: { ...prev[ggid], reviewer_id: (member?.email || member?.id) ? [member?.email || member?.id] : [], reviewer_name: member?.full_name || "" } }));
       }
       try {
         await onAssign(g, role, member);
@@ -1694,7 +1705,20 @@ function DepartmentDrillView({
             const gid = goal.id || goal._id;
             return (
               <div key={gid} className="border border-primary/20 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 overflow-hidden">
-                <div onClick={() => { setParentGoal(goal); setLevelAndNotify("subgoals"); }} className="flex items-center gap-3 p-3 hover:bg-primary/5 transition-colors cursor-pointer" role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setParentGoal(goal); setLevelAndNotify("subgoals"); } }}>
+                <div
+                  onClick={() => { setParentGoal(goal); setLevelAndNotify("subgoals"); loadGoalTasks(gid); }}
+                  className="flex items-center gap-3 p-3 hover:bg-primary/5 transition-colors cursor-pointer"
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setParentGoal(goal);
+                      setLevelAndNotify("subgoals");
+                      loadGoalTasks(gid);
+                    }
+                  }}
+                >
                   <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 bg-primary/10">
                     <Flag className="w-4 h-4 text-primary" />
                   </div>
@@ -1709,15 +1733,31 @@ function DepartmentDrillView({
           {orphanGoals.length > 0 && (
             <div className="pt-1">
               <p className="text-[10px] font-medium text-text-muted mb-1 flex items-center gap-1"><Flag className="w-3 h-3" /> Standalone</p>
-{orphanGoals.map((goal) => (
-                <div key={goal.id || goal._id} className="border border-primary/20 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 overflow-hidden">
-                  <div onClick={() => { setParentGoal(goal); setLevelAndNotify("subgoals"); }} className="flex items-center gap-3 p-3 hover:bg-primary/5 transition-colors cursor-pointer" role="button" tabIndex={0}>
-                    <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 bg-primary/10"><Flag className="w-3.5 h-3.5 text-primary" /></div>
-                    <div className="flex-1 min-w-0"><span className="text-xs font-semibold truncate">{goal.title}</span></div>
-                    <ChevronRight className="w-3.5 h-3.5 text-text-muted flex-shrink-0" />
-                  </div>
+          {orphanGoals.map((goal) => {
+            const gid = goal.id || goal._id;
+            return (
+              <div key={gid} className="border border-primary/20 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 overflow-hidden">
+                <div
+                  onClick={() => { setParentGoal(goal); setLevelAndNotify("subgoals"); loadGoalTasks(gid); }}
+                  className="flex items-center gap-3 p-3 hover:bg-primary/5 transition-colors cursor-pointer"
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setParentGoal(goal);
+                      setLevelAndNotify("subgoals");
+                      loadGoalTasks(gid);
+                    }
+                  }}
+                >
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 bg-primary/10"><Flag className="w-3.5 h-3.5 text-primary" /></div>
+                  <div className="flex-1 min-w-0"><span className="text-xs font-semibold truncate">{goal.title}</span></div>
+                  <ChevronRight className="w-3.5 h-3.5 text-text-muted flex-shrink-0" />
                 </div>
-              ))}
+              </div>
+            );
+          })}
             </div>
           )}
         </>
@@ -1730,6 +1770,7 @@ function DepartmentDrillView({
     if (!parentGoal) return null;
     const pid = parentGoal.id || parentGoal._id;
     const children = childGoalsByParent.get(pid) || [];
+    const parentTasks = goalTaskCache[pid] || _tasks.filter((t: any) => t.goal_id === pid);
     const sq = subgoalSearch.trim().toLowerCase();
     const filteredChildren = sq ? children.filter((c: any) => (c.title || "").toLowerCase().includes(sq)) : children;
     return (
@@ -1816,41 +1857,126 @@ function DepartmentDrillView({
           </div>
         )}
 
-        {/* Existing sub-goals */}
-        {filteredChildren.length > 0 ? (
-          <div className="space-y-1.5">
-            {filteredChildren.map((child) => (
-              <div key={child.id || child._id} className="border border-primary/20 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 overflow-hidden">
-                <div onClick={() => { setSubGoal(child); setLevelAndNotify("tasks"); loadGoalTasks(child.id || child._id); }} className="flex items-center gap-3 p-3 hover:bg-primary/5 transition-colors cursor-pointer" role="button" tabIndex={0}>
-                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${child.status === "completed" ? "bg-emerald-500/10" : "bg-primary/10"}`}>
-                    {child.status === "completed" ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> : <Clock className="w-3.5 h-3.5 text-primary" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <span className="text-xs font-semibold truncate">{child.title}</span>
-                    <div className="flex items-center gap-1.5 text-[9px] text-text-muted mt-0.5">
-                      {child.priority && <span className={`px-1 py-0.5 rounded text-[8px] font-medium ${child.priority === "urgent" ? "text-rose-400 bg-rose-500/10" : child.priority === "high" ? "text-orange-400 bg-orange-500/10" : child.priority === "medium" ? "text-yellow-400 bg-yellow-500/10" : "text-gray-400 bg-gray-500/10"}`}>{child.priority}</span>}
+        {/* Sub-goals & Tasks — one unified list (classic flow: goal -> sub-goals -> tasks) */}
+        <div className="p-3 rounded-xl bg-surface border border-primary/20">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[10px] font-semibold flex items-center gap-1"><GitBranch className="w-3 h-3 text-primary" /> Sub-goals &amp; Tasks ({filteredChildren.length + parentTasks.length})</span>
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => suggestTasks(parentGoal)} disabled={loadingTasks} className="px-2.5 py-1 rounded-lg text-[10px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1">
+                {loadingTasks ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                {loadingTasks ? "Loading..." : "Suggest"}
+              </button>
+              <button onClick={() => setShowCreateForm((v) => !v)} className="px-2.5 py-1 rounded-lg text-[10px] font-medium bg-primary text-white hover:bg-primary/90 transition-colors cursor-pointer flex items-center gap-1">
+                <Plus className="w-3 h-3" /> Create
+              </button>
+            </div>
+          </div>
+
+          {suggestedTasks.length > 0 && (
+            <div className="space-y-1.5 mt-1.5">
+              {!suggestionError && (
+                <p className="text-[9px] text-text-muted mb-1">Select tasks to add to this goal:</p>
+              )}
+              {suggestedTasks.map((s: any, i: number) => {
+                const isSelected = selectedTaskSuggestionIds.has(i);
+                return (
+                  <div key={i} className={`p-2 rounded-lg border ${isSelected ? "bg-emerald-500/10 border-emerald-500/30" : "bg-background border-border/50"}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <span className="text-xs font-medium">{s.title}</span>
+                        <p className="text-[10px] text-text-muted mt-0.5">{s.description}</p>
+                        {s.assignee_hint && <span className="text-[9px] text-text-muted mt-0.5 block"><User className="w-2.5 h-2.5 inline mr-0.5" />{s.assignee_hint}</span>}
+                      </div>
+                      <div
+                        onClick={(e) => { e.stopPropagation(); setSelectedTaskSuggestionIds((prev) => { const next = new Set(prev); next.has(i) ? next.delete(i) : next.add(i); return next; }); }}
+                        className={`w-4 h-4 rounded border flex items-center justify-center cursor-pointer flex-shrink-0 mt-0.5 ${isSelected ? "bg-primary border-primary" : "bg-background border-border"}`}
+                        role="button"
+                        tabIndex={0}
+                      >
+                        {isSelected && <CheckCircle className="w-3 h-3 text-white" />}
+                      </div>
                     </div>
                   </div>
-                  <ChevronRight className="w-3.5 h-3.5 text-text-muted flex-shrink-0" />
+                );
+              })}
+              {selectedTaskSuggestionIds.size > 0 && (
+                <button onClick={() => addSelectedTasks(parentGoal)} disabled={addingTasks} className="w-full py-1.5 rounded-lg text-[10px] font-medium bg-primary text-white hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50">
+                  {addingTasks ? <span className="flex items-center gap-1 justify-center"><Loader2 className="w-3 h-3 animate-spin" /> Adding...</span> : `Add ${selectedTaskSuggestionIds.size} selected`}
+                </button>
+              )}
+            </div>
+          )}
+
+          {showCreateForm && (
+            <div className="p-3 rounded-xl bg-background border border-primary/20 mt-1.5">
+              <p className="text-[10px] font-semibold mb-2">Create Task</p>
+              <div className="flex gap-2">
+                <input value={newTaskTitle} onChange={(e) => setNewTaskTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleCreateTask(parentGoal); }} placeholder="Task title..." className="flex-1 h-8 px-3 text-xs bg-surface border border-border rounded-lg focus:outline-none focus:border-primary" autoFocus />
+                <button onClick={() => handleCreateTask(parentGoal)} disabled={!newTaskTitle.trim()} className="px-3 h-8 rounded-lg text-xs font-medium bg-primary text-white hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1">
+                  <Plus className="w-3 h-3" /> Add
+                </button>
+              </div>
+            </div>
+          )}
+
+          {filteredChildren.length === 0 && parentTasks.length === 0 ? (
+            <p className="text-[10px] text-text-muted text-center py-3">No sub-goals or tasks yet. Use the AI buttons above to create them.</p>
+          ) : (
+            <div className="space-y-1.5 mt-1.5">
+              {filteredChildren.map((child) => (
+                <div key={child.id || child._id} className="border border-primary/20 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 overflow-hidden">
+                  <div onClick={() => { setSubGoal(child); setLevelAndNotify("tasks"); loadGoalTasks(child.id || child._id); }} className="flex items-center gap-3 p-3 hover:bg-primary/5 transition-colors cursor-pointer" role="button" tabIndex={0}>
+                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${child.status === "completed" ? "bg-emerald-500/10" : "bg-primary/10"}`}>
+                      {child.status === "completed" ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> : <Clock className="w-3.5 h-3.5 text-primary" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-xs font-semibold truncate">{child.title}</span>
+                      <div className="flex items-center gap-1.5 text-[9px] text-text-muted mt-0.5">
+                        {child.priority && <span className={`px-1 py-0.5 rounded text-[8px] font-medium ${child.priority === "urgent" ? "text-rose-400 bg-rose-500/10" : child.priority === "high" ? "text-orange-400 bg-orange-500/10" : child.priority === "medium" ? "text-yellow-400 bg-yellow-500/10" : "text-gray-400 bg-gray-500/10"}`}>{child.priority}</span>}
+                      </div>
+                    </div>
+                    <ChevronRight className="w-3.5 h-3.5 text-text-muted flex-shrink-0" />
+                  </div>
+                  <div onClick={(e) => e.stopPropagation()} className="px-3 pb-2 flex items-center gap-1.5 flex-wrap">
+                    {renderPersonPickers(child)}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setConfirmDelete({ type: "subgoal", id: child.id || child._id, title: child.title }); }}
+                      className="p-1 rounded text-text-muted hover:text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer flex-shrink-0 ml-auto"
+                      title="Delete sub-goal"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
                 </div>
-                <div onClick={(e) => e.stopPropagation()} className="px-3 pb-2 flex items-center gap-1.5 flex-wrap">
-                  {renderPersonPickers(child)}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setConfirmDelete({ type: "subgoal", id: child.id || child._id, title: child.title }); }}
-                    className="p-1 rounded text-text-muted hover:text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer flex-shrink-0 ml-auto"
-                    title="Delete sub-goal"
-                  >
-                    <Trash2 className="w-3 h-3" />
+              ))}
+              {parentTasks.map((task: any) => (
+                <div key={task.id} className="flex items-center gap-2 p-2 rounded-lg bg-background border border-border/50 group">
+                  <div className="flex-1 min-w-0">
+                    <TaskRow
+                      task={task}
+                      members={members}
+                      department={parentGoal.department}
+                      onAssigneeChange={(member) => {
+                        const tid = task.id;
+                        updateTask(tid, { assignee_id: (member?.email || member?.id) ? [member?.email || member?.id] : [], assignee_name: member?.full_name || "" } as any).catch(() => {});
+                        setGoalTaskCache((prev) => ({ ...prev, [pid]: (prev[pid] || _tasks.filter((t: any) => t.goal_id === pid)).map((t: any) => t.id === tid ? { ...t, assignee_id: (member?.email || member?.id) ? [member?.email || member?.id] : [], assignee_name: member?.full_name || "" } : t) }));
+                      }}
+                      onStatusChange={(status) => {
+                        const tid = task.id;
+                        updateTask(tid, { status } as any).catch(() => {});
+                        setGoalTaskCache((prev) => ({ ...prev, [pid]: (prev[pid] || _tasks.filter((t: any) => t.goal_id === pid)).map((t: any) => t.id === tid ? { ...t, status } : t) }));
+                      }}
+                      getStatusColor={getStatusColor}
+                    />
+                  </div>
+                  <button onClick={() => setConfirmDelete({ type: "task", id: task.id, title: task.title })} className="p-1 rounded text-text-muted hover:text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer flex-shrink-0" title="Delete task">
+                    <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
-              </div>
-            ))}
-          </div>
-        ) : suggestedSubgoals.length === 0 && !subgoalSearch.trim() ? (
-          <p className="text-[10px] text-text-muted text-center py-3">No sub-goals yet. Use the Generate button above to create AI-suggested sub-goals.</p>
-        ) : subgoalSearch.trim() && filteredChildren.length === 0 ? (
-          <p className="text-[10px] text-text-muted text-center py-3">No matching sub-goals</p>
-        ) : null}
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     );
   };
@@ -1889,7 +2015,7 @@ function DepartmentDrillView({
         <div className="p-3 rounded-xl bg-primary/5 border border-primary/20">
           <div className="flex items-center justify-between mb-1">
             <span className="text-[10px] font-semibold flex items-center gap-1"><Sparkles className="w-3 h-3 text-primary" /> AI Task Suggestions</span>
-            <button onClick={suggestTasks} disabled={loadingTasks} className="px-2.5 py-1 rounded-lg text-[10px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1">
+            <button onClick={() => suggestTasks()} disabled={loadingTasks} className="px-2.5 py-1 rounded-lg text-[10px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1">
               {loadingTasks ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
               {loadingTasks ? "Loading..." : "Suggest"}
             </button>
@@ -1925,7 +2051,7 @@ function DepartmentDrillView({
                 );
               })}
               {selectedTaskSuggestionIds.size > 0 && (
-                <button onClick={addSelectedTasks} disabled={addingTasks} className="w-full py-1.5 rounded-lg text-[10px] font-medium bg-primary text-white hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50">
+                <button onClick={() => addSelectedTasks()} disabled={addingTasks} className="w-full py-1.5 rounded-lg text-[10px] font-medium bg-primary text-white hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50">
                   {addingTasks ? <span className="flex items-center gap-1 justify-center"><Loader2 className="w-3 h-3 animate-spin" /> Adding...</span> : `Add ${selectedTaskSuggestionIds.size} selected`}
                 </button>
               )}
@@ -1939,7 +2065,7 @@ function DepartmentDrillView({
             <p className="text-[10px] font-semibold mb-2">Create Task</p>
             <div className="flex gap-2">
               <input value={newTaskTitle} onChange={(e) => setNewTaskTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleCreateTask(); }} placeholder="Task title..." className="flex-1 h-8 px-3 text-xs bg-background border border-border rounded-lg focus:outline-none focus:border-primary" autoFocus />
-              <button onClick={handleCreateTask} disabled={!newTaskTitle.trim()} className="px-3 h-8 rounded-lg text-xs font-medium bg-primary text-white hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1">
+              <button onClick={() => handleCreateTask()} disabled={!newTaskTitle.trim()} className="px-3 h-8 rounded-lg text-xs font-medium bg-primary text-white hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1">
                 <Plus className="w-3 h-3" /> Add
               </button>
             </div>
@@ -1960,8 +2086,8 @@ function DepartmentDrillView({
                     department={subGoal.department}
                     onAssigneeChange={(member) => {
                       const tid = task.id;
-                      updateTask(tid, { assignee_id: member?.id ? [member.id] : [], assignee_name: member?.full_name || "" } as any).catch(() => {});
-                      setGoalTaskCache((prev) => ({ ...prev, [gid]: (prev[gid] || _tasks.filter((t: any) => t.goal_id === gid)).map((t: any) => t.id === tid ? { ...t, assignee_id: member?.id ? [member.id] : [], assignee_name: member?.full_name || "" } : t) }));
+                      updateTask(tid, { assignee_id: (member?.email || member?.id) ? [member?.email || member?.id] : [], assignee_name: member?.full_name || "" } as any).catch(() => {});
+                      setGoalTaskCache((prev) => ({ ...prev, [gid]: (prev[gid] || _tasks.filter((t: any) => t.goal_id === gid)).map((t: any) => t.id === tid ? { ...t, assignee_id: (member?.email || member?.id) ? [member?.email || member?.id] : [], assignee_name: member?.full_name || "" } : t) }));
                     }}
                     onStatusChange={(status) => {
                       const tid = task.id;
@@ -2010,9 +2136,13 @@ function DepartmentDrillView({
                 await deleteGoal(confirmDelete.id);
               } else if (confirmDelete.type === "task") {
                 await deleteTask(confirmDelete.id);
-                if (subGoal) {
-                  const gid = subGoal.id || subGoal._id;
-                  setGoalTaskCache((prev) => ({ ...prev, [gid]: (prev[gid] || []).filter((t: any) => t.id !== confirmDelete.id) }));
+                const targetGid = subGoal
+                  ? (subGoal.id || subGoal._id)
+                  : parentGoal
+                  ? (parentGoal.id || parentGoal._id)
+                  : null;
+                if (targetGid) {
+                  setGoalTaskCache((prev) => ({ ...prev, [targetGid]: (prev[targetGid] || []).filter((t: any) => t.id !== confirmDelete.id) }));
                 }
               }
               setConfirmDelete(null);
@@ -2031,13 +2161,41 @@ function DepartmentDrillView({
 
 function GoalSection() {
   const { organization } = useOrganizationStore();
+  const { user } = useAuth();
   const { goals, fetchGoals, updateGoal } = useGoalStore();
   const orgId = organization?.id;
+  const wsUserId = (user as any)?.uid || (user as any)?.email || "";
   const [expandedGoal, setExpandedGoal] = useState<any>(null);
   const [openDepartment, setOpenDepartment] = useState<string | null>(null);
   const [showGoalModal, setShowGoalModal] = useState(false);
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [returnDepartment, setReturnDepartment] = useState<string | null>(null);
+  const [expandedGoalId, setExpandedGoalId] = useState<string | null>(null);
+  const [goalChildren, setGoalChildren] = useState<Record<string, any[]>>({});
+  const goalChildrenCache = useRef<Map<string, any[]>>(new Map());
+
+  const loadGoalChildren = useCallback(async (goalId: string) => {
+    if (!orgId) return;
+    if (goalChildrenCache.current.has(goalId)) return;
+    try {
+      const res = await fetchDeduped(
+        `${API_URL}/tasks?organization_id=${orgId}&goal_id=${goalId}`,
+        { headers: getAuthHeaders() }
+      );
+      const data = await res.json();
+      const tasks = Array.isArray(data?.tasks) ? data.tasks : [];
+      goalChildrenCache.current.set(goalId, tasks);
+      setGoalChildren((prev) => ({ ...prev, [goalId]: tasks }));
+    } catch {
+      goalChildrenCache.current.set(goalId, []);
+      setGoalChildren((prev) => ({ ...prev, [goalId]: [] }));
+    }
+  }, [orgId]);
+
+  const toggleGoalExpand = useCallback((goalId: string) => {
+    setExpandedGoalId((cur) => (cur === goalId ? null : goalId));
+    loadGoalChildren(goalId);
+  }, [loadGoalChildren]);
 
   const handleAddGoal = useCallback(() => {
     setReturnDepartment(openDepartment);
@@ -2087,31 +2245,66 @@ function GoalSection() {
     if (orgId) fetchGoals(orgId);
   }, [orgId, fetchGoals]);
 
+  // Live parity with the AI Task Cascade view: new goals/tasks created by the
+  // AI analyst (or anywhere else) appear in the Goals Pipeline immediately.
+  const handleWsGoalCreated = useCallback((data: any) => {
+    if (!data) return;
+    const goal = { ...data, id: data._id || data.id };
+    if (!goal.id) return;
+    const { goals: gs } = useGoalStore.getState();
+    if (gs.find((g: any) => g.id === goal.id)) return;
+    useGoalStore.setState({ goals: [goal, ...gs] });
+  }, []);
+
+  const handleWsGoalChanged = useCallback((data: any) => {
+    if (!data || !orgId) return;
+    fetchGoals(orgId);
+  }, [orgId, fetchGoals]);
+
+  useWebSocket({
+    organizationId: orgId,
+    userId: wsUserId,
+    onGoalCreated: handleWsGoalCreated,
+    onTaskCreated: handleWsGoalChanged,
+    onTaskUpdated: handleWsGoalChanged,
+  });
+
+  // Refetch when the tab regains focus — covers items created in another tab
+  // (AI analyst, tasks page, etc.) while the dashboard was hidden.
+  useEffect(() => {
+    if (!orgId) return;
+    const onFocus = () => fetchGoals(orgId);
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [orgId, fetchGoals]);
+
+  const mainGoals = useMemo(() => goals.filter((g) => !g.parent_goal_id), [goals]);
+
   const departments = useMemo(() => {
     const map = new Map<string, { name: string; goals: any[] }>();
-    for (const g of goals) {
+    for (const g of mainGoals) {
       const raw = (g.department || "Unassigned").trim() || "Unassigned";
       const key = raw.toLowerCase();
       if (!map.has(key)) map.set(key, { name: raw, goals: [] });
       map.get(key)!.goals.push(g);
     }
     return Array.from(map.values()).sort((a, b) => b.goals.length - a.goals.length);
-  }, [goals]);
+  }, [mainGoals]);
 
-  const totalActive = goals.filter((g) => g.status === "active").length;
-  const totalPendingReview = goals.filter((g) => g.status === "pending_review").length;
-  const totalCompleted = goals.filter((g) => g.status === "completed").length;
-  const totalTasks = goals.reduce((acc, g) => acc + (g.task_counts?.total || 0), 0);
-  const totalDone = goals.reduce((acc, g) => acc + (g.task_counts?.completed || 0), 0);
+  const totalActive = mainGoals.filter((g) => g.status === "active").length;
+  const totalPendingReview = mainGoals.filter((g) => g.status === "pending_review").length;
+  const totalCompleted = mainGoals.filter((g) => g.status === "completed").length;
+  const totalTasks = mainGoals.reduce((acc, g) => acc + (g.task_counts?.total || 0), 0);
+  const totalDone = mainGoals.reduce((acc, g) => acc + (g.task_counts?.completed || 0), 0);
   const overallProgress = totalTasks > 0 ? Math.round((totalDone / totalTasks) * 100) : 0;
 
-  console.log("[GoalSection] render", { total: goals.length, totalActive, totalPendingReview, totalCompleted, totalTasks, totalDone, goalsStatuses: goals.map((g) => g.status) });
+  console.log("[GoalSection] render", { total: mainGoals.length, totalActive, totalPendingReview, totalCompleted, totalTasks, totalDone, goalsStatuses: mainGoals.map((g) => g.status) });
 
   const openDepartmentGoals = openDepartment
     ? goals.filter((g) => (g.department || "Unassigned") === openDepartment)
     : [];
 
-  if (goals.length === 0) {
+  if (mainGoals.length === 0) {
     return (
       <Card>
         <CardHeader>
@@ -2194,9 +2387,17 @@ const activeCount = dept.goals.filter((g) => g.status === "active").length;
                   .slice(0, 3);
 
                 return (
-                  <button
+                  <div
                     key={dept.name}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => setOpenDepartment(dept.name)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setOpenDepartment(dept.name);
+                      }
+                    }}
                     className={`group text-left p-4 rounded-2xl bg-gradient-to-br ${style.bg} ${style.border} border hover:shadow-lg hover:scale-[1.01] transition-all cursor-pointer`}
                   >
                     <div className="flex items-start justify-between mb-3">
@@ -2228,18 +2429,70 @@ const activeCount = dept.goals.filter((g) => g.status === "active").length;
                     </div>
 
                     <div className="space-y-1 mb-2">
-                      {topGoals.map((g) => (
-                        <div key={g.id || g._id} className="flex items-center gap-1.5 text-[11px] truncate">
-                          {g.status === "completed" ? (
-                            <CheckCircle className="w-3 h-3 text-emerald-400 flex-shrink-0" />
-                          ) : g.status === "active" ? (
-                            <Clock className="w-3 h-3 text-primary flex-shrink-0" />
-                          ) : (
-                            <AlertCircle className="w-3 h-3 text-yellow-400 flex-shrink-0" />
-                          )}
-                          <span className="truncate text-text-muted">{g.title}</span>
-                        </div>
-                      ))}
+                      {topGoals.map((g) => {
+                        const gid = g.id || g._id;
+                        const isExpandedGoal = expandedGoalId === gid;
+                        const subGoals = goals.filter((sg) => !!sg.parent_goal_id && sg.parent_goal_id === gid);
+                        const childTasks = goalChildren[gid] ?? [];
+                        return (
+                          <div key={gid}>
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              onClick={(e) => { e.stopPropagation(); toggleGoalExpand(gid); }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  toggleGoalExpand(gid);
+                                }
+                              }}
+                              className="flex items-center gap-1.5 text-[11px] truncate cursor-pointer hover:text-foreground transition-colors"
+                            >
+                              <ChevronRight className={`w-3 h-3 flex-shrink-0 text-text-muted transition-transform ${isExpandedGoal ? "rotate-90" : ""}`} />
+                              {g.status === "completed" ? (
+                                <CheckCircle className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+                              ) : g.status === "active" ? (
+                                <Clock className="w-3 h-3 text-primary flex-shrink-0" />
+                              ) : (
+                                <AlertCircle className="w-3 h-3 text-yellow-400 flex-shrink-0" />
+                              )}
+                              <span className="truncate text-text-muted">{g.title}</span>
+                            </div>
+                            {isExpandedGoal && (
+                              <div className="mt-1 ml-4 pl-2 border-l border-border/50 space-y-1">
+                                {subGoals.map((sg) => (
+                                  <div key={sg.id || (sg as any)._id} className="flex items-center gap-1.5 text-[10px] truncate">
+                                    <Target className="w-3 h-3 text-primary flex-shrink-0" />
+                                    <span className="truncate text-text-muted">{sg.title}</span>
+                                  </div>
+                                ))}
+                                {childTasks.length > 0 ? (
+                                  childTasks.map((t: any) => (
+                                    <div key={t.id || t._id} className="flex items-center gap-1.5 text-[10px] truncate">
+                                      {t.status === "completed" ? (
+                                        <CheckCircle className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+                                      ) : t.status === "in_progress" ? (
+                                        <Loader2 className="w-3 h-3 text-primary flex-shrink-0" />
+                                      ) : (
+                                        <Clock className="w-3 h-3 text-yellow-400 flex-shrink-0" />
+                                      )}
+                                      <span className="truncate text-text-muted">{t.title}</span>
+                                      {t.assignee_name?.[0] && (
+                                        <span className="ml-auto text-text-muted/50 flex-shrink-0">{t.assignee_name[0].split(" ")[0]}</span>
+                                      )}
+                                    </div>
+                                  ))
+                                ) : (
+                                  subGoals.length === 0 && (
+                                    <p className="text-[10px] text-text-muted/60">No sub-tasks yet</p>
+                                  )
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                       {dept.goals.length > topGoals.length && (
                         <p className="text-[10px] text-text-muted/60">+{dept.goals.length - topGoals.length} more</p>
                       )}
@@ -2264,7 +2517,7 @@ const activeCount = dept.goals.filter((g) => g.status === "active").length;
                         </div>
                       </div>
                     )}
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -2282,8 +2535,8 @@ const activeCount = dept.goals.filter((g) => g.status === "active").length;
           onAssignGoal={async (g, role, member) => {
             const gid = g.id || g._id;
             const data = role === "defaulter"
-              ? { assignee_id: member?.id ? [member.id] : [], assignee_name: member?.full_name || "" }
-              : { reviewer_id: member?.id ? [member.id] : [], reviewer_name: member?.full_name || "" };
+              ? { assignee_id: (member?.email || member?.id) ? [member?.email || member?.id] : [], assignee_name: member?.full_name || "" }
+              : { reviewer_id: (member?.email || member?.id) ? [member?.email || member?.id] : [], reviewer_name: member?.full_name || "" };
             try {
               await updateGoal(gid, data as any);
               console.warn("[assign] updateGoal OK", gid, role, member?.full_name);
