@@ -7,7 +7,7 @@ import { useGoalStore } from "@/stores/goalStore";
 import { useTaskStore } from "@/stores/taskStore";
 import { useKPIStore } from "@/stores/kpiStore";
 import { useOrgChartStore } from "@/stores/orgChartStore";
-import { useSessionStore, type SessionMessage, type ClarifyingQuestion, type DelegateParams, type GeneratedSubTask } from "@/stores/sessionStore";
+import { useSessionStore, type SessionMessage, type ClarifyingQuestion, type DelegateParams, type GeneratedSubTask, delegateAssigneeLabel } from "@/stores/sessionStore";
 import {
   Sparkles, MessageSquare, Plus, Edit3, Trash2, Paperclip, AtSign,
   Loader2, Send, Lightbulb, Check, ArrowRight, ChevronLeft,
@@ -1092,6 +1092,7 @@ export default function AISummaryChat() {
           description: params.description ?? null,
           assignee_id: params.assignee_id,
           assignee_name: params.assignee_name,
+          assignees: params.assignees,
           priority: params.priority,
           item_type: params.item_type,
           department: params.department ?? null,
@@ -1111,9 +1112,10 @@ export default function AISummaryChat() {
           : params.item_type === "both"
             ? "goal and task"
             : "task";
+      const assigneeLabel = delegateAssigneeLabel(params);
       const summary = selected.length
-        ? `✅ **"${params.title}"** assigned to **${params.assignee_name}** as a ${typeLabel} with ${selected.length} sub-task${selected.length > 1 ? "s" : ""}.`
-        : `✅ **"${params.title}"** assigned to **${params.assignee_name}** as a ${typeLabel}.`;
+        ? `✅ **"${params.title}"** assigned to **${assigneeLabel}** as a ${typeLabel} with ${selected.length} sub-task${selected.length > 1 ? "s" : ""}.`
+        : `✅ **"${params.title}"** assigned to **${assigneeLabel}** as a ${typeLabel}.`;
       const doneMsg: SessionMessage = {
         role: "assistant",
         content: summary,
@@ -2237,7 +2239,7 @@ function DelegatePreviewCard({
           <Sparkles className="w-3 h-3" />
           {typeLabel}
         </span>
-        <span className="text-[10px] text-text-muted">Assign to {params.assignee_name}</span>
+        <span className="text-[10px] text-text-muted">Assign to {delegateAssigneeLabel(params)}</span>
       </div>
 
       <div>

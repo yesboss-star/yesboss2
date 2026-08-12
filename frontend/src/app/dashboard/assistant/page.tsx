@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUIStore } from "@/stores/uiStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
-import { useSessionStore, type ChatSession, type SessionMessage, type ClarifyingQuestion, type BookingParams, type DelegateParams, type GeneratedSubTask } from "@/stores/sessionStore";
+import { useSessionStore, type ChatSession, type SessionMessage, type ClarifyingQuestion, type BookingParams, type DelegateParams, type GeneratedSubTask, delegateAssigneeLabel } from "@/stores/sessionStore";
 import { getAuthHeaders } from "@/lib/utils";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, Button } from "@/components/ui";
@@ -114,7 +114,7 @@ function DelegatePreviewCard({
           <Sparkles className="w-3 h-3" />
           {typeLabel}
         </span>
-        <span className="text-[10px] text-text-muted">Assign to {params.assignee_name}</span>
+        <span className="text-[10px] text-text-muted">Assign to {delegateAssigneeLabel(params)}</span>
       </div>
 
       <div>
@@ -487,6 +487,7 @@ function AssistantInner() {
           description: params.description ?? null,
           assignee_id: params.assignee_id,
           assignee_name: params.assignee_name,
+          assignees: params.assignees,
           priority: params.priority,
           item_type: params.item_type,
           department: params.department ?? null,
@@ -506,9 +507,10 @@ function AssistantInner() {
           : params.item_type === "both"
             ? "goal and task"
             : "task";
+      const assigneeLabel = delegateAssigneeLabel(params);
       const summary = selected.length
-        ? `✅ **"${params.title}"** assigned to **${params.assignee_name}** as a ${typeLabel} with ${selected.length} sub-task${selected.length > 1 ? "s" : ""}.`
-        : `✅ **"${params.title}"** assigned to **${params.assignee_name}** as a ${typeLabel}.`;
+        ? `✅ **"${params.title}"** assigned to **${assigneeLabel}** as a ${typeLabel} with ${selected.length} sub-task${selected.length > 1 ? "s" : ""}.`
+        : `✅ **"${params.title}"** assigned to **${assigneeLabel}** as a ${typeLabel}.`;
 
       updateLastMessage(activeSession.id, {
         role: "assistant",

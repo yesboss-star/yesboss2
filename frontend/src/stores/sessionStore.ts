@@ -26,14 +26,35 @@ export interface BookingParams {
   booking_result?: Record<string, any>;
 }
 
+export interface DelegateAssignee {
+  id: string;
+  name: string;
+  email?: string | null;
+  role?: string | null;
+  department?: string | null;
+}
+
 export interface DelegateParams {
   title: string;
   description?: string | null;
-  assignee_id: string;
-  assignee_name: string;
+  assignee_id: string | string[];
+  assignee_name: string | string[];
+  assignee_email?: string | string[] | null;
+  assignees?: DelegateAssignee[];
   priority: string;
   item_type: "task" | "goal" | "both";
   department?: string | null;
+}
+
+export function delegateAssigneeLabel(params: DelegateParams): string {
+  const names = Array.isArray(params.assignees) && params.assignees.length
+    ? params.assignees.map((a) => a.name)
+    : Array.isArray(params.assignee_name)
+      ? params.assignee_name
+      : params.assignee_name
+        ? [params.assignee_name]
+        : [];
+  return names.filter(Boolean).join(", ");
 }
 
 export interface GeneratedSubTask {
