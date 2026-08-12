@@ -182,7 +182,7 @@ export const useGoalStore = create<GoalState>()(
         }
       },
 
-      createGoal: async (data: { title: string; description: string; priority: string; timeline?: string; due_date?: string; department?: string; assignee_name?: string[]; reviewer_name?: string[]; assignee_id?: string[]; reviewer_id?: string[]; organization_id: string }) => {
+      createGoal: async (data: { title: string; description: string; priority: string; timeline?: string; due_date?: string; department?: string; assignee_name?: string[]; reviewer_name?: string[]; assignee_id?: string[]; reviewer_id?: string[]; organization_id: string; goal_type?: string; duration?: string; end_date?: string; parent_goal_id?: string; industry?: string; micro_vertical?: string }) => {
         set({ loading: true, error: null });
         try {
           const response = await fetch(`${API_URL}/goals`, {
