@@ -106,6 +106,7 @@ async def create_and_deliver(
     actor_name: str = None,
     metadata: dict = None,
     email: str = None,
+    attachments: list = None,
 ):
     db = get_database()
     if db is None:
@@ -142,7 +143,7 @@ async def create_and_deliver(
         user_email = email or get_user_email(user_id)
         if user_email and _check_email_rate_limit(org_id):
             asyncio.create_task(asyncio.to_thread(
-                send_notification_email, user_email, title, message, link
+                send_notification_email, user_email, title, message, link, None, "default", None, attachments
             ))
 
     if is_channel_enabled(prefs, "push", type):

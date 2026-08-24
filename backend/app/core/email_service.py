@@ -3,6 +3,7 @@ import re
 import smtplib
 from collections.abc import Callable
 from email.header import Header
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -21,19 +22,30 @@ def is_email_configured() -> bool:
     return bool(SMTP_HOST and SMTP_USER and SMTP_PASS)
 
 
-def send_email(to_email: str, subject: str, html_body: str, text_body: str | None = None) -> bool:
+def send_email(to_email: str, subject: str, html_body: str, text_body: str | None = None, attachments: list[tuple[str, bytes, str]] | None = None) -> bool:
     if not is_email_configured():
         logger.warning("SMTP not configured - skipping email")
         return False
 
     logger.info("Preparing to send email to %s: %s", to_email, subject)
     try:
-        msg = MIMEMultipart("alternative")
+        if attachments:
+            msg = MIMEMultipart("mixed")
+            body = MIMEMultipart("alternative")
+            body.attach(MIMEText(text_body or "", "plain"))
+            body.attach(MIMEText(html_body, "html"))
+            msg.attach(body)
+            for filename, payload, mimetype in attachments:
+                part = MIMEApplication(payload, _subtype=mimetype.split("/")[-1])
+                part.add_header("Content-Disposition", "attachment", filename=filename)
+                msg.attach(part)
+        else:
+            msg = MIMEMultipart("alternative")
+            msg.attach(MIMEText(text_body or "", "plain"))
+            msg.attach(MIMEText(html_body, "html"))
         msg["From"] = SMTP_FROM
         msg["To"] = to_email
         msg["Subject"] = Header(subject, "utf-8")  # type: ignore[assignment]
-        msg.attach(MIMEText(text_body or "", "plain"))
-        msg.attach(MIMEText(html_body, "html"))
 
         logger.debug("Connecting to SMTP %s:%s", SMTP_HOST, SMTP_PORT)
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
@@ -198,7 +210,7 @@ TEMPLATE_RENDERERS: dict[str, Callable[..., str]] = {
 }
 
 
-def send_notification_email(to_email: str, title: str, message: str, link: str | None = None, action_label: str | None = None, template_name: str = "default", template_data: dict | None = None):
+def send_notification_email(to_email: str, title: str, message: str, link: str | None = None, action_label: str | None = None, template_name: str = "default", template_data: dict | None = None, attachments: list[tuple[str, bytes, str]] | None = None):
     if template_name and template_name in TEMPLATE_RENDERERS:
         renderer = TEMPLATE_RENDERERS[template_name]
         td = template_data or {}
@@ -234,7 +246,7 @@ def send_notification_email(to_email: str, title: str, message: str, link: str |
             html = TEMPLATE_RENDERERS["default"](title, message, link, action_label)
     else:
         html = TEMPLATE_RENDERERS["default"](title, message, link, action_label)
-    send_email(to_email, f"{APP_NAME} - {title}", html, text_body=f"{title}\n\n{message}\n\n{link or ''}")
+    send_email(to_email, f"{APP_NAME} - {title}", html, text_body=f"{title}\n\n{message}\n\n{link or ''}", attachments=attachments)
 
 
 def send_otp_email(to_email: str, otp: str, purpose: str = "verification") -> bool:

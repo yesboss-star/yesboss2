@@ -2,6 +2,7 @@ import asyncio
 import logging
 import threading
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger("yesboss.scheduler")
 
@@ -806,13 +807,13 @@ async def send_auto_reports():
     try:
         from ..core.database import get_database
         from ..core.notification_service import create_and_deliver
-        from ..core.report_generator import generate_employee_report
+        from ..core.report_generator import generate_employee_report, generate_weekly_dept_pdf
 
         db = get_database()
         if db is None:
             return
 
-        now = datetime.utcnow()
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
         is_monday = now.weekday() == 0
         hour = now.hour
 
@@ -824,37 +825,48 @@ async def send_auto_reports():
         orgs = list(db.organizations.find({}))
         for org in orgs:
             org_id = str(org["_id"])
+            org_name = org.get("name") or "Your Org"
 
             try:
-                if is_monday:
-                    # Determine recipient: owner first, fallback to root org chart member
-                    _, recipient_email = await get_org_owner_info(db, org_id)
-                    if not recipient_email:
-                        root = db.org_chart_members.find_one(
-                            {"organization_id": org_id, "manager_email": {"$in": [None, ""]}}
-                        )
-                        if root:
-                            recipient_email = root.get("email")
-                    if not recipient_email:
-                        logger.warning(f"No owner or root user found for org {org_id}, skipping reports")
-                        continue
+                # Determine recipient: owner first, fallback to root org chart member
+                _, recipient_email = await get_org_owner_info(db, org_id)
+                if not recipient_email:
+                    root = db.org_chart_members.find_one(
+                        {"organization_id": org_id, "manager_email": {"$in": [None, ""]}}
+                    )
+                    if root:
+                        recipient_email = root.get("email")
+                if not recipient_email:
+                    logger.warning(f"No owner or root user found for org {org_id}, skipping reports")
+                    continue
 
-                    members = list(db.org_chart_members.find({"organization_id": org_id}))
-                    for m in members:
-                        emp_email = m.get("email", "")
-                        if not emp_email:
-                            continue
-                        report = await generate_employee_report(db, org_id, emp_email, "weekly")
-                        await create_and_deliver(
-                            user_id=recipient_email,
-                            org_id=org_id,
-                            type="report_weekly",
-                            title=f"Weekly Performance Report — {m.get('name', emp_email)}",
-                            message=f"Report for {m.get('name', emp_email)} — {report['metrics']['completion_rate']}% completion rate.",
-                            link="/dashboard/reports",
-                            email=recipient_email,
-                        )
-                    logger.info(f"Weekly reports sent to {recipient_email} for org {org_id} ({len(members)} employees)")
+                members = list(db.org_chart_members.find({"organization_id": org_id}))
+                reports = []
+                for m in members:
+                    emp_email = m.get("email", "")
+                    if not emp_email:
+                        continue
+                    try:
+                        reports.append(await generate_employee_report(db, org_id, emp_email, "weekly"))
+                    except Exception as e:
+                        logger.warning(f"Failed to generate report for {emp_email}: {e}")
+
+                if not reports:
+                    continue
+
+                pdf_bytes = generate_weekly_dept_pdf(reports, org_name)
+
+                await create_and_deliver(
+                    user_id=recipient_email,
+                    org_id=org_id,
+                    type="report_weekly",
+                    title="Weekly Performance Report",
+                    message=f"{len(reports)} employee report(s) attached, grouped department-wise.",
+                    link="/dashboard/reports",
+                    email=recipient_email,
+                    attachments=[("Weekly-Performance-Report.pdf", pdf_bytes, "application/pdf")],
+                )
+                logger.info(f"Weekly report PDF sent to {recipient_email} for org {org_id} ({len(reports)} employees)")
             except Exception as e:
                 logger.error(f"Auto-report failed for org {org_id}: {e}")
     except Exception as e:
@@ -1481,7 +1493,7 @@ async def scheduler_loop():
                     pass
                 if db is not None:
                     await check_goal_deadlines(db)
-                hour = datetime.utcnow().hour
+                hour = datetime.now(ZoneInfo("Asia/Kolkata")).hour
                 if hour == 8:
                     await send_digests()
                     await send_morning_journal_prompts()

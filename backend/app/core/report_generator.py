@@ -213,3 +213,90 @@ def _is_overdue(due_date) -> bool:
         return d < datetime.utcnow()
     except Exception:
         return False
+
+
+def generate_weekly_dept_pdf(reports: list[dict], org_name: str = "YesBoss") -> bytes:
+    """Build a single department-wise PDF from a list of employee report dicts."""
+    import io
+
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import inch
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        rightMargin=54, leftMargin=54,
+        topMargin=54, bottomMargin=54,
+    )
+    styles = getSampleStyleSheet()
+
+    primary = colors.HexColor('#0ea5e9')
+    dark = colors.HexColor('#1e293b')
+    muted = colors.HexColor('#64748b')
+    border = colors.HexColor('#e2e8f0')
+    light_bg = colors.HexColor('#f8fafc')
+
+    title_style = ParagraphStyle('Title2', parent=styles['Title'], fontSize=24, spaceAfter=4, textColor=dark, leading=30)
+    subtitle_style = ParagraphStyle('Sub', parent=styles['Normal'], fontSize=10, spaceAfter=16, textColor=muted, leading=14)
+    dept_style = ParagraphStyle('Dept', parent=styles['Heading1'], fontSize=16, spaceAfter=6, spaceBefore=14, textColor=primary, leading=20)
+    name_style = ParagraphStyle('Name', parent=styles['Heading2'], fontSize=11.5, spaceAfter=4, spaceBefore=8, textColor=dark, leading=15)
+    body_style = ParagraphStyle('Body', parent=styles['Normal'], fontSize=9, spaceAfter=5, leading=13, textColor=dark)
+
+    story = []
+    story.append(Paragraph(org_name, title_style))
+    story.append(Paragraph("Weekly Performance Report — Department-wise", subtitle_style))
+
+    # Group by department (sorted), preserving insertion order within each.
+    depts: dict[str, list[dict]] = {}
+    for r in reports:
+        dept = (r.get("department") or "General").strip() or "General"
+        depts.setdefault(dept, []).append(r)
+
+    for dept in sorted(depts.keys()):
+        members = depts[dept]
+        story.append(Paragraph(f"Department: {dept} ({len(members)} employee(s))", dept_style))
+
+        for r in members:
+            m = r.get("metrics") or {}
+            name = r.get("employee_name") or r.get("employee_email") or "Unknown"
+            email = r.get("employee_email") or ""
+            story.append(Paragraph(f"{name} — {email}", name_style))
+
+            rows = [
+                ["Metric", "Value"],
+                ["Completion Rate", f"{m.get('completion_rate', 0)}%"],
+                ["Total Tasks", str(m.get("total_tasks", 0))],
+                ["Completed", str(m.get("completed_tasks", 0))],
+                ["In Progress", str(m.get("in_progress_tasks", 0))],
+                ["Pending", str(m.get("pending_tasks", 0))],
+                ["Overdue", str(m.get("overdue_tasks", 0))],
+                ["Avg Completion", f"{m.get('avg_completion_hours', 0)}h"],
+                ["Goals Touched", str(m.get("goals_touched", 0))],
+            ]
+            tbl = Table(rows, colWidths=[2.2 * inch, 1.6 * inch])
+            tbl.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), primary),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 8),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 8),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ('GRID', (0, 0), (-1, -1), 0.5, border),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, light_bg]),
+            ]))
+            story.append(tbl)
+            story.append(Spacer(1, 4))
+
+            feedback = (r.get("ai_feedback") or "").strip()
+            if feedback:
+                story.append(Paragraph("<b>AI Feedback:</b> " + feedback.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"), body_style))
+            story.append(Spacer(1, 4))
+
+    doc.build(story)
+    return buf.getvalue()
