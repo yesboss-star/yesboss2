@@ -12,7 +12,8 @@ from pydantic import BaseModel
 from ..core.ai_client import get_ai_response, get_chat_response
 from ..core.database import get_database
 from ..core.file_processor import ALLOWED_EXTENSIONS
-from ..dependencies.auth import get_current_user_optional
+from ..dependencies.auth import get_current_user, get_current_user_optional
+from ..dependencies.scope import is_org_member, is_org_owner
 
 router = APIRouter()
 logger = logging.getLogger("yesboss.strategy_chat")
@@ -22,6 +23,42 @@ def get_user_org_id(user) -> str | None:
     if hasattr(user, 'user_metadata') and user.user_metadata:
         return user.user_metadata.get("organization_id")
     return None
+
+
+def _self_ids(current_user) -> list[str]:
+    uid = getattr(current_user, "id", None) or getattr(current_user, "uid", None)
+    email = (getattr(current_user, "email", "") or "").strip().lower()
+    return [x for x in (uid, email) if x]
+
+
+async def _file_scope(db, current_user, org_id: str):
+    """Return (is_owner, self_filter) for org file access.
+
+    Owners see every file in the org; everyone else only sees files they
+    created/uploaded (created_by / user_id matches their uid or email).
+    """
+    if await is_org_owner(db, org_id, current_user):
+        return True, {}
+    ids = _self_ids(current_user)
+    return False, {"$or": [{"created_by": {"$in": ids}}, {"user_id": {"$in": ids}}]}
+
+
+async def _can_access_file(db, current_user, *, doc=None, file_doc=None) -> bool:
+    """Owner of the file's org, or the file's creator, may access it."""
+    uid = getattr(current_user, "id", None) or getattr(current_user, "uid", None)
+    email = (getattr(current_user, "email", "") or "").strip().lower()
+    records = []
+    if doc is not None:
+        records.append((doc.get("org_id") or "", doc.get("user_id") or doc.get("created_by") or ""))
+    if file_doc is not None:
+        records.append((file_doc.get("organization_id") or "", file_doc.get("created_by") or file_doc.get("user_id") or ""))
+    for org_id, owner in records:
+        if org_id and await is_org_owner(db, org_id, current_user):
+            return True
+        owner_str = owner.strip().lower() if isinstance(owner, str) else str(owner or "")
+        if owner_str and (owner_str == email or owner_str == (uid or "").lower()):
+            return True
+    return False
 
 
 class Message(BaseModel):
@@ -571,7 +608,7 @@ async def get_experts():
 @router.get("/files")
 async def list_org_files(
     organization_id: str | None = None,
-    current_user = Depends(get_current_user_optional)
+    current_user = Depends(get_current_user)
 ):
     db = get_database()
     if db is None:
@@ -581,13 +618,13 @@ async def list_org_files(
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
 
-    user_id = getattr(current_user, 'id', None) if current_user else None
+    if not await is_org_member(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
 
-    files_query: dict = {"organization_id": org_id}
-    docs_query: dict = {"org_id": org_id}
-    if user_id:
-        files_query["created_by"] = user_id
-        docs_query["user_id"] = user_id
+    _, self_filter = await _file_scope(db, current_user, org_id)
+
+    files_query: dict = {"organization_id": org_id, **self_filter}
+    docs_query: dict = {"org_id": org_id, **self_filter}
 
     uploaded_files = list(db.files.find(files_query).sort("created_at", -1).limit(50))
     processed_docs = list(db.documents.find(docs_query).sort("created_at", -1).limit(50))
@@ -625,27 +662,28 @@ async def list_org_files(
 @router.get("/files/{file_id}")
 async def get_file_detail(
     file_id: str,
-    current_user = Depends(get_current_user_optional)
+    current_user = Depends(get_current_user)
 ):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
-    user_id = getattr(current_user, 'id', None) if current_user else None
-    doc_query: dict = {"file_id": file_id}
-    if user_id:
-        doc_query["user_id"] = user_id
+    doc = db.documents.find_one({"file_id": file_id})
+    if doc and not await _can_access_file(db, current_user, doc=doc):
+        doc = None
 
-    doc = db.documents.find_one(doc_query)
+    f = None
     if not doc:
         from bson import ObjectId
-        file_query: dict = {"_id": ObjectId(file_id) if ObjectId.is_valid(file_id) else file_id}
-        if user_id:
-            file_query["created_by"] = user_id
-        f = db.files.find_one(file_query)
-        if f:
-            return {"file": {"id": file_id, "filename": f.get("filename"), "file_type": f.get("file_type"), "source": "upload"}}
+        f = db.files.find_one({"_id": ObjectId(file_id) if ObjectId.is_valid(file_id) else file_id})
+        if f and not await _can_access_file(db, current_user, file_doc=f):
+            f = None
+
+    if not doc and not f:
         raise HTTPException(status_code=404, detail="File not found")
+
+    if f:
+        return {"file": {"id": file_id, "filename": f.get("filename"), "file_type": f.get("file_type"), "source": "upload"}}
 
     return {
         "file": {
@@ -664,17 +702,26 @@ async def get_file_detail(
 async def delete_file(
     file_id: str,
     organization_id: str | None = None,
-    current_user = Depends(get_current_user_optional)
+    current_user = Depends(get_current_user)
 ):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
-    user_id = getattr(current_user, 'id', None) if current_user else None
-    doc_query: dict = {"file_id": file_id}
-    if user_id:
-        doc_query["user_id"] = user_id
-    doc = db.documents.find_one(doc_query)
+    doc = db.documents.find_one({"file_id": file_id})
+    if doc and not await _can_access_file(db, current_user, doc=doc):
+        doc = None
+
+    f = None
+    if not doc:
+        from bson import ObjectId
+        f = db.files.find_one({"_id": ObjectId(file_id) if ObjectId.is_valid(file_id) else file_id})
+        if f and not await _can_access_file(db, current_user, file_doc=f):
+            f = None
+
+    if not doc and not f:
+        raise HTTPException(status_code=404, detail="File not found")
+
     if doc:
         file_path = doc.get("file_path")
         if file_path and os.path.exists(file_path):
@@ -682,19 +729,11 @@ async def delete_file(
         db.documents.delete_one({"file_id": file_id})
         return {"success": True, "message": f"File '{doc.get('filename', 'unknown')}' deleted"}
 
-    from bson import ObjectId
-    file_query: dict = {"_id": ObjectId(file_id) if ObjectId.is_valid(file_id) else file_id}
-    if user_id:
-        file_query["created_by"] = user_id
-    f = db.files.find_one(file_query)
-    if f:
-        file_path = f.get("file_path")
-        if file_path and os.path.exists(file_path):
-            os.remove(file_path)
-        db.files.delete_one({"_id": f["_id"]})
-        return {"success": True, "message": f"File '{f.get('filename', 'unknown')}' deleted"}
-
-    raise HTTPException(status_code=404, detail="File not found")
+    file_path = f.get("file_path")
+    if file_path and os.path.exists(file_path):
+        os.remove(file_path)
+    db.files.delete_one({"_id": f["_id"]})
+    return {"success": True, "message": f"File '{f.get('filename', 'unknown')}' deleted"}
 
 
 class RenameFileRequest(BaseModel):
@@ -705,7 +744,7 @@ class RenameFileRequest(BaseModel):
 async def rename_file(
     file_id: str,
     payload: RenameFileRequest,
-    current_user = Depends(get_current_user_optional)
+    current_user = Depends(get_current_user)
 ):
     db = get_database()
     if db is None:
@@ -720,11 +759,20 @@ async def rename_file(
     if "/" in new_name or "\\" in new_name or "\x00" in new_name:
         raise HTTPException(status_code=400, detail="Filename contains invalid characters")
 
-    user_id = getattr(current_user, 'id', None) if current_user else None
-    doc_query: dict = {"file_id": file_id}
-    if user_id:
-        doc_query["user_id"] = user_id
-    doc = db.documents.find_one(doc_query)
+    doc = db.documents.find_one({"file_id": file_id})
+    if doc and not await _can_access_file(db, current_user, doc=doc):
+        doc = None
+
+    f = None
+    if not doc:
+        from bson import ObjectId
+        f = db.files.find_one({"_id": ObjectId(file_id) if ObjectId.is_valid(file_id) else file_id})
+        if f and not await _can_access_file(db, current_user, file_doc=f):
+            f = None
+
+    if not doc and not f:
+        raise HTTPException(status_code=404, detail="File not found")
+
     if doc:
         db.documents.update_one(
             {"file_id": file_id},
@@ -732,35 +780,33 @@ async def rename_file(
         )
         return {"success": True, "file_id": file_id, "filename": new_name}
 
-    from bson import ObjectId
-    file_query: dict = {"_id": ObjectId(file_id) if ObjectId.is_valid(file_id) else file_id}
-    if user_id:
-        file_query["created_by"] = user_id
-    f = db.files.find_one(file_query)
-    if f:
-        db.files.update_one(
-            {"_id": f["_id"]},
-            {"$set": {"filename": new_name}}
-        )
-        return {"success": True, "file_id": file_id, "filename": new_name}
-
-    raise HTTPException(status_code=404, detail="File not found")
+    db.files.update_one(
+        {"_id": f["_id"]},
+        {"$set": {"filename": new_name}}
+    )
+    return {"success": True, "file_id": file_id, "filename": new_name}
 
 
 @router.get("/files/{file_id}/download")
 async def download_file(
     file_id: str,
-    current_user = Depends(get_current_user_optional)
+    current_user = Depends(get_current_user)
 ):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
-    user_id = getattr(current_user, 'id', None) if current_user else None
-    doc_query: dict = {"file_id": file_id}
-    if user_id:
-        doc_query["user_id"] = user_id
-    doc = db.documents.find_one(doc_query)
+    doc = db.documents.find_one({"file_id": file_id})
+    if doc and not await _can_access_file(db, current_user, doc=doc):
+        doc = None
+
+    f = None
+    if not doc:
+        from bson import ObjectId
+        f = db.files.find_one({"_id": ObjectId(file_id) if ObjectId.is_valid(file_id) else file_id})
+        if f and not await _can_access_file(db, current_user, file_doc=f):
+            f = None
+
     if doc and doc.get("file_path") and os.path.exists(doc["file_path"]):
         return FileResponse(
             doc["file_path"],
@@ -768,11 +814,6 @@ async def download_file(
             media_type="application/octet-stream"
         )
 
-    from bson import ObjectId
-    file_query: dict = {"_id": ObjectId(file_id) if ObjectId.is_valid(file_id) else file_id}
-    if user_id:
-        file_query["created_by"] = user_id
-    f = db.files.find_one(file_query)
     if f and f.get("file_path") and os.path.exists(f["file_path"]):
         return FileResponse(
             f["file_path"],

@@ -81,8 +81,9 @@ class ChatRequest(BaseModel):
 class DelegateRequest(BaseModel):
     title: str
     description: str | None = None
-    assignee_id: str | None = None  # employee _id OR email
-    assignee_name: str | None = None
+    assignee_id: str | list[str] | None = None  # employee _id OR email
+    assignee_name: str | list[str] | None = None
+    assignees: list[dict[str, Any]] | None = None  # [{id, name, email}, ...] resolved by preview
     priority: str = "medium"
     timeline: str | None = None
     due_date: str | None = None
@@ -389,13 +390,16 @@ def _find_employee(db, org_id: str, query: str):
     Searches both `employees` and `org_chart_members` collections (they're separate)."""
     if not query:
         return None
-    q = re.escape(query.strip())
+    raw = query.strip()
+    q = re.escape(raw)
+    first_token = raw.split()[0] if raw.split() else raw
     filter = {
         "organization_id": org_id,
         "$or": [
             {"full_name": {"$regex": q, "$options": "i"}},
             {"email": {"$regex": q, "$options": "i"}},
             {"full_name": {"$regex": r"\b" + q, "$options": "i"}},
+            {"full_name": {"$regex": r"\b" + re.escape(first_token) + r"\b", "$options": "i"}},
         ],
     }
     emp = db.employees.find_one(filter)
@@ -406,6 +410,29 @@ def _find_employee(db, org_id: str, query: str):
         member["_id"] = str(member["_id"])
         return member
     return None
+
+
+_ASSIGNEE_SEPARATORS = re.compile(r"\s*(?:,|;|&|\band\b|\bwith\b|\+)\s*", re.IGNORECASE)
+
+
+def _parse_assignee_names(raw: str | list[str] | None) -> list[str]:
+    """Split a possibly-multi-person assignee string into individual names.
+
+    Handles the LLM emitting things like "Prince Pandey, Krisha Suchak",
+    "Prince and Krisha", or an actual JSON list.
+    """
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        parts: list[str] = []
+        for item in raw:
+            parts.extend(_parse_assignee_names(item))
+        return parts
+    text = str(raw).strip()
+    if not text:
+        return []
+    names = [p.strip() for p in _ASSIGNEE_SEPARATORS.split(text) if p.strip()]
+    return names
 
 
 @router.post("/people/search")
@@ -451,17 +478,114 @@ async def search_people(request: PersonSearchRequest):
 # ---------------------------------------------------------------------------
 
 
-def _resolve_assignee(db, org_id: str, assignee_id: str | None, assignee_name: str | None):
-    if assignee_id:
+def _resolve_assignee(db, org_id: str, assignee_id, assignee_name):
+    """Resolve a single assignee (back-compat wrapper used by bulk-create)."""
+    matched, _ = _resolve_assignees(db, org_id, assignee_id=assignee_id, assignee_name=assignee_name)
+    return matched[0] if matched else None
+
+
+def _resolve_assignees(db, org_id: str, assignee_id=None, assignee_name=None, assignee_email=None):
+    """Resolve one or more assignees into matched employee records.
+
+    Accepts a single value or a list for assignee_id / assignee_name /
+    assignee_email (as produced by the LLM's delegate JSON). Returns
+    (matched, unresolved) where matched is a list of employee dicts (each with
+    a string `_id`) and unresolved is a list of the raw strings we couldn't match.
+    """
+    matched: list[dict[str, Any]] = []
+    unresolved: list[str] = []
+
+    ids = []
+    if isinstance(assignee_id, list):
+        ids.extend(assignee_id)
+    elif assignee_id:
+        ids.append(assignee_id)
+
+    for aid in ids:
+        emp = None
         try:
-            emp = db.employees.find_one({"_id": ObjectId(assignee_id), "organization_id": org_id})
+            emp = db.employees.find_one({"_id": ObjectId(aid), "organization_id": org_id})
         except Exception:
             emp = None
+        if not emp:
+            emp = _find_employee(db, org_id, aid)
         if emp:
-            return emp
-    if assignee_name:
-        return _find_employee(db, org_id, assignee_name)
-    return None
+            matched.append(emp)
+        else:
+            unresolved.append(str(aid))
+
+    names = _parse_assignee_names(assignee_name)
+    emails = _parse_assignee_names(assignee_email)
+
+    for name in names:
+        emp = _find_employee(db, org_id, name)
+        if emp:
+            matched.append(emp)
+        else:
+            unresolved.append(name)
+
+    for email in emails:
+        emp = _find_employee(db, org_id, email)
+        if emp:
+            matched.append(emp)
+        else:
+            unresolved.append(email)
+
+    # De-duplicate by canonical id while preserving order
+    seen: set[str] = set()
+    unique: list[dict[str, Any]] = []
+    for emp in matched:
+        eid = str(emp["_id"])
+        if eid in seen:
+            continue
+        seen.add(eid)
+        emp["_id"] = eid
+        unique.append(emp)
+    return unique, unresolved
+
+
+def _employee_assignee_spec(emp: dict[str, Any]) -> dict[str, Any]:
+    """Canonical assignee payload for a resolved employee."""
+    return {
+        "id": str(emp["_id"]),
+        "name": emp.get("full_name") or emp.get("name") or emp.get("email"),
+        "email": emp.get("email"),
+        "role": emp.get("role"),
+        "department": emp.get("department"),
+    }
+
+
+def _list_team_members(db, org_id: str, limit: int = 30) -> list[dict[str, str]]:
+    """Return up to `limit` team members (name + email) for LLM prompts.
+
+    Searches both `employees` and `org_chart_members` collections and
+    de-duplicates by email.
+    """
+    members: list[dict[str, str]] = []
+    seen_emails: set[str] = set()
+    try:
+        for emp in db.employees.find({"organization_id": org_id}).limit(limit):
+            email = (emp.get("email") or "").strip().lower()
+            if email and email in seen_emails:
+                continue
+            if email:
+                seen_emails.add(email)
+            name = emp.get("full_name") or emp.get("name") or email or ""
+            members.append({"name": name, "email": email})
+    except Exception as e:
+        logger.warning("_list_team_members (employees) failed: %s", e)
+    try:
+        for m in db.org_chart_members.find({"organization_id": org_id}).limit(limit):
+            email = (m.get("email") or "").strip().lower()
+            if email and email in seen_emails:
+                continue
+            if email:
+                seen_emails.add(email)
+            name = m.get("full_name") or m.get("name") or email or ""
+            members.append({"name": name, "email": email})
+    except Exception as e:
+        logger.warning("_list_team_members (org_chart_members) failed: %s", e)
+    return members[:limit]
 
 
 @router.post("/delegate")
@@ -486,12 +610,36 @@ async def delegate_task(request: DelegateRequest):
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
 
-    emp = _resolve_assignee(db, org_id, request.assignee_id, request.assignee_name)
-    if not emp:
+    # Resolve assignees. Prefer the pre-resolved list from the preview; fall
+    # back to resolving the raw id/name/email fields (which may each hold a
+    # single value or a comma-separated list of names).
+    assignees: list[dict[str, Any]] = []
+    unresolved: list[str] = []
+    if request.assignees:
+        for a in request.assignees:
+            a = dict(a)
+            a["_id"] = a.get("id") or a.get("_id")
+            assignees.append(a)
+    else:
+        assignees, unresolved = _resolve_assignees(
+            db, org_id,
+            assignee_id=request.assignee_id,
+            assignee_name=request.assignee_name,
+        )
+    if unresolved:
         raise HTTPException(
             status_code=404,
             detail=(
-                f"Couldn't find '{request.assignee_name or request.assignee_id}' in your team. "
+                f"Couldn't find **{', '.join(unresolved)}** in your team. "
+                f"Add them to the org first, then try again."
+            ),
+        )
+    if not assignees:
+        shown = str(request.assignee_name or request.assignee_id or "")
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Couldn't find '{shown}' in your team. "
                 f"Add them to the org first, then try again."
             ),
         )
@@ -506,7 +654,7 @@ async def delegate_task(request: DelegateRequest):
             )
         except Exception as e:
             logger.warning("Department analysis failed in delegate: %s", e)
-            department = emp.get("department") or "General"
+            department = assignees[0].get("department") or "General"
 
     now = datetime.utcnow()
     item_type = (request.item_type or "task").strip().lower()
@@ -514,6 +662,12 @@ async def delegate_task(request: DelegateRequest):
         item_type = "task"
     create_goal = item_type in ("goal", "both")
     create_task = item_type in ("task", "both")
+
+    assignee_ids = [str(a["_id"]) for a in assignees if a.get("_id")]
+    assignee_names = [
+        (a.get("full_name") or a.get("name") or a.get("email")) for a in assignees
+    ]
+    assignee_emails = [a.get("email") for a in assignees if a.get("email")]
 
     goal_doc: dict[str, Any] | None = None
     goal_id: str | None = None
@@ -526,9 +680,9 @@ async def delegate_task(request: DelegateRequest):
             "priority": request.priority or "medium",
             "timeline": request.timeline,
             "department": department,
-            "assignee_id": str(emp["_id"]),
-            "assignee_name": emp.get("full_name") or emp.get("email"),
-            "assignee_email": emp.get("email"),
+            "assignee_id": assignee_ids,
+            "assignee_name": assignee_names,
+            "assignee_email": assignee_emails,
             "organization_id": org_id,
             "created_by": (request.context.user_email if request.context else None),
             "status": "active",
@@ -544,16 +698,16 @@ async def delegate_task(request: DelegateRequest):
     task_id: str | None = None
     confirmed = request.sub_tasks or []
 
-    # 2) Task (only when the user asked for a task)
-    if create_task:
-        task_doc = {
+    def _task_doc() -> dict[str, Any]:
+        return {
             "title": title,
             "description": request.description,
             "priority": request.priority or "medium",
             "status": "pending",
             "goal_id": goal_id,
-            "assignee_id": str(emp["_id"]),
-            "assignee_email": emp.get("email"),
+            "assignee_id": assignee_ids,
+            "assignee_email": assignee_emails,
+            "assignee_name": assignee_names,
             "department": department,
             "due_date": request.due_date,
             "organization_id": org_id,
@@ -562,6 +716,10 @@ async def delegate_task(request: DelegateRequest):
             "created_at": now,
             "updated_at": now,
         }
+
+    # 2) Task (only when the user asked for a task)
+    if create_task:
+        task_doc = _task_doc()
         task_result = db.tasks.insert_one(task_doc)
         task_id = str(task_result.inserted_id)
         task_doc["_id"] = task_id
@@ -570,47 +728,36 @@ async def delegate_task(request: DelegateRequest):
     #     sub-tasks can be linked to it (parent_task_id) and the goal renders as
     #     a proper goal -> task -> sub-task chain in the drill-down flow.
     elif create_goal and (confirmed or request.create_tasks):
-        task_doc = {
-            "title": title,
-            "description": request.description,
-            "priority": request.priority or "medium",
-            "status": "pending",
-            "goal_id": goal_id,
-            "assignee_id": str(emp["_id"]),
-            "assignee_email": emp.get("email"),
-            "department": department,
-            "due_date": request.due_date,
-            "organization_id": org_id,
-            "created_by": (request.context.user_email if request.context else None),
-            "source": "assistant_delegation",
-            "created_at": now,
-            "updated_at": now,
-        }
+        task_doc = _task_doc()
         task_result = db.tasks.insert_one(task_doc)
         task_id = str(task_result.inserted_id)
         task_doc["_id"] = task_id
+
+    def _sub_doc(st: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "title": (st.get("title") or "").strip() or "Sub-task",
+            "description": st.get("description", ""),
+            "priority": st.get("priority", "medium"),
+            "status": "pending",
+            "goal_id": goal_id,
+            "parent_task_id": task_id,
+            "assignee_id": assignee_ids,
+            "assignee_email": assignee_emails,
+            "assignee_name": assignee_names,
+            "department": department,
+            "due_date": request.due_date,
+            "organization_id": org_id,
+            "source": "assistant_delegation_subtask",
+            "created_at": now,
+            "updated_at": now,
+        }
 
     # 3) Sub-tasks: insert the user-confirmed selection; otherwise keep the
     #    legacy auto-generate path (used by the guided delegate flow).
     sub_tasks: list[dict[str, Any]] = []
     if confirmed:
         for st in confirmed[:8]:
-            sub_doc = {
-                "title": (st.get("title") or "").strip() or "Sub-task",
-                "description": st.get("description", ""),
-                "priority": st.get("priority", "medium"),
-                "status": "pending",
-                "goal_id": goal_id,
-                "parent_task_id": task_id,
-                "assignee_id": str(emp["_id"]),
-                "assignee_email": emp.get("email"),
-                "department": department,
-                "due_date": request.due_date,
-                "organization_id": org_id,
-                "source": "assistant_delegation_subtask",
-                "created_at": now,
-                "updated_at": now,
-            }
+            sub_doc = _sub_doc(st)
             sr = db.tasks.insert_one(sub_doc)
             sub_doc["_id"] = str(sr.inserted_id)
             sub_tasks.append(sub_doc)
@@ -623,37 +770,24 @@ async def delegate_task(request: DelegateRequest):
                 count=max(1, min(request.task_count, 8)),
             )
             for st in (generated or [])[: request.task_count]:
-                sub_doc = {
-                    "title": st.get("title", "Sub-task"),
-                    "description": st.get("description", ""),
-                    "priority": st.get("priority", "medium"),
-                    "status": "pending",
-                    "goal_id": goal_id,
-                    "parent_task_id": task_id,
-                    "assignee_id": str(emp["_id"]),
-                    "assignee_email": emp.get("email"),
-                    "department": department,
-                    "due_date": request.due_date,
-                    "organization_id": org_id,
-                    "source": "assistant_delegation_subtask",
-                    "created_at": now,
-                    "updated_at": now,
-                }
+                sub_doc = _sub_doc(st)
                 sr = db.tasks.insert_one(sub_doc)
                 sub_doc["_id"] = str(sr.inserted_id)
                 sub_tasks.append(sub_doc)
         except Exception as e:
             logger.warning("Sub-task generation failed in delegate: %s", e)
 
-    # 4) Provider ToDo sync
+    # 4) Provider ToDo sync (sync per assignee email)
     try:
         from .tasks import sync_task_to_provider
         if task_doc:
-            zoho_task = {**task_doc, "assignee_id": emp.get("email")}
-            asyncio.create_task(sync_task_to_provider(db, zoho_task, org_id))
+            for a in assignees:
+                zoho_task = {**task_doc, "assignee_id": a.get("email")}
+                asyncio.create_task(sync_task_to_provider(db, zoho_task, org_id))
         for st in sub_tasks:
-            st_zoho = {**st, "assignee_id": emp.get("email")}
-            asyncio.create_task(sync_task_to_provider(db, st_zoho, org_id))
+            for a in assignees:
+                st_zoho = {**st, "assignee_id": a.get("email")}
+                asyncio.create_task(sync_task_to_provider(db, st_zoho, org_id))
     except Exception as e:
         logger.warning("Provider sync failed in delegate: %s", e)
 
@@ -668,37 +802,40 @@ async def delegate_task(request: DelegateRequest):
             asyncio.create_task(ws_manager.broadcast_to_organization(
                 {"type": "task_created", "data": task_doc}, org_id
             ))
-            if emp.get("email"):
-                asyncio.create_task(ws_manager.send_personal_message(
-                    {"type": "task_assigned", "data": task_doc}, emp["email"]
-                ))
+            for a in assignees:
+                if a.get("email"):
+                    asyncio.create_task(ws_manager.send_personal_message(
+                        {"type": "task_assigned", "data": task_doc}, a["email"]
+                    ))
     except Exception as e:
         logger.warning("WebSocket broadcast failed in delegate: %s", e)
 
     try:
-        # In-app + email notification for the assignee
-        assignee_id = str(emp["_id"])
-        if goal_doc:
-            asyncio.create_task(create_notification(
-                user_id=assignee_id, org_id=org_id, type="goal_assigned",
-                title="New Goal Assigned", message=f"Goal assigned: {title}",
-                link=f"/goals/{goal_id}",
-                actor_id=user_id, email=emp.get("email"),
-            ))
-        if task_doc:
-            asyncio.create_task(create_notification(
-                user_id=assignee_id, org_id=org_id, type="task_assigned",
-                title="New Task Assigned", message=f"You have been assigned: {title}",
-                link=f"/tasks/{task_id}",
-                actor_id=user_id, email=emp.get("email"),
-            ))
+        # In-app + email notification for each assignee
+        for a in assignees:
+            assignee_id = str(a["_id"])
+            if goal_doc:
+                asyncio.create_task(create_notification(
+                    user_id=assignee_id, org_id=org_id, type="goal_assigned",
+                    title="New Goal Assigned", message=f"Goal assigned: {title}",
+                    link=f"/goals/{goal_id}",
+                    actor_id=user_id, email=a.get("email"),
+                ))
+            if task_doc:
+                asyncio.create_task(create_notification(
+                    user_id=assignee_id, org_id=org_id, type="task_assigned",
+                    title="New Task Assigned", message=f"You have been assigned: {title}",
+                    link=f"/tasks/{task_id}",
+                    actor_id=user_id, email=a.get("email"),
+                ))
         for st in sub_tasks:
-            asyncio.create_task(create_notification(
-                user_id=assignee_id, org_id=org_id, type="task_assigned",
-                title="New Sub-Task Assigned", message=f"You have been assigned: {st.get('title', 'Sub-task')}",
-                link=f"/tasks/{st.get('_id', task_id)}",
-                actor_id=user_id, email=emp.get("email"),
-            ))
+            for a in assignees:
+                asyncio.create_task(create_notification(
+                    user_id=str(a["_id"]), org_id=org_id, type="task_assigned",
+                    title="New Sub-Task Assigned", message=f"You have been assigned: {st.get('title', 'Sub-task')}",
+                    link=f"/tasks/{st.get('_id', task_id)}",
+                    actor_id=user_id, email=a.get("email"),
+                ))
     except Exception as e:
         logger.warning("Notification delivery failed in delegate: %s", e)
 
@@ -708,13 +845,8 @@ async def delegate_task(request: DelegateRequest):
         "goal": goal_doc,
         "task": task_doc,
         "sub_tasks": sub_tasks,
-        "assignee": {
-            "id": str(emp["_id"]),
-            "name": emp.get("full_name") or emp.get("email"),
-            "email": emp.get("email"),
-            "role": emp.get("role"),
-            "department": emp.get("department"),
-        },
+        "assignees": [_employee_assignee_spec(a) for a in assignees],
+        "assignee": _employee_assignee_spec(assignees[0]),
     }
 
 
@@ -724,19 +856,33 @@ async def _build_delegate_preview(parsed: dict, db, org_id: str | None):
     Returns (delegate_params, generated_sub_tasks, error) where error is a
     user-facing message string when we can't proceed, else None.
     """
-    assignee_name = (parsed.get("assignee_name") or "").strip()
+    raw_names = parsed.get("assignee_name") or ""
     title = (parsed.get("title") or "").strip()
-    if not title or not assignee_name:
+    if not title or not raw_names:
         return None, [], "I need a bit more detail — who should I assign this to, and what's the task?"
 
     item_type = (parsed.get("item_type") or "task").strip().lower()
     if item_type not in ("task", "goal", "both"):
         item_type = "task"
 
-    emp = _resolve_assignee(db, org_id, parsed.get("assignee_id"), assignee_name) if org_id else None
-    if not emp:
+    assignees: list[dict[str, Any]] = []
+    unresolved: list[str] = []
+    if org_id:
+        assignees, unresolved = _resolve_assignees(
+            db, org_id,
+            assignee_id=parsed.get("assignee_id"),
+            assignee_name=raw_names,
+            assignee_email=parsed.get("assignee_email"),
+        )
+    if unresolved:
         return None, [], (
-            f"Couldn't find '{assignee_name}' in your team. "
+            f"Couldn't find **{', '.join(unresolved)}** in your team. "
+            "Add them to the org first, then try again."
+        )
+    if not assignees:
+        shown = str(raw_names if isinstance(raw_names, str) else ", ".join(raw_names))
+        return None, [], (
+            f"Couldn't find '{shown}' in your team. "
             "Add them to the org first, then try again."
         )
 
@@ -760,11 +906,15 @@ async def _build_delegate_preview(parsed: dict, db, org_id: str | None):
     delegate_params = {
         "title": title,
         "description": parsed.get("description"),
-        "assignee_id": str(emp["_id"]),
-        "assignee_name": emp.get("full_name") or emp.get("email"),
+        "assignee_id": [str(a["_id"]) for a in assignees],
+        "assignee_name": ", ".join(
+            (a.get("full_name") or a.get("name") or a.get("email") or "") for a in assignees
+        ),
+        "assignee_email": [a.get("email") for a in assignees if a.get("email")],
+        "assignees": [_employee_assignee_spec(a) for a in assignees],
         "priority": parsed.get("priority", "medium"),
         "item_type": item_type,
-        "department": emp.get("department"),
+        "department": assignees[0].get("department"),
     }
     return delegate_params, generated_sub_tasks, None
 
@@ -849,17 +999,195 @@ def resolve_mentions(text: str, db, org_id: str) -> list[str]:
     return list(set(resolved))
 
 
+def _member_calendar_settings(db, org_id: str, email: str) -> tuple[str, str, str]:
+    """Return (timezone, working_hours_start, working_hours_end) for a member."""
+    m = db.org_chart_members.find_one({
+        "organization_id": org_id,
+        "email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+    })
+    tz_name = (m or {}).get("timezone") or "Asia/Kolkata"
+    wh_start = (m or {}).get("working_hours_start") or "09:00"
+    wh_end = (m or {}).get("working_hours_end") or "18:00"
+    return tz_name, wh_start, wh_end
+
+
+def _slot_iso(day_str: str, hhmm: str, tz_name: str) -> str:
+    from zoneinfo import ZoneInfo
+
+    h, m = hhmm.split(":")
+    aware = datetime(int(day_str[:4]), int(day_str[5:7]), int(day_str[8:10]), int(h), int(m), tzinfo=ZoneInfo(tz_name))
+    return aware.strftime("%Y%m%dT%H%M00%z")
+
+
+async def _collect_busy_blocks(db, org_id, ref_tz, day, attendee_emails, att_tokens) -> list:
+    """Busy intervals (aware datetimes in ref_tz) across all attendees on their own provider."""
+    from datetime import UTC, timedelta
+    from zoneinfo import ZoneInfo
+
+    from ..core.google import GoogleCalendar
+    from ..core.zoho import ZohoCalendar
+
+    busy: list = []
+    for email in attendee_emails:
+        tok = att_tokens.get(email)
+        if not tok:
+            continue
+        provider, token = tok
+        att_tz_name = _member_calendar_settings(db, org_id, email)[0]
+        att_tz = ZoneInfo(att_tz_name)
+        day_start_local = datetime(day.year, day.month, day.day, 0, 0, tzinfo=att_tz)
+        day_end_local = day_start_local + timedelta(days=1)
+        try:
+            if provider == "google":
+                blocks = await GoogleCalendar.get_freebusy(
+                    token,
+                    [email],
+                    day_start_local.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    day_end_local.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                )
+                for b in blocks:
+                    s, e = b.get("start", ""), b.get("end", "")
+                    if not s or not e:
+                        continue
+                    try:
+                        s_dt = datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(ref_tz)
+                        e_dt = datetime.fromisoformat(e.replace("Z", "+00:00")).astimezone(ref_tz)
+                        busy.append((s_dt, e_dt))
+                    except Exception:
+                        pass
+            else:
+                blocks = await ZohoCalendar.check_freebusy(
+                    token,
+                    email,
+                    day_start_local.strftime("%Y%m%dT%H%M%S"),
+                    day_end_local.strftime("%Y%m%dT%H%M%S"),
+                )
+                for b in blocks:
+                    fb_s, fb_e = b.get("startTime", ""), b.get("endTime", "")
+                    if not fb_s or not fb_e:
+                        continue
+                    try:
+                        s_dt = datetime.strptime(fb_s.replace("T", ""), "%Y%m%d%H%M%S").replace(tzinfo=att_tz).astimezone(ref_tz)
+                        e_dt = datetime.strptime(fb_e.replace("T", ""), "%Y%m%d%H%M%S").replace(tzinfo=att_tz).astimezone(ref_tz)
+                        busy.append((s_dt, e_dt))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+    return busy
+
+
+def _free_slots(window, duration: int, busy: list) -> list:
+    from datetime import timedelta
+
+    slots = []
+    cur, end = window
+    while cur + timedelta(minutes=duration) <= end:
+        slot_end = cur + timedelta(minutes=duration)
+        conflict = False
+        for bs, be in busy:
+            if bs < slot_end and be > cur:
+                conflict = True
+                break
+        if not conflict:
+            slots.append({
+                "date": cur.strftime("%Y-%m-%d"),
+                "start": cur.strftime("%H:%M"),
+                "end": slot_end.strftime("%H:%M"),
+            })
+        cur += timedelta(minutes=30)
+    return slots
+
+
+async def _book_provider_event(
+    db, org_id, organizer_email, organizer_token, is_google, ref_tz_name,
+    slot, title, description, attendee_emails, att_tokens,
+) -> dict:
+    """Create the organizer's event (with invites) + mirror events on each attendee's own calendar."""
+    from ..core.google import GoogleCalendar
+    from ..core.zoho import ZohoCalendar
+
+    day_str = slot["date"]
+    g_start = f"{day_str}T{slot['start']}:00"
+    g_end = f"{day_str}T{slot['end']}:00"
+    iso_start = _slot_iso(day_str, slot["start"], ref_tz_name)
+    iso_end = _slot_iso(day_str, slot["end"], ref_tz_name)
+    attendees = [{"email": e} for e in attendee_emails]
+    event_ids: dict = {}
+
+    if is_google:
+        cal = await GoogleCalendar.get_primary_calendar_id(organizer_token)
+        if cal:
+            eid = await GoogleCalendar.create_event(
+                user_token=organizer_token, calendar_id=cal, title=title,
+                description=description, start_dt=g_start, end_dt=g_end,
+                timezone=ref_tz_name, attendees=attendees,
+            )
+            if eid:
+                event_ids["google"] = eid
+    else:
+        cal = await ZohoCalendar.get_default_calendar_uid(organizer_token)
+        if cal:
+            eid = await ZohoCalendar.create_event(
+                user_token=organizer_token, calendar_uid=cal, title=title,
+                description=description, start_dt=iso_start, end_dt=iso_end,
+                timezone=ref_tz_name, attendees=attendees,
+            )
+            if eid:
+                event_ids["zoho"] = eid
+
+    for email in attendee_emails:
+        if email == organizer_email:
+            continue
+        tok = att_tokens.get(email)
+        if not tok:
+            continue
+        prov, token = tok
+        try:
+            if prov == "google":
+                cal = await GoogleCalendar.get_primary_calendar_id(token)
+                if cal:
+                    eid = await GoogleCalendar.create_event(
+                        user_token=token, calendar_id=cal, title=title,
+                        description=description, start_dt=g_start, end_dt=g_end,
+                        timezone=ref_tz_name, attendees=[],
+                    )
+                    if eid:
+                        event_ids[email] = eid
+            else:
+                cal = await ZohoCalendar.get_default_calendar_uid(token)
+                if cal:
+                    eid = await ZohoCalendar.create_event(
+                        user_token=token, calendar_uid=cal, title=title,
+                        description=description, start_dt=iso_start, end_dt=iso_end,
+                        timezone=ref_tz_name, attendees=[],
+                    )
+                    if eid:
+                        event_ids[email] = eid
+        except Exception:
+            pass
+
+    return event_ids
+
+
 async def handle_meeting_booking(booking_params: dict, db, org_id: str, user_id: str) -> dict[str, Any]:
-    """Handle meeting booking: resolve attendees, check freebusy, book."""
+    """Handle meeting booking: resolve attendees, check freebusy (per-attendee provider), book."""
     import re as _re
-    from datetime import datetime, timedelta
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
 
     attendee_names = booking_params.get("attendee_names", [])
-    date_str = booking_params.get("date", "")
+    date_str = booking_params.get("date", "") or ""
+    date_start = booking_params.get("date_start", "") or ""
+    date_end = booking_params.get("date_end", "") or ""
     duration = int(booking_params.get("duration_minutes", 60))
     title = booking_params.get("title", "Meeting")
     description = booking_params.get("description", "")
     preferred_time = booking_params.get("preferred_time", "")
+    auto = bool(booking_params.get("auto", False))
+    recurrence = booking_params.get("recurrence") or {}
+    remind_minutes = int(booking_params.get("remind_before_minutes", 30))
+    series_id = booking_params.get("series_id") or str(uuid.uuid4())
 
     # Resolve names to emails
     attendee_emails = []
@@ -879,27 +1207,29 @@ async def handle_meeting_booking(booking_params: dict, db, org_id: str, user_id:
     if not attendee_emails:
         return {"error": "Could not find any attendees in your team. Make sure they are added to the org chart."}
 
-    from ..core.providers import get_provider_token
-    from ..core.zoho import ZohoCalendar, ZohoOAuth
+    from ..core.providers import get_provider_token, resolve_token_for_email
+    from ..core.zoho import ZohoOAuth
 
+    organizer_email = (user_id or "").lower()
     provider_token = await get_provider_token(db, user_id)
+    if not provider_token and organizer_email:
+        provider_token = await resolve_token_for_email(db, organizer_email, org_id)
     if not provider_token:
-        # Fall back to org-level token (either provider)
         if org_id:
-            gdoc = db.google_tokens.find_one({"org_id": str(org_id)}) if db else None
+            gdoc = db.google_tokens.find_one({"org_id": str(org_id)}) if db is not None else None
             if gdoc and gdoc.get("user_id"):
                 from ..core.google import GoogleOAuth
                 gtoken = await GoogleOAuth(db).get_valid_token(gdoc["user_id"])
                 if gtoken:
                     provider_token = ("google", gtoken)
             if not provider_token:
-                zdoc = db.zoho_tokens.find_one({"org_id": str(org_id)}) if db else None
+                zdoc = db.zoho_tokens.find_one({"org_id": str(org_id)}) if db is not None else None
                 if zdoc and zdoc.get("user_id"):
                     ztoken = await ZohoOAuth(db).get_valid_token(zdoc["user_id"])
                     if ztoken:
                         provider_token = ("zoho", ztoken)
         if not provider_token:
-            zdoc = db.zoho_tokens.find_one({}, sort=[("connected_at", -1)]) if db else None
+            zdoc = db.zoho_tokens.find_one({}, sort=[("connected_at", -1)]) if db is not None else None
             if zdoc and zdoc.get("user_id"):
                 ztoken = await ZohoOAuth(db).get_valid_token(zdoc["user_id"])
                 if ztoken:
@@ -908,261 +1238,366 @@ async def handle_meeting_booking(booking_params: dict, db, org_id: str, user_id:
     if not provider_token:
         return {"error": "No calendar account connected. Please connect Zoho or Google in Settings first."}
 
+
     provider, organizer_token = provider_token
     is_google = provider == "google"
+    ref_tz_name = _member_calendar_settings(db, org_id, organizer_email)[0]
+    ref_tz = ZoneInfo(ref_tz_name)
 
-    parsed_date = None
-    if date_str:
-        try:
-            parsed_date = datetime.strptime(date_str, "%Y-%m-%d")
-        except ValueError:
-            try:
-                parsed_date = datetime.strptime(date_str, "%d/%m/%Y")
-            except ValueError:
-                parsed_date = datetime.now()
-    if not parsed_date:
-        parsed_date = datetime.now()
-
-    date_key = parsed_date.strftime("%Y-%m-%d")
-    start_str = parsed_date.strftime("%Y%m%dT000000")
-    end_str = parsed_date.strftime("%Y%m%dT235959")
-
-    # Gather busy blocks for all attendees
-    all_busy = []
+    # Resolve each attendee's own provider token
+    att_tokens: dict = {}
     for email in attendee_emails:
-        if is_google:
-            from ..core.google import GoogleCalendar
-            from ..core.providers import resolve_token_for_email
+        tok = await resolve_token_for_email(db, email, org_id)
+        if tok:
+            att_tokens[email] = tok
 
-            att_provider_token = await resolve_token_for_email(db, email, org_id)
-            if not att_provider_token or att_provider_token[0] != "google":
+    # Determine the days to search
+    def _iter_days():
+        if date_start and date_end:
+            try:
+                d = datetime.strptime(date_start, "%Y-%m-%d").date()
+                end = datetime.strptime(date_end, "%Y-%m-%d").date()
+            except ValueError:
+                d = end = datetime.now().date()
+            while d <= end:
+                yield d
+                d += timedelta(days=1)
+            return
+        d = None
+        if date_str:
+            try:
+                d = datetime.strptime(date_str, "%Y-%m-%d").date()
+            except ValueError:
+                try:
+                    d = datetime.strptime(date_str, "%d/%m/%Y").date()
+                except ValueError:
+                    d = None
+        yield d or datetime.now().date()
+
+    all_slots: list = []
+    for day in _iter_days():
+        # Intersection of working windows across organizer + attendees
+        window_start = None
+        window_end = None
+        for email in [organizer_email] + attendee_emails:
+            if not email:
                 continue
-            att_token = att_provider_token[1]
-            tz_start = f"{parsed_date.strftime('%Y-%m-%d')}T00:00:00Z"
-            tz_end = f"{parsed_date.strftime('%Y-%m-%d')}T23:59:59Z"
-            blocks = await GoogleCalendar.get_freebusy(att_token, [email], tz_start, tz_end)
-            for b in blocks:
-                s = b.get("start", "")
-                e = b.get("end", "")
-                if s and e and len(s) >= 16:
-                    try:
-                        all_busy.append({"start": s[11:16], "end": e[11:16]})
-                    except Exception:
-                        pass
+            tz_name, ws, we = _member_calendar_settings(db, org_id, email)
+            att_tz = ZoneInfo(tz_name)
+            try:
+                wh, wm = (int(x) for x in ws.split(":"))
+                eh, em = (int(x) for x in we.split(":"))
+            except Exception:
+                wh, wm, eh, em = 9, 0, 18, 0
+            s_local = datetime(day.year, day.month, day.day, wh, wm, tzinfo=att_tz).astimezone(ref_tz)
+            e_local = datetime(day.year, day.month, day.day, eh, em, tzinfo=att_tz).astimezone(ref_tz)
+            if e_local <= s_local:
+                e_local += timedelta(days=1)
+            window_start = s_local if window_start is None else max(window_start, s_local)
+            window_end = e_local if window_end is None else min(window_end, e_local)
+
+        if window_start is None or window_end is None or window_start >= window_end:
             continue
 
-        blocks = await ZohoCalendar.check_freebusy(organizer_token, email, start_str, end_str)
-        for b in blocks:
-            fb_start = b.get("startTime", "")
-            fb_end = b.get("endTime", "")
-            if fb_start and fb_end:
-                try:
-                    s = datetime.strptime(fb_start.replace("T", ""), "%Y%m%d%H%M%S")
-                    e = datetime.strptime(fb_end.replace("T", ""), "%Y%m%d%H%M%S")
-                    all_busy.append({"start": s.strftime("%H:%M"), "end": e.strftime("%H:%M")})
-                except Exception:
-                    pass
+        busy = await _collect_busy_blocks(db, org_id, ref_tz, day, attendee_emails, att_tokens)
+        all_slots.extend(_free_slots((window_start, window_end), duration, busy))
 
-    # Compute available slots (9 AM – 6 PM workday)
-    available = []
-    work_start = 9
-    work_end = 18
-    current = parsed_date.replace(hour=work_start, minute=0, second=0)
-    end_of_day = parsed_date.replace(hour=work_end, minute=0, second=0)
-
-    while current + timedelta(minutes=duration) <= end_of_day:
-        slot_end = current + timedelta(minutes=duration)
-        slot_start_str = current.strftime("%H:%M")
-        slot_end_str = slot_end.strftime("%H:%M")
-
-        conflict = False
-        for busy in all_busy:
-            if busy["start"] < slot_end_str and busy["end"] > slot_start_str:
-                conflict = True
-                break
-
-        if not conflict:
-            available.append({"start": slot_start_str, "end": slot_end_str})
-
-        current += timedelta(minutes=30)
-
-    def slot_to_iso(t_str: str) -> str:
-        h, m = t_str.split(":")
-        return f"{parsed_date.strftime('%Y%m%d')}T{h.zfill(2)}{m.zfill(2)}00+0530"
-
-    # If preferred_time specified, try to book that slot
-    if preferred_time:
-        match = _re.match(r"(\d{1,2})(?::(\d{2}))?", preferred_time.strip())
-        if match:
-            pref_h = int(match.group(1))
-            pref_m = int(match.group(2) or 0)
-            slot_start_str = f"{pref_h:02d}:{pref_m:02d}"
-            slot_end_dt = parsed_date.replace(hour=pref_h, minute=pref_m) + timedelta(minutes=duration)
-            slot_end_str = slot_end_dt.strftime("%H:%M")
-
-            conflict = False
-            for busy in all_busy:
-                if busy["start"] < slot_end_str and busy["end"] > slot_start_str:
-                    conflict = True
-                    break
-
-            if not conflict:
-                if is_google:
-                    from ..core.google import GoogleCalendar
-                    from ..core.providers import resolve_token_for_email
-
-                    cal_uid = await GoogleCalendar.get_primary_calendar_id(organizer_token)
-                    tz = "Asia/Kolkata"
-                    g_start = f"{parsed_date.strftime('%Y-%m-%d')}T{slot_start_str}:00"
-                    g_end = f"{parsed_date.strftime('%Y-%m-%d')}T{slot_end_str}:00"
-                    event_id = await GoogleCalendar.create_event(
-                        user_token=organizer_token,
-                        calendar_id=cal_uid,
-                        title=title,
-                        description=description,
-                        start_dt=g_start,
-                        end_dt=g_end,
-                        timezone=tz,
-                        attendees=[{"email": e} for e in attendee_emails],
-                    )
-                    for email in attendee_emails:
-                        att_provider_token = await resolve_token_for_email(db, email, org_id)
-                        if att_provider_token and att_provider_token[0] == "google":
-                            att_cal = await GoogleCalendar.get_primary_calendar_id(att_provider_token[1])
-                            if att_cal:
-                                await GoogleCalendar.create_event(
-                                    user_token=att_provider_token[1],
-                                    calendar_id=att_cal,
-                                    title=title,
-                                    description=description,
-                                    start_dt=g_start,
-                                    end_dt=g_end,
-                                    timezone=tz,
-                                    attendees=[{"email": e} for e in attendee_emails],
-                                )
-                else:
-                    cal_uid = await ZohoCalendar.get_default_calendar_uid(organizer_token)
-                    event_id = None
-                    if cal_uid:
-                        event_id = await ZohoCalendar.create_event(
-                            user_token=organizer_token,
-                            calendar_uid=cal_uid,
-                            title=title,
-                            description=description,
-                            start_dt=slot_to_iso(slot_start_str),
-                            end_dt=slot_to_iso(slot_end_str),
-                            timezone="Asia/Kolkata",
-                            attendees=[{"email": e} for e in attendee_emails],
-                        )
-                if event_id:
-                    try:
-                        from ..core.notification_service import create_and_deliver
-                        for email in attendee_emails:
-                            asyncio.create_task(create_and_deliver(
-                                user_id=email, org_id=org_id,
-                                type="meeting_booked",
-                                title=f"Meeting: {title}",
-                                message=f"Booked {date_key} at {slot_start_str}",
-                            ))
-                    except Exception:
-                        pass
-                    return {
-                        "booked": True,
-                        "title": title,
-                        "start": slot_to_iso(slot_start_str),
-                        "end": slot_to_iso(slot_end_str),
-                        "attendees": attendee_emails,
-                        "slot": {"start": slot_start_str, "end": slot_end_str},
-                    }
-
+    if not all_slots:
+        scope = f"{date_start} to {date_end}" if (date_start and date_end) else (date_str or "that date")
         return {
             "booked": False,
-            "message": f"The time {preferred_time} is busy on {date_key}. Here are available slots:",
-            "available_slots": available,
-        }
-
-    # No preferred time — check availability
-    if not available:
-        return {
-            "booked": False,
-            "message": f"No available slots on {date_key} for a {duration}-minute meeting. Try another date.",
+            "message": f"No available slots {('between ' + scope) if (date_start and date_end) else ('on ' + (date_str or 'that date'))} for a {duration}-minute meeting. Try another date.",
             "available_slots": [],
         }
 
-    if len(available) == 1:
-        slot = available[0]
-        if is_google:
-            from ..core.google import GoogleCalendar
-            from ..core.providers import resolve_token_for_email
-
-            cal_uid = await GoogleCalendar.get_primary_calendar_id(organizer_token)
-            tz = "Asia/Kolkata"
-            g_start = f"{parsed_date.strftime('%Y-%m-%d')}T{slot['start']}:00"
-            g_end = f"{parsed_date.strftime('%Y-%m-%d')}T{slot['end']}:00"
-            event_id = await GoogleCalendar.create_event(
-                user_token=organizer_token,
-                calendar_id=cal_uid,
-                title=title,
-                description=description,
-                start_dt=g_start,
-                end_dt=g_end,
-                timezone=tz,
-                attendees=[{"email": e} for e in attendee_emails],
-            )
-            for email in attendee_emails:
-                att_provider_token = await resolve_token_for_email(db, email, org_id)
-                if att_provider_token and att_provider_token[0] == "google":
-                    att_cal = await GoogleCalendar.get_primary_calendar_id(att_provider_token[1])
-                    if att_cal:
-                        await GoogleCalendar.create_event(
-                            user_token=att_provider_token[1],
-                            calendar_id=att_cal,
-                            title=title,
-                            description=description,
-                            start_dt=g_start,
-                            end_dt=g_end,
-                            timezone=tz,
-                            attendees=[{"email": e} for e in attendee_emails],
-                        )
-        else:
-            cal_uid = await ZohoCalendar.get_default_calendar_uid(organizer_token)
-            event_id = None
-            if cal_uid:
-                event_id = await ZohoCalendar.create_event(
-                    user_token=organizer_token,
-                    calendar_uid=cal_uid,
-                    title=title,
-                    description=description,
-                    start_dt=slot_to_iso(slot["start"]),
-                    end_dt=slot_to_iso(slot["end"]),
-                    timezone="Asia/Kolkata",
-                    attendees=[{"email": e} for e in attendee_emails],
-                )
-        if event_id:
-            try:
-                from ..core.notification_service import create_and_deliver
-                for email in attendee_emails:
-                    asyncio.create_task(create_and_deliver(
-                        user_id=email, org_id=org_id,
-                        type="meeting_booked",
-                        title=f"Meeting: {title}",
-                        message=f"Booked {date_key} at {slot['start']}",
-                    ))
-            except Exception:
-                pass
+    # Decide which slot to book
+    chosen = None
+    if preferred_time:
+        match = _re.match(r"(\d{1,2})(?::(\d{2}))?", preferred_time.strip())
+        if match:
+            pref = f"{int(match.group(1)):02d}:{int(match.group(2) or 0):02d}"
+            for slot in all_slots:
+                if slot["start"] == pref:
+                    chosen = slot
+                    break
+        if not chosen:
             return {
-                "booked": True,
-                "title": title,
-                "start": slot_to_iso(slot["start"]),
-                "end": slot_to_iso(slot["end"]),
-                "attendees": attendee_emails,
-                "slot": slot,
+                "booked": False,
+                "message": f"The time {preferred_time} is busy. Here are available slots:",
+                "available_slots": all_slots[:8],
             }
+    elif auto or len(all_slots) == 1:
+        chosen = all_slots[0]
+
+    if not chosen:
+        return {
+            "booked": False,
+            "message": f"Found {len(all_slots)} available slot(s):",
+            "available_slots": all_slots[:8],
+        }
+
+    # Build instances (recurring expands a bounded series)
+    instances = [chosen]
+    if recurrence and recurrence.get("frequency") and recurrence.get("count"):
+        freq = recurrence["frequency"]
+        count = max(1, int(recurrence.get("count", 8)))
+        freq_days = 7 if freq == "weekly" else 1 if freq == "daily" else 7
+        for i in range(1, count):
+            from datetime import date as _date
+            d = chosen["date"]
+            nd = _date(int(d[:4]), int(d[5:7]), int(d[8:10])) + timedelta(days=i * freq_days)
+            instances.append({
+                "date": nd.strftime("%Y-%m-%d"),
+                "start": chosen["start"],
+                "end": chosen["end"],
+            })
+
+    booked_records = []
+    for inst in instances:
+        event_ids = await _book_provider_event(
+            db, org_id, organizer_email, organizer_token, is_google, ref_tz_name,
+            inst, title, description, attendee_emails, att_tokens,
+        )
+        iso_start = _slot_iso(inst["date"], inst["start"], ref_tz_name)
+        iso_end = _slot_iso(inst["date"], inst["end"], ref_tz_name)
+        booked_records.append({
+            "start": iso_start,
+            "end": iso_end,
+            "slot": inst,
+            "event_ids": event_ids,
+        })
+        try:
+            meeting_doc = {
+                "organization_id": org_id,
+                "title": title,
+                "description": description,
+                "attendees": attendee_emails,
+                "created_by": organizer_email or None,
+                "status": "booked",
+                "mom_uploaded": False,
+                "reminder_sent": False,
+                "remind_before_minutes": remind_minutes,
+                "start_dt": iso_start,
+                "end_dt": iso_end,
+                "series_id": series_id,
+                "recurring": recurrence or None,
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+            }
+            if "google" in event_ids:
+                meeting_doc["google_event_id"] = event_ids["google"]
+            if "zoho" in event_ids:
+                meeting_doc["zoho_event_id"] = event_ids["zoho"]
+            db.meetings.insert_one(meeting_doc)
+        except Exception as e:
+            logger.warning(f"Failed to persist meeting record: {e}")
+
+    try:
+        from ..core.notification_service import create_and_deliver
+        for email in attendee_emails:
+            asyncio.create_task(create_and_deliver(
+                user_id=email, org_id=org_id,
+                type="meeting_booked",
+                title=f"Meeting: {title}",
+                message=f"Booked {instances[0]['date']} at {instances[0]['start']}",
+            ))
+    except Exception:
+        pass
+
+    first = booked_records[0]
+    return {
+        "booked": True,
+        "title": title,
+        "start": first["start"],
+        "end": first["end"],
+        "attendees": attendee_emails,
+        "slot": first["slot"],
+        "count": len(instances),
+        "series_id": series_id,
+        "message": f"Booked {len(instances)} occurrence(s)." if len(instances) > 1 else "Booked.",
+    }
+
+
+async def _find_meeting_by_title(db, org_id: str, title: str):
+    if not title:
+        return None
+    return db.meetings.find_one(
+        {
+            "organization_id": org_id,
+            "status": {"$ne": "cancelled"},
+            "title": {"$regex": re.escape(title), "$options": "i"},
+        },
+        sort=[("created_at", -1)],
+    )
+
+
+async def _cancel_meeting(db, org_id: str, meeting_meta: dict) -> dict[str, Any]:
+    """Cancel a booked meeting: best-effort delete external events, mark record cancelled."""
+    title = (meeting_meta.get("title") or "").strip()
+    meeting_id = meeting_meta.get("meeting_id")
+    meeting = None
+    if meeting_id and ObjectId.is_valid(str(meeting_id)):
+        meeting = db.meetings.find_one({"_id": ObjectId(str(meeting_id)), "organization_id": org_id})
+    if not meeting and title:
+        meeting = await _find_meeting_by_title(db, org_id, title)
+    if not meeting:
+        return {"error": "I couldn't find that meeting to cancel. Tell me the meeting title."}
+
+    title = meeting.get("title", "Meeting")
+    from ..core.google import GoogleCalendar
+    from ..core.providers import get_provider_token
+    from ..core.zoho import ZohoCalendar, ZohoOAuth
+
+    provider_token = await get_provider_token(db, meeting.get("created_by") or "")
+    if not provider_token and org_id:
+        gdoc = db.google_tokens.find_one({"org_id": str(org_id)}) if db is not None else None
+        if gdoc and gdoc.get("user_id"):
+            from ..core.google import GoogleOAuth
+            gtoken = await GoogleOAuth(db).get_valid_token(gdoc["user_id"])
+            if gtoken:
+                provider_token = ("google", gtoken)
+        if not provider_token:
+            zdoc = db.zoho_tokens.find_one({"org_id": str(org_id)}) if db is not None else None
+            if zdoc and zdoc.get("user_id"):
+                ztoken = await ZohoOAuth(db).get_valid_token(zdoc["user_id"])
+                if ztoken:
+                    provider_token = ("zoho", ztoken)
+
+    event_ids = meeting.get("event_ids") or {}
+    if provider_token:
+        provider, token = provider_token
+        try:
+            if provider == "google":
+                cal = await GoogleCalendar.get_primary_calendar_id(token)
+                if cal:
+                    gid = meeting.get("google_event_id")
+                    if gid:
+                        await GoogleCalendar.delete_event(token, cal, gid)
+            else:
+                cal = await ZohoCalendar.get_default_calendar_uid(token)
+                if cal:
+                    zid = meeting.get("zoho_event_id")
+                    if zid:
+                        await ZohoCalendar.delete_event(token, cal, zid)
+        except Exception:
+            pass
+
+    # Best-effort delete attendee mirror events
+    from ..core.providers import resolve_token_for_email
+    for email, eid in event_ids.items():
+        try:
+            tok = await resolve_token_for_email(db, email, org_id)
+            if not tok:
+                continue
+            prov, t = tok
+            if prov == "google":
+                cal = await GoogleCalendar.get_primary_calendar_id(t)
+                if cal:
+                    await GoogleCalendar.delete_event(t, cal, eid)
+            else:
+                cal = await ZohoCalendar.get_default_calendar_uid(t)
+                if cal:
+                    await ZohoCalendar.delete_event(t, cal, eid)
+        except Exception:
+            pass
+
+    now = datetime.utcnow()
+    db.meetings.update_one(
+        {"_id": meeting["_id"]},
+        {"$set": {"status": "cancelled", "cancelled_at": now, "updated_at": now}},
+    )
+
+    try:
+        from ..core.notification_service import create_and_deliver
+        for att in meeting.get("attendees") or []:
+            asyncio.create_task(create_and_deliver(
+                user_id=att, org_id=org_id,
+                type="meeting_cancelled",
+                title=f"Meeting cancelled: {title}",
+                message=f"The meeting '{title}' has been cancelled.",
+            ))
+    except Exception:
+        pass
+
+    return {"title": title, "meeting_id": str(meeting["_id"])}
+
+
+def _parse_time_to_hhmm(text: str) -> str | None:
+    """Return HH:MM for a bare-time message like '1', '1:00', '1pm', '3 PM', '13:00', or None."""
+    m = re.match(r"^\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*$", text or "", re.IGNORECASE)
+    if not m:
+        return None
+    h = int(m.group(1))
+    mi = int(m.group(2) or 0)
+    ap = (m.group(3) or "").lower()
+    if ap == "pm" and h < 12:
+        h += 12
+    if ap == "am" and h == 12:
+        h = 0
+    if h > 23 or mi > 59:
+        return None
+    return f"{h:02d}:{mi:02d}"
+
+
+async def _try_deterministic_booking(
+    text: str,
+    session_context: dict[str, Any],
+    db,
+    org_id: str | None,
+    organizer_email: str | None,
+) -> dict[str, Any] | None:
+    """Short-circuit a bare-time reply against a pending booking stored in session_context.
+
+    Returns a metadata-ready dict if booking was attempted, else None.
+    """
+    booking_time = _parse_time_to_hhmm(text)
+    if not booking_time or not org_id or db is None:
+        return None
+
+    raw = session_context.get("pending_booking") or ""
+    if not raw:
+        return None
+    try:
+        pending_bp = json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        return None
+    if not isinstance(pending_bp, dict) or not pending_bp.get("attendee_names"):
+        return None
+
+    bp = dict(pending_bp)
+    bp["preferred_time"] = booking_time
+    bp.pop("auto", None)
+    bp.pop("available_slots", None)
+    bp.pop("booking_result", None)
+
+    try:
+        result = await handle_meeting_booking(bp, db, org_id, organizer_email or "")
+    except Exception as e:
+        logger.warning(f"deterministic booking failed: {e}")
+        return {"type": "answer", "answer": f"I couldn't book that time: {e}"}
+
+    if result.get("error"):
+        return {"type": "answer", "answer": f"I couldn't book the meeting: {result['error']}"}
+
+    bp["attendee_emails"] = result.get("attendees", [])
+    bp["available_slots"] = result.get("available_slots")
+    bp["booking_result"] = result
+    bp["preferred_time"] = booking_time
+
+    if result.get("booked"):
+        slot = result.get("slot", {})
+        count = result.get("count", 1)
+        recurring_note = f" — {count} occurrences" if count and count > 1 else ""
+        answer = (
+            f"✅ Meeting **\"{result['title']}\"** booked on {slot.get('date', '')} at "
+            f"{slot.get('start', '')}{recurring_note} with {len(result.get('attendees', []))} attendee(s)."
+        )
+        return {"type": "answer", "answer": answer, "booking_params": bp}
 
     return {
-        "booked": False,
-        "message": f"Found {len(available)} available slots on {date_key}:",
-        "available_slots": available,
+        "type": "meeting_booking",
+        "answer": result.get("message", "Available slots:"),
+        "booking_params": bp,
     }
 
 
@@ -1437,6 +1872,15 @@ async def _build_ask_prompt(
     emp_block = ""
     if employees.get("count", 0) > 0:
         emp_block = f"Team: {employees['count']} people\n"
+    team_block = ""
+    if db is not None and org_id:
+        try:
+            team_members = _list_team_members(db, org_id) or []
+            if team_members:
+                lines = "\n".join(f"- {m['name']} ({m['email']})" if m.get("email") else f"- {m['name']}" for m in team_members)
+                team_block = f"Team members (use these EXACT names when assigning tasks):\n{lines}\n"
+        except Exception as e:
+            logger.warning("Team member listing failed in _build_ask_prompt: %s", e)
 
     ctx_block = ""
     if session_context:
@@ -1454,6 +1898,7 @@ async def _build_ask_prompt(
         f"{goals_block}"
         f"{tasks_block}"
         f"{emp_block}"
+        f"{team_block}"
         f"{ctx_block}"
         f"{insights_block}\n"
         f"Recent chat:\n{history_block}\n\n"
@@ -1769,6 +2214,16 @@ async def assistant_chat(request: ChatRequest, current_user = Depends(get_curren
             f"Team: {employees['count']} people across departments — {dept_summary}.\n\n"
         )
 
+    team_block = ""
+    if db is not None and org_id:
+        try:
+            team_members = _list_team_members(db, org_id) or []
+            if team_members:
+                lines = "\n".join(f"- {m['name']} ({m['email']})" if m.get("email") else f"- {m['name']}" for m in team_members)
+                team_block = f"Team members (use these EXACT names when assigning tasks):\n{lines}\n\n"
+        except Exception as e:
+            logger.warning("Team member listing failed in assistant_chat: %s", e)
+
     updates_block = ""
     updates = snap.get("team_updates") or []
     if updates:
@@ -1792,6 +2247,7 @@ async def assistant_chat(request: ChatRequest, current_user = Depends(get_curren
         f"{goals_block}"
         f"{tasks_block}"
         f"{emp_block}"
+        f"{team_block}"
         f"{updates_block}"
         f"{avail_block}"
         f"{missing_line}"
@@ -1911,7 +2367,7 @@ User: "assign the Q4 report to John"
 
 ## MEETING BOOKING
 
-When the user asks to book/schedule a meeting (e.g. "add meeting with @john next Tuesday", "schedule a call with @sarah", "book a meeting with team"), you must:
+When the user asks to book/schedule a meeting (e.g. "add meeting with @john next Tuesday", "schedule a call with @sarah", "book a meeting with team", "schedule a weekly sync", "reschedule the meeting to Thursday 3pm", "cancel the meeting"), you must:
 
 1. **Extract all available info from their message first.** If they gave you attendees, date, time, and duration all in one message, do NOT ask any clarifying questions — just book it. The `Current date` line at the top tells you today's date. Use it to resolve relative dates like "today", "tomorrow", "next Tuesday", "this Friday" into absolute YYYY-MM-DD.
 
@@ -1921,21 +2377,32 @@ When the user asks to book/schedule a meeting (e.g. "add meeting with @john next
    - what time / duration? (only if not given — e.g. if they said "9pm for 1hr", extract both)
    - what's the meeting title? (only if not given)
 
-3. Once ALL of the following are clear (from their original message or your questions), output a meeting_booking response:
+3. **Reschedule:** if the user asks to move an existing meeting, output {"type":"meeting_reschedule","meeting":{"title":"...","date":"YYYY-MM-DD","preferred_time":"HH:MM or empty"},"answer":"..."}. Identify the meeting from conversation history (title + who was attending). If the new date/time is given, resolve relative to Current date; leave preferred_time empty if "any time".
+
+4. **Cancel:** if the user asks to cancel/delete an existing meeting, output {"type":"meeting_cancel","meeting":{"title":"..."},"answer":"I'll cancel that meeting."}. Identify the meeting title from the message or conversation history.
+
+5. **Book:** otherwise output a meeting_booking response. Once ALL of the following are clear, include in `booking_params`:
    - `attendee_names` — list of full names or emails of attendees (resolve @mentions to names)
-   - `date` — the absolute calendar date in YYYY-MM-DD format. If they said "today", use the Current date from above. If "tomorrow", use the next day. If "next Tuesday", calculate it.
+   - `date` — the absolute calendar date in YYYY-MM-DD format (today/tomorrow/next Tuesday resolved from Current date). If they gave a RANGE (e.g. "sometime next week", "any day this week", "this month"), set `date` empty and instead set `date_start` + `date_end` (YYYY-MM-DD).
    - `duration_minutes` — numeric duration (15, 30, 60, 90, 120). Default 60 if unclear.
    - `title` — meeting title (default "Meeting" if unclear)
-   - `preferred_time` — the specific time if they mentioned one (e.g. "15:00", "10:30", or leave empty and we'll find available slots)
+   - `preferred_time` — the specific time if they mentioned one (e.g. "15:00", "10:30"); otherwise leave empty.
+   - `auto` — true ONLY if they didn't specify a time and clearly want you to pick (e.g. "any time", "whenever works", "book it for me"); system auto-picks the first free slot. For a range with no time, also set auto true.
+   - `recurrence` — if recurring, {"frequency":"weekly","count":8} (or "daily").
+   - `remind_before_minutes` — 30 by default; set to their request if they say e.g. "remind me 10 min before".
    - `description` — optional meeting agenda or context
 
-4. If they said "sometime" or didn't specify a time, leave preferred_time empty. The system will check availability and return options.
+6. CRITICAL: Never ask for the date if they already said "today". Never ask what "today" means. Use the Current date provided above.
 
-5. CRITICAL: Never ask for the date if they already said "today". Never ask what "today" means. Use the Current date provided above.
+7. **Bare-time follow-up:** If the user's message is ONLY a time (e.g. "1:00", "1pm", "3 PM", "13:00") and the recent chat shows you just asked for a meeting time, treat it as the answer — output a meeting_booking with `preferred_time` in HH:MM, reusing the attendees, title and date from the recent chat. NEVER ask another question in that case.
+
+8. **Clarifying questions must carry booking_params:** Whenever you ask a meeting clarifying question (e.g. "what time?", "who should attend?"), include a partial `booking_params` object at the top level of the SAME JSON envelope (alongside `type` and `question`) with whatever you have already gathered — e.g. {"type":"question","question":{...},"booking_params":{"attendee_names":["Krisha"],"title":"YB test project","date":"2026-08-24","duration_minutes":60}}. This lets the system resume booking once the user answers.
 
 ## MEETING BOOKING RESPONSE FORMAT
 
 {"type":"meeting_booking","booking_params":{"attendee_names":["John Smith","Sarah Jones"],"date":"2026-06-23","duration_minutes":60,"title":"Sprint Review","preferred_time":"15:00","description":"Weekly sprint sync"},"answer":"I found availability at 3 PM on Tuesday. Let me book it for you!"}
+
+Range + auto example: {"type":"meeting_booking","booking_params":{"attendee_names":["John Smith"],"date_start":"2026-06-22","date_end":"2026-06-26","duration_minutes":30,"title":"Check-in","auto":true},"answer":"I'll find the first free slot next week and book it."}
 
 ## RESPONSE FORMATS
 
@@ -1943,8 +2410,26 @@ For answers: {"type":"answer","answer":"your answer here (max 8 lines)","follow_
 
 For questions: {"type":"question","question":{"id":"q_xxx","field_id":"field_name","text":"one clear question","options":[{"value":"opt1","label":"Option 1"},...],"allow_custom":true},"answer":null}
 
+## STRATEGIC BRIEFING (RESPONSE TYPE: "briefing")
+
+Use this ONLY when the user's message is a long, multi-topic, strategic context-dump — they describe how the whole business runs in a single turn (sales flow, order pipeline, org structure and owners, operating cadence, targets, margins, concerns, and what they want to restructure). Think: a thinking-out-loud briefing about the entire operation, not one focused question and not one explicit delegation request.
+
+Response format (same JSON envelope as "answer", so keep field names identical):
+{"type":"briefing","answer":"the full structured briefing (may be LONG — no 8-line cap here; tables and code blocks welcome)","follow_up":"one short closing line","missing_data":{"doc_type":"...","reason":"..."},"suggestions":[{"label":"...","action":"..."}]}
+
+Rules for the "briefing" response:
+- If the user SAID they are attaching files (e.g. a funnel Excel, an implementation-process doc, an org-chart file, a presentation) but no such files appear in the "Uploaded documents" section above, say so openly up front and include a "missing_data" entry so the app asks them to upload. Then tell them what you can do once the files arrive.
+- Reflect their operating model back in an organized way: the flow (e.g. funnel → order booking → execution → invoicing → collection) with who owns each stage; the key problems with each lever; the org structure they described (use a code block for the chart); the operating cadence (weekly sales commitment, delivery review, collection tracking, monthly governance); and the numbers they gave.
+- Answer any embedded strategic question directly (e.g. "should I slow down?"), with a clear recommendation and why.
+- NEVER delegate, create tasks, or create goals from a briefing. It is context-setting, not an assignment. Do not output type "delegate".
+- Never invent numbers. Only use figures the user explicitly stated.
+- Flag obvious gaps they raised themselves (e.g. an ownerless function).
+- End with ONE next-step question offering to operationalize something (a tracker, a weekly plan, a checklist).
+
 For delegation (when user wants to assign a task or goal to someone AND you have enough context):
-{"type":"delegate","item_type":"task|goal|both","assignee_name":"full name of person","assignee_email":"their email if known","title":"short title (2-8 words)","description":"optional detail","priority":"medium|high|low","answer":"confirmation of intent to show the user (1-2 sentences)"}
+{"type":"delegate","item_type":"task|goal|both","assignee_name":"full name of person (or comma-separated list: "Prince Pandey, Krisha Suchak")","assignee_email":"their email if known","title":"short title (2-8 words)","description":"optional detail","priority":"medium|high|low","answer":"confirmation of intent to show the user (1-2 sentences)"}
+
+For MULTIPLE assignees you may also provide the names as an array: "assignee_name": ["Prince Pandey", "Krisha Suchak"]. ALWAYS use the EXACT names from the "Team members" list above — never invent or guess a teammate's name. One task/goal with multiple assignees (do NOT create a separate task per person).
 
 For item_type: use "task" when the user says "assign as a task" / "create a task and assign" / just says assign something to do; use "goal" when they say "assign as a goal" / "set a goal for" someone; use "both" when the request is ambiguous or clearly implies both a goal and a task. Never create both unless the user's words imply both.
 
@@ -2055,16 +2540,23 @@ class AskRequest(BaseModel):
 
 
 class BookingSlot(BaseModel):
+    date: str | None = None
     start: str
     end: str
 
 class BookingParams(BaseModel):
     attendee_emails: list[str] = []
     date: str | None = None
+    date_start: str | None = None
+    date_end: str | None = None
     duration_minutes: int = 60
     title: str | None = None
     description: str | None = None
     preferred_time: str | None = None
+    auto: bool = False
+    recurrence: dict[str, Any] | None = None
+    remind_before_minutes: int = 30
+    series_id: str | None = None
     available_slots: list[BookingSlot] | None = None
     booking_result: dict[str, Any] | None = None
 
@@ -2083,7 +2575,7 @@ class BulkCreateTasksRequest(BaseModel):
 
 
 class AskResponse(BaseModel):
-    type: str  # "question" | "answer" | "meeting_booking"
+    type: str  # "question" | "answer" | "briefing" | "meeting_booking" | "delegate_preview"
     question: dict[str, Any] | None = None
     answer: str | None = None
     follow_up: str | None = None
@@ -2112,6 +2604,15 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
     db = get_database()
 
     session_context = dict(request.session_context or {})
+    det = await _try_deterministic_booking(text, session_context, db, org_id, ctx.user_email or "")
+    if det:
+        det_bp = det.get("booking_params")
+        return AskResponse(
+            type=det["type"],
+            answer=det.get("answer"),
+            booking_params=BookingParams(**det_bp) if det_bp else None,
+            session_id=request.session_id,
+        )
     prompt, system, snap = await _build_ask_prompt(
         text=text,
         ctx=ctx,
@@ -2217,10 +2718,13 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
 
                 if booking_result.get("booked"):
                     slot = booking_result.get("slot", {})
-                    time_str = slot.get("start", "")[9:14] if slot.get("start") else ""
+                    time_str = slot.get("start", "")
+                    slot_date = slot.get("date", "") or bp.get("date", "")
+                    count = booking_result.get("count", 1)
+                    recurring_note = f" — {count} occurrences" if count and count > 1 else ""
                     answer_text = parsed.get("answer") or (
                         f"✅ Meeting **\"{booking_result['title']}\"** booked "
-                        f"on {bp.get('date', '')} at {time_str} "
+                        f"on {slot_date} at {time_str}{recurring_note} "
                         f"with {len(booking_result.get('attendees', []))} attendee(s). "
                         "Everyone will get a calendar invite."
                     )
@@ -2240,9 +2744,9 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
                     for slot in slots[:5]:
                         s = slot.get("start", "")
                         e = slot.get("end", "")
-                        s_t = f"{s[8:10]}:{s[10:12]}" if len(s) >= 12 else s
-                        e_t = f"{e[8:10]}:{e[10:12]}" if len(e) >= 12 else e
-                        slot_lines.append(f"- {s_t} – {e_t}")
+                        d = slot.get("date", "")
+                        label = f"{d} {s} – {e}" if d else f"{s} – {e}"
+                        slot_lines.append(f"- {label}")
                     answer_text = booking_result.get("message", "Available slots:") + "\n" + "\n".join(slot_lines[:5])
                     if len(slots) > 5:
                         answer_text += f"\n... and {len(slots) - 5} more"
@@ -2260,6 +2764,99 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
                     answer=f"I tried to check availability but something went wrong: {e}. Maybe try again?",
                     session_id=request.session_id,
                 )
+
+        if parsed_type in ("meeting_reschedule", "meeting_cancel"):
+            mt = parsed.get("meeting") or {}
+            try:
+                if parsed_type == "meeting_cancel":
+                    result = await _cancel_meeting(db, org_id, mt)
+                    if result.get("error"):
+                        return AskResponse(type="answer", answer=result["error"], session_id=request.session_id)
+                    return AskResponse(
+                        type="answer",
+                        answer=f"✅ Cancelled meeting **\"{result['title']}\"**.",
+                        session_id=request.session_id,
+                    )
+
+                # Reschedule
+                new_params = {
+                    "date": mt.get("date"),
+                    "date_start": mt.get("date_start"),
+                    "date_end": mt.get("date_end"),
+                    "preferred_time": mt.get("preferred_time"),
+                    "duration_minutes": mt.get("duration_minutes", 60),
+                    "title": mt.get("title", "Meeting"),
+                    "description": mt.get("description", ""),
+                    "auto": bool(mt.get("auto", False)),
+                }
+                existing = await _find_meeting_by_title(db, org_id, mt.get("title", ""))
+                if existing and existing.get("attendees"):
+                    new_params["attendee_names"] = existing["attendees"]
+
+                booking_result = await handle_meeting_booking(new_params, db, org_id, ctx.user_email or "")
+                if booking_result.get("error"):
+                    return AskResponse(
+                        type="answer",
+                        answer=f"I couldn't reschedule: {booking_result['error']}",
+                        session_id=request.session_id,
+                    )
+                if booking_result.get("booked"):
+                    if existing:
+                        await _cancel_meeting(db, org_id, {"meeting_id": str(existing["_id"])})
+                    slot = booking_result.get("slot", {})
+                    return AskResponse(
+                        type="answer",
+                        answer=f"✅ Rescheduled **\"{booking_result['title']}\"** to {slot.get('date', '')} at {slot.get('start', '')}.",
+                        session_id=request.session_id,
+                    )
+                return AskResponse(
+                    type="meeting_booking",
+                    answer=booking_result.get("message", "Here are available slots:"),
+                    booking_params=BookingParams(
+                        attendee_names=new_params.get("attendee_names", []),
+                        date=new_params.get("date"),
+                        date_start=new_params.get("date_start"),
+                        date_end=new_params.get("date_end"),
+                        preferred_time=new_params.get("preferred_time"),
+                        duration_minutes=new_params.get("duration_minutes", 60),
+                        title=new_params.get("title"),
+                        available_slots=booking_result.get("available_slots"),
+                    ),
+                    session_id=request.session_id,
+                )
+            except Exception as e:
+                logger.warning(f"{parsed_type} failed: {e}")
+                return AskResponse(
+                    type="answer",
+                    answer="I couldn't do that right now. Please try again.",
+                    session_id=request.session_id,
+                )
+
+        if parsed_type == "briefing":
+            answer_text = (parsed.get("answer") or "").strip()
+            if not answer_text:
+                return AskResponse(**fallback_question)
+            missing_data = parsed.get("missing_data")
+            if missing_data and not isinstance(missing_data, dict):
+                missing_data = None
+            suggestions = parsed.get("suggestions")
+            if suggestions and not isinstance(suggestions, list):
+                suggestions = None
+            action_items = parsed.get("action_items")
+            if action_items and not isinstance(action_items, list):
+                action_items = None
+            asyncio.create_task(
+                _store_session_insight(db, org_id, request.session_id, answer_text, user_id=user_id, user_email=user_email)
+            )
+            return AskResponse(
+                type="briefing",
+                answer=answer_text,
+                follow_up=parsed.get("follow_up"),
+                missing_data=missing_data,
+                suggestions=suggestions,
+                action_items=action_items,
+                session_id=request.session_id,
+            )
 
         if parsed_type == "answer":
             answer_text = (parsed.get("answer") or "").strip()
@@ -2297,9 +2894,16 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
             q.setdefault("id", f"q_{uuid.uuid4().hex[:6]}")
             q.setdefault("allow_custom", True)
             q.setdefault("options", [{"value": "tell_me_more", "label": "Tell me more"}])
+            q_bp = None
+            if parsed.get("booking_params"):
+                try:
+                    q_bp = BookingParams(**parsed["booking_params"])
+                except Exception:
+                    q_bp = None
             return AskResponse(
                 type="question",
                 question=q,
+                booking_params=q_bp,
                 session_id=request.session_id,
             )
     except Exception as e:
@@ -2373,6 +2977,14 @@ async def ask_stream(request: AskRequest, user: dict = Depends(get_current_user_
     db = get_database()
 
     session_context = dict(request.session_context or {})
+    det = await _try_deterministic_booking(text, session_context, db, org_id, ctx.user_email or "")
+    if det:
+
+        async def det_stream():
+            yield f"event: metadata\ndata: {json.dumps(det)}\n\n"
+            yield "event: done\ndata: [DONE]\n\n"
+
+        return StreamingResponse(det_stream(), media_type="text/event-stream")
     prompt, system, snap = await _build_ask_prompt(
         text=text,
         ctx=ctx,
@@ -2435,6 +3047,7 @@ async def ask_stream(request: AskRequest, user: dict = Depends(get_current_user_
             "suggestions": None,
             "delegate_params": None,
             "generated_sub_tasks": None,
+            "booking_params": None,
         }
         try:
             parsed = json.loads(cleaned)
@@ -2457,12 +3070,30 @@ async def ask_stream(request: AskRequest, user: dict = Depends(get_current_user_
                 suggestions = parsed.get("suggestions")
                 if suggestions and isinstance(suggestions, list):
                     metadata["suggestions"] = suggestions
+            elif parsed_type == "briefing":
+                answer_text = (parsed.get("answer") or "").strip()
+                if answer_text:
+                    metadata["answer"] = answer_text
+                missing_data = parsed.get("missing_data")
+                if missing_data and isinstance(missing_data, dict):
+                    metadata["missing_data"] = missing_data
+                suggestions = parsed.get("suggestions")
+                if suggestions and isinstance(suggestions, list):
+                    metadata["suggestions"] = suggestions
+                action_items = parsed.get("action_items")
+                if action_items and isinstance(action_items, list):
+                    metadata["action_items"] = action_items
             elif parsed_type == "question":
                 q = parsed.get("question", {})
                 q.setdefault("id", f"q_{uuid.uuid4().hex[:6]}")
                 q.setdefault("allow_custom", True)
                 q.setdefault("options", [{"value": "tell_me_more", "label": "Tell me more"}])
                 metadata["question"] = q
+                if parsed.get("booking_params"):
+                    try:
+                        metadata["booking_params"] = BookingParams(**parsed["booking_params"]).model_dump()
+                    except Exception:
+                        metadata["booking_params"] = None
             elif parsed_type == "delegate":
                 try:
                     delegate_params, generated_sub_tasks, preview_error = await _build_delegate_preview(
@@ -2486,6 +3117,83 @@ async def ask_stream(request: AskRequest, user: dict = Depends(get_current_user_
                     logger.warning(f"ask_stream: delegate failed: {e}")
                     metadata["type"] = "answer"
                     metadata["answer"] = f"I couldn't create that task right now. The system said: {e}. Want to try again?"
+            elif parsed_type in ("meeting_booking", "meeting_reschedule", "meeting_cancel"):
+                try:
+                    if parsed_type == "meeting_cancel":
+                        mt = parsed.get("meeting") or {}
+                        result = await _cancel_meeting(db, org_id, mt)
+                        metadata["type"] = "answer"
+                        metadata["answer"] = result.get("error") or f"✅ Cancelled meeting **\"{result.get('title', '')}\"**."
+                    elif parsed_type == "meeting_reschedule":
+                        mt = parsed.get("meeting") or {}
+                        new_params = {
+                            "date": mt.get("date"),
+                            "date_start": mt.get("date_start"),
+                            "date_end": mt.get("date_end"),
+                            "preferred_time": mt.get("preferred_time"),
+                            "duration_minutes": mt.get("duration_minutes", 60),
+                            "title": mt.get("title", "Meeting"),
+                            "description": mt.get("description", ""),
+                            "auto": bool(mt.get("auto", False)),
+                        }
+                        existing = await _find_meeting_by_title(db, org_id, mt.get("title", ""))
+                        if existing and existing.get("attendees"):
+                            new_params["attendee_names"] = existing["attendees"]
+                        booking_result = await handle_meeting_booking(new_params, db, org_id, ctx.user_email or "")
+                        if booking_result.get("error"):
+                            metadata["type"] = "answer"
+                            metadata["answer"] = f"I couldn't reschedule: {booking_result['error']}"
+                        elif booking_result.get("booked"):
+                            if existing:
+                                await _cancel_meeting(db, org_id, {"meeting_id": str(existing["_id"])})
+                            slot = booking_result.get("slot", {})
+                            metadata["type"] = "answer"
+                            metadata["answer"] = f"✅ Rescheduled **\"{booking_result['title']}\"** to {slot.get('date', '')} at {slot.get('start', '')}."
+                        else:
+                            metadata["type"] = "meeting_booking"
+                            metadata["answer"] = booking_result.get("message", "Here are available slots:")
+                            metadata["booking_params"] = {
+                                "attendee_names": new_params.get("attendee_names", []),
+                                "date": new_params.get("date"),
+                                "date_start": new_params.get("date_start"),
+                                "date_end": new_params.get("date_end"),
+                                "preferred_time": new_params.get("preferred_time"),
+                                "duration_minutes": new_params.get("duration_minutes", 60),
+                                "title": new_params.get("title"),
+                                "available_slots": booking_result.get("available_slots"),
+                            }
+                    else:
+                        bp = parsed.get("booking_params") or {}
+                        mention_emails = resolve_mentions(text, db, org_id) if db is not None and org_id else []
+                        if mention_emails and not bp.get("attendee_names"):
+                            members = list(db.org_chart_members.find({"organization_id": org_id, "email": {"$in": mention_emails}}))
+                            bp["attendee_names"] = [m.get("full_name", m["email"]) for m in members]
+                        booking_result = await handle_meeting_booking(bp, db, org_id, ctx.user_email or "")
+                        if booking_result.get("error"):
+                            metadata["type"] = "answer"
+                            metadata["answer"] = f"I couldn't book the meeting: {booking_result['error']}"
+                        else:
+                            bp["attendee_emails"] = booking_result.get("attendees", [])
+                            bp["available_slots"] = booking_result.get("available_slots")
+                            bp["booking_result"] = booking_result
+                            metadata["booking_params"] = BookingParams(**bp).model_dump()
+                            if booking_result.get("booked"):
+                                slot = booking_result.get("slot", {})
+                                count = booking_result.get("count", 1)
+                                recurring_note = f" — {count} occurrences" if count and count > 1 else ""
+                                metadata["type"] = "answer"
+                                metadata["answer"] = parsed.get("answer") or (
+                                    f"✅ Meeting **\"{booking_result['title']}\"** booked on {slot.get('date', '')} at "
+                                    f"{slot.get('start', '')}{recurring_note} with {len(booking_result.get('attendees', []))} attendee(s). "
+                                    "Everyone will get a calendar invite."
+                                )
+                            else:
+                                metadata["type"] = "meeting_booking"
+                                metadata["answer"] = booking_result.get("message", "Available slots:")
+                except Exception as e:
+                    logger.warning(f"ask_stream: meeting failed: {e}")
+                    metadata["type"] = "answer"
+                    metadata["answer"] = f"I couldn't do that right now: {e}. Maybe try again?"
         except json.JSONDecodeError:
             logger.warning("ask_stream: could not parse AI output as JSON, using raw text as answer")
             metadata["type"] = "answer"

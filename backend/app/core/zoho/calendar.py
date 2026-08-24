@@ -134,3 +134,16 @@ class ZohoCalendar:
         except Exception as e:
             logger.warning("Create event error: %s", e)
         return None
+
+    @staticmethod
+    async def delete_event(user_token: str, calendar_uid: str, event_id: str) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.delete(
+                    f"{settings.ZOHO_CALENDAR_API_URL}/calendars/{calendar_uid}/events/{event_id}",
+                    headers={"Authorization": f"Zoho-oauthtoken {user_token}"},
+                )
+                return resp.status_code in (200, 204)
+        except Exception as e:
+            logger.warning("delete_event error: %s", e)
+        return False

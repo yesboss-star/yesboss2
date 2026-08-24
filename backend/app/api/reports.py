@@ -12,7 +12,6 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-from ..core.cache import cache
 from ..core.database import get_database
 from ..dependencies.auth import get_current_user_optional
 from ..dependencies.scope import is_org_member, is_org_owner
@@ -563,29 +562,6 @@ async def generate_all_employee_reports(
                 logger.warning(f"Failed to generate report for {email}: {e}")
 
     return {"reports": reports, "total": len(reports)}
-
-
-@router.get("/health/{organization_id}")
-async def get_org_health(
-    organization_id: str,
-    current_user = Depends(get_current_user_optional)
-):
-    db = get_database()
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not configured")
-
-    if not await is_org_owner(db, organization_id, current_user):
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    cached = cache.get("org_health", {"organization_id": organization_id})
-    if cached is not None:
-        return {"health": cached}
-
-    from ..core.report_generator import generate_org_health
-
-    health = await generate_org_health(db, organization_id)
-    cache.set("org_health", {"organization_id": organization_id}, health)
-    return {"health": health}
 
 
 def generate_docx(content: dict[str, Any], org_name: str = "YesBoss") -> bytes:

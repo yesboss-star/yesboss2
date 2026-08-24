@@ -110,6 +110,7 @@ from .api.journal import router as journal_router
 from .api.learning import router as learning_router
 from .api.market_trends import router as market_trends_router
 from .api.master_agent import router as agent_router
+from .api.me import router as me_router
 from .api.meetings import router as meetings_router
 from .api.notification_preferences import router as notification_preferences_router
 from .api.notifications import router as notifications_router
@@ -371,3 +372,4 @@ app.include_router(websocket_router, tags=["WebSocket"])
 app.include_router(journal_router, prefix="/api/v1/journal", tags=["Journal"])
 app.include_router(finance_router, prefix="/api/v1/finance", tags=["Finance"])
 app.include_router(sessions_router, prefix="/api/v1/sessions", tags=["Sessions"])
+app.include_router(me_router, prefix="/api/v1/me", tags=["Me"])

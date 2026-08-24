@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, Tabs, TabsList, TabsTrigger, TabsContent, Button } from "@/components/ui";
-import { Bell, ArrowLeft, Volume2, Mail, Smartphone, Plug, MessageSquare } from "lucide-react";
+import { Bell, ArrowLeft, Volume2, Mail, Smartphone, Plug, MessageSquare, User, Sparkles, Lightbulb, Activity } from "lucide-react";
 import ZohoConnectButton from "@/components/owners/ZohoConnectButton";
 import GoogleConnectButton from "@/components/owners/GoogleConnectButton";
 import { useZohoStore } from "@/stores/zohoStore";
@@ -43,6 +43,8 @@ export default function SettingsPage() {
   const router = useRouter();
   const [prefs, setPrefs] = useState<any>(DEFAULT_PREFS);
   const [loading, setLoading] = useState(true);
+  const [understanding, setUnderstanding] = useState<any>(null);
+  const [understandingLoading, setUnderstandingLoading] = useState(true);
 
   useEffect(() => {
     const headers = getAuthHeaders();
@@ -53,6 +55,16 @@ export default function SettingsPage() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    fetch(`${API_URL}/me/understanding`, { headers: getAuthHeaders() })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data) setUnderstanding(data);
+      })
+      .catch(() => {})
+      .finally(() => setUnderstandingLoading(false));
   }, []);
 
   useEffect(() => {
@@ -131,6 +143,7 @@ export default function SettingsPage() {
             <TabsTrigger value="notifications"><Bell className="w-4 h-4 mr-2" /> Notifications</TabsTrigger>
             <TabsTrigger value="integrations"><Plug className="w-4 h-4 mr-2" /> Integrations</TabsTrigger>
             <TabsTrigger value="feedback"><MessageSquare className="w-4 h-4 mr-2" /> Feedback</TabsTrigger>
+            <TabsTrigger value="about-you"><User className="w-4 h-4 mr-2" /> About You</TabsTrigger>
           </TabsList>
 
           <TabsContent value="notifications">
@@ -288,6 +301,89 @@ export default function SettingsPage() {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="about-you">
+            {understandingLoading ? (
+              <Card><CardContent className="p-6 text-center text-text-muted">Loading...</CardContent></Card>
+            ) : !understanding?.has_data ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle><User className="w-4 h-4 inline mr-2" /> About You</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-text-muted mb-2">{understanding?.working_style || "Not much learned about how you work yet."}</p>
+                  <p className="text-xs text-text-muted/60">Create and complete tasks and goals — YesBoss will learn your working style and suggest improvements.</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-4">
+                <Card>
+                  <CardHeader><CardTitle><Sparkles className="w-4 h-4 inline mr-2" /> Your working style</CardTitle></CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-text-muted leading-relaxed">{understanding.working_style}</p>
+                  </CardContent>
+                </Card>
+
+                {understanding.improvements?.length > 0 && (
+                  <Card>
+                    <CardHeader><CardTitle><Lightbulb className="w-4 h-4 inline mr-2" /> How you could improve</CardTitle></CardHeader>
+                    <CardContent>
+                      <ul className="space-y-2">
+                        {understanding.improvements.map((tip: string, i: number) => (
+                          <li key={i} className="flex items-start gap-2 text-sm text-text-muted">
+                            <span className="text-primary mt-0.5">&bull;</span><span>{tip}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {(understanding.facts?.top_categories?.length > 0 || understanding.facts?.task?.total > 0) && (
+                  <Card>
+                    <CardHeader><CardTitle><Activity className="w-4 h-4 inline mr-2" /> What this is based on</CardTitle></CardHeader>
+                    <CardContent className="space-y-4">
+                      {understanding.facts?.top_categories?.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-text-muted mb-2">Work you do most</p>
+                          <div className="flex flex-wrap gap-2">
+                            {understanding.facts.top_categories.map((c: { name: string; count: number }, i: number) => (
+                              <span key={i} className="text-xs px-2.5 py-1 rounded-full bg-surface border border-border/50 text-text-muted">
+                                {c.name} · {c.count}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {understanding.facts?.task?.total > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-text-muted mb-2">Your task pace</p>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            <div className="p-2.5 rounded-lg bg-surface border border-border/50">
+                              <p className="text-[10px] text-text-muted uppercase tracking-wider">Completed</p>
+                              <p className="text-sm font-semibold">{understanding.facts.task.completed}/{understanding.facts.task.total}</p>
+                            </div>
+                            <div className="p-2.5 rounded-lg bg-surface border border-border/50">
+                              <p className="text-[10px] text-text-muted uppercase tracking-wider">Completion rate</p>
+                              <p className="text-sm font-semibold">{understanding.facts.task.completion_rate ?? "—"}%</p>
+                            </div>
+                            <div className="p-2.5 rounded-lg bg-surface border border-border/50">
+                              <p className="text-[10px] text-text-muted uppercase tracking-wider">Overdue</p>
+                              <p className="text-sm font-semibold">{understanding.facts.task.overdue}</p>
+                            </div>
+                            <div className="p-2.5 rounded-lg bg-surface border border-border/50">
+                              <p className="text-[10px] text-text-muted uppercase tracking-wider">Avg completion</p>
+                              <p className="text-sm font-semibold">{understanding.facts.avg_completion_hours ? `~${understanding.facts.avg_completion_hours}h` : "—"}</p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            )}
           </TabsContent>
         </Tabs>
       </div>

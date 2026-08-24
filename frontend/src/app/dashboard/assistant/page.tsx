@@ -191,7 +191,7 @@ function AssistantInner() {
   useEffect(() => {
     setBreadcrumbs([
       { label: "Dashboard", href: "/dashboard" },
-      { label: "AI Business Analytics" },
+      { label: "Let's Talk" },
     ]);
   }, [setBreadcrumbs]);
 
@@ -640,7 +640,7 @@ function AssistantInner() {
               <Sparkles className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h1 className="text-sm font-semibold">AI Business Analytics</h1>
+              <h1 className="text-sm font-semibold">Let's Talk</h1>
               <p className="text-[10px] text-text-muted">Ask, answer, get insights</p>
             </div>
           </div>

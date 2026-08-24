@@ -39,7 +39,6 @@ import AcceptedKPIBanner from "@/components/owners/AcceptedKPIBanner";
 import AISummaryChat from "@/components/AISummaryChat";
 import MeetingUploadModal from "@/components/owners/MeetingUploadModal";
 import CalendarBooking from "@/components/owners/CalendarBooking";
-import OrgHealthWidget from "@/components/owners/OrgHealthWidget";
 import MarketImpactCard from "@/components/owners/MarketImpactCard";
 import CheckInModal from "@/components/owners/CheckInModal";
 import IndustryBenchmarksCard from "@/components/owners/IndustryBenchmarksCard";
@@ -3272,145 +3271,6 @@ function DataCharts({ goals, tasks }: { goals: any[]; tasks?: any[] }) {
   );
 }
 
-function RevenueRiskRadar() {
-  const [risks, setRisks] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const { organization } = useOrganizationStore();
-
-  const fetchRisk = useCallback(() => {
-    if (!organization?.id) return;
-    setLoading(true);
-    fetchDeduped(`${API_URL}/dashboard/kpi?organization_id=${organization.id}`, { headers: getAuthHeaders() })
-      .then((r) => r.json())
-      .then((data) => {
-        const computed = [];
-        if (data.goals_active) {
-          const val = data.goals_active.value;
-          computed.push({
-            title: "Goal Completion Risk",
-            level: val > 5 ? "high" : val > 2 ? "medium" : "low",
-            value: Math.min(val * 15, 95),
-            description: `${val} active goals in progress`,
-            impact: val > 5 ? "High - review priorities" : val > 2 ? "Medium - monitor progress" : "Low - on track",
-            icon: Target,
-          });
-        }
-        if (data.completion_rate) {
-          const rate = data.completion_rate.value;
-          computed.push({
-            title: "Task Completion Rate",
-            level: rate < 30 ? "high" : rate < 60 ? "medium" : "low",
-            value: 100 - rate,
-            description: `${rate}% tasks completed`,
-            impact: rate >= 60 ? "Good momentum" : rate >= 30 ? "Needs attention" : "Critical - intervene",
-            icon: CheckCircle,
-          });
-        }
-        if (data.team_size) {
-          computed.push({
-            title: "Team Capacity",
-            level: "medium",
-            value: Math.min(data.team_size.value * 10, 80),
-            description: `${data.team_size.value} team members`,
-            impact: "Monitor team workload distribution",
-            icon: Activity,
-          });
-        }
-        if (data.tasks_pipeline) {
-          const pend = data.tasks_pipeline.change?.match(/(\d+) pending/);
-          const pendingCount = pend ? parseInt(pend[1]) : 0;
-          computed.push({
-            title: "Task Backlog",
-            level: pendingCount > 10 ? "high" : pendingCount > 5 ? "medium" : "low",
-            value: Math.min(pendingCount * 8, 90),
-            description: `${pendingCount} pending tasks in queue`,
-            impact: pendingCount > 10 ? "High - assign resources" : pendingCount > 5 ? "Medium - review priorities" : "Low - manageable",
-            icon: Clock,
-          });
-        }
-        setRisks(computed.length > 0 ? computed : [
-          { title: "No Risk Data", level: "low", value: 0, description: "Add goals and tasks to see risk analysis", impact: "Start creating goals", icon: Shield },
-        ]);
-        setLoading(false);
-      })
-      .catch(() => {
-        setRisks([]); setLoading(false);
-      });
-  }, [organization?.id]);
-
-  useEffect(() => {
-    fetchRisk();
-  }, [fetchRisk]);
-
-  const getRiskColor = (level: string) => {
-    switch (level) {
-      case "high": return { bg: "bg-rose-500/10", text: "text-rose-400", border: "border-rose-500/20", bar: "bg-rose-400" };
-      case "medium": return { bg: "bg-amber-500/10", text: "text-amber-400", border: "border-amber-500/20", bar: "bg-amber-400" };
-      default: return { bg: "bg-emerald-500/10", text: "text-emerald-400", border: "border-emerald-500/20", bar: "bg-emerald-400" };
-    }
-  };
-
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Shield className="w-5 h-5 text-primary" />
-            <CardTitle>Business Risk Radar</CardTitle>
-          </div>
-          <button
-            onClick={fetchRisk}
-            disabled={loading}
-            className="p-1.5 rounded-lg hover:bg-surface-light text-text-muted hover:text-foreground transition-colors cursor-pointer disabled:opacity-50"
-            title="Refresh risk analysis"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-          </button>
-        </div>
-        <CardDescription>AI-analyzed risks based on your actual business data</CardDescription>
-      </CardHeader>
-      <CardContent>
-        {loading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="w-5 h-5 animate-spin text-primary" />
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {risks.slice(0, 6).map((risk, i) => {
-              const colors = getRiskColor(risk.level);
-              const Icon = risk.icon;
-              return (
-                <div key={i} className={`p-4 rounded-xl ${colors.bg} ${colors.border} border transition-all hover:shadow-lg`}>
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <Icon className={`w-4 h-4 ${colors.text}`} />
-                      <span className="text-sm font-medium">{risk.title}</span>
-                    </div>
-                    <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${colors.bg} ${colors.text} ${colors.border} border`}>
-                      {risk.level}
-                    </span>
-                  </div>
-                  <div className="mb-2">
-                    <div className="flex justify-between text-xs mb-1">
-                      <span className="text-text-muted">Risk Score</span>
-                      <span className={colors.text}>{risk.value}%</span>
-                    </div>
-                    <div className="h-2 bg-black/20 rounded-full overflow-hidden">
-                      <div className={`h-full rounded-full ${colors.bar} transition-all duration-500`} style={{ width: `${risk.value}%` }} />
-                    </div>
-                  </div>
-                  <p className="text-xs text-text-muted mt-2">{risk.description}</p>
-                  <p className={`text-[10px] ${colors.text} mt-1`}>{risk.impact}</p>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
 export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => void } = {}) {
   const { user } = useAuth();
   const router = useRouter();
@@ -3681,29 +3541,7 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
         </Card>
       )}
 
-      {adaptation.showGrokInsights && <OrgHealthWidget orgId={orgId} compact />}
-
       <AcceptedKPIBanner />
-
-      <CollapsibleSection title="Goals Pipeline" icon={Target} badge={goalsBadge} badgeVariant={urgentGoals > 0 ? "warning" : "default"} defaultExpanded={goalsExpanded}>
-        <GoalSection />
-      </CollapsibleSection>
-
-      {adaptation.showExecutiveKPIs && (
-        <CollapsibleSection title="AI Business Analytics" icon={BarChart3} defaultExpanded={false}>
-          <DataCharts goals={goals} />
-        </CollapsibleSection>
-      )}
-
-      <CollapsibleSection title="AI KPI Advisor" icon={BarChart3} defaultExpanded={false}>
-        <KPISuggestionsCard />
-      </CollapsibleSection>
-
-      {adaptation.showGrokInsights && (
-        <CollapsibleSection title="Weekly Report Generator" icon={FileText} defaultExpanded={false}>
-          <WeeklyReportGenerator />
-        </CollapsibleSection>
-      )}
 
       <CollapsibleSection
         title="Meeting Notes"
@@ -3800,9 +3638,17 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
         </div>
       </CollapsibleSection>
 
-      <CollapsibleSection title="Market Impact" icon={TrendingUp} defaultExpanded={false}>
-        <MarketImpactCard orgId={orgId} />
-      </CollapsibleSection>
+      {adaptation.showExecutiveKPIs && (
+        <CollapsibleSection title="Progress" icon={BarChart3} defaultExpanded={false}>
+          <DataCharts goals={goals} />
+        </CollapsibleSection>
+      )}
+
+      {adaptation.showGrokInsights && (
+        <CollapsibleSection title="Weekly Report Generator" icon={FileText} defaultExpanded={false}>
+          <WeeklyReportGenerator />
+        </CollapsibleSection>
+      )}
 
       {adaptation.showGrokInsights && (
         <div className="h-[600px]">
@@ -3812,9 +3658,10 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
 
       {adaptation.showRevenueRisk && (
         <>
-          <RevenueRiskRadar />
+          <CollapsibleSection title="Financial Metrics" icon={DollarSign} defaultExpanded={false}>
+            <FinancialMetricsCard organizationId={organization?.id || ""} />
+          </CollapsibleSection>
           <IndustryBenchmarksCard industry={organization?.industry || ""} microVertical={organization?.micro_vertical} />
-          <FinancialMetricsCard organizationId={organization?.id || ""} />
         </>
       )}
 
@@ -3870,6 +3717,18 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
         </CardContent>
         </Card>
       )}
+
+      <CollapsibleSection title="AI KPI Advisor" icon={BarChart3} defaultExpanded={false}>
+        <KPISuggestionsCard />
+      </CollapsibleSection>
+
+      <CollapsibleSection title="Market Impact" icon={TrendingUp} defaultExpanded={false}>
+        <MarketImpactCard orgId={orgId} />
+      </CollapsibleSection>
+
+      <CollapsibleSection title="Goals Pipeline" icon={Target} badge={goalsBadge} badgeVariant={urgentGoals > 0 ? "warning" : "default"} defaultExpanded={goalsExpanded}>
+        <GoalSection />
+      </CollapsibleSection>
 
       <MeetingUploadModal
         open={showMeetingModal}

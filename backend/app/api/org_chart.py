@@ -25,6 +25,9 @@ class OrgMemberCreate(BaseModel):
     department: str
     manager_email: str | None = None
     title: str | None = None
+    timezone: str = "Asia/Kolkata"
+    working_hours_start: str = "09:00"
+    working_hours_end: str = "18:00"
 
 class OrgMemberUpdate(BaseModel):
     full_name: str | None = None
@@ -32,6 +35,9 @@ class OrgMemberUpdate(BaseModel):
     department: str | None = None
     manager_email: str | None = None
     title: str | None = None
+    timezone: str | None = None
+    working_hours_start: str | None = None
+    working_hours_end: str | None = None
 
 class BulkUploadResponse(BaseModel):
     inserted: int
@@ -171,6 +177,9 @@ async def add_org_member(
         "department": member.department,
         "manager_email": member.manager_email,
         "title": member.title,
+        "timezone": member.timezone or "Asia/Kolkata",
+        "working_hours_start": member.working_hours_start or "09:00",
+        "working_hours_end": member.working_hours_end or "18:00",
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
     }

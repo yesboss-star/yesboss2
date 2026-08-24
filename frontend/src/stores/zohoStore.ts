@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { useUIStore } from "@/stores/uiStore";
+import { refreshAuthToken } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
@@ -58,12 +59,22 @@ export const useZohoStore = create<ZohoState>()((set, get) => ({
   connect: async () => {
     try {
       set({ connecting: true });
+      await refreshAuthToken();
       const res = await fetch(`${API_URL}/zoho/auth-url`, {
         credentials: "include",
         headers: { ...getAuthHeaders() },
       });
       if (!res.ok) {
-        console.error("Failed to get Zoho auth URL");
+        const body = await res.text().catch(() => "");
+        console.error("Failed to get Zoho auth URL", res.status, body);
+        useUIStore.getState().addNotification({
+          type: "error",
+          title: "Zoho connection failed",
+          message:
+            res.status === 401
+              ? "Your session expired. Please sign out and back in."
+              : `Couldn't start Zoho connection (${res.status}).`,
+        });
         set({ connecting: false });
         return;
       }

@@ -148,6 +148,64 @@ async def check_mom_reminders(db):
         logger.warning("MoM reminder check failed: %s", e)
 
 
+async def check_meeting_reminders():
+    try:
+        from ..core.database import get_database
+        from ..core.notification_service import create_and_deliver
+
+        db = get_database()
+        if db is None:
+            return
+
+        now = datetime.utcnow()
+        upcoming = list(db.meetings.find({
+            "status": {"$ne": "cancelled"},
+            "reminder_sent": {"$ne": True},
+            "start_dt": {"$ne": None, "$exists": True},
+        }))
+
+        sent = 0
+        for mt in upcoming:
+            try:
+                start_raw = str(mt.get("start_dt") or "")
+                if not start_raw:
+                    continue
+                try:
+                    start_dt = datetime.fromisoformat(start_raw)
+                except ValueError:
+                    try:
+                        start_dt = datetime.strptime(start_raw, "%Y%m%dT%H%M%S%z")
+                    except ValueError:
+                        continue
+                if start_dt.tzinfo is None:
+                    start_dt = start_dt.replace(tzinfo=__import__("datetime").timezone.utc)
+                start_utc = start_dt.astimezone(__import__("datetime").timezone.utc)
+                remind_before = int(mt.get("remind_before_minutes", 30) or 30)
+                remind_at = start_utc - timedelta(minutes=remind_before)
+                if remind_at <= now < start_utc + timedelta(minutes=10):
+                    for att in mt.get("attendees") or []:
+                        await create_and_deliver(
+                            user_id=att,
+                            org_id=mt.get("organization_id", ""),
+                            type="meeting_reminder",
+                            title=f"Reminder: {mt.get('title', 'Meeting')}",
+                            message=f"Your meeting '{mt.get('title', 'Meeting')}' starts in {remind_before} minutes.",
+                            link="/dashboard",
+                            metadata={"meeting_id": str(mt.get("_id", ""))},
+                        )
+                        sent += 1
+                    db.meetings.update_one(
+                        {"_id": mt["_id"]},
+                        {"$set": {"reminder_sent": True, "updated_at": now}},
+                    )
+            except Exception:
+                continue
+        if sent:
+            logger.info(f"Meeting reminders sent to {sent} recipients")
+    except Exception as e:
+        logger.warning(f"Meeting reminder check failed: {e}")
+
+
 async def check_deadline_reminders():
     try:
         from ..core.database import get_database
@@ -748,7 +806,7 @@ async def send_auto_reports():
     try:
         from ..core.database import get_database
         from ..core.notification_service import create_and_deliver
-        from ..core.report_generator import generate_employee_report, generate_org_health
+        from ..core.report_generator import generate_employee_report
 
         db = get_database()
         if db is None:
@@ -756,10 +814,9 @@ async def send_auto_reports():
 
         now = datetime.utcnow()
         is_monday = now.weekday() == 0
-        is_first_of_month = now.day == 1
         hour = now.hour
 
-        if not is_monday and not is_first_of_month:
+        if not is_monday:
             return
         if hour != 9:
             return
@@ -767,9 +824,6 @@ async def send_auto_reports():
         orgs = list(db.organizations.find({}))
         for org in orgs:
             org_id = str(org["_id"])
-            owner_id = org.get("owner_id")
-            if not owner_id:
-                continue
 
             try:
                 if is_monday:
@@ -801,18 +855,6 @@ async def send_auto_reports():
                             email=recipient_email,
                         )
                     logger.info(f"Weekly reports sent to {recipient_email} for org {org_id} ({len(members)} employees)")
-
-                if is_first_of_month:
-                    health = await generate_org_health(db, org_id)
-                    await create_and_deliver(
-                        user_id=owner_id,
-                        org_id=org_id,
-                        type="report_monthly",
-                        title=f"Monthly Org Health: {health['health_label']}",
-                        message=f"Organization health score: {health['health_score']}/100 ({health['health_label']}). {len(health.get('departments', {}))} departments analyzed.",
-                        link="/dashboard/reports",
-                    )
-                    logger.info(f"Monthly health report sent for org {org_id}")
             except Exception as e:
                 logger.error(f"Auto-report failed for org {org_id}: {e}")
     except Exception as e:
@@ -1462,6 +1504,8 @@ async def scheduler_loop():
             if cal_sync_counter % 3 == 0:  # every ~15 min (stub until G3)
                 await sync_zoho_calendar()
                 await sync_google_calendar()
+
+            await check_meeting_reminders()
 
             deadline_counter += 1
             google_sync_counter += 1

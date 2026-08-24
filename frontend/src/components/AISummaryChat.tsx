@@ -7,7 +7,7 @@ import { useGoalStore } from "@/stores/goalStore";
 import { useTaskStore } from "@/stores/taskStore";
 import { useKPIStore } from "@/stores/kpiStore";
 import { useOrgChartStore } from "@/stores/orgChartStore";
-import { useSessionStore, type SessionMessage, type ClarifyingQuestion, type DelegateParams, type GeneratedSubTask, delegateAssigneeLabel } from "@/stores/sessionStore";
+import { useSessionStore, type SessionMessage, type ClarifyingQuestion, type DelegateParams, type GeneratedSubTask, type BookingParams, type BookingSlot, delegateAssigneeLabel } from "@/stores/sessionStore";
 import {
   Sparkles, MessageSquare, Plus, Edit3, Trash2, Paperclip, AtSign,
   Loader2, Send, Lightbulb, Check, ArrowRight, ChevronLeft,
@@ -19,62 +19,108 @@ import {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function inlineMarkdown(line: string): string {
+  return line
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .replace(/`(.+?)`/g, "<code class=\"px-1 py-0.5 rounded bg-surface-light text-[11px]\">$1</code>");
+}
+
 function renderMarkdown(text: string): string {
-  const lines = text.split("\n");
   const result: string[] = [];
-  let inList = false;
-  let listType: "ul" | "ol" | null = null;
+  const blocks = text.split(/(```[\s\S]*?```)/g);
 
-  for (let i = 0; i < lines.length; i++) {
-    let line = lines[i];
-    line = line
-      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/\*(.+?)\*/g, "<em>$1</em>")
-      .replace(/`(.+?)`/g, "<code class=\"px-1 py-0.5 rounded bg-surface-light text-[11px]\">$1</code>");
-
-    const headerMatch = line.match(/^(#{1,3})\s+(.+)/);
-    if (headerMatch) {
-      if (inList) { result.push(`</${listType}>`); inList = false; listType = null; }
-      const level = headerMatch[1].length;
-      result.push(`<h${level} class="text-sm font-semibold mt-4 mb-2 text-foreground">${headerMatch[2]}</h${level}>`);
+  for (const block of blocks) {
+    const trimmed = block.trim();
+    if (trimmed.startsWith("```")) {
+      const code = block.replace(/^```[^\n]*\n?/, "").replace(/```$/, "").replace(/\n$/, "");
+      result.push(`<pre class="text-[12px] leading-relaxed whitespace-pre overflow-x-auto my-2 p-3 rounded-lg bg-surface-light text-foreground/90">${escapeHtml(code)}</pre>`);
       continue;
     }
 
-    const bulletMatch = line.match(/^[-*]\s+(.+)/);
-    if (bulletMatch) {
-      if (!inList || listType !== "ul") {
-        if (inList) result.push(`</${listType}>`);
-        result.push('<ul class="space-y-1 my-2">');
-        inList = true;
-        listType = "ul";
+    const lines = block.split("\n");
+    let inList = false;
+    let listType: "ul" | "ol" | null = null;
+
+    for (let i = 0; i < lines.length; i++) {
+      let line = lines[i];
+
+      const headerMatch = line.match(/^(#{1,3})\s+(.+)/);
+      if (headerMatch) {
+        if (inList) { result.push(`</${listType}>`); inList = false; listType = null; }
+        const level = headerMatch[1].length;
+        result.push(`<h${level} class="text-sm font-semibold mt-4 mb-2 text-foreground">${inlineMarkdown(headerMatch[2])}</h${level}>`);
+        continue;
       }
-      result.push(`<li class="flex items-start gap-2 text-sm"><span class="text-primary mt-1.5 flex-shrink-0 w-1.5 h-1.5 rounded-full bg-primary/60"></span><span>${bulletMatch[1]}</span></li>`);
-      continue;
-    }
 
-    const numMatch = line.match(/^\d+[.)]\s+(.+)/);
-    if (numMatch) {
-      if (!inList || listType !== "ol") {
-        if (inList) result.push(`</${listType}>`);
-        result.push('<ol class="space-y-1.5 my-2 list-none">');
-        inList = true;
-        listType = "ol";
+      if (line.trim().startsWith("|") && lines[i + 1] && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1])) {
+        if (inList) { result.push(`</${listType}>`); inList = false; listType = null; }
+        const tableLines: string[] = [];
+        while (i < lines.length && lines[i].trim().startsWith("|")) {
+          tableLines.push(lines[i].trim());
+          i++;
+        }
+        i--;
+        const headerCells = tableLines[0].split("|").slice(1, -1).map((c) => inlineMarkdown(c.trim()));
+        const bodyRows = tableLines.slice(2).map((row) =>
+          row.split("|").slice(1, -1).map((c) => inlineMarkdown(c.trim()))
+        );
+        const cellsHtml = (cells: string[], tag: string) =>
+          cells.map((c) => `<${tag} class="px-3 py-1.5 text-left align-top text-sm">${c || "&nbsp;"}</${tag}>`).join("");
+        result.push(
+          `<div class="my-2 overflow-x-auto"><table class="w-full text-left border-collapse min-w-[420px]">` +
+          `<thead><tr class="border-b border-surface-strong">${cellsHtml(headerCells, "th")}</tr></thead>` +
+          `<tbody>${bodyRows.map((cells) => `<tr class="border-b border-surface-light/60">${cellsHtml(cells, "td")}</tr>`).join("")}</tbody>` +
+          `</table></div>`
+        );
+        continue;
       }
-      result.push(`<li class="flex items-start gap-2 text-sm"><span class="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-semibold flex items-center justify-center flex-shrink-0 mt-0.5">${numMatch[1].match(/^\d+/)?.[0] || "•"}</span><span>${numMatch[1].replace(/^\d+[.)]\s*/, "")}</span></li>`);
-      continue;
-    }
 
-    if (line.trim() === "") {
+      const bulletMatch = line.match(/^[-*]\s+(.+)/);
+      if (bulletMatch) {
+        if (!inList || listType !== "ul") {
+          if (inList) result.push(`</${listType}>`);
+          result.push('<ul class="space-y-1 my-2">');
+          inList = true;
+          listType = "ul";
+        }
+        result.push(`<li class="flex items-start gap-2 text-sm"><span class="text-primary mt-1.5 flex-shrink-0 w-1.5 h-1.5 rounded-full bg-primary/60"></span><span>${inlineMarkdown(bulletMatch[1])}</span></li>`);
+        continue;
+      }
+
+      const numMatch = line.match(/^\d+[.)]\s+(.+)/);
+      if (numMatch) {
+        if (!inList || listType !== "ol") {
+          if (inList) result.push(`</${listType}>`);
+          result.push('<ol class="space-y-1.5 my-2 list-none">');
+          inList = true;
+          listType = "ol";
+        }
+        result.push(`<li class="flex items-start gap-2 text-sm"><span class="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-semibold flex items-center justify-center flex-shrink-0 mt-0.5">${numMatch[1].match(/^\d+/)?.[0] || "•"}</span><span>${inlineMarkdown(numMatch[1].replace(/^\d+[.)]\s*/, ""))}</span></li>`);
+        continue;
+      }
+
+      if (line.trim() === "") {
+        if (inList) { result.push(`</${listType}>`); inList = false; listType = null; }
+        result.push("<div class=\"h-2\"></div>");
+        continue;
+      }
+
       if (inList) { result.push(`</${listType}>`); inList = false; listType = null; }
-      result.push("<div class=\"h-2\"></div>");
-      continue;
+      result.push(`<p class="text-sm leading-relaxed mb-2 text-foreground/90">${inlineMarkdown(line)}</p>`);
     }
 
-    if (inList) { result.push(`</${listType}>`); inList = false; listType = null; }
-    result.push(`<p class="text-sm leading-relaxed mb-2 text-foreground/90">${line}</p>`);
+    if (inList) result.push(`</${listType}>`);
   }
 
-  if (inList) result.push(`</${listType}>`);
   return result.join("\n");
 }
 
@@ -610,7 +656,7 @@ export default function AISummaryChat() {
         return;
       }
       const created = addKPI(organization.id, {
-        title: finalTitle, source: "ai", sourceDetail: "Added from AI Business Analytics chat", category: "growth", icon: "BarChart3",
+        title: finalTitle, source: "ai", sourceDetail: "Added from Let's Talk chat", category: "growth", icon: "BarChart3",
       });
       const confirm = created
         ? `✅ Added **${finalTitle}** as a new KPI card. It will start showing values as soon as the dashboard refreshes (every 30s).`
@@ -746,6 +792,9 @@ export default function AISummaryChat() {
       if (data.type === "question" && data.question) {
         const q = data.question as ClarifyingQuestion;
         const hasOptions = q.options && q.options.length > 0;
+        if (data.booking_params) {
+          updateSessionContext(s.id, { pending_booking: JSON.stringify(data.booking_params) });
+        }
         if (hasOptions) {
           const qMsg: SessionMessage = { role: "assistant", content: q.text, is_question: true, timestamp: Date.now() };
           setPendingQuestion(q);
@@ -790,6 +839,18 @@ export default function AISummaryChat() {
         };
         setMessages([...updated, delMsg]);
         addMessage(s.id, delMsg);
+      } else if (data.type === "meeting_booking" && data.booking_params) {
+        setIsStreaming(false);
+        setSuggestions(null);
+        const bookMsg: SessionMessage = {
+          role: "assistant",
+          content: data.answer || "",
+          is_booking: true,
+          booking_params: data.booking_params,
+          timestamp: Date.now(),
+        };
+        setMessages([...updated, bookMsg]);
+        addMessage(s.id, bookMsg);
       } else {
         setIsStreaming(false);
         setSuggestions(null);
@@ -823,7 +884,7 @@ export default function AISummaryChat() {
       if (value === "yes") {
         const title = extractKpiTitleFromAssistant(pendingQuestion?.text || "") || "New KPI";
         if (title) {
-          const created = addKPI(organization.id, { title, source: "ai", sourceDetail: "Added from AI Business Analytics chat", category: "growth", icon: "BarChart3" });
+          const created = addKPI(organization.id, { title, source: "ai", sourceDetail: "Added from Let's Talk chat", category: "growth", icon: "BarChart3" });
           const confirm = created ? `✅ Added **${title}** as a new KPI card on your dashboard.` : `I couldn't add that KPI right now. Please try again.`;
           const kpiMsg: SessionMessage = { role: "assistant", content: confirm, timestamp: Date.now() };
           setMessages([...updated, kpiMsg]);
@@ -846,6 +907,9 @@ export default function AISummaryChat() {
       if (data.type === "question" && data.question) {
         const q = data.question as ClarifyingQuestion;
         const hasOptions = q.options && q.options.length > 0;
+        if (data.booking_params) {
+          updateSessionContext(s.id, { pending_booking: JSON.stringify(data.booking_params) });
+        }
         if (hasOptions) {
           const qMsg: SessionMessage = { role: "assistant", content: q.text, is_question: true, timestamp: Date.now() };
           setPendingQuestion(q);
@@ -888,6 +952,17 @@ export default function AISummaryChat() {
         };
         setMessages([...updated, delMsg]);
         addMessage(s.id, delMsg);
+        setSuggestions(null);
+      } else if (data.type === "meeting_booking" && data.booking_params) {
+        const bookMsg: SessionMessage = {
+          role: "assistant",
+          content: data.answer || "",
+          is_booking: true,
+          booking_params: data.booking_params,
+          timestamp: Date.now(),
+        };
+        setMessages([...updated, bookMsg]);
+        addMessage(s.id, bookMsg);
         setSuggestions(null);
       } else {
         const fallbackMsg: SessionMessage = { role: "assistant", content: "Thanks! Let me know if you have more questions.", timestamp: Date.now() };
@@ -1076,6 +1151,37 @@ export default function AISummaryChat() {
   const dismissImportSuggestion = () => {
     setImportSuggestion(null);
     setSuggestionGoalCreated(false);
+  };
+
+  const bookSlot = async (slot: BookingSlot) => {
+    const s = activeSession || (await ensureSession());
+    if (!s) return;
+    const text = slot.date ? `book the meeting on ${slot.date} at ${slot.start}` : `book the meeting at ${slot.start}`;
+    const userMsg: SessionMessage = { role: "user", content: text, timestamp: Date.now() };
+    const updated = [...messages, userMsg];
+    setMessages(updated);
+    addMessage(s.id, userMsg);
+    setLoading(true);
+    try {
+      const data = await apiAsk(text);
+      if (!data) return;
+      let resultMsg: SessionMessage;
+      if (data.type === "answer" && data.answer) {
+        resultMsg = { role: "assistant", content: data.answer, is_answer: true, timestamp: Date.now() };
+      } else if (data.type === "meeting_booking" && data.booking_params) {
+        resultMsg = { role: "assistant", content: data.answer || "", is_booking: true, booking_params: data.booking_params, timestamp: Date.now() };
+      } else {
+        resultMsg = { role: "assistant", content: data.answer || "Done! Check your calendar.", is_answer: true, timestamp: Date.now() };
+      }
+      setMessages([...updated, resultMsg]);
+      addMessage(s.id, resultMsg);
+    } catch {
+      const errMsg: SessionMessage = { role: "assistant", content: "Couldn't book that slot. Try again?", timestamp: Date.now() };
+      setMessages([...updated, errMsg]);
+      addMessage(s.id, errMsg);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const confirmDelegate = async (msg: SessionMessage, selected: GeneratedSubTask[]) => {
@@ -1453,7 +1559,7 @@ export default function AISummaryChat() {
       <CardHeader className="flex-shrink-0 pb-2">
         <div className="flex items-center gap-2">
           <MessageSquare className="w-5 h-5 text-primary" />
-          <CardTitle>AI Business Analytics</CardTitle>
+          <CardTitle>Let's Talk</CardTitle>
           <Badge variant="default" className="text-[10px] ml-2">Real-time</Badge>
         </div>
       </CardHeader>
@@ -1670,6 +1776,12 @@ export default function AISummaryChat() {
                           params={msg.delegate_params}
                           subTasks={msg.generated_sub_tasks || []}
                           onConfirm={(selected) => confirmDelegate(msg, selected)}
+                          disabled={loading}
+                        />
+                      ) : msg.is_booking && msg.booking_params ? (
+                        <BookingCard
+                          params={msg.booking_params}
+                          onBook={(slot) => bookSlot(slot)}
                           disabled={loading}
                         />
                       ) : (
@@ -2207,6 +2319,60 @@ export default function AISummaryChat() {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function BookingCard({
+  params,
+  onBook,
+  disabled,
+}: {
+  params: BookingParams;
+  onBook: (slot: BookingSlot) => void;
+  disabled?: boolean;
+}) {
+  const slots = params.available_slots || [];
+  const booked = params.booking_result?.booked;
+
+  if (booked) {
+    const r = params.booking_result;
+    return (
+      <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/20 p-4 space-y-2 min-w-[280px] max-w-[420px]">
+        <div className="flex items-center gap-2 text-emerald-400 font-medium">
+          <Check className="w-5 h-5" />
+          Meeting Booked
+        </div>
+        <p className="text-sm text-foreground font-medium">{r?.title || "Meeting"}</p>
+        <p className="text-xs text-text-muted">
+          {r?.slot?.date ? `${r.slot.date} · ` : ""}
+          {r?.slot?.start || ""} – {r?.slot?.end || ""}
+          {r?.count && r.count > 1 ? ` (${r.count} occurrences)` : ""}
+        </p>
+        <p className="text-xs text-text-muted">{r?.attendees?.length || 0} attendee(s)</p>
+      </div>
+    );
+  }
+
+  if (!slots.length) return null;
+
+  return (
+    <div className="rounded-2xl bg-surface border border-border p-4 space-y-3 min-w-[280px] max-w-[420px]">
+      <p className="text-[10px] font-medium text-text-muted uppercase tracking-wider">Available Slots</p>
+      <div className="grid grid-cols-2 gap-2">
+        {slots.slice(0, 8).map((slot, i) => (
+          <button
+            key={i}
+            onClick={() => onBook(slot)}
+            disabled={disabled}
+            className="px-3 py-2 rounded-lg bg-primary/10 hover:bg-primary/20 border border-primary/20 text-sm font-medium text-primary transition-all cursor-pointer disabled:opacity-50"
+          >
+            {slot.date ? `${slot.date.slice(5)} ` : ""}
+            {slot.start} – {slot.end}
+          </button>
+        ))}
+      </div>
+      <p className="text-[10px] text-text-muted">Click a slot to book instantly</p>
+    </div>
   );
 }
 

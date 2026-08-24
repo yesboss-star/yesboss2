@@ -149,6 +149,19 @@ class GoogleCalendar:
         return None
 
     @staticmethod
+    async def delete_event(user_token: str, calendar_id: str, event_id: str) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.delete(
+                    f"{_CALENDAR_API_URL}/calendars/{calendar_id}/events/{event_id}",
+                    headers=_bearer(user_token),
+                )
+                return resp.status_code in (200, 204)
+        except Exception as e:
+            logger.warning("delete_event error: %s", e)
+        return False
+
+    @staticmethod
     def event_to_dict(ev: dict) -> dict:
         start = ev.get("start", {})
         end = ev.get("end", {})

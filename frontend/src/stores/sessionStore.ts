@@ -11,6 +11,7 @@ function getAuthHeaders(): Record<string, string> {
 }
 
 export interface BookingSlot {
+  date?: string;
   start: string;
   end: string;
 }
@@ -18,10 +19,16 @@ export interface BookingSlot {
 export interface BookingParams {
   attendee_emails?: string[];
   date?: string;
+  date_start?: string;
+  date_end?: string;
   duration_minutes?: number;
   title?: string;
   description?: string;
   preferred_time?: string;
+  auto?: boolean;
+  recurrence?: Record<string, any>;
+  remind_before_minutes?: number;
+  series_id?: string;
   available_slots?: BookingSlot[];
   booking_result?: Record<string, any>;
 }

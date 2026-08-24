@@ -17,6 +17,20 @@ export function getAuthHeaders(): Record<string, string> {
   return headers;
 }
 
+export async function refreshAuthToken(): Promise<string | null> {
+  if (typeof window === "undefined") return null;
+  try {
+    const { auth } = await import("@/lib/firebase");
+    const user = auth.currentUser;
+    if (!user) return null;
+    const token = await user.getIdToken(true);
+    if (token) localStorage.setItem("yesboss_id_token", token);
+    return token;
+  } catch {
+    return null;
+  }
+}
+
 const inflightFetches = new Map<string, Promise<Response>>();
 
 export function fetchDeduped(url: string, init?: RequestInit): Promise<Response> {

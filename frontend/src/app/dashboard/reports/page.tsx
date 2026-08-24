@@ -5,8 +5,7 @@ import { useRouter } from "next/navigation";
 import { getAuthHeaders } from "@/lib/utils";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, Tabs, TabsList, TabsTrigger, TabsContent, Badge, Button } from "@/components/ui";
-import { BarChart3, Download, FileText, TrendingUp, Users, Loader2, RefreshCw, ArrowLeft, Activity, User } from "lucide-react";
-import OrgHealthWidget from "@/components/owners/OrgHealthWidget";
+import { BarChart3, Download, FileText, TrendingUp, Users, Loader2, RefreshCw, ArrowLeft, User } from "lucide-react";
 import EmployeeReportCard from "@/components/owners/EmployeeReportCard";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
@@ -212,7 +211,6 @@ export default function ReportsPage() {
                 <TabsTrigger value="goals">Goals Breakdown</TabsTrigger>
                 <TabsTrigger value="tasks">Tasks Breakdown</TabsTrigger>
                 <TabsTrigger value="employees">Employee Reports</TabsTrigger>
-                <TabsTrigger value="health">Org Health</TabsTrigger>
               </TabsList>
 
               <TabsContent value="overview">
@@ -360,10 +358,6 @@ export default function ReportsPage() {
                     </div>
                   )}
                 </div>
-              </TabsContent>
-
-              <TabsContent value="health">
-                <OrgHealthWidget orgId={orgId} />
               </TabsContent>
             </Tabs>
           </>
