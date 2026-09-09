@@ -84,17 +84,22 @@ export default function TaskPage() {
 
   const visibleTasks = useMemo(() => {
     if (role === "owner") return tasks;
+    const aeList = (t: any) =>
+      Array.isArray(t.assignee_email)
+        ? t.assignee_email.map((x: any) => String(x).toLowerCase())
+        : [String(t.assignee_email || "").toLowerCase()];
     if (taskView === "my") {
       return tasks.filter((t) => {
         const ids = t.assignee_id || [];
-        return ids.some((id) => id.toLowerCase() === userEmail.toLowerCase()) ||
-          (t.assignee_email || "").toLowerCase() === userEmail.toLowerCase();
+        const target = userEmail.toLowerCase();
+        return ids.some((id) => id.toLowerCase() === target) ||
+          aeList(t).includes(target);
       });
     }
     return tasks.filter((t) => {
       const ids = t.assignee_id || [];
       return ids.some((id) => directReportEmails.has(id.toLowerCase())) ||
-        directReportEmails.has((t.assignee_email || "").toLowerCase());
+        aeList(t).some((e: string) => directReportEmails.has(e));
     });
   }, [tasks, role, taskView, userEmail, directReportEmails]);
 

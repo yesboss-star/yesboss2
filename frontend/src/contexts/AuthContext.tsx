@@ -104,27 +104,49 @@ async function clearSession() {
 }
 
 async function resolveOrganization(idToken: string) {
-  try {
-    const res = await fetch(`${API_URL}/organizations/me`, {
-      headers: { Authorization: `Bearer ${idToken}` },
-    });
-    if (!res.ok) return;
-    const data = await res.json();
-    const org = data.organization;
-    if (!org) return;
-    useOrganizationStore.getState().setOrganization({
-      id: org._id || org.id,
-      name: org.name || "",
-      domain: org.domain || "",
-      industry: org.industry || "",
-      size: org.size || "",
-      micro_vertical: org.micro_vertical,
-      createdAt: org.created_at || new Date().toISOString(),
-      owner_id: org.owner_id,
-      co_owners: org.co_owners || [],
-    });
-  } catch {
-    // Non-fatal — dashboard falls back to generic state
+  // Retry once after a short delay: for employees the org is derived from
+  // org_chart_members, and a transient 404 (or an org-load race right after
+  // session establishment) would otherwise leave the dashboard empty.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(`${API_URL}/organizations/me`, {
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      if (!res.ok) {
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 700));
+          continue;
+        }
+        return;
+      }
+      const data = await res.json();
+      const org = data.organization;
+      if (!org) {
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 700));
+          continue;
+        }
+        return;
+      }
+      useOrganizationStore.getState().setOrganization({
+        id: org._id || org.id,
+        name: org.name || "",
+        domain: org.domain || "",
+        industry: org.industry || "",
+        size: org.size || "",
+        micro_vertical: org.micro_vertical,
+        createdAt: org.created_at || new Date().toISOString(),
+        owner_id: org.owner_id,
+        co_owners: org.co_owners || [],
+      });
+      return;
+    } catch {
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 700));
+        continue;
+      }
+      return; // Non-fatal — dashboard falls back to generic state
+    }
   }
 }
 

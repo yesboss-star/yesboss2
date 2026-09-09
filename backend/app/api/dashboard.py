@@ -463,13 +463,12 @@ async def get_dashboard_kpi(
     org_micro_vertical = org.get("micro_vertical", "") if org else ""
 
     if email:
+        from ..core.identity import person_scope_query
         user_email = email.lower().strip()
-        user_filter = {"organization_id": org_id, "$or": [
-            {"assignee_email": user_email},
-            {"assigned_to": user_email},
-            {"assignee_id": user_email},
-        ]}
-        goal_filter = {"organization_id": org_id, "assignee_email": user_email}
+        uid = getattr(current_user, "id", None) or getattr(current_user, "uid", None)
+        scope = person_scope_query(uid, user_email).get("$or") or []
+        user_filter = {"organization_id": org_id, "$or": scope}
+        goal_filter = {"organization_id": org_id, "$or": scope}
 
         total_goals, active_goals, completed_goals = await asyncio.gather(
             _count(db, "goals", goal_filter),

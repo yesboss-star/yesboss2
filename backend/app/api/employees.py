@@ -85,11 +85,11 @@ async def get_employee_tasks(
 
     query = {"organization_id": org_id}
     if email:
-        query["$or"] = [
-            {"assignee_email": email},
-            {"assigned_to": email},
-            {"assignee_id": email},
-        ]
+        from ..core.identity import person_scope_query
+        user_email = email.lower().strip()
+        uid = getattr(current_user, "id", None) or getattr(current_user, "uid", None)
+        scope = person_scope_query(uid, user_email).get("$or") or []
+        query["$or"] = scope
 
     try:
         tasks = list(db.tasks.find(query).sort("due_date", 1).limit(20))

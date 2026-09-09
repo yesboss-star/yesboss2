@@ -570,6 +570,311 @@ async def register_custom_role(
     return {"saved": True}
 
 
+class RemindRequest(BaseModel):
+    organization_id: str | None = None
+    emails: list[str] = []
+
+
+@router.get("/members/status")
+async def get_member_integration_status(
+    organization_id: str | None = None,
+    current_user = Depends(get_current_user)
+):
+    """Return per-member integration status (integrated vs not) for the org.
+
+    Integrated = has a valid entry in the org's provider token collection
+    (Google or Zoho, determined by the org's provider via providers.get_org_provider).
+    No G/Z split — just boolean integrated, per clarification.
+    """
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    from ..core.providers import get_org_provider
+
+    org_id = organization_id or get_user_org_id(current_user)
+    if not org_id:
+        raise HTTPException(status_code=400, detail="Organization ID required")
+
+    from ..dependencies.scope import is_org_member
+    if not await is_org_member(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    members = list(db.org_chart_members.find({"organization_id": org_id}, {"email": 1, "full_name": 1}))
+    # Normalize emails
+    email_to_name = {}
+    emails_lower = []
+    for m in members:
+        e = (m.get("email") or "").strip().lower()
+        if not e:
+            continue
+        email_to_name[e] = m.get("full_name") or e
+        emails_lower.append(e)
+
+    # Determine org provider
+    provider = None
+    try:
+        provider = get_org_provider(db, org_id)
+    except Exception:
+        provider = None
+
+    # Collect integrated emails — robust: handles UID vs email mismatch via users/employees lookup
+    integrated_set: set[str] = set()
+    connected_map: dict[str, str] = {}
+    try:
+        # Build maps: member email -> uid, uid -> member email
+        email_to_uid: dict[str, str] = {}
+        uid_to_email: dict[str, str] = {}
+        for u in db.users.find({"email": {"$in": emails_lower}}, {"email": 1, "uid": 1}):
+            el = (u.get("email") or "").strip().lower()
+            uid = (u.get("uid") or "").strip()
+            if el in email_to_name and uid:
+                email_to_uid[el] = uid
+                uid_to_email[uid.lower()] = el
+        for e in db.employees.find({"email": {"$in": emails_lower}}, {"email": 1, "uid": 1}):
+            el = (e.get("email") or "").strip().lower()
+            uid = (e.get("uid") or "").strip()
+            if el in email_to_name and uid and el not in email_to_uid:
+                email_to_uid[el] = uid
+                uid_to_email[uid.lower()] = el
+
+        # Helper to mark a token as integrated for a member email
+        def mark_integrated(member_email: str, doc: dict):
+            ml = member_email.strip().lower()
+            if ml in email_to_name and ml not in integrated_set and doc.get("access_token"):
+                integrated_set.add(ml)
+                # Prefer stored connected_at, fallback to updated_at
+                connected_map[ml] = str(doc.get("connected_at") or doc.get("updated_at") or "")
+
+        # Check google_tokens — try 3 strategies: direct email, uid->email via map, uid lookup in users
+        for doc in db.google_tokens.find({}, {"user_id": 1, "email": 1, "connected_at": 1, "access_token": 1, "updated_at": 1}):
+            if not doc.get("access_token"):
+                continue
+            token_email = (doc.get("email") or "").strip().lower()
+            token_uid = (doc.get("user_id") or "").strip()
+            token_uid_lower = token_uid.lower()
+            # Direct email match
+            if token_email and token_email in email_to_name:
+                mark_integrated(token_email, doc)
+                continue
+            # UID mapped via our prebuilt map
+            if token_uid_lower in uid_to_email:
+                mark_integrated(uid_to_email[token_uid_lower], doc)
+                continue
+            # Fallback: lookup user by uid in DB to get email
+            if token_uid:
+                u = db.users.find_one({"uid": token_uid}, {"email": 1})
+                if u and (u.get("email") or "").strip().lower() in email_to_name:
+                    mark_integrated((u.get("email") or "").strip().lower(), doc)
+                    continue
+                # Also try employees
+                e = db.employees.find_one({"uid": token_uid}, {"email": 1})
+                if e and (e.get("email") or "").strip().lower() in email_to_name:
+                    mark_integrated((e.get("email") or "").strip().lower(), doc)
+                    continue
+        # Check zoho_tokens — same + zoho_mail_id
+        for doc in db.zoho_tokens.find({}, {"user_id": 1, "email": 1, "zoho_mail_id": 1, "connected_at": 1, "access_token": 1, "updated_at": 1}):
+            if not doc.get("access_token"):
+                continue
+            token_email = (doc.get("email") or "").strip().lower()
+            token_zoho = (doc.get("zoho_mail_id") or "").strip().lower()
+            token_uid = (doc.get("user_id") or "").strip()
+            token_uid_lower = token_uid.lower()
+            if token_email and token_email in email_to_name:
+                mark_integrated(token_email, doc)
+                continue
+            if token_zoho and token_zoho in email_to_name:
+                mark_integrated(token_zoho, doc)
+                continue
+            if token_uid_lower in uid_to_email:
+                mark_integrated(uid_to_email[token_uid_lower], doc)
+                continue
+            if token_uid:
+                u = db.users.find_one({"uid": token_uid}, {"email": 1})
+                if u and (u.get("email") or "").strip().lower() in email_to_name:
+                    mark_integrated((u.get("email") or "").strip().lower(), doc)
+                    continue
+                e = db.employees.find_one({"uid": token_uid}, {"email": 1})
+                if e and (e.get("email") or "").strip().lower() in email_to_name:
+                    mark_integrated((e.get("email") or "").strip().lower(), doc)
+                    continue
+    except Exception as e:
+        logger.warning(f"member status lookup failed: {e}", exc_info=True)
+
+    result = []
+    for e in emails_lower:
+        is_int = e in integrated_set
+        result.append({
+            "email": e,
+            "full_name": email_to_name.get(e) or e,
+            "integrated": is_int,
+            "provider": provider if is_int else None,
+            "connected_at": connected_map.get(e) if is_int else None,
+        })
+
+    return {
+        "organization_id": org_id,
+        "provider": provider,
+        "total": len(result),
+        "integrated_count": len([r for r in result if r["integrated"]]),
+        "members": result,
+    }
+
+
+@router.post("/members/remind")
+async def remind_members(
+    body: RemindRequest,
+    current_user = Depends(get_current_user)
+):
+    """Send reminder email to not-integrated members to connect their account.
+
+    Body: { organization_id, emails: [...] }
+    Only sends to members of the organization. Checks scope via is_org_owner or is_org_member.
+    """
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    org_id = body.organization_id or get_user_org_id(current_user)
+    if not org_id:
+        raise HTTPException(status_code=400, detail="Organization ID required")
+
+    from ..dependencies.scope import is_org_member
+
+    if not await is_org_member(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Normalize requested emails to those that are members and not integrated
+    # Reuse status logic
+    members = list(db.org_chart_members.find({"organization_id": org_id}, {"email": 1}))
+    member_emails = set((m.get("email") or "").strip().lower() for m in members if m.get("email"))
+
+    requested = [(e or "").strip().lower() for e in body.emails if e]
+    if not requested:
+        raise HTTPException(status_code=400, detail="No emails provided")
+    # Filter to members only
+    target_emails = [e for e in requested if e in member_emails]
+    if not target_emails:
+        raise HTTPException(status_code=400, detail="No valid member emails")
+
+    # Determine which are not integrated
+    from ..core.providers import get_org_provider
+
+    provider = None
+    try:
+        provider = get_org_provider(db, org_id)
+    except Exception:
+        provider = None
+
+    # Robust integrated check via users/employees mapping (handles UID vs email mismatch for earlier integrated users)
+    integrated_set: set[str] = set()
+    try:
+        target_lower = [e.lower() for e in target_emails]
+        email_to_uid: dict[str, str] = {}
+        uid_to_email: dict[str, str] = {}
+        for u in db.users.find({"email": {"$in": target_lower}}, {"email": 1, "uid": 1}):
+            el = (u.get("email") or "").strip().lower()
+            uid = (u.get("uid") or "").strip()
+            if el in member_emails and uid:
+                email_to_uid[el] = uid
+                uid_to_email[uid.lower()] = el
+        for e in db.employees.find({"email": {"$in": target_lower}}, {"email": 1, "uid": 1}):
+            el = (e.get("email") or "").strip().lower()
+            uid = (e.get("uid") or "").strip()
+            if el in member_emails and uid and el not in email_to_uid:
+                email_to_uid[el] = uid
+                uid_to_email[uid.lower()] = el
+
+        def mark_target(member_email: str):
+            ml = member_email.strip().lower()
+            if ml in member_emails:
+                integrated_set.add(ml)
+
+        for doc in db.google_tokens.find({}, {"user_id": 1, "email": 1, "access_token": 1}):
+            if not doc.get("access_token"):
+                continue
+            te = (doc.get("email") or "").strip().lower()
+            tu = (doc.get("user_id") or "").strip().lower()
+            if te and te in member_emails:
+                mark_target(te)
+                continue
+            if tu in uid_to_email:
+                mark_target(uid_to_email[tu])
+                continue
+            if tu:
+                u = db.users.find_one({"uid": doc.get("user_id")}, {"email": 1})
+                if u and (u.get("email") or "").strip().lower() in member_emails:
+                    mark_target((u.get("email") or "").strip().lower())
+                    continue
+                ee = db.employees.find_one({"uid": doc.get("user_id")}, {"email": 1})
+                if ee and (ee.get("email") or "").strip().lower() in member_emails:
+                    mark_target((ee.get("email") or "").strip().lower())
+                    continue
+        for doc in db.zoho_tokens.find({}, {"user_id": 1, "email": 1, "zoho_mail_id": 1, "access_token": 1}):
+            if not doc.get("access_token"):
+                continue
+            te = (doc.get("email") or "").strip().lower()
+            tz = (doc.get("zoho_mail_id") or "").strip().lower()
+            tu = (doc.get("user_id") or "").strip().lower()
+            if te and te in member_emails:
+                mark_target(te)
+                continue
+            if tz and tz in member_emails:
+                mark_target(tz)
+                continue
+            if tu in uid_to_email:
+                mark_target(uid_to_email[tu])
+                continue
+            if tu:
+                u = db.users.find_one({"uid": doc.get("user_id")}, {"email": 1})
+                if u and (u.get("email") or "").strip().lower() in member_emails:
+                    mark_target((u.get("email") or "").strip().lower())
+                    continue
+                ee = db.employees.find_one({"uid": doc.get("user_id")}, {"email": 1})
+                if ee and (ee.get("email") or "").strip().lower() in member_emails:
+                    mark_target((ee.get("email") or "").strip().lower())
+                    continue
+        # Keep only those that were requested
+        integrated_set = set(e for e in integrated_set if e in [x.lower() for x in target_emails])
+    except Exception as e:
+        logger.warning(f"remind status lookup failed: {e}", exc_info=True)
+
+    not_integrated = [e for e in target_emails if e not in integrated_set]
+    if not not_integrated:
+        return {"sent": 0, "message": "All selected members are already integrated"}
+
+    # Send email via notification_service / email_service
+    try:
+        from ..core.config import settings as cfg
+        frontend_url = (getattr(cfg, "FRONTEND_URL", "") or "").strip().rstrip("/") or "http://localhost:3000"
+        link = f"{frontend_url}/dashboard/settings"
+        sent = 0
+        for email in not_integrated:
+            try:
+                from ..core.notification_service import create_and_deliver
+                # Find member name for personalization
+                m = db.org_chart_members.find_one({"organization_id": org_id, "email": email})
+                name = m.get("full_name") if m else email
+                title = "Connect your account to YesBoss"
+                message = f"Hi {name}, please connect your account in YesBoss Settings → Integrations so tasks and goals can sync. Open Settings to connect."
+                await create_and_deliver(
+                    user_id=email,
+                    org_id=org_id,
+                    type="integration_reminder",
+                    title=title,
+                    message=message,
+                    link=link,
+                    actor_id=getattr(current_user, "id", None) or getattr(current_user, "uid", None),
+                )
+                sent += 1
+            except Exception as e:
+                logger.warning(f"remind failed for {email}: {e}")
+        return {"sent": sent, "requested": len(target_emails), "not_integrated": len(not_integrated)}
+    except Exception as e:
+        logger.error(f"remind error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/role-suggestions")
 async def get_role_suggestions(
     q: str = "",

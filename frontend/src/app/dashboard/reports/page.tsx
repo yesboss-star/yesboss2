@@ -54,8 +54,8 @@ export default function ReportsPage() {
     setLoading(true);
     try {
       const [goalsRes, tasksRes] = await Promise.all([
-        fetch(`${API_URL}/goals`),
-        fetch(`${API_URL}/tasks`),
+        fetch(`${API_URL}/goals`, { headers: getAuthHeaders() }),
+        fetch(`${API_URL}/tasks`, { headers: getAuthHeaders() }),
       ]);
       const goalsData = await goalsRes.json();
       const tasksData = await tasksRes.json();
@@ -97,8 +97,8 @@ export default function ReportsPage() {
     try {
       await fetch(`${API_URL}/reports/generate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ period: "weekly" }),
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({ period: "weekly", organization_id: orgId || undefined }),
       });
     } catch {}
     setGenerating(false);
@@ -109,7 +109,7 @@ export default function ReportsPage() {
     try {
       const res = await fetch(`${API_URL}/reports/generate/all-employees`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({ period: "weekly", organization_id: orgId || undefined }),
       });
       if (res.ok) {
@@ -126,7 +126,7 @@ export default function ReportsPage() {
     try {
       const res = await fetch(`${API_URL}/reports/generate/employee`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({ period: "weekly", organization_id: orgId || undefined }),
       });
       if (res.ok) {

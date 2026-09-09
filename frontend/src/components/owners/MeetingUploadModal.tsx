@@ -8,8 +8,9 @@ import {
 } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
-import { FileText, Upload, Loader2, CheckCircle, AlertCircle, X, Calendar, Clock, User, Search } from "lucide-react";
+import { FileText, Upload, Loader2, CheckCircle, AlertCircle, X, Calendar, Clock, User, Search, AlertTriangle } from "lucide-react";
 import { getCalendarBase } from "@/lib/calendar";
+import { getAuthHeaders } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
@@ -148,23 +149,47 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
     } catch {}
   }, [organization?.id]);
 
+  const [hasSearchedParticipants, setHasSearchedParticipants] = useState(false);
+
   const fetchParticipantSuggestions = useCallback(async (q: string) => {
-    if (!organization?.id || q.length < 1) {
+    const clean = q.replace(/^@+/, "").trim();
+    if (!organization?.id || clean.length < 1) {
       setParticipantSuggestions([]);
       setShowParticipantDropdown(false);
+      setHasSearchedParticipants(false);
       return;
     }
     setSearchingParticipants(true);
+    setHasSearchedParticipants(true);
     try {
-      const res = await fetch(`${API_URL}/org-chart/members/search?q=${encodeURIComponent(q)}&organization_id=${organization.id}`, { credentials: "include" });
+      const res = await fetch(`${API_URL}/org-chart/members/search?q=${encodeURIComponent(clean)}&organization_id=${organization.id}`, { headers: getAuthHeaders() });
       if (res.ok) {
         const data = await res.json();
         const alreadySelected = new Set(selectedParticipants.map((p) => p.email.toLowerCase()));
         const filtered = (data.members || []).filter((m: OrgMember) => !alreadySelected.has(m.email.toLowerCase()));
         setParticipantSuggestions(filtered);
-        setShowParticipantDropdown(filtered.length > 0);
+        setShowParticipantDropdown(true);
+      } else {
+        // Fallback to calendar provider search
+        try {
+          const fb = await fetch(`${getCalendarBase()}/users/search?q=${encodeURIComponent(clean)}`, { credentials: "include", headers: getAuthHeaders() as any });
+          if (fb.ok) {
+            const d2 = await fb.json();
+            const users = (d2.users || []).map((u: any) => ({ _id: u.id, id: u.id, email: u.email, full_name: u.name, role: "", department: "" }));
+            const alreadySelected2 = new Set(selectedParticipants.map((p) => p.email.toLowerCase()));
+            const filtered2 = users.filter((m: any) => !alreadySelected2.has((m.email || "").toLowerCase()));
+            setParticipantSuggestions(filtered2);
+            setShowParticipantDropdown(true);
+            return;
+          }
+        } catch {}
+        setParticipantSuggestions([]);
+        setShowParticipantDropdown(true);
       }
-    } catch {} finally {
+    } catch {
+      setParticipantSuggestions([]);
+      setShowParticipantDropdown(true);
+    } finally {
       setSearchingParticipants(false);
     }
   }, [organization?.id, selectedParticipants]);
@@ -179,6 +204,26 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
     setParticipantQuery(val);
     clearTimeout(participantDebounceRef.current);
     participantDebounceRef.current = setTimeout(() => fetchParticipantSuggestions(val), 200);
+  };
+
+  const handleParticipantKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      const raw = participantQuery.trim().replace(/^@+/, "").trim();
+      if (!raw) return;
+      if (participantSuggestions.length > 0) {
+        e.preventDefault();
+        addParticipant(participantSuggestions[0]);
+        return;
+      }
+      if (raw.includes("@")) {
+        e.preventDefault();
+        const email = raw.toLowerCase();
+        if (!selectedParticipants.some((p) => p.email.toLowerCase() === email)) {
+          addParticipant({ _id: email, id: email, email, full_name: email, role: "", department: "" } as any);
+          setParticipantQuery("");
+        }
+      }
+    }
   };
 
   const addParticipant = (member: OrgMember) => {
@@ -476,10 +521,11 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
                 ))}
                 <input
                   className="flex-1 min-w-[120px] bg-transparent border-none outline-none text-sm px-1 py-0.5"
-                  placeholder={selectedParticipants.length === 0 ? "Search participants from org chart..." : "Add more..."}
+                  placeholder={selectedParticipants.length === 0 ? "Search participants from org chart... (@name works)" : "Add more..."}
                   value={participantQuery}
                   onChange={(e) => onParticipantQueryChange(e.target.value)}
-                  onFocus={() => { if (participantSuggestions.length > 0) setShowParticipantDropdown(true); }}
+                  onKeyDown={handleParticipantKeyDown}
+                  onFocus={() => { if (participantSuggestions.length > 0 || hasSearchedParticipants) setShowParticipantDropdown(true); }}
                   disabled={loading}
                 />
                 {searchingParticipants && <Loader2 className="w-4 h-4 animate-spin text-text-muted self-center" />}
@@ -487,7 +533,10 @@ export default function MeetingUploadModal({ open, onOpenChange, onSuccess }: Me
               {showParticipantDropdown && (
                 <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-surface border border-border/50 rounded-xl shadow-lg max-h-56 overflow-y-auto">
                   {participantSuggestions.length === 0 ? (
-                    <div className="px-4 py-3 text-sm text-text-muted">No matches found</div>
+                    <div className="px-4 py-3 text-sm text-text-muted flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-400" />
+                      <span>Person not found in Orchestration. Add them in Orchestration first.</span>
+                    </div>
                   ) : (
                     participantSuggestions.map((m) => (
                       <button

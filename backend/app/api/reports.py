@@ -103,7 +103,16 @@ def build_report_content(db, org_id: str, request: ReportRequest) -> dict[str, A
 
     task_breakdown = []
     for t in tasks[:20]:
-        assignee = t.get("assignee_email") or t.get("assignee_name") or "Unassigned"
+        ae = t.get("assignee_email")
+        if isinstance(ae, (list, tuple)):
+            ae = ae[0] if ae else None
+        an = t.get("assignee_name")
+        if isinstance(an, (list, tuple)):
+            an = ", ".join(str(x) for x in an) if an else None
+        assignee = ae or an or "Unassigned"
+        if isinstance(assignee, (list, tuple)):
+            assignee = ", ".join(str(x) for x in assignee) if assignee else "Unassigned"
+        assignee = str(assignee)
         created = t.get("created_at")
         days_open = (now - _parse_dt(created)).days if created else 0
         task_breakdown.append({
@@ -314,10 +323,15 @@ def generate_pdf(content: dict[str, Any], org_name: str = "YesBoss") -> bytes:
         tb_header = [Paragraph("<b>Task</b>", cell_style), Paragraph("<b>Status</b>", cell_style), Paragraph("<b>Assignee</b>", cell_style), Paragraph("<b>Priority</b>", cell_style), Paragraph("<b>Days</b>", cell_style)]
         tb_rows = [tb_header]
         for t in task_breakdown:
+            assignee_val = t.get("assignee", "-")
+            if isinstance(assignee_val, (list, tuple)):
+                assignee_val = ", ".join(str(x) for x in assignee_val) if assignee_val else "-"
+            else:
+                assignee_val = str(assignee_val) if assignee_val is not None else "-"
             tb_rows.append([
                 Paragraph(t.get("title", "-"), cell_style),
                 Paragraph(t.get("status", "-"), cell_style),
-                Paragraph(t.get("assignee", "-")[:20], cell_style),
+                Paragraph(assignee_val[:30], cell_style),
                 Paragraph(t.get("priority", "-"), cell_style),
                 Paragraph(str(t.get("days_open", 0)), cell_style),
             ])
@@ -818,7 +832,11 @@ async def download_report(
             }
         )
 
-    pdf_bytes = generate_pdf(content, org_name)
+    try:
+        pdf_bytes = generate_pdf(content, org_name)
+    except Exception as e:
+        logger.error(f"PDF generation failed for report {report_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",

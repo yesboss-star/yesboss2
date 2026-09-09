@@ -6,6 +6,8 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, Badge, Button } from "@/components/ui";
 import { ArrowLeft, Calendar, Target, Flag, User, Loader2 } from "lucide-react";
 import { useGoalStore } from "@/stores/goalStore";
+import { useAuth } from "@/contexts/AuthContext";
+import { getAuthHeaders } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
@@ -28,6 +30,7 @@ interface GoalDetail {
 export default function GoalDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
   const [goal, setGoal] = useState<GoalDetail | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -35,9 +38,14 @@ export default function GoalDetailPage() {
 
   useEffect(() => {
     if (!goalId) return;
+    // Wait for auth (email deep-link flow lands here before login finishes)
+    // and always send the token — the endpoint requires authentication.
+    if (authLoading) return;
     const fetchGoal = async () => {
       try {
-        const res = await fetch(`${API_URL}/goals/${goalId}`);
+        const res = await fetch(`${API_URL}/goals/${goalId}`, {
+          headers: { ...getAuthHeaders() },
+        });
         if (!res.ok) throw new Error("Goal not found");
         const data = await res.json();
         setGoal({ ...data.goal, id: data.goal._id || data.goal.id, tasks: data.tasks || [] });
@@ -48,7 +56,7 @@ export default function GoalDetailPage() {
       }
     };
     fetchGoal();
-  }, [goalId]);
+  }, [goalId, user, authLoading]);
 
   return (
     <DashboardLayout>

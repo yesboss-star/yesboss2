@@ -28,7 +28,7 @@ export default function TaskDetailPage() {
   const params = useParams();
   const taskId = params.id as string;
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { setBreadcrumbs } = useUIStore();
   const { organization } = useOrganizationStore();
   const { currentTask, comments, fetchTaskWithComments, updateTask, completeTask, approveTask, deleteTask, addComment, loading } = useTaskStore();
@@ -48,10 +48,14 @@ export default function TaskDetailPage() {
   }, [setBreadcrumbs]);
 
   useEffect(() => {
+    // Wait for auth: on the email deep-link flow (?redirect=/tasks/:id) this
+    // page mounts before login finishes; fetching immediately would 401 and
+    // stick on "Task not found". Re-run once the user is known.
+    if (authLoading) return;
     if (taskId && taskId !== "new") {
       fetchTaskWithComments(taskId);
     }
-  }, [taskId, fetchTaskWithComments]);
+  }, [taskId, fetchTaskWithComments, user, authLoading]);
 
   const handleAddComment = async () => {
     if (!newComment.trim()) return;
@@ -108,7 +112,7 @@ export default function TaskDetailPage() {
   const isOwner = (user as any)?.user_metadata?.role === "owner";
   const assigneeIds = Array.isArray(currentTask?.assignee_id) ? currentTask.assignee_id : (currentTask?.assignee_id ? [currentTask.assignee_id] : []);
 
-  if (!currentTask && loading) {
+  if (!currentTask && (loading || authLoading)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <Loader2 className="w-6 h-6 text-primary animate-spin" />

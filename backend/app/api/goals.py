@@ -333,8 +333,18 @@ async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user_
             logger = logging.getLogger("yesboss.goals")
             logger.warning(f"AI department analysis failed, leaving unassigned: {e}")
 
-    assignee_ids = _normalize_list(goal.assignee_id) or []
-    assignee_names = _normalize_list(goal.assignee_name) or []
+    # Canonical assignee identity = EMAILS (see app/core/identity.py). Keeps AI
+    # analytics, filters and notifications resolving by the same key.
+    from ..core.identity import canonical_assignee_payload
+
+    canon = canonical_assignee_payload(
+        db, org_id,
+        assignee_id=goal.assignee_id,
+        assignee_email=goal.assignee_email,
+        assignee_name=goal.assignee_name,
+    )
+    assignee_ids = canon["assignee_id"]
+    assignee_names = canon["assignee_name"]
     reviewer_ids = _normalize_list(goal.reviewer_id) or []
     reviewer_names = _normalize_list(goal.reviewer_name) or []
 
@@ -349,7 +359,7 @@ async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user_
         "department": department,
         "assignee_id": assignee_ids,
         "assignee_name": assignee_names,
-        "assignee_email": goal.assignee_email,
+        "assignee_email": canon["assignee_email"],
         "reviewer_id": reviewer_ids,
         "reviewer_name": reviewer_names,
         "organization_id": org_id,
@@ -406,7 +416,7 @@ async def create_goal(goal: GoalCreate, current_user = Depends(get_current_user_
                 message=f"Goal assigned: {goal.title}",
                 link=f"/goals/{result.inserted_id}",
                 actor_id=user_id,
-                email=goal.assignee_email,
+                email=aid if ("@" in str(aid)) else None,
             ))
 
     for rid in reviewer_ids:
@@ -703,18 +713,9 @@ async def get_goal(goal_id: str, current_user = Depends(get_current_user)):
     uid = getattr(current_user, "id", None)
     is_owner = await is_org_owner(db, goal.get("organization_id"), current_user)
 
-    def _id_field_matches(field: str) -> bool:
-        raw = goal.get(field)
-        values = raw if isinstance(raw, list) else ([raw] if raw else [])
-        return uid in values or user_email in values
+    from ..core.identity import is_person_involved
 
-    involved = (
-        goal.get("created_by") == uid
-        or goal.get("assignee_email") == user_email
-        or goal.get("reviewer_email") == user_email
-        or _id_field_matches("assignee_id")
-        or _id_field_matches("reviewer_id")
-    )
+    involved = is_person_involved(goal, uid, user_email)
     if not is_owner and not involved:
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -832,8 +833,9 @@ async def update_goal(goal_id: str, goal: GoalUpdate, current_user = Depends(get
     if current_user and getattr(current_user, 'id', None):
         g_org_id = old_goal_doc.get("organization_id", "")
         if not await _is_org_owner(db, g_org_id, current_user.id):
+            from ..core.identity import is_person_involved
             user_email = (getattr(current_user, 'email', '') or '').lower().strip()
-            if old_goal_doc.get("created_by") != current_user.id and old_goal_doc.get("assignee_email") != user_email:
+            if not is_person_involved(old_goal_doc, current_user.id, user_email):
                 raise HTTPException(status_code=403, detail="Access denied")
 
     update_data = {}
@@ -844,6 +846,19 @@ async def update_goal(goal_id: str, goal: GoalUpdate, current_user = Depends(get
             update_data[k] = _normalize_list(v) or []
         else:
             update_data[k] = v
+
+    # Canonicalize assignee changes to emails so reads agree (see identity.py).
+    if "assignee_id" in update_data:
+        from ..core.identity import canonical_assignee_payload
+        canon = canonical_assignee_payload(
+            db, old_goal_doc.get("organization_id") or "",
+            assignee_id=update_data.get("assignee_id"),
+            assignee_name=update_data.get("assignee_name"),
+        )
+        update_data["assignee_id"] = canon["assignee_id"]
+        update_data["assignee_email"] = canon["assignee_email"]
+        if canon["assignee_name"]:
+            update_data["assignee_name"] = canon["assignee_name"]
     update_data["updated_at"] = datetime.utcnow()
 
     db.goals.update_one(
@@ -923,7 +938,7 @@ async def update_goal(goal_id: str, goal: GoalUpdate, current_user = Depends(get
                 title=f"Goal Status: {goal_doc['status'].title()}",
                 message=f"Goal '{goal_doc.get('title')}' status updated to {goal_doc['status']}",
                 link=f"/goals/{goal_id}",
-                email=goal_doc.get("assignee_email"),
+                email=aid if ("@" in str(aid)) else None,
             ))
 
     created_by = goal_doc.get("created_by")
@@ -1082,8 +1097,9 @@ async def delete_goal(goal_id: str, current_user = Depends(get_current_user_opti
     if current_user and getattr(current_user, 'id', None):
         g_org_id = goal.get("organization_id", "")
         if not await _is_org_owner(db, g_org_id, current_user.id):
+            from ..core.identity import is_person_involved
             user_email = (getattr(current_user, 'email', '') or '').lower().strip()
-            if goal.get("created_by") != current_user.id and goal.get("assignee_email") != user_email:
+            if not is_person_involved(goal, current_user.id, user_email):
                 raise HTTPException(status_code=403, detail="Access denied")
 
     if goal:
@@ -1102,7 +1118,7 @@ async def delete_goal(goal_id: str, current_user = Depends(get_current_user_opti
                     title="Goal Deleted",
                     message=f"Goal '{goal.get('title')}' was deleted",
                     metadata={"goal_id": goal_id},
-                    email=goal.get("assignee_email"),
+                    email=aid if ("@" in str(aid)) else None,
                 ))
         if created_by and created_by not in notified:
             asyncio.create_task(create_notification(

@@ -26,6 +26,26 @@ def _check_email_rate_limit(org_id: str, max_per_hour: int = 50) -> bool:
     return True
 
 
+def _to_absolute_link(link: str | None) -> str | None:
+    """Convert a relative /tasks/... or /goals/... link to an absolute FRONTEND_URL link for emails."""
+    if not link:
+        return link
+    link = link.strip()
+    if link.startswith("http://") or link.startswith("https://"):
+        return link
+    # Ensure leading slash
+    if not link.startswith("/"):
+        link = "/" + link
+    try:
+        from .config import settings as cfg
+        base = (getattr(cfg, "FRONTEND_URL", "") or "").strip().rstrip("/")
+        if base:
+            return f"{base}{link}"
+    except Exception:
+        pass
+    return link
+
+
 def resolve_uid(user_id: str) -> str:
     db = get_database()
     if db is None:
@@ -142,8 +162,9 @@ async def create_and_deliver(
     if is_channel_enabled(prefs, "email", type) and is_email_configured():
         user_email = email or get_user_email(user_id)
         if user_email and _check_email_rate_limit(org_id):
+            absolute_link = _to_absolute_link(link)
             asyncio.create_task(asyncio.to_thread(
-                send_notification_email, user_email, title, message, link, None, "default", None, attachments
+                send_notification_email, user_email, title, message, absolute_link, None, "default", None, attachments
             ))
 
     if is_channel_enabled(prefs, "push", type):

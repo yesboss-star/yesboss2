@@ -663,11 +663,21 @@ async def delegate_task(request: DelegateRequest):
     create_goal = item_type in ("goal", "both")
     create_task = item_type in ("task", "both")
 
-    assignee_ids = [str(a["_id"]) for a in assignees if a.get("_id")]
+    # Canonical identity = EMAILS (so AI analytics / filters / notifications all
+    # resolve "who owns this work" by the same key). ObjectIds from the old
+    # delegate path are the root cause of tasks vanishing for a person's view.
+    from ..core.identity import email_list
+
+    assignee_emails = email_list([a.get("email") for a in assignees])
+    assignee_ids = (
+        list(assignee_emails)
+        if assignee_emails
+        else [str(a["_id"]) for a in assignees if a.get("_id")]
+    )
     assignee_names = [
         (a.get("full_name") or a.get("name") or a.get("email")) for a in assignees
     ]
-    assignee_emails = [a.get("email") for a in assignees if a.get("email")]
+    assignee_email_primary = assignee_emails[0] if assignee_emails else None
 
     goal_doc: dict[str, Any] | None = None
     goal_id: str | None = None
@@ -682,7 +692,7 @@ async def delegate_task(request: DelegateRequest):
             "department": department,
             "assignee_id": assignee_ids,
             "assignee_name": assignee_names,
-            "assignee_email": assignee_emails,
+            "assignee_email": assignee_email_primary,
             "organization_id": org_id,
             "created_by": (request.context.user_email if request.context else None),
             "status": "active",
@@ -706,7 +716,7 @@ async def delegate_task(request: DelegateRequest):
             "status": "pending",
             "goal_id": goal_id,
             "assignee_id": assignee_ids,
-            "assignee_email": assignee_emails,
+            "assignee_email": assignee_email_primary,
             "assignee_name": assignee_names,
             "department": department,
             "due_date": request.due_date,
@@ -742,7 +752,7 @@ async def delegate_task(request: DelegateRequest):
             "goal_id": goal_id,
             "parent_task_id": task_id,
             "assignee_id": assignee_ids,
-            "assignee_email": assignee_emails,
+            "assignee_email": assignee_email_primary,
             "assignee_name": assignee_names,
             "department": department,
             "due_date": request.due_date,
@@ -811,9 +821,13 @@ async def delegate_task(request: DelegateRequest):
         logger.warning("WebSocket broadcast failed in delegate: %s", e)
 
     try:
-        # In-app + email notification for each assignee
+        # In-app + email notification for each assignee (keyed by email, which
+        # resolve_uid can turn back into the Firebase uid).
+        def _notify_target(a: dict[str, Any]) -> str:
+            return a.get("email") or str(a.get("_id") or "")
+
         for a in assignees:
-            assignee_id = str(a["_id"])
+            assignee_id = _notify_target(a)
             if goal_doc:
                 asyncio.create_task(create_notification(
                     user_id=assignee_id, org_id=org_id, type="goal_assigned",
@@ -831,7 +845,7 @@ async def delegate_task(request: DelegateRequest):
         for st in sub_tasks:
             for a in assignees:
                 asyncio.create_task(create_notification(
-                    user_id=str(a["_id"]), org_id=org_id, type="task_assigned",
+                    user_id=_notify_target(a), org_id=org_id, type="task_assigned",
                     title="New Sub-Task Assigned", message=f"You have been assigned: {st.get('title', 'Sub-task')}",
                     link=f"/tasks/{st.get('_id', task_id)}",
                     actor_id=user_id, email=a.get("email"),
@@ -1650,31 +1664,125 @@ async def _gather_org_snapshot(db, org_id: str, user_id: str | None = None, user
         snap["documents"] = {"total_documents": 0, "analyzed_documents": 0, "summary": ""}
 
     try:
-        goals = list(db.goals.find({"organization_id": org_id}).sort("created_at", -1).limit(20))
-        for g in goals:
+        goals_docs = list(db.goals.find({"organization_id": org_id}).sort("created_at", -1).limit(60))
+        for g in goals_docs:
             g["_id"] = str(g["_id"])
         snap["goals"] = {
-            "count": len(goals),
-            "active": sum(1 for g in goals if g.get("status") == "active"),
-            "departments": list({g.get("department") for g in goals if g.get("department")})[:10],
-            "titles": [g.get("title") for g in goals[:8]],
+            "count": len(goals_docs),
+            "active": sum(1 for g in goals_docs if g.get("status") == "active"),
+            "departments": list({g.get("department") for g in goals_docs if g.get("department")})[:10],
+            "titles": [g.get("title") for g in goals_docs[:8]],
         }
+        snap["_goal_docs"] = goals_docs
     except Exception as e:
         logger.warning("goals snapshot failed: %s", e)
         snap["goals"] = {"count": 0, "active": 0, "departments": [], "titles": []}
+        snap["_goal_docs"] = []
 
     try:
-        tasks = list(db.tasks.find({"organization_id": org_id}).limit(50))
+        task_docs = list(db.tasks.find({"organization_id": org_id}).sort("created_at", -1).limit(150))
         snap["tasks"] = {
-            "total": len(tasks),
-            "pending": sum(1 for t in tasks if t.get("status") == "pending"),
-            "in_progress": sum(1 for t in tasks if t.get("status") == "in_progress"),
-            "completed": sum(1 for t in tasks if t.get("status") == "completed"),
-            "departments": list({t.get("department") for t in tasks if t.get("department")})[:10],
+            "total": len(task_docs),
+            "pending": sum(1 for t in task_docs if t.get("status") == "pending"),
+            "in_progress": sum(1 for t in task_docs if t.get("status") == "in_progress"),
+            "completed": sum(1 for t in task_docs if t.get("status") == "completed"),
+            "departments": list({t.get("department") for t in task_docs if t.get("department")})[:10],
         }
+        snap["_task_docs"] = task_docs
     except Exception as e:
         logger.warning("tasks snapshot failed: %s", e)
         snap["tasks"] = {"total": 0, "pending": 0, "in_progress": 0, "completed": 0, "departments": []}
+        snap["_task_docs"] = []
+
+    # Per-person workload index so the AI can answer "show me what's assigned
+    # to <person>" / "What should I focus on this week?" with real names+titles.
+    try:
+        from ..core.identity import is_email as _is_email
+
+        member_map: dict[str, str] = {}
+        for col in ("employees", "org_chart_members"):
+            for m in db[col].find({"organization_id": org_id}, {"email": 1, "full_name": 1}):
+                em = str(m.get("email") or "").strip().lower()
+                if em:
+                    member_map.setdefault(em, m.get("full_name") or m.get("name") or em)
+
+        id2email: dict[str, str] = {e.lower(): e for e in member_map}
+        for col in ("employees", "org_chart_members"):
+            for m in db[col].find({"organization_id": org_id}, {"email": 1}):
+                em = str(m.get("email") or "").strip().lower()
+                if em:
+                    try:
+                        id2email.setdefault(str(m["_id"]).lower(), em)
+                    except Exception:
+                        pass
+                    uid = m.get("uid")
+                    if uid:
+                        id2email.setdefault(str(uid).lower(), em)
+        for u in db["users"].find({}, {"email": 1, "uid": 1}):
+            em = str(u.get("email") or "").strip().lower()
+            uid = u.get("uid")
+            if em and uid:
+                id2email.setdefault(str(uid).lower(), em)
+
+        def _assignee_emails_of(doc: dict[str, Any]) -> list[str]:
+            raw = doc.get("assignee_id")
+            if isinstance(raw, str):
+                raw = [raw]
+            out: list[str] = []
+            for v in raw or []:
+                s = str(v or "").strip().lower()
+                if not s:
+                    continue
+                if _is_email(s):
+                    out.append(s)
+                else:
+                    mapped = id2email.get(s)
+                    if mapped:
+                        out.append(mapped)
+            # De-duplicate while preserving order
+            seen: set[str] = set()
+            deduped: list[str] = []
+            for e in out:
+                if e not in seen:
+                    seen.add(e)
+                    deduped.append(e)
+            return deduped
+
+        workload: dict[str, dict[str, Any]] = {}
+
+        def _touch(email: str) -> dict[str, Any]:
+            w = workload.setdefault(email, {"email": email, "name": member_map.get(email, email), "goals": [], "tasks": []})
+            return w
+
+        goal_titles: dict[str, str] = {str(g.get("_id")): g.get("title") for g in snap.get("_goal_docs") or []}
+
+        for g in snap.get("_goal_docs") or []:
+            for e in _assignee_emails_of(g):
+                w = _touch(e)
+                if len(w["goals"]) < 5:
+                    pid = g.get("parent_goal_id")
+                    label = g.get("title")
+                    if pid and pid in goal_titles:
+                        label = f"{label} (sub-goal of {goal_titles[pid]})"
+                    w["goals"].append({"title": label, "status": g.get("status"), "goal_type": g.get("goal_type")})
+
+        for t in snap.get("_task_docs") or []:
+            for e in _assignee_emails_of(t):
+                w = _touch(e)
+                if len(w["tasks"]) < 6:
+                    w["tasks"].append({"title": t.get("title"), "status": t.get("status"), "priority": t.get("priority")})
+
+        # Only expose members with at least one item (or members with anything)
+        workload_list = [w for w in workload.values() if w["goals"] or w["tasks"]]
+        workload_list.sort(key=lambda w: (w["name"] or w["email"]).lower())
+        snap["team_workload"] = workload_list[:40]
+    except Exception as e:
+        logger.warning("workload snapshot failed: %s", e)
+        snap["team_workload"] = []
+
+    # Drop the private raw lists before returning the snapshot
+    snap.pop("_goal_docs", None)
+    snap.pop("_task_docs", None)
 
     try:
         employees = list(db.employees.find({"organization_id": org_id}).limit(100))
@@ -1835,8 +1943,10 @@ async def _build_ask_prompt(
             org_block += "\n".join(org_lines) + "\n"
 
     doc_block = ""
-    if docs and (docs.get("analyzed_documents") or 0) > 0:
-        doc_block = f"Uploaded documents ({docs.get('analyzed_documents', 0)} analyzed):\n"
+    if docs and (docs.get("total_documents") or 0) > 0:
+        analyzed_n = docs.get("analyzed_documents") or 0
+        total_n = docs.get("total_documents") or 0
+        doc_block = f"Uploaded documents ({analyzed_n} analyzed of {total_n}):\n"
         for d in (docs.get("documents") or [])[:8]:
             line = f"- {d.get('filename')}: {(d.get('summary') or '')[:200]}"
             metrics = d.get("key_metrics") or []
@@ -1882,6 +1992,49 @@ async def _build_ask_prompt(
         except Exception as e:
             logger.warning("Team member listing failed in _build_ask_prompt: %s", e)
 
+    # Per-person workload index — the key ingredient that lets the AI answer
+    # "what is assigned to <person>?" with real task/goal titles by name.
+    workload = snap.get("team_workload") or []
+    workload_map: dict[str, dict[str, Any]] = {}
+    for w in workload:
+        workload_map[(w.get("email") or "").lower()] = w
+        workload_map[(w.get("name") or "").lower()] = w
+
+    def _fmt_person(w: dict[str, Any]) -> str:
+        parts = []
+        goals = w.get("goals") or []
+        tasks = w.get("tasks") or []
+        if goals:
+            parts.append("goals: " + "; ".join(f"{g.get('title')} ({g.get('status')})" for g in goals[:5]))
+        if tasks:
+            parts.append("tasks: " + "; ".join(f"{t.get('title')} ({t.get('status')})" for t in tasks[:6]))
+        return f"- {w.get('name')} <{w.get('email')}>: " + (" | ".join(parts) if parts else "no assigned work")
+
+    workload_block = ""
+    if workload:
+        rendered = [_fmt_person(w) for w in workload[:40]]
+        workload_block = "Team workload (who is assigned what — check here when the user names a person):\n" + "\n".join(rendered) + "\n"
+
+    # Personal block for the signed-in user, plus any person explicitly
+    # @-mentioned or named in the message.
+    personal_blocks: list[str] = []
+    mentioned_keys: set[str] = set()
+    for key in (user_email or "").lower(), (user_id or "").lower():
+        if key and key in workload_map and key not in mentioned_keys:
+            mentioned_keys.add(key)
+            personal_blocks.append("Your assigned work:\n" + _fmt_person(workload_map[key]))
+    for cand in workload:
+        key = (cand.get("email") or "").lower()
+        name = (cand.get("name") or "").strip().lower()
+        if key in mentioned_keys or not name:
+            continue
+        if name and len(name) >= 3 and (name in text.lower() or (cand.get("email") or "").lower() in text.lower()):
+            mentioned_keys.add(key)
+            personal_blocks.append(f"Work assigned to {cand.get('name')}:\n" + _fmt_person(cand))
+        if len(personal_blocks) >= 3:
+            break
+    personal_block = ("\n".join(personal_blocks) + "\n") if personal_blocks else ""
+
     ctx_block = ""
     if session_context:
         ctx_block = "What we already know from this chat:\n" + "\n".join(f"- {k}: {v}" for k, v in session_context.items()) + "\n"
@@ -1899,6 +2052,8 @@ async def _build_ask_prompt(
         f"{tasks_block}"
         f"{emp_block}"
         f"{team_block}"
+        f"{personal_block}"
+        f"{workload_block}"
         f"{ctx_block}"
         f"{insights_block}\n"
         f"Recent chat:\n{history_block}\n\n"
@@ -2163,8 +2318,9 @@ async def assistant_chat(request: ChatRequest, current_user = Depends(get_curren
 
     doc_block = ""
     docs = snap.get("documents") or {}
-    if docs and (docs.get("analyzed_documents") or 0) > 0:
-        # Per-document detailed block (small subset, trimmed)
+    if docs and (docs.get("total_documents") or 0) > 0:
+        # Per-document detailed block (small subset, trimmed). Summaries include
+        # a raw-text preview fallback so pending docs aren't bare filenames.
         doc_lines = []
         for d in (docs.get("documents") or [])[:8]:
             line = f"- **{d.get('filename', 'document')}** ({d.get('document_category', '?')}): {d.get('summary', '')[:200]}"
@@ -2181,7 +2337,7 @@ async def assistant_chat(request: ChatRequest, current_user = Depends(get_curren
             doc_lines.append(line)
         if doc_lines:
             doc_block = (
-                f"Documents analyzed ({docs.get('analyzed_documents', 0)}/{docs.get('total_documents', 0)}):\n"
+                f"Documents ({docs.get('analyzed_documents', 0)} analyzed of {docs.get('total_documents', 0)}):\n"
                 + "\n".join(doc_lines)
                 + "\n\n"
             )
@@ -3237,12 +3393,17 @@ async def bulk_create_tasks(request: BulkCreateTasksRequest):
             failed.append({"title": "", "error": "Empty title"})
             continue
         try:
+            from ..core.identity import canonical_assignee_payload
+
             emp = None
             if item.assignee_name or item.assignee_email:
                 emp = _resolve_assignee(db, org_id, item.assignee_email, item.assignee_name)
-            assignee_id = str(emp["_id"]) if emp else None
-            assignee_email = (emp.get("email") if emp else None) or item.assignee_email
-            assignee_name = (emp.get("full_name") if emp else None) or item.assignee_name
+            raw_id = str(emp["_id"]) if emp else (item.assignee_email or None)
+            raw_email = (emp.get("email") if emp else None) or item.assignee_email
+            canon = canonical_assignee_payload(db, org_id, assignee_id=raw_id, assignee_email=raw_email, assignee_name=item.assignee_name)
+            assignee_emails = canon["assignee_id"]
+            assignee_email = assignee_emails[0] if assignee_emails else None
+            assignee_name = canon["assignee_name"][0] if canon["assignee_name"] else item.assignee_name
 
             task_doc = {
                 "title": title,
@@ -3250,9 +3411,9 @@ async def bulk_create_tasks(request: BulkCreateTasksRequest):
                 "priority": item.priority or "medium",
                 "status": "pending",
                 "organization_id": org_id,
-                "assignee_id": assignee_id,
+                "assignee_id": assignee_emails,
                 "assignee_email": assignee_email,
-                "assignee_name": assignee_name,
+                "assignee_name": canon["assignee_name"] or [assignee_name] if assignee_name else [],
                 "source": "ai_action_item",
                 "created_at": now,
                 "updated_at": now,
@@ -3268,10 +3429,10 @@ async def bulk_create_tasks(request: BulkCreateTasksRequest):
                 except Exception as e:
                     logger.warning(f"Provider sync failed for action item: {e}")
 
-            if assignee_id:
+            if assignee_email:
                 try:
                     asyncio.create_task(create_notification(
-                        user_id=assignee_id, org_id=org_id, type="task_assigned",
+                        user_id=assignee_email, org_id=org_id, type="task_assigned",
                         title="New Task from AI Analysis",
                         message=f"Action item created: {title}",
                         link=f"/tasks/{task_doc['_id']}",
@@ -3352,7 +3513,7 @@ async def generate_insights(request: GenerateInsightsRequest):
     try:
         # Fetch recent documents with raw text for insight generation
         raw_docs = list(
-            db.documents.find({"organization_id": org_id})
+            db.documents.find({"org_id": org_id})
             .sort("created_at", -1)
             .limit(6)
         )

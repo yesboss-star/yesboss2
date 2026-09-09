@@ -155,9 +155,17 @@ export default function SignupPage() {
       document.cookie = `yesboss_token=true; path=/; max-age=86400; SameSite=Lax`;
       document.cookie = `yesboss_user=${userCookie}; path=/; max-age=86400; SameSite=Lax`;
 
-      const dest = role === "owner"
+      // Preserve deep-link redirect through onboarding if present
+      let redirect: string | null = null;
+      try {
+        redirect = new URLSearchParams(window.location.search).get("redirect");
+        if (redirect && (!redirect.startsWith("/") || redirect.startsWith("//"))) redirect = null;
+        if (redirect) localStorage.setItem("yesboss_pending_redirect", redirect);
+      } catch {}
+      const baseDest = role === "owner"
         ? `/onboarding/owner?email=${encodeURIComponent(userData.email)}&name=${encodeURIComponent(formData.fullName)}`
         : `/onboarding/employee?email=${encodeURIComponent(userData.email)}&name=${encodeURIComponent(formData.fullName)}`;
+      const dest = redirect ? `${baseDest}&redirect=${encodeURIComponent(redirect)}` : baseDest;
       router.push(dest);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {

@@ -1,11 +1,13 @@
 import { type NextRequest, NextResponse } from "next/server";
 
-const protectedRoutes = ["/dashboard", "/onboarding"];
+const protectedRoutes = ["/dashboard", "/onboarding", "/tasks", "/goals"];
 const authRoutes = ["/login", "/signup"];
 const onboardingRoutes = ["/onboarding/owner", "/onboarding/employee"];
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const search = request.nextUrl.search || "";
+  const fullPath = pathname + search;
   const isProtected = protectedRoutes.some((route) => pathname.startsWith(route));
   const isAuthRoute = authRoutes.some((route) => pathname.startsWith(route));
   const isOnboardingRoute = onboardingRoutes.some((route) => pathname.startsWith(route));
@@ -20,7 +22,7 @@ export async function proxy(request: NextRequest) {
 
   if (isProtected && !hasAuth) {
     const redirectUrl = new URL("/login", request.url);
-    redirectUrl.searchParams.set("redirect", pathname);
+    redirectUrl.searchParams.set("redirect", fullPath);
     return NextResponse.redirect(redirectUrl);
   }
 
@@ -40,5 +42,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/onboarding/:path*", "/login", "/signup"],
+  matcher: ["/dashboard/:path*", "/onboarding/:path*", "/tasks/:path*", "/goals/:path*", "/login", "/signup"],
 };

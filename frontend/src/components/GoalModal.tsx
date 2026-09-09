@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useGoalStore } from "@/stores/goalStore";
 import { useOrgChartStore } from "@/stores/orgChartStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
+import { getAuthHeaders } from "@/lib/utils";
 import { X, Loader2, Sparkles, Calendar, Users, Flag, CheckCircle2, ChevronDown, Check, GitBranch, Clock, ArrowLeft } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
@@ -323,7 +324,7 @@ export default function GoalModal({ isOpen, onClose, onBack }: GoalModalProps) {
           try {
             await fetch(`${API_URL}/tasks`, {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", ...getAuthHeaders() },
               body: JSON.stringify({
                 title: t.title,
                 description: t.description || t.title,

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Eye, EyeOff, Mail, Lock, AlertCircle, Loader2, CheckCircle, Phone, User, ArrowRight } from "lucide-react";
 import { auth } from "@/lib/firebase";
 import {
@@ -31,6 +31,7 @@ const COUNTRY_CODES = [
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [tab, setTab] = useState<LoginTab>("email");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -66,6 +67,20 @@ export default function LoginPage() {
   const updateField = (field: string, value: string | boolean) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
     setError("");
+  };
+
+  const getRedirectPath = () => {
+    const redirect = searchParams.get("redirect");
+    if (redirect && redirect.startsWith("/") && !redirect.startsWith("//")) return redirect;
+    // Fallback to pending stored redirect (e.g., after onboarding)
+    try {
+      const pending = localStorage.getItem("yesboss_pending_redirect");
+      if (pending && pending.startsWith("/") && !pending.startsWith("//")) {
+        localStorage.removeItem("yesboss_pending_redirect");
+        return pending;
+      }
+    } catch {}
+    return "/dashboard";
   };
 
   const finalizeLogin = async (uid: string, email: string) => {
@@ -106,7 +121,7 @@ export default function LoginPage() {
     document.cookie = `yesboss_token=true; path=/; max-age=86400; SameSite=Lax`;
     document.cookie = `yesboss_user=${userCookie}; path=/; max-age=86400; SameSite=Lax`;
 
-    window.location.href = "/dashboard";
+    window.location.href = getRedirectPath();
   };
 
   const handleEmailLogin = async () => {
@@ -235,7 +250,7 @@ export default function LoginPage() {
       document.cookie = `yesboss_token=true; path=/; max-age=86400; SameSite=Lax`;
       document.cookie = `yesboss_user=${userCookie}; path=/; max-age=86400; SameSite=Lax`;
 
-      window.location.href = "/dashboard";
+      window.location.href = getRedirectPath();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       if (err.code === "auth/invalid-verification-code") setError("Invalid OTP");
@@ -459,7 +474,13 @@ export default function LoginPage() {
 
           <p className="text-center text-sm text-text-muted mt-8">
             Or create an account{" "}
-            <Link href="/signup" className="text-primary hover:text-primary-light transition-colors cursor-pointer font-medium">
+            <Link
+              href={(() => {
+                const p = searchParams.get("redirect");
+                return p && p.startsWith("/") && !p.startsWith("//") ? `/signup?redirect=${encodeURIComponent(p)}` : "/signup";
+              })()}
+              className="text-primary hover:text-primary-light transition-colors cursor-pointer font-medium"
+            >
               Sign up free
             </Link>
           </p>

@@ -1908,7 +1908,15 @@ function OwnerOnboardingContent() {
                 Back
               </button>
               <button
-                onClick={() => router.push("/dashboard")}
+                onClick={() => {
+                  const redirect = searchParams.get("redirect") || (typeof window !== "undefined" ? localStorage.getItem("yesboss_pending_redirect") : null);
+                  if (redirect && redirect.startsWith("/") && !redirect.startsWith("//")) {
+                    try { localStorage.removeItem("yesboss_pending_redirect"); } catch {}
+                    router.push(redirect);
+                  } else {
+                    router.push("/dashboard");
+                  }
+                }}
                 className="flex-1 py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 flex items-center justify-center gap-2"
               >
                 Continue

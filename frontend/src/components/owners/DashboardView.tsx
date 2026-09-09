@@ -191,6 +191,11 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
 
   const handleAddChildGoal = async (suggestion: any, index: number) => {
     if (childGoalsBeingAdded.includes(index)) return;
+    const effOrgId = propOrgId || goalData.organization_id || (goalData as any).organization_id;
+    if (!effOrgId) {
+      console.error("Organization not loaded for child goal");
+      return;
+    }
     setChildGoalsBeingAdded((prev) => [...prev, index]);
     try {
       await createGoal({
@@ -201,7 +206,7 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
         assignee_id: goalData.assignee_id || [],
         assignee_name: goalData.assignee_name || [],
         timeline: suggestion.suggested_timeline || "",
-        organization_id: propOrgId || goalData.organization_id,
+        organization_id: effOrgId,
         goal_type: "short_term",
         duration: "one_time",
         parent_goal_id: goalData.id || goalData._id,
@@ -217,6 +222,8 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
           const data = await refresh.json();
           if (data.goal) setGoalData((prev: any) => ({ ...prev, sub_goals: data.goal.sub_goals }));
         }
+        // Also refresh global goals so Goals Pipeline updates instantly
+        if (effOrgId) fetchGoals(effOrgId).catch(() => {});
       } catch {}
     } catch (e) {
       console.error("Failed to add child goal", e);
@@ -603,11 +610,11 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
                 )}
               </div>
 
-              {/* Suggest Tasks */}
+              {/* Task-suggest */}
               <div>
                 <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-primary" />
-                  Task Suggestions
+                  Task-suggest
                 </h4>
                 {pipelineTaskSuggestions.length === 0 ? (
                   <div className="p-4 rounded-xl bg-surface border border-primary/20 text-center">
@@ -621,7 +628,7 @@ function ExpandedGoalPipeline({ goal, onClose, orgId: propOrgId }: { goal: any; 
                       className="px-4 py-2 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-xs font-medium cursor-pointer disabled:opacity-50 flex items-center gap-1.5 mx-auto"
                     >
                       {suggestingPipelineTasks ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
-                      {suggestingPipelineTasks ? "Generating..." : "Suggest Tasks"}
+                      {suggestingPipelineTasks ? "Generating..." : "Task-suggest"}
                     </button>
                   </div>
                 ) : (
@@ -1488,10 +1495,16 @@ function DepartmentDrillView({
   }, [level, parentGoal]);
 
   const suggestSubgoals = async () => {
-    if (!parentGoal || !orgId) return;
+    if (!parentGoal) return;
+    const effOrgId = orgId || parentGoal.organization_id || (parentGoal as any).organization_id;
+    if (!effOrgId) {
+      setSuggestionError("Organization not loaded. Please wait or refresh.");
+      return;
+    }
     setLoadingSubgoals(true);
     setSuggestedSubgoals([]);
     setSelectedSuggestionIds(new Set());
+    setSuggestionError("");
     try {
       const res = await fetch(`${API_URL}/goals/${parentGoal.id || parentGoal._id}/suggest-children`, {
         method: "POST",
@@ -1499,9 +1512,15 @@ function DepartmentDrillView({
       });
       if (res.ok) {
         const data = await res.json();
-        setSuggestedSubgoals(data.suggestions || []);
+        const list = data.suggestions || [];
+        if (list.length === 0) setSuggestionError("No suggestions returned. Try again.");
+        setSuggestedSubgoals(list);
+      } else {
+        setSuggestionError("Failed to generate suggestions. Try again.");
       }
-    } catch {} finally {
+    } catch {
+      setSuggestionError("Network error. Please try again.");
+    } finally {
       setLoadingSubgoals(false);
     }
   };
@@ -1545,9 +1564,64 @@ function DepartmentDrillView({
     }
   };
 
-  const addSelectedSubgoals = async () => {
-    if (!parentGoal || !orgId) return;
+  const addSingleSubgoal = async (suggestion: any, index: number) => {
+    if (!parentGoal) return;
+    const effOrgId = orgId || parentGoal.organization_id || (parentGoal as any).organization_id;
+    if (!effOrgId) {
+      setSuggestionError("Organization not loaded. Please refresh.");
+      return;
+    }
+    if (addingSubgoals) return;
     setAddingSubgoals(true);
+    setSuggestionError("");
+    try {
+      await createGoal({
+        title: suggestion.title,
+        description: suggestion.description || suggestion.title,
+        priority: suggestion.priority || "medium",
+        department: suggestion.department || parentGoal.department || departmentName,
+        organization_id: effOrgId,
+        goal_type: "short_term",
+        duration: "one_time",
+        parent_goal_id: parentGoal.id || parentGoal._id,
+        industry: parentGoal.industry || "",
+        micro_vertical: parentGoal.micro_vertical || "",
+      } as any);
+      // Remove only the added item, keep others
+      setSuggestedSubgoals((prev) => prev.filter((_, i) => i !== index));
+      // Keep selection in sync — shift indices after removal
+      setSelectedSuggestionIds((prev) => {
+        const next = new Set<number>();
+        for (const idx of prev) {
+          if (idx === index) continue;
+          next.add(idx > index ? idx - 1 : idx);
+        }
+        return next;
+      });
+      // Ensure global pipeline updates
+      if (effOrgId) fetchGoals(effOrgId).catch(() => {});
+    } catch (e: any) {
+      console.error("[addSingleSubgoal] failed", e);
+      setSuggestionError(e?.message || "Failed to add sub-goal. Try again.");
+    } finally {
+      setAddingSubgoals(false);
+    }
+  };
+
+  const addSelectedSubgoals = async () => {
+    if (!parentGoal) return;
+    const effOrgId = orgId || parentGoal.organization_id || (parentGoal as any).organization_id;
+    if (!effOrgId) {
+      setSuggestionError("Organization not loaded. Please refresh.");
+      return;
+    }
+    const selected = Array.from(selectedSuggestionIds);
+    if (selected.length === 0) {
+      setSuggestionError("Select at least one sub-goal to add.");
+      return;
+    }
+    setAddingSubgoals(true);
+    setSuggestionError("");
     const items = suggestedSubgoals.filter((_, i) => selectedSuggestionIds.has(i));
     const results = await Promise.allSettled(
       items.map((s) =>
@@ -1556,7 +1630,7 @@ function DepartmentDrillView({
           description: s.description || s.title,
           priority: s.priority || "medium",
           department: s.department || parentGoal.department || departmentName,
-          organization_id: orgId,
+          organization_id: effOrgId,
           goal_type: "short_term",
           duration: "one_time",
           parent_goal_id: parentGoal.id || parentGoal._id,
@@ -1565,12 +1639,24 @@ function DepartmentDrillView({
         } as any)
       )
     );
-    const failed = results.filter((r) => r.status === "rejected");
+    const failed = results.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
+    const succeeded = results.filter((r) => r.status === "fulfilled").length;
     if (failed.length > 0) {
-      console.warn("[addSelectedSubgoals] failed to create", failed.length, "sub-goals");
+      console.warn("[addSelectedSubgoals] failed to create", failed.length, "sub-goals", failed.map((f) => (f as any).reason));
+      setSuggestionError(`${failed.length} failed to add. ${succeeded} added. Try again for failed items.`);
+      // Keep failed items visible: remove only succeeded selected indices
+      const failedOriginal = new Set(selected.filter((origIdx, k) => results[k].status === "rejected"));
+      // Build new list: keep unselected + failed
+      setSuggestedSubgoals((prev) => prev.filter((_, i) => !selected.includes(i) || failedOriginal.has(i)));
+      // Clear selection (user can re-select failures)
+      setSelectedSuggestionIds(new Set());
+      if (succeeded > 0 && effOrgId) fetchGoals(effOrgId).catch(() => {});
+    } else {
+      // All succeeded
+      setSuggestedSubgoals([]);
+      setSelectedSuggestionIds(new Set());
+      if (effOrgId) fetchGoals(effOrgId).catch(() => {});
     }
-    setSuggestedSubgoals([]);
-    setSelectedSuggestionIds(new Set());
     setAddingSubgoals(false);
   };
 
@@ -1804,14 +1890,19 @@ function DepartmentDrillView({
               {loadingSubgoals ? "Loading..." : "Generate"}
             </button>
           </div>
+          {suggestionError && <p className="text-[9px] text-rose-400 mt-1">{suggestionError}</p>}
           {suggestedSubgoals.length === 0 ? (
-            <p className="text-[9px] text-text-muted">Generate AI-suggested sub-goals for this goal.</p>
+            <p className="text-[9px] text-text-muted">Generate AI-suggested sub-goals for this goal. Click any suggestion to select it, then “Add selected”, or use quick “Add”.</p>
           ) : (
             <div className="space-y-1.5 mt-1.5">
               {suggestedSubgoals.map((s: any, i: number) => {
                 const isSelected = selectedSuggestionIds.has(i);
                 return (
-                  <div key={i} className={`p-2 rounded-lg border ${isSelected ? "bg-emerald-500/10 border-emerald-500/30" : "bg-surface border-border/50"}`}>
+                  <div
+                    key={i}
+                    onClick={() => setSelectedSuggestionIds((prev) => { const next = new Set(prev); next.has(i) ? next.delete(i) : next.add(i); return next; })}
+                    className={`p-2 rounded-lg border cursor-pointer transition-all ${isSelected ? "bg-emerald-500/10 border-emerald-500/30" : "bg-surface border-border/50 hover:border-primary/30"}`}
+                  >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
                         <span className="text-xs font-medium">{s.title}</span>
@@ -1822,23 +1913,33 @@ function DepartmentDrillView({
                           {s.priority && <span className={`px-1 py-0.5 rounded text-[8px] font-medium ${s.priority === "high" ? "text-orange-400 bg-orange-500/10" : s.priority === "medium" ? "text-yellow-400 bg-yellow-500/10" : "text-gray-400 bg-gray-500/10"}`}>{s.priority}</span>}
                         </div>
                       </div>
-                      <div
-                        onClick={(e) => { e.stopPropagation(); setSelectedSuggestionIds((prev) => { const next = new Set(prev); next.has(i) ? next.delete(i) : next.add(i); return next; }); }}
-                        className={`w-4 h-4 rounded border flex items-center justify-center cursor-pointer flex-shrink-0 mt-0.5 ${isSelected ? "bg-primary border-primary" : "bg-background border-border"}`}
-                        role="button"
-                        tabIndex={0}
-                      >
-                        {isSelected && <CheckCircle className="w-3 h-3 text-white" />}
+                      <div className="flex items-center gap-1.5 flex-shrink-0 mt-0.5">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); addSingleSubgoal(s, i); }}
+                          disabled={addingSubgoals}
+                          className="px-2 py-1 rounded-lg text-[9px] font-medium bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20 transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1"
+                          title="Add this sub-goal immediately"
+                        >
+                          <Plus className="w-3 h-3" /> Add
+                        </button>
+                        <div className={`w-5 h-5 rounded border-2 flex items-center justify-center cursor-pointer ${isSelected ? "bg-primary border-primary" : "bg-background border-border"}`}>
+                          {isSelected && <CheckCircle className="w-3 h-3 text-white" />}
+                        </div>
                       </div>
                     </div>
                   </div>
                 );
               })}
-              {selectedSuggestionIds.size > 0 && (
-                <button onClick={addSelectedSubgoals} disabled={addingSubgoals} className="w-full py-1.5 rounded-lg text-[10px] font-medium bg-primary text-white hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50">
-                  {addingSubgoals ? <span className="flex items-center gap-1 justify-center"><Loader2 className="w-3 h-3 animate-spin" /> Adding...</span> : `Add ${selectedSuggestionIds.size} selected`}
+              <div className="flex gap-2">
+                {selectedSuggestionIds.size > 0 && (
+                  <button onClick={addSelectedSubgoals} disabled={addingSubgoals} className="flex-1 py-1.5 rounded-lg text-[10px] font-medium bg-primary text-white hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50">
+                    {addingSubgoals ? <span className="flex items-center gap-1 justify-center"><Loader2 className="w-3 h-3 animate-spin" /> Adding...</span> : `Add ${selectedSuggestionIds.size} selected`}
+                  </button>
+                )}
+                <button onClick={() => { setSuggestedSubgoals([]); setSelectedSuggestionIds(new Set()); setSuggestionError(""); }} className="px-3 py-1.5 rounded-lg text-[10px] font-medium bg-surface border border-border hover:bg-surface-light transition-colors cursor-pointer">
+                  Clear
                 </button>
-              )}
+              </div>
             </div>
           )}
         </div>
@@ -1863,7 +1964,7 @@ function DepartmentDrillView({
             <div className="flex items-center gap-1.5">
               <button onClick={() => suggestTasks(parentGoal)} disabled={loadingTasks} className="px-2.5 py-1 rounded-lg text-[10px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1">
                 {loadingTasks ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
-                {loadingTasks ? "Loading..." : "Suggest"}
+                {loadingTasks ? "Loading..." : "Task-suggest"}
               </button>
               <button onClick={() => setShowCreateForm((v) => !v)} className="px-2.5 py-1 rounded-lg text-[10px] font-medium bg-primary text-white hover:bg-primary/90 transition-colors cursor-pointer flex items-center gap-1">
                 <Plus className="w-3 h-3" /> Create
@@ -1876,22 +1977,22 @@ function DepartmentDrillView({
               {!suggestionError && (
                 <p className="text-[9px] text-text-muted mb-1">Select tasks to add to this goal:</p>
               )}
+              {suggestionError && <p className="text-[9px] text-rose-400 mb-1">{suggestionError}</p>}
               {suggestedTasks.map((s: any, i: number) => {
                 const isSelected = selectedTaskSuggestionIds.has(i);
                 return (
-                  <div key={i} className={`p-2 rounded-lg border ${isSelected ? "bg-emerald-500/10 border-emerald-500/30" : "bg-background border-border/50"}`}>
+                  <div
+                    key={i}
+                    onClick={() => setSelectedTaskSuggestionIds((prev) => { const next = new Set(prev); next.has(i) ? next.delete(i) : next.add(i); return next; })}
+                    className={`p-2 rounded-lg border cursor-pointer transition-all ${isSelected ? "bg-emerald-500/10 border-emerald-500/30" : "bg-background border-border/50 hover:border-primary/30"}`}
+                  >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
                         <span className="text-xs font-medium">{s.title}</span>
                         <p className="text-[10px] text-text-muted mt-0.5">{s.description}</p>
                         {s.assignee_hint && <span className="text-[9px] text-text-muted mt-0.5 block"><User className="w-2.5 h-2.5 inline mr-0.5" />{s.assignee_hint}</span>}
                       </div>
-                      <div
-                        onClick={(e) => { e.stopPropagation(); setSelectedTaskSuggestionIds((prev) => { const next = new Set(prev); next.has(i) ? next.delete(i) : next.add(i); return next; }); }}
-                        className={`w-4 h-4 rounded border flex items-center justify-center cursor-pointer flex-shrink-0 mt-0.5 ${isSelected ? "bg-primary border-primary" : "bg-background border-border"}`}
-                        role="button"
-                        tabIndex={0}
-                      >
+                      <div className={`w-5 h-5 rounded border-2 flex items-center justify-center cursor-pointer flex-shrink-0 mt-0.5 ${isSelected ? "bg-primary border-primary" : "bg-background border-border"}`}>
                         {isSelected && <CheckCircle className="w-3 h-3 text-white" />}
                       </div>
                     </div>
@@ -1922,19 +2023,30 @@ function DepartmentDrillView({
             <p className="text-[10px] text-text-muted text-center py-3">No sub-goals or tasks yet. Use the AI buttons above to create them.</p>
           ) : (
             <div className="space-y-1.5 mt-1.5">
-              {filteredChildren.map((child) => (
-                <div key={child.id || child._id} className="border border-primary/20 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 overflow-hidden">
-                  <div onClick={() => { setSubGoal(child); setLevelAndNotify("tasks"); loadGoalTasks(child.id || child._id); }} className="flex items-center gap-3 p-3 hover:bg-primary/5 transition-colors cursor-pointer" role="button" tabIndex={0}>
-                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${child.status === "completed" ? "bg-emerald-500/10" : "bg-primary/10"}`}>
-                      {child.status === "completed" ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> : <Clock className="w-3.5 h-3.5 text-primary" />}
+              {filteredChildren.map((child) => {
+                const childTaskCount = (goalTaskCache[child.id || child._id] || _tasks.filter((t: any) => t.goal_id === (child.id || child._id))).length;
+                return (
+                <div key={child.id || child._id} className="border border-primary/20 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 overflow-hidden hover:border-primary/40 hover:shadow-md transition-all group/card">
+                  <div
+                    onClick={() => { setSubGoal(child); setLevelAndNotify("tasks"); loadGoalTasks(child.id || child._id); }}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSubGoal(child); setLevelAndNotify("tasks"); loadGoalTasks(child.id || child._id); } }}
+                    className="flex items-center gap-3 p-3 hover:bg-primary/5 transition-colors cursor-pointer group"
+                    role="button"
+                    tabIndex={0}
+                    title="Click to view tasks for this sub-goal"
+                  >
+                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${child.status === "completed" ? "bg-emerald-500/10" : "bg-primary/10 group-hover:bg-primary/20"} transition-colors`}>
+                      {child.status === "completed" ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> : <Target className="w-3.5 h-3.5 text-primary" />}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <span className="text-xs font-semibold truncate">{child.title}</span>
+                      <span className="text-xs font-semibold truncate group-hover:text-primary transition-colors">{child.title}</span>
                       <div className="flex items-center gap-1.5 text-[9px] text-text-muted mt-0.5">
                         {child.priority && <span className={`px-1 py-0.5 rounded text-[8px] font-medium ${child.priority === "urgent" ? "text-rose-400 bg-rose-500/10" : child.priority === "high" ? "text-orange-400 bg-orange-500/10" : child.priority === "medium" ? "text-yellow-400 bg-yellow-500/10" : "text-gray-400 bg-gray-500/10"}`}>{child.priority}</span>}
+                        {childTaskCount > 0 && <span className="flex items-center gap-0.5"><List className="w-2.5 h-2.5" />{childTaskCount} task{childTaskCount!==1?"s":""}</span>}
+                        <span className="hidden group-hover:inline-flex items-center gap-0.5 text-primary">→ tasks</span>
                       </div>
                     </div>
-                    <ChevronRight className="w-3.5 h-3.5 text-text-muted flex-shrink-0" />
+                    <ChevronRight className="w-4 h-4 text-text-muted group-hover:text-primary group-hover:translate-x-0.5 transition-all flex-shrink-0" />
                   </div>
                   <div onClick={(e) => e.stopPropagation()} className="px-3 pb-2 flex items-center gap-1.5 flex-wrap">
                     {renderPersonPickers(child)}
@@ -1947,7 +2059,8 @@ function DepartmentDrillView({
                     </button>
                   </div>
                 </div>
-              ))}
+                );
+              })}
               {parentTasks.map((task: any) => (
                 <div key={task.id} className="flex items-center gap-2 p-2 rounded-lg bg-background border border-border/50 group">
                   <div className="flex-1 min-w-0">
@@ -2016,7 +2129,7 @@ function DepartmentDrillView({
             <span className="text-[10px] font-semibold flex items-center gap-1"><Sparkles className="w-3 h-3 text-primary" /> AI Task Suggestions</span>
             <button onClick={() => suggestTasks()} disabled={loadingTasks} className="px-2.5 py-1 rounded-lg text-[10px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1">
               {loadingTasks ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
-              {loadingTasks ? "Loading..." : "Suggest"}
+              {loadingTasks ? "Loading..." : "Task-suggest"}
             </button>
           </div>
           {suggestionError && (
@@ -2749,6 +2862,10 @@ function WeeklyReportGenerator() {
   };
 
   const handleGenerate = async () => {
+    if (!orgId) {
+      showAlert("Organization not loaded", "Please wait a moment and try again.");
+      return;
+    }
     if (useTemplate && template) {
       setConfirmOpen(true);
       return;
@@ -2757,11 +2874,17 @@ function WeeklyReportGenerator() {
   };
 
   const doGenerate = async (useTpl = false) => {
+    if (!orgId) {
+      showAlert("Organization not loaded", "Please wait a moment and try again.");
+      return;
+    }
     try {
       await generateReport("weekly", orgId, useTpl);
     } catch (err: any) {
       if (err?.message?.includes("Insufficient data") || err?.status === 400) {
         showAlert("Insufficient Data", "You need at least one goal or task before generating a report. Create a goal first to get started.");
+      } else if (err?.message?.toLowerCase().includes("access denied") || err?.status === 403) {
+        showAlert("Access denied", "Your session expired or you are not a member of this organization. Please refresh the page and log in again.");
       } else {
         showAlert("Generation Failed", err?.message || "Could not generate the report. Please try again.");
       }
@@ -2969,7 +3092,7 @@ function WeeklyReportGenerator() {
             </div>
             <Button
               onClick={handleGenerate}
-              disabled={generating}
+              disabled={generating || !orgId}
               className="cursor-pointer"
               size="sm"
             >

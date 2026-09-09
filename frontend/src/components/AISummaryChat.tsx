@@ -317,11 +317,19 @@ export default function AISummaryChat() {
     if (role === "owner") return tasks;
     const email = user?.email?.toLowerCase() || "";
     return tasks.filter((t) => {
-      const assigneeEmail = (t.assignee_email || "").toLowerCase();
+      const ae = (t as any).assignee_email;
+      const assigneeEmails = Array.isArray(ae)
+        ? ae.map((x: any) => String(x).toLowerCase())
+        : [String(ae || "").toLowerCase()];
       const assigneeIds = t.assignee_id || [];
       const inAssignees = assigneeIds.some((id) => id.toLowerCase() === email);
       const inDirectReports = assigneeIds.some((id) => directReportEmails.has(id.toLowerCase()));
-      return assigneeEmail === email || inAssignees || directReportEmails.has(assigneeEmail) || inDirectReports;
+      return (
+        assigneeEmails.includes(email) ||
+        inAssignees ||
+        assigneeEmails.some((e: string) => directReportEmails.has(e)) ||
+        inDirectReports
+      );
     });
   }, [tasks, role, user?.email, directReportEmails]);
 

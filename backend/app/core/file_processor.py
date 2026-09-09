@@ -179,6 +179,9 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVE
 async def generate_embeddings(texts: list[str], provider: str | None = None) -> list[list[float]]:
     from .config import settings
 
+    if not texts:
+        return []
+
     embeddings = []
 
     try:
@@ -187,7 +190,7 @@ async def generate_embeddings(texts: list[str], provider: str | None = None) -> 
         embed_provider = provider or settings.EMBEDDINGS_PROVIDER or "gemini"
 
         if embed_provider == "gemini" and settings.GEMINI_API_KEY:
-            return await _gemini_embed_batch(texts)
+            return await _gemini_embed_all(texts)
 
         from openai import AsyncOpenAI
 
@@ -218,6 +221,30 @@ async def generate_embeddings(texts: list[str], provider: str | None = None) -> 
             embeddings.append([0.0] * 1536)
 
     return embeddings
+
+
+async def _gemini_embed_all(texts: list[str], batch_size: int = 24) -> list[list[float]]:
+    """Embed a (possibly large) list of chunks in safe Gemini batches.
+
+    A single batchEmbedContents call fails silently on very large inputs (the
+    reason big Excel exports ended up with all-zero vectors). Splitting into
+    small batches with a retry keeps big files searchable.
+    """
+    vectors: list[list[float]] = []
+    for start in range(0, len(texts), batch_size):
+        batch = texts[start:start + batch_size]
+        try:
+            batch_vectors = await _gemini_embed_batch(batch)
+            vectors.extend(batch_vectors)
+        except Exception as e:
+            logger.warning(f"Gemini embedding batch {start}-{start + len(batch)} failed ({e}); retrying once")
+            try:
+                batch_vectors = await _gemini_embed_batch(batch)
+                vectors.extend(batch_vectors)
+            except Exception as e2:
+                logger.error(f"Gemini embedding batch retry failed ({e2}); storing zero vectors for {len(batch)} chunks")
+                vectors.extend([[0.0] * 1536 for _ in batch])
+    return vectors
 
 
 async def _gemini_embed_batch(texts: list[str], model: str = "gemini-embedding-2", dim: int = 1536) -> list[list[float]]:
@@ -490,8 +517,15 @@ async def get_org_document_context(
                     "context": m.get("context", ""),
                 })
 
-        if insights.get("summary"):
-            summaries_for_brief.append(f"- {d.get('filename')}: {insights['summary']}")
+        # Show a readable preview even before deep analysis completes, so the
+        # AI never sees a bare filename for a pending/failed document.
+        raw_summary = (insights.get("summary") or "").strip()
+        raw_text = d.get("text") or ""
+        if not raw_summary and raw_text:
+            raw_summary = re.sub(r"\s+", " ", raw_text).strip()[:140]
+
+        if raw_summary:
+            summaries_for_brief.append(f"- {d.get('filename')}: {raw_summary}")
 
         out_docs.append({
             "file_id": d.get("file_id"),
@@ -499,7 +533,7 @@ async def get_org_document_context(
             "file_type": d.get("file_type"),
             "uploaded_at": d.get("created_at").isoformat() if d.get("created_at") else None,
             "insights_status": d.get("insights_status", "pending"),
-            "summary": insights.get("summary", ""),
+            "summary": raw_summary,
             "document_category": cat,
             "key_metrics": insights.get("key_metrics", []),
             "key_entities": insights.get("key_entities", {}),
@@ -585,34 +619,62 @@ async def search_documents(
     if db is None:
         return []
     try:
+        # Fallback path: no embeddings / Qdrant down. Scan the RECENT docs and
+        # their full chunk lists in Python. This is what makes content beyond
+        # the first 50k chars of large Excel exports reachable (rows after the
+        # truncation point live only in `chunks`, not in `text`).
         base_query: dict = {"org_id": org_id}
         if user_id:
             base_query["user_id"] = user_id
         keywords = [w for w in re.findall(r"[A-Za-z0-9$%]{3,}", query) if w.lower() not in {"the","and","for","with","what","our","how","did","was","are","this","that","from"}][:8]
-        if keywords:
-            regex = "|".join(re.escape(k) for k in keywords)
-            base_query["text"] = {"$regex": regex, "$options": "i"}
-            cursor = db.documents.find(
+
+        docs = list(
+            db.documents.find(
                 base_query,
-                {"filename": 1, "text": 1, "file_id": 1, "text_length": 1},
-            ).limit(top_k * 3)
-        else:
-            cursor = db.documents.find(
-                base_query,
-                {"filename": 1, "text": 1, "file_id": 1, "text_length": 1},
-            ).limit(top_k)
+                {"filename": 1, "text": 1, "chunks": 1, "file_id": 1, "text_length": 1},
+            )
+            .sort("created_at", -1)
+            .limit(40)
+        )
+
+        def _snippet_around(hay: str, pos: int, radius: int = 500) -> str:
+            start = max(0, pos - radius)
+            end = min(len(hay), pos + radius)
+            return hay[start:end].strip()
+
+        def _score_hits(hay: str) -> tuple[int, str]:
+            lowered = hay.lower()
+            hit_positions = []
+            for k in keywords:
+                idx = lowered.find(k.lower())
+                if idx != -1:
+                    hit_positions.append(idx)
+            if not hit_positions:
+                return 0, ""
+            snippet = _snippet_around(hay, min(hit_positions))
+            return len(set(kw.lower() for kw in keywords if kw.lower() in lowered)), snippet
 
         out = []
-        for d in cursor:
-            txt = (d.get("text") or "")[:1200]
-            score = 0.5
+        for d in docs:
+            filename = d.get("filename", "?")
+            chunks = d.get("chunks") or []
+            if chunks:
+                hay = "\n".join(str(c) for c in chunks)
+            else:
+                hay = d.get("text") or ""
+            if not hay:
+                continue
             if keywords:
-                lowered = txt.lower()
-                hits = sum(1 for k in keywords if k.lower() in lowered)
-                score = min(0.99, 0.4 + 0.1 * hits)
+                hits, snippet = _score_hits(hay)
+                if hits == 0:
+                    continue
+                score = min(0.99, 0.4 + 0.15 * hits)
+            else:
+                snippet = hay[:1200]
+                score = 0.5
             out.append({
-                "filename": d.get("filename"),
-                "text": txt,
+                "filename": filename,
+                "text": snippet or hay[:1200],
                 "score": score,
                 "file_id": d.get("file_id"),
             })

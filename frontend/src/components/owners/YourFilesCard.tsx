@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useOrganizationStore } from "@/stores/organizationStore";
+import { getAuthHeaders } from "@/lib/utils";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Badge } from "@/components/ui";
 import {
   FileText,
@@ -18,6 +19,7 @@ import {
   X,
   AlertTriangle,
   RefreshCw,
+  Sparkles,
 } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
@@ -33,6 +35,9 @@ interface UploadedFile {
   file_type: string;
   source: string;
   text_length?: number;
+  ai_status?: string;
+  summary?: string;
+  file_id?: string;
   created_at: string;
 }
 
@@ -66,18 +71,99 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
   const [renaming, setRenaming] = useState(false);
+  const [reAnalyzing, setReAnalyzing] = useState<string | null>(null);
+
+  const handleReAnalyze = async (fileId: string) => {
+    setReAnalyzing(fileId);
+    try {
+      const res = await fetch(`${API_URL}/strategy-chat/files/${fileId}/re-analyze`, {
+        method: "POST",
+        headers: { ...getAuthHeaders() },
+      });
+      if (res.ok) {
+        loadFiles();
+        onFilesChanged?.();
+      } else {
+        let detail = "Re-analyze failed";
+        try {
+          const body = await res.json();
+          detail = body.detail || detail;
+        } catch {}
+        alert(detail);
+      }
+    } catch {
+      alert("Network error. Please try again.");
+    } finally {
+      setReAnalyzing(null);
+    }
+  };
+
+  const handleOpen = async (file: UploadedFile) => {
+    try {
+      const res = await fetch(`${API_URL}/strategy-chat/files/${file.id}/download`, {
+        headers: { ...getAuthHeaders() },
+      });
+      if (!res.ok) {
+        let detail = "Failed to open document";
+        try {
+          const body = await res.json();
+          detail = body.detail || detail;
+        } catch {}
+        alert(detail);
+        return;
+      }
+      const blob = await res.blob();
+      const contentType = res.headers.get("content-type") || "";
+      // For text-like responses that are JSON error, blob will be JSON; handle above via res.ok
+      const url = window.URL.createObjectURL(blob);
+      window.open(url, "_blank");
+      setTimeout(() => window.URL.revokeObjectURL(url), 60000);
+    } catch {
+      alert("Failed to open document");
+    }
+  };
+
+  const handleDownload = async (file: UploadedFile) => {
+    try {
+      const res = await fetch(`${API_URL}/strategy-chat/files/${file.id}/download`, {
+        headers: { ...getAuthHeaders() },
+      });
+      if (!res.ok) {
+        let detail = "Download failed";
+        try {
+          const body = await res.json();
+          detail = body.detail || detail;
+        } catch {}
+        alert(detail);
+        return;
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = file.filename || "document";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      alert("Download failed");
+    }
+  };
 
   const loadFiles = useCallback(() => {
     if (!organization?.id) return;
     setLoading(true);
-    fetch(`${API_URL}/strategy-chat/files?organization_id=${organization.id}`)
+    fetch(`${API_URL}/strategy-chat/files?organization_id=${organization.id}`, {
+      headers: getAuthHeaders(),
+    })
       .then((r) => r.json())
       .then((data) => {
         setFiles(data.files || []);
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [organization]);
+  }, [organization?.id]);
 
   useEffect(() => {
     if (organization?.id) loadFiles();
@@ -89,7 +175,7 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
     try {
       const res = await fetch(
         `${API_URL}/strategy-chat/files/${fileId}?organization_id=${organization?.id}`,
-        { method: "DELETE" }
+        { method: "DELETE", headers: getAuthHeaders() }
       );
       if (res.ok) {
         setFiles((prev) => prev.filter((f) => f.id !== fileId));
@@ -129,8 +215,10 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
             const formData = new FormData();
             formData.append("file", file);
             formData.append("organization_id", organization.id);
+            const { "Content-Type": _omit, ...uploadHeaders } = getAuthHeaders();
             const res = await fetch(`${API_URL}/strategy-chat/upload-and-analyze`, {
               method: "POST",
+              headers: uploadHeaders,
               body: formData,
             });
             if (!res.ok) {
@@ -220,7 +308,7 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
         `${API_URL}/strategy-chat/files/${fileId}?organization_id=${organization?.id}`,
         {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getAuthHeaders() },
           body: JSON.stringify({ filename: trimmed }),
         }
       );
@@ -399,7 +487,7 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
                 className="flex items-center gap-4 p-4 rounded-xl bg-surface hover:bg-surface-light transition-all border border-border/50 group"
               >
                 <div
-                  onClick={() => window.open(`${API_URL}/strategy-chat/files/${file.id}/download`, "_blank")}
+                  onClick={() => handleOpen(file)}
                   className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0 cursor-pointer"
                 >
                   <FileText className="w-5 h-5 text-primary" />
@@ -445,7 +533,7 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
                   ) : (
                     <div className="flex items-center gap-2">
                       <p
-                        onClick={() => window.open(`${API_URL}/strategy-chat/files/${file.id}/download`, "_blank")}
+                        onClick={() => handleOpen(file)}
                         className="font-medium truncate cursor-pointer hover:text-primary transition-colors"
                       >
                         {file.filename}
@@ -463,6 +551,26 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
                     <Badge variant="outline" className="text-[10px]">
                       {file.file_type}
                     </Badge>
+                    {file.ai_status === "completed" && (
+                      <Badge className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        Analyzed
+                      </Badge>
+                    )}
+                    {file.ai_status === "pending" && (
+                      <Badge className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                        <Loader2 className="w-2.5 h-2.5 animate-spin mr-1" /> Analyzing…
+                      </Badge>
+                    )}
+                    {file.ai_status === "failed" && (
+                      <Badge className="text-[10px] bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                        <AlertTriangle className="w-2.5 h-2.5 mr-1" /> Failed
+                      </Badge>
+                    )}
+                    {file.ai_status === "upload_only" && (
+                      <Badge className="text-[10px] bg-gray-500/10 text-gray-400 border border-gray-500/20">
+                        Upload only
+                      </Badge>
+                    )}
                     <span className="flex items-center gap-1">
                       <Calendar className="w-3 h-3" />
                       {formatDate(file.created_at)}
@@ -477,12 +585,31 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
                       </span>
                     )}
                   </div>
+                  {file.summary && (
+                    <p className="text-xs text-text-muted/70 mt-1 truncate max-w-[420px]">
+                      {file.summary}
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
+                  {file.ai_status && file.ai_status !== "completed" && file.ai_status !== "upload_only" && (
+                    <button
+                      onClick={() => handleReAnalyze(file.id)}
+                      disabled={reAnalyzing === file.id}
+                      className="p-2 rounded-lg hover:bg-primary/10 transition-colors cursor-pointer"
+                      title="Re-analyze this file so the AI can read it"
+                    >
+                      {reAnalyzing === file.id ? (
+                        <Loader2 className="w-4 h-4 text-primary animate-spin" />
+                      ) : (
+                        <Sparkles className="w-4 h-4 text-primary" />
+                      )}
+                    </button>
+                  )}
                   <button
-                    onClick={() => window.open(`${API_URL}/strategy-chat/files/${file.id}/download`, "_blank")}
+                    onClick={() => handleDownload(file)}
                     className="p-2 rounded-lg hover:bg-surface-light text-text-muted hover:text-foreground transition-colors cursor-pointer"
-                    title="Download / open"
+                    title="Download"
                   >
                     <ExternalLink className="w-4 h-4" />
                   </button>

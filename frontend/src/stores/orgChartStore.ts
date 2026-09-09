@@ -16,17 +16,30 @@ export interface OrgMember {
   children?: OrgMember[];
 }
 
+export interface MemberIntegrationStatus {
+  email: string;
+  full_name: string;
+  integrated: boolean;
+  provider?: string | null;
+  connected_at?: string | null;
+}
+
 interface OrgChartState {
   tree: OrgMember[];
   members: OrgMember[];
   loading: boolean;
   error: string | null;
+  memberStatus: MemberIntegrationStatus[];
+  statusLoading: boolean;
+  provider: string | null;
   setTree: (tree: OrgMember[]) => void;
   setMembers: (members: OrgMember[]) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   fetchOrgTree: (orgId?: string) => Promise<void>;
   fetchOrgMembers: (orgId?: string) => Promise<void>;
+  fetchMemberStatus: (orgId?: string) => Promise<void>;
+  sendReminder: (emails: string[], orgId?: string) => Promise<{ sent: number }>;
   uploadFile: (file: File, orgId?: string) => Promise<{ inserted: number; errors: string[] }>;
   addMember: (data: { email: string; full_name: string; role: string; department: string; manager_email?: string; title?: string }, orgId?: string) => Promise<void>;
   updateMember: (memberId: string, data: Partial<OrgMember>, orgId?: string) => Promise<void>;
@@ -39,6 +52,9 @@ export const useOrgChartStore = create<OrgChartState>()(
     members: [],
     loading: false,
     error: null,
+    memberStatus: [],
+    statusLoading: false,
+    provider: null,
 
     setTree: (tree) => set({ tree }),
     setMembers: (members) => set({ members }),
@@ -158,6 +174,32 @@ export const useOrgChartStore = create<OrgChartState>()(
         set({ error: error.message, loading: false });
         throw error;
       }
+    },
+
+    fetchMemberStatus: async (orgId?: string) => {
+      set({ statusLoading: true });
+      try {
+        const params = orgId ? `?organization_id=${orgId}` : "";
+        const res = await fetch(`${API_URL}/org-chart/members/status${params}`, { headers: getAuthHeaders() });
+        if (!res.ok) throw new Error("Failed to fetch status");
+        const data = await res.json();
+        set({ memberStatus: data.members || [], provider: data.provider || null, statusLoading: false });
+      } catch {
+        set({ statusLoading: false });
+      }
+    },
+
+    sendReminder: async (emails, orgId?: string) => {
+      const res = await fetch(`${API_URL}/org-chart/members/remind`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({ organization_id: orgId, emails }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || "Failed to send reminder");
+      }
+      return await res.json();
     },
   })
 );

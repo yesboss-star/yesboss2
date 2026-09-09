@@ -36,9 +36,23 @@ async def _file_scope(db, current_user, org_id: str):
 
     Owners see every file in the org; everyone else only sees files they
     created/uploaded (created_by / user_id matches their uid or email).
+
+    Robustness: if is_org_owner fails due to stale org_id / co-owner edge,
+    but the user has role 'owner' and is a member of the org, treat as owner
+    so the Owner's Uploaded Data is not mysteriously empty (the reported bug).
     """
     if await is_org_owner(db, org_id, current_user):
         return True, {}
+    # Fallback: owner role + membership → treat as owner for file visibility
+    try:
+        from ..dependencies.scope import is_org_member
+        uid = getattr(current_user, "id", None) or getattr(current_user, "uid", None)
+        if uid and await is_org_member(db, org_id, current_user):
+            u = db.users.find_one({"uid": uid}, {"role": 1})
+            if u and (u.get("role") or "").strip().lower() == "owner":
+                return True, {}
+    except Exception:
+        pass
     ids = _self_ids(current_user)
     return False, {"$or": [{"created_by": {"$in": ids}}, {"user_id": {"$in": ids}}]}
 
@@ -307,8 +321,9 @@ async def upload_and_analyze(
         raise HTTPException(status_code=400, detail="File too large (max 25MB)")
 
     import uuid
+    import asyncio
 
-    from ..core.file_processor import chunk_text, extract_text, generate_embeddings, store_embeddings_in_qdrant
+    from ..core.file_processor import chunk_text, extract_text, generate_embeddings, store_embeddings_in_qdrant, _run_deep_analysis
 
     text = extract_text(contents, file.filename)
     if not text:
@@ -324,6 +339,23 @@ async def upload_and_analyze(
     with open(file_path, "wb") as f:
         f.write(contents)
 
+    # Org context so the deep analysis has company/industry to work with.
+    company_name = ""
+    industry = ""
+    micro_vertical = ""
+    try:
+        from bson import ObjectId as _OID
+        org = db.organizations.find_one(
+            {"_id": _OID(organization_id) if _OID.is_valid(organization_id) else organization_id}
+        )
+        if org:
+            company_name = org.get("name") or ""
+            industry = org.get("industry") or ""
+            micro_vertical = org.get("micro_vertical") or ""
+    except Exception:
+        pass
+
+    chunks = chunk_text(text)
     doc = {
         "file_id": file_id,
         "filename": file.filename,
@@ -333,8 +365,10 @@ async def upload_and_analyze(
         "user_id": getattr(current_user, 'id', None) or "",
         "text": text[:50000],
         "text_length": len(text),
-        "chunks": chunk_text(text),
-        "chunk_count": 0,
+        "chunks": chunks,
+        "chunk_count": len(chunks),
+        "insights": None,
+        "insights_status": "pending",
         "created_at": datetime.utcnow(),
         "metadata": {
             "file_id": file_id,
@@ -343,14 +377,14 @@ async def upload_and_analyze(
             "text_length": len(text),
         }
     }
-    doc["chunk_count"] = len(doc["chunks"])
     db.documents.insert_one(doc)
 
+    # Embed in safe batches; even if it fails, deep analysis below still runs.
     try:
-        embeddings = await generate_embeddings(doc["chunks"])
+        embeddings = await generate_embeddings(chunks)
         user_id_val = getattr(current_user, 'id', None) or ""
         payloads = []
-        for i, chunk in enumerate(doc["chunks"]):
+        for i, chunk in enumerate(chunks):
             payloads.append({
                 "file_id": file_id,
                 "filename": file.filename,
@@ -361,15 +395,32 @@ async def upload_and_analyze(
                 "document_type": file_type,
                 "processed_at": datetime.utcnow().isoformat()
             })
-        await store_embeddings_in_qdrant("documents", embeddings, payloads)
+        if payloads:
+            await store_embeddings_in_qdrant("documents", embeddings, payloads)
     except Exception as e:
         logger.warning(f"Embedding failed for chat upload: {e}")
+
+    # Deep analysis = the step that makes the file readable by the AI. Previous
+    # chat/data uploads skipped this, which is why they showed as filename-only.
+    asyncio.create_task(
+        _run_deep_analysis(
+            file_id=file_id,
+            org_id=organization_id,
+            filename=file.filename,
+            file_type=file_type,
+            text=text,
+            company_name=company_name,
+            industry=industry,
+            micro_vertical=micro_vertical,
+        )
+    )
 
     return {
         "file_id": file_id,
         "filename": file.filename,
         "file_type": file_type,
         "status": "completed",
+        "insights_status": "pending",
         "text_preview": text[:500],
         "text_length": len(text),
         "message": f"File '{file.filename}' uploaded and analyzed. You can now ask questions about it."
@@ -618,8 +669,25 @@ async def list_org_files(
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
 
+    # Robustness: if the requested org is stale (user switched org, localStorage
+    # has old id), fall back to one of the user's actual orgs so Uploaded Data
+    # does not show 0 files after a domain/org recreate.
     if not await is_org_member(db, org_id, current_user):
-        raise HTTPException(status_code=403, detail="Access denied")
+        from ..dependencies.scope import resolve_user_org_ids
+        user_orgs = await resolve_user_org_ids(db, current_user)
+        if user_orgs:
+            # If the requested org is not in the user's set, pick their first real org
+            if org_id not in user_orgs and str(org_id).lower() not in {str(o).lower() for o in user_orgs}:
+                alt = next(iter(user_orgs))
+                # Re-validate with the corrected org
+                if await is_org_member(db, alt, current_user):
+                    org_id = alt
+                else:
+                    raise HTTPException(status_code=403, detail="Access denied")
+            else:
+                raise HTTPException(status_code=403, detail="Access denied")
+        else:
+            raise HTTPException(status_code=403, detail="Access denied")
 
     _, self_filter = await _file_scope(db, current_user, org_id)
 
@@ -640,6 +708,7 @@ async def list_org_files(
             "filename": f.get("filename", "unknown"),
             "file_type": f.get("file_type", "unknown"),
             "source": "upload",
+            "ai_status": "upload_only",
             "created_at": f.get("created_at", "").isoformat() if hasattr(f.get("created_at"), "isoformat") else str(f.get("created_at", "")),
         })
 
@@ -647,12 +716,19 @@ async def list_org_files(
         fid = d.get("file_id", "")
         if fid not in seen:
             seen.add(fid)
+            insights = d.get("insights") or {}
+            raw_summary = (insights.get("summary") or "").strip()
+            if not raw_summary and d.get("text"):
+                raw_summary = " ".join(str(d.get("text")).split())[:140]
             all_files.append({
                 "id": fid,
                 "filename": d.get("filename", "unknown"),
                 "file_type": d.get("file_type", "unknown"),
                 "source": "chat-upload",
                 "text_length": d.get("text_length", 0),
+                "ai_status": d.get("insights_status", "pending"),
+                "summary": raw_summary,
+                "file_id": fid,
                 "created_at": d.get("created_at", "").isoformat() if hasattr(d.get("created_at"), "isoformat") else str(d.get("created_at", "")),
             })
 
@@ -695,6 +771,110 @@ async def get_file_detail(
             "text_preview": doc.get("text", "")[:2000],
             "created_at": doc.get("created_at", "").isoformat() if hasattr(doc.get("created_at"), "isoformat") else str(doc.get("created_at", "")),
         }
+    }
+
+
+@router.post("/files/{file_id}/re-analyze")
+async def re_analyze_file(
+    file_id: str,
+    current_user = Depends(get_current_user)
+):
+    """Re-run deep analysis (+ embeddings) for an uploaded document.
+
+    Fixes files that were uploaded before every upload ran the deep-analysis
+    step (they appeared as filename-only in the AI) or whose embeddings failed.
+    """
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    doc = db.documents.find_one({"file_id": file_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="File not found")
+    if not await _can_access_file(db, current_user, doc=doc):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    org_id = doc.get("org_id") or doc.get("organization_id")
+    filename = doc.get("filename") or "document"
+    file_type = doc.get("file_type") or "other"
+    chunks = doc.get("chunks") or []
+    # Rebuild the full text from chunks when available (chunks are not truncated,
+    # unlike the stored `text` field which is capped at 50k chars).
+    if chunks:
+        full_text = "\n".join(str(c) for c in chunks)
+    else:
+        full_text = doc.get("text") or ""
+
+    org_name = industry = micro_vertical = ""
+    if org_id:
+        try:
+            from bson import ObjectId as _OID
+            org = db.organizations.find_one({"_id": _OID(org_id) if _OID.is_valid(org_id) else org_id})
+            if org:
+                org_name = org.get("name") or ""
+                industry = org.get("industry") or ""
+                micro_vertical = org.get("micro_vertical") or ""
+        except Exception:
+            pass
+
+    # 1) Re-embed (batched & safe). Replace old points for this file first so we
+    #    never accumulate stale/zero vectors.
+    try:
+        from qdrant_client.models import FieldCondition, Filter, Match
+
+        from ..core.file_processor import generate_embeddings, store_embeddings_in_qdrant
+        from ..core.qdrant import get_qdrant_client
+
+        qclient = get_qdrant_client()
+        try:
+            qclient.delete(
+                collection_name="documents",
+                points_selector=Filter(must=[FieldCondition(key="file_id", match=Match(value=file_id))]),
+            )
+        except Exception:
+            pass  # collection may not exist yet
+
+        if chunks:
+            embeddings = await generate_embeddings(chunks)
+            user_id_val = doc.get("user_id") or ""
+            payloads = []
+            for i, chunk in enumerate(chunks):
+                payloads.append({
+                    "file_id": file_id,
+                    "filename": filename,
+                    "org_id": org_id or "",
+                    "user_id": user_id_val,
+                    "chunk_index": i,
+                    "chunk_text": chunk[:500],
+                    "document_type": file_type,
+                    "processed_at": datetime.utcnow().isoformat(),
+                })
+            await store_embeddings_in_qdrant("documents", embeddings, payloads)
+    except Exception as e:
+        logger.warning(f"Re-embedding failed for {file_id}: {e}")
+
+    # 2) Deep analysis (the step that gives the AI a real summary).
+    from ..core.file_processor import _run_deep_analysis
+
+    await _run_deep_analysis(
+        file_id=file_id,
+        org_id=org_id or "",
+        filename=filename,
+        file_type=file_type,
+        text=full_text or filename,
+        company_name=org_name,
+        industry=industry,
+        micro_vertical=micro_vertical,
+    )
+
+    fresh = db.documents.find_one({"file_id": file_id}) or {}
+    insights = fresh.get("insights") or {}
+    return {
+        "file_id": file_id,
+        "filename": filename,
+        "ai_status": fresh.get("insights_status", "completed"),
+        "summary": insights.get("summary") or ((" ".join(str(fresh.get("text") or "").split()))[:140] if fresh.get("text") else ""),
+        "message": "File re-analyzed successfully.",
     }
 
 

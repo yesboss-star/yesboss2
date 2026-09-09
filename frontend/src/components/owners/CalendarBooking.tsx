@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, Button, Input, Label } from "@/components/ui";
-import { Loader2, Calendar, Clock, Users, CheckCircle, X, Plus } from "lucide-react";
+import { Loader2, Calendar, Clock, Users, CheckCircle, X, Plus, AlertTriangle } from "lucide-react";
 import { useZohoStore } from "@/stores/zohoStore";
 import { useGoogleStore } from "@/stores/googleStore";
 import { getCalendarBase } from "@/lib/calendar";
+import { useOrganizationStore } from "@/stores/organizationStore";
+import { getAuthHeaders } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
@@ -75,6 +77,9 @@ export default function CalendarBooking({ onClose }: { onClose?: () => void }) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const [hasSearched, setHasSearched] = useState(false);
+  const { organization } = useOrganizationStore();
+
   if (initialLoading || loading) {
     return (
       <Card>
@@ -97,17 +102,39 @@ export default function CalendarBooking({ onClose }: { onClose?: () => void }) {
   }
 
   const searchUsers = async (q: string) => {
-    if (!q || q.length < 1) { setSuggestions([]); return; }
+    const clean = q.replace(/^@+/, "").trim();
+    if (!clean || clean.length < 1) { setSuggestions([]); setHasSearched(false); return; }
+    setHasSearched(true);
+    // Prefer org-chart members search (covers all orchestration members)
     try {
-      const res = await fetch(`${getCalendarBase()}/users/search?q=${encodeURIComponent(q)}`, {
+      const orgId = organization?.id;
+      if (orgId) {
+        const res = await fetch(`${API_URL}/org-chart/members/search?q=${encodeURIComponent(clean)}&organization_id=${orgId}`, {
+          headers: getAuthHeaders(),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const members = (data.members || []).map((m: any) => ({ id: m._id || m.id, name: m.full_name, email: m.email, type: "member" }));
+          if (members.length > 0) {
+            setSuggestions(members);
+            return;
+          }
+        }
+      }
+    } catch {}
+    // Fallback to calendar provider search (legacy employees)
+    try {
+      const res = await fetch(`${getCalendarBase()}/users/search?q=${encodeURIComponent(clean)}`, {
         credentials: "include",
         headers: authHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
         setSuggestions(data.users || []);
+      } else {
+        setSuggestions([]);
       }
-    } catch {}
+    } catch { setSuggestions([]); }
   };
 
   const handleAttendeeInput = (val: string) => {
@@ -131,11 +158,21 @@ export default function CalendarBooking({ onClose }: { onClose?: () => void }) {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && attendeeInput.includes("@")) {
-      e.preventDefault();
-      const email = attendeeInput.trim();
-      if (email && !attendees.some((a) => a.email === email)) {
-        addAttendee(email, email);
+    if (e.key === "Enter") {
+      const raw = attendeeInput.trim().replace(/^@+/, "").trim();
+      if (!raw) return;
+      // If suggestions available, pick first; else if it looks like email, add as custom
+      if (suggestions.length > 0) {
+        e.preventDefault();
+        addAttendee(suggestions[0].name, suggestions[0].email);
+        return;
+      }
+      if (raw.includes("@")) {
+        e.preventDefault();
+        const email = raw.toLowerCase();
+        if (email && !attendees.some((a) => a.email.toLowerCase() === email)) {
+          addAttendee(email, email);
+        }
       }
     }
   };
@@ -296,6 +333,15 @@ export default function CalendarBooking({ onClose }: { onClose?: () => void }) {
                         <Plus className="w-3.5 h-3.5 text-text-muted ml-auto shrink-0" />
                       </button>
                     ))}
+                  </div>
+                )}
+                {showSuggestions && hasSearched && suggestions.length === 0 && attendeeInput.replace(/^@+/, "").trim().length > 0 && (
+                  <div className="absolute z-10 mt-1 w-full rounded-lg bg-surface border border-amber-500/20 shadow-lg p-3 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                    <div>
+                      <p className="text-sm text-text-muted">Person not found in Orchestration</p>
+                      <p className="text-[11px] text-text-muted/70">Add them in Orchestration first, or enter a full email and press Enter.</p>
+                    </div>
                   </div>
                 )}
               </div>

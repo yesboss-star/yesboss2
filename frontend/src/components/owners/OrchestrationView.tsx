@@ -68,14 +68,21 @@ function TreeNode({
   onAdd,
   onDelete,
   onSelect,
+  statusMap,
+  filter,
 }: {
   node: OrgMember;
   onAdd: (parentEmail: string) => void;
   onDelete: (memberId: string) => void;
   onSelect: (member: OrgMember) => void;
+  statusMap?: Map<string, { integrated: boolean }>;
+  filter?: "all" | "integrated" | "not";
 }) {
   const [expanded, setExpanded] = useState(false);
   const hasChildren = node.children && node.children.length > 0;
+  const st = statusMap?.get(node.email?.toLowerCase() || "");
+  const isIntegrated = st?.integrated === true;
+  const isDimmed = filter === "integrated" ? !isIntegrated : filter === "not" ? isIntegrated : false;
 
   const isRoot =
     node.role?.toLowerCase() === "ceo" ||
@@ -87,12 +94,17 @@ function TreeNode({
       <div className="relative group flex-shrink-0">
         <div
           onClick={() => onSelect(node)}
-          className={`relative w-52 p-3 rounded-xl border transition-all duration-200 cursor-pointer hover:shadow-lg hover:border-primary/30 ${
+          className={`relative w-52 p-3 rounded-xl border transition-all duration-200 cursor-pointer hover:shadow-lg hover:border-primary/30 ${isDimmed ? "opacity-40 grayscale" : ""} ${
             isRoot
               ? "bg-gradient-to-br from-primary/10 to-purple-500/10 border-primary/30 shadow-md"
               : "bg-surface/80 border-border/50 hover:bg-surface"
           }`}
         >
+          {/* Integration dot */}
+          <div
+            className={`absolute -top-1 -left-1 w-3 h-3 rounded-full border-2 border-background shadow-sm ${isIntegrated ? "bg-emerald-500" : "bg-gray-400"} ${isDimmed ? "opacity-50" : ""}`}
+            title={isIntegrated ? "Integrated" : "Not integrated"}
+          />
           {/* Role + Department badges */}
           <div className="flex items-center gap-1.5 flex-wrap mb-2.5">
             <span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${getRoleColor(node.role)}`}>
@@ -164,7 +176,7 @@ function TreeNode({
             {node.children!.map((child, i) => (
               <div key={child.id || i} className="relative">
                 <div className="absolute left-0 top-1/2 -translate-x-full w-4 h-px bg-border/60" />
-                <TreeNode node={child} onAdd={onAdd} onDelete={onDelete} onSelect={onSelect} />
+                <TreeNode node={child} onAdd={onAdd} onDelete={onDelete} onSelect={onSelect} statusMap={statusMap} filter={filter} />
               </div>
             ))}
           </div>
@@ -175,10 +187,13 @@ function TreeNode({
 }
 
 export default function OrchestrationView() {
-  const { tree, members, loading, fetchOrgTree, uploadFile, addMember, deleteMember } =
+  const { tree, members, loading, fetchOrgTree, uploadFile, addMember, deleteMember, memberStatus, statusLoading, provider, fetchMemberStatus, sendReminder } =
     useOrgChartStore();
   const { organization } = useOrganizationStore();
   const { user } = useAuth();
+  const [statusFilter, setStatusFilter] = useState<"all" | "integrated" | "not">("all");
+  const [sendingMail, setSendingMail] = useState(false);
+  const [reminderMsg, setReminderMsg] = useState<string | null>(null);
 
   const getOwnerRank = (): number | null => {
     if (!organization || !user?.uid) return null;
@@ -260,6 +275,33 @@ export default function OrchestrationView() {
   }, [fetchOrgTree, organization?.id]);
 
   useEffect(() => {
+    if (organization?.id) fetchMemberStatus(organization.id);
+  }, [organization?.id, fetchMemberStatus]);
+
+  // Derived integration helpers
+  const statusMap = new Map<string, { integrated: boolean }>();
+  (memberStatus || []).forEach((s: any) => statusMap.set((s.email || "").toLowerCase(), { integrated: !!s.integrated }));
+  const integratedCount = (memberStatus || []).filter((s: any) => s.integrated).length;
+  const notIntegrated = (memberStatus || []).filter((s: any) => !s.integrated);
+  const notIntegratedEmails = notIntegrated.map((s: any) => s.email);
+  const handleSendReminder = async (emails?: string[]) => {
+    const target = emails && emails.length ? emails : notIntegratedEmails;
+    if (!target.length) return;
+    setSendingMail(true);
+    setReminderMsg(null);
+    try {
+      const res = await sendReminder(target, organization?.id);
+      setReminderMsg(`Reminder sent to ${res.sent} member${res.sent!==1?"s":""}`);
+      await fetchMemberStatus(organization?.id);
+    } catch (e: any) {
+      setReminderMsg(e.message || "Failed to send");
+    } finally {
+      setSendingMail(false);
+      setTimeout(() => setReminderMsg(null), 3000);
+    }
+  };
+
+  useEffect(() => {
     if (!organization?.id) return;
     fetchTasks(organization.id).then(() => {
       const { tasks } = useTaskStore.getState();
@@ -297,6 +339,7 @@ export default function OrchestrationView() {
     try {
       const result = await uploadFile(selectedFile, organization?.id);
       setUploadResult(result);
+      fetchMemberStatus(organization?.id);
     } catch (err: any) {
       setUploadResult({ inserted: 0, errors: [err.message] });
     } finally {
@@ -340,6 +383,7 @@ export default function OrchestrationView() {
     if (!manualForm.email || !manualForm.full_name) return;
     try {
       await addMember(manualForm, organization?.id);
+      fetchMemberStatus(organization?.id);
       setShowManualModal(false);
       setAddChildFor(null);
       setManualForm({
@@ -398,6 +442,7 @@ export default function OrchestrationView() {
   const handleDeleteMember = async (memberId: string) => {
     if (confirm("Remove this member from the org chart?")) {
       await deleteMember(memberId, organization?.id);
+      fetchMemberStatus(organization?.id);
     }
   };
 
@@ -422,12 +467,50 @@ export default function OrchestrationView() {
             )}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Badge variant="outline" className="text-xs">
             {members.length} members
           </Badge>
+          {members.length > 0 && (
+            <>
+              <span className="text-xs text-text-muted hidden sm:inline">·</span>
+              <Badge variant="outline" className="text-xs border-emerald-500/20 text-emerald-400 bg-emerald-500/10">
+                {statusLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : `${integratedCount} integrated`}
+              </Badge>
+              <Badge variant="outline" className="text-xs border-amber-500/20 text-amber-400 bg-amber-500/10">
+                {statusLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : `${memberStatus.length - integratedCount} not`}
+              </Badge>
+              {provider && <Badge variant="outline" className="text-xs capitalize">{provider}</Badge>}
+            </>
+          )}
         </div>
       </div>
+      {members.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex p-1 rounded-xl bg-surface border border-border">
+            {(["all", "integrated", "not"] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setStatusFilter(f)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${statusFilter === f ? "bg-primary text-white shadow-sm" : "text-text-muted hover:text-foreground"}`}
+              >
+                {f === "all" ? "All" : f === "integrated" ? "Integrated" : "Not integrated"}
+              </button>
+            ))}
+          </div>
+          <Button
+            onClick={() => handleSendReminder()}
+            disabled={sendingMail || notIntegratedEmails.length === 0 || statusLoading}
+            variant="outline"
+            size="sm"
+            className="cursor-pointer"
+          >
+            {sendingMail ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Mail className="w-4 h-4 mr-1" />}
+            Send mail to not integrated ({notIntegratedEmails.length})
+          </Button>
+          {reminderMsg && <span className="text-xs text-emerald-400">{reminderMsg}</span>}
+        </div>
+      )}
 
       {members.length === 0 ? (
         <Card className="border-primary/20 bg-gradient-to-br from-primary/5 to-purple-500/5">
@@ -560,6 +643,8 @@ export default function OrchestrationView() {
                     onAdd={handleAddChild}
                     onDelete={handleDeleteMember}
                     onSelect={setSelectedMember}
+                    statusMap={statusMap}
+                    filter={statusFilter}
                   />
                 ))}
               </div>
@@ -951,6 +1036,24 @@ export default function OrchestrationView() {
               </div>
 
               <div className="space-y-2">
+                {(() => {
+                  const st = statusMap.get((selectedMember.email || "").toLowerCase());
+                  const isInt = !!st?.integrated;
+                  return (
+                    <div className={`flex items-center gap-3 p-3 rounded-xl border ${isInt ? "bg-emerald-500/10 border-emerald-500/20" : "bg-amber-500/10 border-amber-500/20"}`}>
+                      <div className={`w-2.5 h-2.5 rounded-full ${isInt ? "bg-emerald-500" : "bg-amber-500"} flex-shrink-0`} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[10px] text-text-muted">{isInt ? "Integrated" : "Not integrated"}{provider ? ` · ${provider}` : ""}</p>
+                        <p className="text-sm font-medium">{isInt ? "Connected to YesBoss" : "Needs to connect"}</p>
+                      </div>
+                      {!isInt && (
+                        <Button size="sm" onClick={() => handleSendReminder([selectedMember.email])} disabled={sendingMail} className="cursor-pointer">
+                          {sendingMail ? <Loader2 className="w-3 h-3 animate-spin" /> : <Mail className="w-3 h-3 mr-1" />}Remind
+                        </Button>
+                      )}
+                    </div>
+                  );
+                })()}
                 {selectedMember.email && (
                   <div className="flex items-center gap-3 p-3 rounded-xl bg-surface border border-border/50">
                     <Mail className="w-4 h-4 text-text-muted flex-shrink-0" />

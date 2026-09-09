@@ -120,6 +120,7 @@ export function useAIDashboardAdaptation() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: "Analyze our current business state and provide a one-paragraph executive summary of what needs attention.",
+          organization_id: organization?.id,
           context: {
             organization: organization?.name,
             industry: organization?.industry,

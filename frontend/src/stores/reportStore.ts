@@ -1,5 +1,5 @@
 ﻿import { create } from "zustand";
-import { getAuthHeaders } from "@/lib/utils";
+import { getAuthHeaders, refreshAuthToken } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
@@ -75,12 +75,18 @@ export const useReportStore = create<ReportState>()(
 
     generateReport: async (period = "weekly", organization_id, useTemplate = false) => {
       set({ generating: true, error: null });
-      try {
-        const response = await fetch(`${API_URL}/reports/generate`, {
+      const doFetch = async () =>
+        fetch(`${API_URL}/reports/generate`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getAuthHeaders() },
           body: JSON.stringify({ period, organization_id, use_template: useTemplate }),
         });
+      try {
+        let response = await doFetch();
+        if (!response.ok && response.status === 401) {
+          await refreshAuthToken();
+          response = await doFetch();
+        }
         if (!response.ok) {
           const errBody = await response.json().catch(() => ({}));
           const err = new Error(errBody.detail || "Failed to generate report");
@@ -126,7 +132,15 @@ export const useReportStore = create<ReportState>()(
     downloadReport: async (reportId, format = "pdf") => {
       set({ downloading: true, error: null });
       try {
-        const response = await fetch(`${API_URL}/reports/download/${reportId}?format=${format}`);
+        const doDl = () =>
+          fetch(`${API_URL}/reports/download/${reportId}?format=${format}`, {
+            headers: getAuthHeaders(),
+          });
+        let response = await doDl();
+        if (!response.ok && response.status === 401) {
+          await refreshAuthToken();
+          response = await doDl();
+        }
         if (!response.ok) throw new Error("Failed to download report");
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
@@ -147,7 +161,9 @@ export const useReportStore = create<ReportState>()(
     fetchTemplate: async (organization_id) => {
       set({ templateLoading: true });
       try {
-        const response = await fetch(`${API_URL}/reports/template?organization_id=${encodeURIComponent(organization_id)}`);
+        const response = await fetch(`${API_URL}/reports/template?organization_id=${encodeURIComponent(organization_id)}`, {
+          headers: getAuthHeaders(),
+        });
         if (!response.ok) { set({ templateLoading: false }); return; }
         const result = await response.json();
         set({ template: result.template, templateLoading: false });
@@ -161,8 +177,10 @@ export const useReportStore = create<ReportState>()(
       try {
         const formData = new FormData();
         formData.append("file", file);
+        const { "Content-Type": _omit, ...uploadHeaders } = getAuthHeaders();
         const response = await fetch(`${API_URL}/reports/template/upload?organization_id=${encodeURIComponent(organization_id)}`, {
           method: "POST",
+          headers: uploadHeaders,
           body: formData,
         });
         if (!response.ok) {
@@ -182,6 +200,7 @@ export const useReportStore = create<ReportState>()(
       try {
         await fetch(`${API_URL}/reports/template?organization_id=${encodeURIComponent(organization_id)}`, {
           method: "DELETE",
+          headers: getAuthHeaders(),
         });
         set({ template: null, templateUploading: false });
       } catch {
@@ -191,7 +210,9 @@ export const useReportStore = create<ReportState>()(
 
     fetchPlaceholders: async () => {
       try {
-        const response = await fetch(`${API_URL}/reports/placeholders`);
+        const response = await fetch(`${API_URL}/reports/placeholders`, {
+          headers: getAuthHeaders(),
+        });
         if (!response.ok) return;
         const result = await response.json();
         set({ placeholders: result.placeholders || [] });

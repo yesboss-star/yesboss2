@@ -131,7 +131,8 @@ async def search_users(
     if token_doc:
         org_id = token_doc.get("org_id")
 
-    ql = re.escape(q.strip())
+    clean_q = q.strip().lstrip("@")
+    ql = re.escape(clean_q)
     query: dict[str, Any] = {}
     if org_id:
         query["organization_id"] = org_id
@@ -154,6 +155,19 @@ async def search_users(
                 "email": email,
                 "type": "employee",
             })
+
+    if len(results) < limit:
+        org_members = list(db.org_chart_members.find(query).limit(limit - len(results)))
+        for mem in org_members:
+            email = mem.get("email", "")
+            if email and email not in seen_emails:
+                seen_emails.add(email)
+                results.append({
+                    "id": str(mem["_id"]),
+                    "name": mem.get("full_name", email),
+                    "email": email,
+                    "type": "member",
+                })
 
     if len(results) < limit:
         owner_query: dict[str, Any] = {}

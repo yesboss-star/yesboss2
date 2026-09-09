@@ -139,11 +139,16 @@ async def get_my_organization(current_user = Depends(get_current_user_optional))
     org = db.organizations.find_one(query)
     if not org and user_email:
         # Employees are org_chart_members (not owners) — resolve their org by email.
+        # org_chart_members.organization_id is stored as a STRING, while
+        # organizations._id is an ObjectId — cast before lookup or we 404 every
+        # employee (the "empty employee dashboard" bug).
         member = db.org_chart_members.find_one(
             {"email": {"$regex": f"^{re.escape(user_email)}$", "$options": "i"}}
         )
         if member and member.get("organization_id"):
-            org = db.organizations.find_one({"_id": member["organization_id"]})
+            from bson import ObjectId as _OID
+            mid = member.get("organization_id")
+            org = db.organizations.find_one({"_id": _OID(mid) if _OID.is_valid(mid) else mid})
 
     if not org:
         raise HTTPException(status_code=404, detail="No organization found for this user")

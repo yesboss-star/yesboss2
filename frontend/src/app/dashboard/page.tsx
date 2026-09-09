@@ -100,10 +100,13 @@ export default function DashboardPage() {
 
   const handleWsTaskCreated = useCallback((data: any) => {
     if (!data || role !== "employee" || !user?.email) return;
-    const assigneeEmail = data.assignee_email || "";
+    const rawAE = data.assignee_email;
+    const assigneeEmails = Array.isArray(rawAE)
+      ? rawAE.map((x: any) => String(x).toLowerCase())
+      : [String(rawAE || "").toLowerCase()];
     const assigneeIds = Array.isArray(data.assignee_id) ? data.assignee_id : (data.assignee_id ? [data.assignee_id] : []);
     const userEmail = user.email.toLowerCase();
-    if (assigneeEmail.toLowerCase() === userEmail || assigneeIds.some((id: string) => id.toLowerCase() === userEmail)) {
+    if (assigneeEmails.includes(userEmail) || assigneeIds.some((id: string) => id.toLowerCase() === userEmail)) {
       setAssignedTasks((prev) => {
         if (prev.find((t) => t.id === data._id || t.id === data.id)) return prev;
         return [{

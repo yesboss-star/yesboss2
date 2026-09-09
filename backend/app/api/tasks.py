@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from ..api.websocket import manager as ws_manager
 from ..core.database import get_database
+from ..core.identity import canonical_assignee_payload, email_list, is_person_involved, person_scope_query
 from ..core.zoho import ZohoMailTasks, ZohoOAuth
 from ..dependencies.auth import get_current_user, get_current_user_optional
 
@@ -490,11 +491,14 @@ class TaskCreate(BaseModel):
     priority: str = "medium"
     goal_id: str | None = None
     assignee_id: str | list[str] | None = None
-    assignee_email: str | None = None
+    assignee_email: str | list[str] | None = None
     department: str | None = None
     due_date: str | None = None
     dependencies: list[str] | None = None
     reviewers: list[str] | None = None
+    # Accepted in the JSON body too (GoalModal posts it in-body, not as a
+    # query param — FastAPI would otherwise ignore it and 400 below).
+    organization_id: str | None = None
 
 
 class TaskUpdate(BaseModel):
@@ -519,13 +523,16 @@ async def create_task(task: TaskCreate, organization_id: str | None = None, curr
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
-    org_id = organization_id or get_user_org_id(current_user)
+    org_id = organization_id or task.organization_id or get_user_org_id(current_user)
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
 
     user_id = getattr(current_user, 'id', None) or str(current_user) if current_user else None
 
-    assignee_ids = _normalize_assignee_ids(task.assignee_id) or []
+    canon = canonical_assignee_payload(
+        db, org_id, assignee_id=task.assignee_id, assignee_email=task.assignee_email
+    )
+    assignee_ids = canon["assignee_id"]
 
     task_doc = {
         "title": task.title,
@@ -534,7 +541,7 @@ async def create_task(task: TaskCreate, organization_id: str | None = None, curr
         "status": "pending",
         "goal_id": task.goal_id,
         "assignee_id": assignee_ids,
-        "assignee_email": task.assignee_email,
+        "assignee_email": canon["assignee_email"],
         "department": task.department,
         "due_date": _normalize_due_date(task.due_date),
         "dependencies": task.dependencies or [],
@@ -573,7 +580,7 @@ async def create_task(task: TaskCreate, organization_id: str | None = None, curr
             message=f"You have been assigned: {task.title}",
             link=f"/tasks/{result.inserted_id}",
             actor_id=user_id,
-            email=task.assignee_email,
+            email=aid if ("@" in str(aid)) else None,
         ))
 
     from ..agents.frequency_agent import process_task as _freq_task
@@ -628,12 +635,9 @@ async def list_tasks(
     if not await is_org_owner(db, org_id, current_user):
         uid = getattr(current_user, 'id', None) or getattr(current_user, 'uid', None)
         user_email = (getattr(current_user, 'email', '') or '').lower().strip()
-        query["$or"] = [
-            {"created_by": uid},
-            {"assignee_email": user_email},
-            {"assigned_to": user_email},
-            {"assignee_id": {"$in": [uid, user_email]}},
-        ]
+        scope = person_scope_query(uid, user_email)
+        if scope.get("$or"):
+            query["$or"] = scope["$or"]
 
     tasks = list(db.tasks.find(query).sort("created_at", -1))
 
@@ -668,7 +672,7 @@ async def get_task(task_id: str, current_user = Depends(get_current_user)):
 
     user_email = (getattr(current_user, 'email', '') or '').lower().strip()
     is_owner = await is_org_owner(db, task.get("organization_id"), current_user)
-    if not is_owner and task.get("created_by") != current_user.id and task.get("assignee_email") != user_email and task.get("assigned_to") != user_email:
+    if not is_owner and not is_person_involved(task, getattr(current_user, 'id', None), user_email):
         raise HTTPException(status_code=403, detail="Access denied")
 
     task["_id"] = str(task["_id"])
@@ -700,7 +704,7 @@ async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get
     org_id = old_obj.get("organization_id", "")
     if not await is_org_owner(db, org_id, current_user):
         user_email = (getattr(current_user, 'email', '') or '').lower().strip()
-        if old_obj.get("created_by") != current_user.id and old_obj.get("assignee_email") != user_email and old_obj.get("assigned_to") != user_email:
+        if not is_person_involved(old_obj, getattr(current_user, 'id', None), user_email):
             raise HTTPException(status_code=403, detail="Access denied")
 
     update_data = {}
@@ -715,6 +719,18 @@ async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get
             update_data[k] = _normalize_due_date(v)
         else:
             update_data[k] = v
+
+    # Canonicalize any assignee change to EMAILS so read filters agree.
+    if "assignee_id" in update_data:
+        canon = canonical_assignee_payload(
+            db, org_id,
+            assignee_id=update_data.get("assignee_id"),
+            assignee_name=update_data.get("assignee_name"),
+        )
+        update_data["assignee_id"] = canon["assignee_id"]
+        update_data["assignee_email"] = canon["assignee_email"]
+        if canon["assignee_name"]:
+            update_data["assignee_name"] = canon["assignee_name"]
     update_data["updated_at"] = datetime.utcnow()
 
     db.tasks.update_one(
@@ -803,14 +819,13 @@ async def delete_task(task_id: str, current_user = Depends(get_current_user_opti
         t_org_id = task.get("organization_id", "")
         if not await _is_org_owner(db, t_org_id, current_user.id):
             user_email = (getattr(current_user, 'email', '') or '').lower().strip()
-            if task.get("created_by") != current_user.id and task.get("assignee_email") != user_email and task.get("assigned_to") != user_email:
+            if not is_person_involved(task, getattr(current_user, 'id', None), user_email):
                 raise HTTPException(status_code=403, detail="Access denied")
 
     if task:
         raw_assignees = task.get("assignee_id", [])
         if isinstance(raw_assignees, str):
             raw_assignees = [raw_assignees]
-        assignee_email = task.get("assignee_email")
         org_id = task.get("organization_id", "")
 
         zoho_group_id = task.get("zoho_group_task_id")
@@ -829,7 +844,7 @@ async def delete_task(task_id: str, current_user = Depends(get_current_user_opti
                 title="Task Deleted",
                 message=f"Task '{task.get('title')}' was deleted",
                 metadata={"task_id": task_id},
-                email=assignee_email,
+                email=aid if ("@" in str(aid)) else None,
             ))
 
     goal_id = task.get("goal_id")
