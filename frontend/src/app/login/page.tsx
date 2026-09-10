@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Eye, EyeOff, Mail, Lock, AlertCircle, Loader2, CheckCircle, Phone, User, ArrowRight } from "lucide-react";
@@ -29,7 +29,7 @@ const COUNTRY_CODES = [
   { code: "+65", country: "Singapore" },
 ];
 
-export default function LoginPage() {
+function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<LoginTab>("email");
@@ -487,5 +487,19 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center">
+          <span className="text-sm text-text-muted">Loading...</span>
+        </div>
+      }
+    >
+      <LoginContent />
+    </Suspense>
   );
 }
