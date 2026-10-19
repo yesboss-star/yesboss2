@@ -130,6 +130,7 @@ from .api.upload import router as upload_router
 from .api.websocket import router as websocket_router
 from .api.zoho_auth import router as zoho_auth_router
 from .api.zoho_calendar import router as zoho_calendar_router
+from .api.zoho_cliq import router as zoho_cliq_router
 from .core import settings
 from .core.database import close_mongodb, connect_mongodb, get_database
 from .core.qdrant import close_qdrant, connect_qdrant
@@ -364,6 +365,7 @@ app.include_router(meetings_router, prefix="/api/v1/meetings", tags=["Meetings"]
 app.include_router(push_subscriptions_router, prefix="/api/v1/push", tags=["Push Notifications"])
 app.include_router(zoho_auth_router, prefix="/api/v1/zoho", tags=["Zoho Auth"])
 app.include_router(zoho_calendar_router, prefix="/api/v1/zoho/calendar", tags=["Zoho Calendar"])
+app.include_router(zoho_cliq_router, prefix="/api/v1/zoho/cliq", tags=["Zoho Cliq"])
 app.include_router(google_auth_router, prefix="/api/v1/google", tags=["Google Auth"])
 app.include_router(google_calendar_router, prefix="/api/v1/google/calendar", tags=["Google Calendar"])
 app.include_router(check_ins_router, prefix="/api/v1/organizations", tags=["Check-Ins"])

@@ -13,9 +13,14 @@ logger = logging.getLogger("yesboss.zoho.oauth")
 SCOPE_MAIL_TASKS = "ZohoMail.tasks.ALL"
 SCOPE_CALENDAR_CALENDARS = "ZohoCalendar.calendar.ALL"
 SCOPE_CALENDAR_EVENTS = "ZohoCalendar.event.ALL"
-SCOPE_CALENDAR_FREEBUSY = "ZohoCalendar.freebusy.ALL"
+SCOPE_CALENDAR_FREEBUSY = "ZohoCalendar.freebusy.READ"
 
-FULL_SCOPE = f"{SCOPE_MAIL_TASKS},{SCOPE_CALENDAR_CALENDARS},{SCOPE_CALENDAR_EVENTS},{SCOPE_CALENDAR_FREEBUSY}"
+SCOPE_CLIQ_WEBHOOKS = "ZohoCliq.Webhooks.CREATE"
+SCOPE_CLIQ_MESSAGES = "ZohoCliq.Messages.READ"
+SCOPE_CLIQ_CHANNELS = "ZohoCliq.Channels.CREATE"
+SCOPE_CLIQ_USERS = "ZohoCliq.Users.READ"
+
+FULL_SCOPE = f"{SCOPE_MAIL_TASKS},{SCOPE_CALENDAR_CALENDARS},{SCOPE_CALENDAR_EVENTS},{SCOPE_CALENDAR_FREEBUSY},{SCOPE_CLIQ_WEBHOOKS},{SCOPE_CLIQ_MESSAGES},{SCOPE_CLIQ_CHANNELS},{SCOPE_CLIQ_USERS}"
 
 # Use settings for accounts URL (defaults to India DC: accounts.zoho.in)
 # so OAuth tokens match the API data center (mail.zoho.in, calendar.zoho.in)

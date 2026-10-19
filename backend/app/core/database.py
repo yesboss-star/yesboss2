@@ -75,7 +75,7 @@ def connect_mongodb():
 
 def _ensure_collections(db: Database):
     collections = db.list_collection_names()
-    required = ["users", "organizations", "employees", "goals", "tasks", "workflows", "task_outcomes", "bottlenecks", "learning_patterns", "documents", "conversations", "uploads", "org_chart_members", "reports", "user_patterns", "notifications", "notification_preferences", "push_subscriptions", "team_updates", "meetings", "zoho_tokens", "google_tokens", "calendar_events", "check_ins", "employee_frequencies", "goal_outcomes", "industry_intelligence", "assistant_sessions", "strategy_chat_sessions", "market_trends", "market_impacts", "files", "approval_requests", "password_reset_codes", "signup_otps", "role_registry", "journal_entries", "financial_metrics"]
+    required = ["users", "organizations", "employees", "goals", "tasks", "workflows", "task_outcomes", "bottlenecks", "learning_patterns", "documents", "conversations", "uploads", "org_chart_members", "reports", "user_patterns", "notifications", "notification_preferences", "push_subscriptions", "team_updates", "meetings", "zoho_tokens", "google_tokens", "calendar_events", "check_ins", "employee_frequencies", "goal_outcomes", "industry_intelligence", "assistant_sessions", "strategy_chat_sessions", "market_trends", "market_impacts", "files", "approval_requests", "password_reset_codes", "signup_otps", "role_registry", "journal_entries", "financial_metrics", "task_followups"]
     for col in required:
         if col not in collections:
             db.create_collection(col)
@@ -174,6 +174,11 @@ def _ensure_indexes(db: Database):
 
         db.financial_metrics.create_index("organization_id")
         db.financial_metrics.create_index([("organization_id", 1), ("extracted_at", -1)])
+
+        # Phase 0 (Communication Agent, additive): per-task 1-1 follow-up threads.
+        db.task_followups.create_index([("task_id", 1), ("assignee_email", 1)], unique=True)
+        db.task_followups.create_index([("next_followup_at", 1), ("status", 1)])
+        db.task_followups.create_index([("org_id", 1), ("created_at", -1)])
 
         logger.info("Database indexes created")
     except Exception as e:

@@ -1262,6 +1262,13 @@ async def delegate_task(request: DelegateRequest, current_user = Depends(get_cur
     task_result = db.tasks.insert_one(task_doc)
     task_doc["_id"] = str(task_result.inserted_id)
 
+    try:
+        from ..agents.task_interaction_agent import notify_cliq_assignments
+
+        notify_cliq_assignments(db, task_doc)
+    except Exception as e:
+        logger.warning("cliq assign failed: %s", e)
+
     from ..core.notification_service import create_and_deliver as _notify
     asyncio.create_task(_notify(
         user_id=request.assignee_email,

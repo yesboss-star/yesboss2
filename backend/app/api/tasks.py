@@ -586,6 +586,15 @@ async def create_task(task: TaskCreate, organization_id: str | None = None, curr
     from ..agents.frequency_agent import process_task as _freq_task
     asyncio.create_task(_freq_task(task_doc, org_id))
 
+    # Communication Agent: open a Zoho Cliq follow-up thread per assignee.
+    # Non-blocking and stub-safe (ZohoCliq no-ops until ZOHO_CLIQ_BOT_ID is set).
+    try:
+        from ..agents.task_interaction_agent import notify_cliq_assignments
+
+        notify_cliq_assignments(db, task_doc)
+    except Exception as e:
+        logger.warning("cliq assign failed: %s", e)
+
     return {"task": task_doc}
 
 
@@ -801,6 +810,19 @@ async def update_task(task_id: str, task: TaskUpdate, current_user = Depends(get
 
     from ..agents.frequency_agent import process_task as _freq_task
     asyncio.create_task(_freq_task(task_obj, org_id))
+
+    # Communication Agent: open threads for newly-added assignees; summarize on
+    # completion. Non-blocking and stub-safe.
+    try:
+        from ..agents.task_interaction_agent import on_task_assigned, summarize_thread
+
+        for em in new_assignees:
+            if isinstance(em, str) and "@" in em:
+                asyncio.create_task(on_task_assigned(db, task_obj, em))
+        if task.status in ("completed", "approved") and task_obj.get("cliq_thread_id"):
+            asyncio.create_task(summarize_thread(db, str(task_obj.get("cliq_thread_id"))))
+    except Exception as e:
+        logger.warning("cliq update hook failed: %s", e)
 
     return {"task": task_obj}
 
@@ -1354,6 +1376,13 @@ async def bulk_import_confirm(
 
             result = db.tasks.insert_one(task_doc)
             task_doc["_id"] = str(result.inserted_id)
+
+            try:
+                from ..agents.task_interaction_agent import notify_cliq_assignments
+
+                notify_cliq_assignments(db, task_doc)
+            except Exception as e:
+                logger.warning("cliq assign failed: %s", e)
 
             asyncio.create_task(ws_manager.broadcast_to_organization(
                 {"type": "task_created", "data": task_doc}, organization_id

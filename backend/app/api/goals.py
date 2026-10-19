@@ -1237,6 +1237,13 @@ async def generate_tasks_from_goal(request: TaskGenerate, current_user = Depends
         task_doc["_id"] = str(result.inserted_id)
         created_tasks.append(task_doc)
 
+        try:
+            from ..agents.task_interaction_agent import notify_cliq_assignments
+
+            notify_cliq_assignments(db, task_doc)
+        except Exception as e:
+            logging.getLogger("yesboss.goals").warning("cliq assign failed: %s", e)
+
         from ..agents.frequency_agent import process_task as _freq_task
         org_id = goal.get("organization_id")
         asyncio.create_task(_freq_task(task_doc, org_id))
@@ -1441,6 +1448,13 @@ async def select_strategy(
         task_doc["_id"] = str(result.inserted_id)
         created_tasks.append(task_doc)
 
+        try:
+            from ..agents.task_interaction_agent import notify_cliq_assignments
+
+            notify_cliq_assignments(db, task_doc)
+        except Exception as e:
+            logging.getLogger("yesboss.goals").warning("cliq assign failed: %s", e)
+
         from ..agents.frequency_agent import process_task as _freq_task
         asyncio.create_task(_freq_task(task_doc, org_id))
 
@@ -1526,6 +1540,13 @@ async def create_tasks_from_suggestions(
         result = db.tasks.insert_one(task_doc)
         task_doc["_id"] = str(result.inserted_id)
         created_tasks.append(task_doc)
+
+        try:
+            from ..agents.task_interaction_agent import notify_cliq_assignments
+
+            notify_cliq_assignments(db, task_doc)
+        except Exception as e:
+            logging.getLogger("yesboss.goals").warning("cliq assign failed: %s", e)
 
         from ..agents.frequency_agent import process_task as _freq_task
         asyncio.create_task(_freq_task(task_doc, org_id))

@@ -743,6 +743,15 @@ async def delegate_task(request: DelegateRequest):
         task_id = str(task_result.inserted_id)
         task_doc["_id"] = task_id
 
+    # Communication Agent: open a Zoho Cliq follow-up thread for the main task.
+    if task_doc:
+        try:
+            from ..agents.task_interaction_agent import notify_cliq_assignments
+
+            notify_cliq_assignments(db, task_doc)
+        except Exception as e:
+            logger.warning("cliq assign failed: %s", e)
+
     def _sub_doc(st: dict[str, Any]) -> dict[str, Any]:
         return {
             "title": (st.get("title") or "").strip() or "Sub-task",
@@ -3421,6 +3430,13 @@ async def bulk_create_tasks(request: BulkCreateTasksRequest):
             tr = db.tasks.insert_one(task_doc)
             task_doc["_id"] = str(tr.inserted_id)
             created.append(task_doc)
+
+            try:
+                from ..agents.task_interaction_agent import notify_cliq_assignments
+
+                notify_cliq_assignments(db, task_doc)
+            except Exception as e:
+                logger.warning("cliq assign failed: %s", e)
 
             if assignee_email:
                 try:

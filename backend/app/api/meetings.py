@@ -451,6 +451,13 @@ async def create_task_from_meeting(
     result = db.tasks.insert_one(task_doc)
     task_doc["_id"] = str(result.inserted_id)
 
+    try:
+        from ..agents.task_interaction_agent import notify_cliq_assignments
+
+        notify_cliq_assignments(db, task_doc)
+    except Exception as e:
+        logger.warning("cliq assign failed: %s", e)
+
     asyncio.create_task(ws_manager.broadcast_to_organization(
         {"type": "task_created", "data": task_doc}, org_id
     ))
@@ -711,6 +718,13 @@ async def confirm_meeting_tasks(
         }
         result = db.tasks.insert_one(task_doc)
         task_doc["_id"] = str(result.inserted_id)
+
+        try:
+            from ..agents.task_interaction_agent import notify_cliq_assignments
+
+            notify_cliq_assignments(db, task_doc)
+        except Exception as e:
+            logger.warning("cliq assign failed: %s", e)
 
         asyncio.create_task(ws_manager.broadcast_to_organization(
             {"type": "task_created", "data": task_doc}, org_id

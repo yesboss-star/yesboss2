@@ -75,6 +75,18 @@ class Settings:
     ZOHO_ACCOUNTS_URL: str = os.getenv("ZOHO_ACCOUNTS_URL", "https://accounts.zoho.com")
     ZOHO_MAIL_API_URL: str = os.getenv("ZOHO_MAIL_API_URL", "https://mail.zoho.com/api")
     ZOHO_CALENDAR_API_URL: str = os.getenv("ZOHO_CALENDAR_API_URL", "https://calendar.zoho.com/api/v1")
+
+    # Phase 0 (Communication Agent, additive): TAZ fallback + Zoho Cliq bot + STT.
+    # Cliq must live in the SAME data center as OAuth (accounts.zoho.com => cliq.zoho.com).
+    # ZOHO_CLIQ_BOT_ID is the bot's UNIQUE NAME (slug), used in /bots/{name}/message.
+    TAZ_WEBHOOK_URL: str = os.getenv("TAZ_WEBHOOK_URL", "")
+    ZOHO_CLIQ_API_BASE: str = os.getenv("ZOHO_CLIQ_API_BASE", "https://cliq.zoho.com/api/v2")
+    ZOHO_CLIQ_BOT_ID: str = os.getenv("ZOHO_CLIQ_BOT_ID", "")
+    ZOHO_CLIQ_ORG_ID: str = os.getenv("ZOHO_CLIQ_ORG_ID", "")
+    ZOHO_CLIQ_VERIFY_TOKEN: str = os.getenv("ZOHO_CLIQ_VERIFY_TOKEN", "")
+    ZOHO_CLIQ_ENABLED: bool = os.getenv("ZOHO_CLIQ_ENABLED", "true").lower() == "true"
+    STT_PROVIDER: str = os.getenv("STT_PROVIDER", "none")
+
     GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
     GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
     GOOGLE_REDIRECT_URI: str = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/v1/google/callback")
