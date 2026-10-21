@@ -803,11 +803,52 @@ async def send_morning_journal_prompts():
         logger.error(f"Morning journal prompt send failed: {e}")
 
 
+async def _send_cliq_weekly_digests(db, org_id: str, reports: list[dict]) -> None:
+    """Opt-in per-assignee weekly Cliq summary (never breaks the report run)."""
+    try:
+        from ..core.zoho.cliq import ZohoCliq
+
+        cliq = ZohoCliq(db)
+    except Exception:
+        return
+    for report in reports or []:
+        email = str(report.get("employee_email") or "")
+        if not email:
+            continue
+        try:
+            user = (
+                db.users.find_one({"email": email.lower()})
+                or db.users.find_one({"email": email})
+                or {}
+            )
+            uid = user.get("uid") or user.get("user_id") or email
+            prefs = db["notification_preferences"].find_one({
+                "user_id": uid,
+                "organization_id": org_id,
+            }) or {}
+            if not bool((prefs.get("cliq") or {}).get("weekly_digest")):
+                continue
+            eng = report.get("cliq_engagement") or {}
+            text = (
+                "*Weekly Cliq summary*\n"
+                f"Threads: {eng.get('threads', 0)} · Replies: {eng.get('replies', 0)}\n"
+                f"Avg response: {eng.get('avg_response_hours', 0)}h · Nudges: {eng.get('nudges', 0)}\n"
+                f"{(report.get('ai_feedback') or '')[:240]}"
+            )
+            await cliq.send_dm(email, text, org_id=org_id)
+        except Exception as e:
+            logger.debug("weekly Cliq digest failed for %s: %s", email, e)
+
+
 async def send_auto_reports():
     try:
         from ..core.database import get_database
         from ..core.notification_service import create_and_deliver
-        from ..core.report_generator import generate_employee_report, generate_weekly_dept_pdf
+        from ..core.report_generator import (
+            generate_cliq_rollup,
+            generate_employee_report,
+            generate_weekly_dept_pdf,
+        )
 
         db = get_database()
         if db is None:
@@ -855,17 +896,30 @@ async def send_auto_reports():
                     continue
 
                 pdf_bytes = generate_weekly_dept_pdf(reports, org_name)
+                rollup = generate_cliq_rollup(db, org_id, reports)
 
                 await create_and_deliver(
                     user_id=recipient_email,
                     org_id=org_id,
                     type="report_weekly",
                     title="Weekly Performance Report",
-                    message=f"{len(reports)} employee report(s) attached, grouped department-wise.",
+                    message=(
+                        f"{len(reports)} employee report(s) attached, grouped department-wise. "
+                        f"Cliq: {rollup['at_risk_count']} at-risk thread(s), "
+                        f"{len(rollup['escalations'])} escalation(s)."
+                    ),
                     link="/dashboard/reports",
                     email=recipient_email,
                     attachments=[("Weekly-Performance-Report.pdf", pdf_bytes, "application/pdf")],
+                    metadata={
+                        "cliq_rollup": rollup,
+                        "cliq_engagement": {
+                            r.get("employee_email", ""): r.get("cliq_engagement")
+                            for r in reports
+                        },
+                    },
                 )
+                await _send_cliq_weekly_digests(db, org_id, reports)
                 logger.info(f"Weekly report PDF sent to {recipient_email} for org {org_id} ({len(reports)} employees)")
             except Exception as e:
                 logger.error(f"Auto-report failed for org {org_id}: {e}")
@@ -1471,6 +1525,122 @@ async def send_weekly_idea_digest():
         logger.error(f"Weekly idea digest failed: {e}")
 
 
+def _cliq_nudge_text(task, thread) -> str:
+    title = (task or {}).get("title") or "your task"
+    status = thread.get("status")
+    if status == "blocked":
+        return f"Still blocked on *{title}*? Reply with what you need to unblock."
+    if status == "extension_requested":
+        return f"Following up on the extension for *{title}*. Reply with the new date or *started*."
+    return f"Quick check-in on *{title}*. Reply *started*, *blocked*, or *extension*."
+
+
+async def check_cliq_followups(db):
+    """Send due Cliq follow-up nudges (guide §11). Never raises into the loop."""
+    if db is None:
+        return
+    try:
+        from ..agents.task_interaction_agent import (
+            CLOSED_STATUSES,
+            STATUS_BLOCKED,
+            STATUS_EXTENSION,
+            STATUS_OVERDUE,
+            _load_task,
+            _persist_thread,
+            compute_next_followup,
+            escalate_risk_summary,
+            evaluate_criticality,
+        )
+        from ..core.zoho.cliq import ZohoCliq, _cliq_enabled
+
+        if not _cliq_enabled():
+            return
+
+        now = datetime.utcnow()
+        threads = list(
+            db.task_followups.find({
+                "next_followup_at": {"$lte": now},
+                "status": {"$nin": list(CLOSED_STATUSES)},
+            }).limit(200)
+        )
+        cliq = ZohoCliq(db)
+        sent = 0
+
+        for thread in threads:
+            try:
+                email = thread.get("assignee_email", "")
+                if not email:
+                    continue
+                task = _load_task(db, thread.get("task_id", ""))
+                res = await cliq.send_dm(
+                    email,
+                    _cliq_nudge_text(task, thread),
+                    org_id=thread.get("org_id", ""),
+                )
+                if res is not None:
+                    thread["nudge_count"] = int(thread.get("nudge_count") or 0) + 1
+                    thread["last_send_error"] = ""
+                    sent += 1
+                else:
+                    thread["last_send_error"] = "send_failed"
+                thread["last_nudge_at"] = now
+
+                due_dt = None
+                if task and task.get("due_date"):
+                    try:
+                        due_dt = datetime.fromisoformat(
+                            str(task["due_date"]).strip().replace("Z", "").replace("+00:00", "")
+                        )
+                    except Exception:
+                        due_dt = None
+                overdue = bool(due_dt and due_dt < now)
+
+                if overdue and thread.get("status") not in (STATUS_BLOCKED, STATUS_EXTENSION):
+                    thread["status"] = STATUS_OVERDUE
+                    if task and task.get("_id") is not None:
+                        level = 1
+                        days = _days_overdue(task.get("due_date")) or 0
+                        if days >= 7:
+                            level = 3
+                        elif days >= 3:
+                            level = 2
+                        try:
+                            db.tasks.update_one(
+                                {"_id": task["_id"]},
+                                {"$max": {"escalation_level": level},
+                                 "$set": {"last_cliq_nudge_at": now}},
+                            )
+                        except Exception as e:
+                            logger.debug("cliq escalation bump failed: %s", e)
+
+                crit = evaluate_criticality(task, thread)
+                thread["criticality"] = crit["criticality"]
+                thread["risk_score"] = crit["risk_score"]
+                thread["risk_notes"] = crit["risk_notes"]
+                thread["next_followup_at"] = compute_next_followup(
+                    crit["criticality"],
+                    thread.get("status", ""),
+                    (task or {}).get("due_date"),
+                    int(thread.get("nudge_count") or 0),
+                    now,
+                )
+                thread["updated_at"] = now
+                _persist_thread(db, thread)
+
+                no_reply = not thread.get("last_reply_at")
+                if crit["criticality"] in ("high", "critical") or (
+                    overdue and int(thread.get("nudge_count") or 0) >= 2 and no_reply
+                ):
+                    await escalate_risk_summary(db, thread)
+            except Exception as e:
+                logger.warning("cliq follow-up thread failed: %s", e)
+
+        if threads:
+            logger.info("Cliq follow-ups: %s due, %s nudged", len(threads), sent)
+    except Exception as e:
+        logger.error("Cliq follow-up check failed: %s", e)
+
+
 async def scheduler_loop():
     logger.info("Scheduler started")
     deadline_counter = 0
@@ -1518,6 +1688,14 @@ async def scheduler_loop():
                 await sync_google_calendar()
 
             await check_meeting_reminders()
+
+            try:
+                from ..core.database import get_database as _get_db
+                cliq_db = _get_db()
+                if cliq_db is not None:
+                    await check_cliq_followups(cliq_db)
+            except Exception as e:
+                logger.error("Cliq follow-up tick failed: %s", e)
 
             deadline_counter += 1
             google_sync_counter += 1

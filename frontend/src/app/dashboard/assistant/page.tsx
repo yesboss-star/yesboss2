@@ -7,11 +7,13 @@ import { useUIStore } from "@/stores/uiStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { useSessionStore, type ChatSession, type SessionMessage, type ClarifyingQuestion, type BookingParams, type DelegateParams, type GeneratedSubTask, delegateAssigneeLabel } from "@/stores/sessionStore";
 import { getAuthHeaders } from "@/lib/utils";
+import { useVoiceInput } from "@/hooks/useVoiceInput";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, Button } from "@/components/ui";
 import {
   Loader2, Sparkles, Send, MessageSquare, Plus, X, Trash2, Edit3, Check,
   ChevronRight, PanelLeftOpen, PanelLeftClose, FileText, Lightbulb, ArrowRight,
+  Mic, MicOff,
 } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
@@ -179,6 +181,7 @@ function AssistantInner() {
 
   const [input, setInput] = useState("");
   const [isAsking, setIsAsking] = useState(false);
+  const { listening, startListening, stopListening } = useVoiceInput();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -733,6 +736,26 @@ function AssistantInner() {
                 disabled={isAsking || !activeSession}
                 className="flex-1 px-4 py-2.5 rounded-xl bg-surface border border-border focus:border-primary focus:outline-none text-sm disabled:opacity-50"
               />
+              <button
+                type="button"
+                onClick={
+                  listening
+                    ? stopListening
+                    : () =>
+                        startListening((text: string) =>
+                          setInput((prev) => (prev ? `${prev} ${text}` : text))
+                        )
+                }
+                title={listening ? "Stop recording" : "Start voice input"}
+                disabled={isAsking || !activeSession}
+                className={`px-3 rounded-xl border transition-all cursor-pointer disabled:opacity-50 ${
+                  listening
+                    ? "bg-rose-500/20 text-rose-400 border-rose-500/30 animate-pulse"
+                    : "bg-surface border-border text-text-muted hover:text-primary hover:border-primary/30"
+                }`}
+              >
+                {listening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+              </button>
               <Button
                 onClick={handleSend}
                 disabled={!input.trim() || isAsking || !activeSession}

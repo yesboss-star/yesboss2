@@ -61,7 +61,7 @@ def normalize_input(raw: dict[str, Any] | None) -> dict[str, Any]:
         text = str(raw.get("text") or raw.get("transcript") or "")
 
     if raw.get("audio_url") or (isinstance(raw.get("files"), list) and raw.get("files")):
-        modality = "voice" if raw.get("audio_url") else modality
+        modality = "voice"
         confidence = 0.6
 
     return {
@@ -118,6 +118,7 @@ async def route(
     normalized: dict[str, Any],
     identity: dict[str, Any],
     context: dict[str, Any] | None = None,
+    use_llm: bool = False,
 ) -> dict[str, Any]:
     """Route a normalized message to the Task Interaction Agent.
 
@@ -161,6 +162,7 @@ async def route(
             normalized.get("text", ""),
             modality=normalized.get("modality", "text"),
             cliq_msg_id=normalized.get("cliq_msg_id", ""),
+            use_llm=use_llm,
         )
         return {"routed": True, "kind": "reply", **result}
     except Exception as e:

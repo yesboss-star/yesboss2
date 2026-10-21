@@ -1,11 +1,12 @@
 ﻿"use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { useJournalStore } from "@/stores/journalStore";
 import { useGoalStore } from "@/stores/goalStore";
+import { useVoiceInput } from "@/hooks/useVoiceInput";
 import DashboardLayout from "@/components/DashboardLayout";
 import {
   Card, CardHeader, CardTitle, CardDescription, CardContent,
@@ -39,59 +40,6 @@ const TYPE_OPTIONS = [
   { value: "journal", icon: <BookOpen className="w-4 h-4 text-blue-400" />, label: "Journal" },
   { value: "reflection", icon: <Brain className="w-4 h-4 text-purple-400" />, label: "Reflection" },
 ];
-
-function useSpeechRecognition() {
-  const [listening, setListening] = useState(false);
-  const [interimText, setInterimText] = useState("");
-  const finalRef = useRef("");
-  const recognitionRef = useRef<any>(null);
-  const onFinalRef = useRef<((text: string) => void) | null>(null);
-
-  const startListening = useCallback((onFinal?: (text: string) => void) => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) return;
-    finalRef.current = "";
-    setInterimText("");
-    if (onFinal) onFinalRef.current = onFinal;
-    const recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = true;
-    recognition.lang = "en-US";
-    recognition.onresult = (event: any) => {
-      let interim = "";
-      for (let i = 0; i < event.results.length; i++) {
-        if (event.results[i].isFinal) {
-          finalRef.current += event.results[i][0].transcript + " ";
-        } else {
-          interim += event.results[i][0].transcript;
-        }
-      }
-      setInterimText(interim);
-    };
-    recognition.onend = () => {
-      setListening(false);
-      setInterimText("");
-      if (finalRef.current.trim()) {
-        onFinalRef.current?.(finalRef.current.trim());
-      }
-    };
-    recognition.onerror = () => {
-      setListening(false);
-      setInterimText("");
-    };
-    recognitionRef.current = recognition;
-    recognition.start();
-    setListening(true);
-  }, []);
-
-  const stopListening = useCallback(() => {
-    recognitionRef.current?.stop();
-    setListening(false);
-    setInterimText("");
-  }, []);
-
-  return { listening, interimText, startListening, stopListening };
-}
 
 function EntryCard({ entry, onDelete, orgId }: { entry: any; onDelete: (id: string) => void; orgId?: string }) {
   const router = useRouter();
@@ -278,7 +226,7 @@ export default function IdeasPage() {
   const [submitting, setSubmitting] = useState(false);
   const [filter, setFilter] = useState<string>("");
   const [tab, setTab] = useState<"entries" | "pipeline" | "trends">("entries");
-  const { listening, interimText, startListening, stopListening } = useSpeechRecognition();
+  const { listening, interimText, startListening, stopListening } = useVoiceInput();
   const [moodTrends, setMoodTrends] = useState<any[]>([]);
   const [moodSummary, setMoodSummary] = useState<any>(null);
   const [trendsLoading, setTrendsLoading] = useState(false);

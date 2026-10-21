@@ -7,12 +7,13 @@ import { useUIStore } from "@/stores/uiStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { useChatStore, ChatMessage } from "@/stores/chatStore";
 import { useOrgChartStore } from "@/stores/orgChartStore";
+import { useVoiceInput } from "@/hooks/useVoiceInput";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, Button } from "@/components/ui";
 import { 
   Send, Loader2, Sparkles, Bot, User, Trash2, MessageSquare, Plus, X,
   ChevronRight, PanelLeftOpen, PanelLeftClose, FileText, Lightbulb, ArrowRight,
-  Check, Copy, Zap, TrendingUp, Target, Briefcase, BarChart3, AtSign
+  Check, Copy, Zap, TrendingUp, Target, Briefcase, BarChart3, AtSign, Mic, MicOff
 } from "lucide-react";
 
 const QUICK_ACTIONS = [
@@ -53,6 +54,7 @@ export default function StrategyChatPage() {
   const mentionListRef = useRef<HTMLDivElement>(null);
   const orgId = organization?.id;
   const { members, fetchOrgMembers } = useOrgChartStore();
+  const { listening, startListening, stopListening } = useVoiceInput();
 
   useEffect(() => {
     setBreadcrumbs([
@@ -530,6 +532,24 @@ export default function StrategyChatPage() {
                   style={{ minHeight: "42px", maxHeight: "120px" }}
                 />
               </div>
+              <button
+                onClick={
+                  listening
+                    ? stopListening
+                    : () =>
+                        startListening((text: string) =>
+                          setInput((prev) => (prev ? `${prev} ${text}` : text))
+                        )
+                }
+                title={listening ? "Stop recording" : "Start voice input"}
+                className={`p-2.5 rounded-xl border transition-all cursor-pointer flex-shrink-0 ${
+                  listening
+                    ? "bg-rose-500/20 text-rose-400 border-rose-500/30 animate-pulse"
+                    : "bg-surface border-border text-text-muted hover:text-primary hover:border-primary/30"
+                }`}
+              >
+                {listening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+              </button>
               <button
                 onClick={handleSubmit}
                 disabled={!input.trim() || askLoading || loading}

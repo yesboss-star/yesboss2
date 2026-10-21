@@ -35,6 +35,15 @@ DEFAULT_PREFERENCES = {
         "goal_status": True,
         "alert": True,
     },
+    "cliq": {
+        "task_assigned": True,
+        "task_status": True,
+        "task_completed": True,
+        "task_escalation": True,
+        "cliq_followup": True,
+        "weekly_digest": False,
+        "alert": True,
+    },
     "sound": True,
     "digest": {
         "enabled": False,
@@ -47,6 +56,7 @@ class NotificationPreferencesUpdate(BaseModel):
     email: dict | None = None
     push: dict | None = None
     in_app: dict | None = None
+    cliq: dict | None = None
     sound: bool | None = None
     digest: dict | None = None
 
@@ -108,6 +118,8 @@ async def update_preferences(
         update_data["push"] = {**existing.get("push", DEFAULT_PREFERENCES["push"]), **updates.push}
     if updates.in_app is not None:
         update_data["in_app"] = {**existing.get("in_app", DEFAULT_PREFERENCES["in_app"]), **updates.in_app}
+    if updates.cliq is not None:
+        update_data["cliq"] = {**existing.get("cliq", DEFAULT_PREFERENCES["cliq"]), **updates.cliq}
     if updates.sound is not None:
         update_data["sound"] = updates.sound
     if updates.digest is not None:

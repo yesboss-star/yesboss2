@@ -6,6 +6,15 @@ import { refreshAuthToken } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
+export interface CliqStatus {
+  bot: string;
+  dc: string;
+  enabled: boolean;
+  configured: boolean;
+  inputs: string[];
+  followups: string;
+}
+
 interface ZohoState {
   connected: boolean;
   email: string;
@@ -13,7 +22,9 @@ interface ZohoState {
   connectedAt: string;
   loading: boolean;
   connecting: boolean;
+  cliqStatus: CliqStatus | null;
   checkStatus: () => Promise<void>;
+  checkCliqStatus: () => Promise<void>;
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
 }
@@ -32,6 +43,7 @@ export const useZohoStore = create<ZohoState>()((set, get) => ({
   connectedAt: "",
   loading: false,
   connecting: false,
+  cliqStatus: null,
 
   checkStatus: async () => {
     try {
@@ -56,8 +68,21 @@ export const useZohoStore = create<ZohoState>()((set, get) => ({
     }
   },
 
-  connect: async () => {
+  checkCliqStatus: async () => {
     try {
+      const res = await fetch(`${API_URL}/zoho/cliq/bot/capabilities`, {
+        credentials: "include",
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        set({ cliqStatus: await res.json() });
+      }
+    } catch {
+      set({ cliqStatus: null });
+    }
+  },
+
+  connect: async () => {    try {
       set({ connecting: true });
       await refreshAuthToken();
       const res = await fetch(`${API_URL}/zoho/auth-url`, {

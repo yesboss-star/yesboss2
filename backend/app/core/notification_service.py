@@ -170,6 +170,22 @@ async def create_and_deliver(
     if is_channel_enabled(prefs, "push", type):
         asyncio.create_task(_send_push(resolved_uid, title, message, link, str(notif_doc.get("_id")) if notif_doc else None))
 
+    from .config import settings as _settings
+    if (
+        getattr(_settings, "ZOHO_CLIQ_ENABLED", False)
+        and is_channel_enabled(prefs, "cliq", type)
+        and type not in ("task_assigned", "cliq_followup")
+    ):
+        cliq_email = email or get_user_email(user_id)
+        if cliq_email:
+            try:
+                from .zoho.cliq import ZohoCliq
+                asyncio.create_task(
+                    ZohoCliq(db).send_dm(cliq_email, f"*{title}*\n{message}", org_id=org_id)
+                )
+            except Exception as e:
+                logger.warning("cliq fan-out failed: %s", e)
+
     return notif_doc
 
 

@@ -8,6 +8,7 @@ import { useOrganizationStore } from "@/stores/organizationStore";
 import { useTaskStore } from "@/stores/taskStore";
 import { useGoalStore } from "@/stores/goalStore";
 import DashboardLayout from "@/components/DashboardLayout";
+import FollowupThread from "@/components/FollowupThread";
 import { Card, CardHeader, CardTitle, CardContent, Badge, Button, Textarea, Avatar, AvatarFallback } from "@/components/ui";
 import { 
   ArrowLeft, 
@@ -242,6 +243,8 @@ export default function TaskDetailPage() {
                 </Button>
               </CardContent>
             </Card>
+
+            <FollowupThread taskId={taskId} />
           </div>
 
           <div className="space-y-6">

@@ -228,8 +228,33 @@ class ZohoCliq:
     ) -> dict[str, Any] | None:
         """Assignment card with Started/Blocked/Extension buttons."""
         buttons = [
-            {"label": "Started ✅", "action": {"type": "invoke.function", "data": {"task_id": task_id, "action": "started"}}},
-            {"label": "Blocked ⛔", "action": {"type": "invoke.function", "data": {"task_id": task_id, "action": "blocked"}}},
-            {"label": "Extension 📅", "action": {"type": "invoke.function", "data": {"task_id": task_id, "action": "extension"}}},
+            {"label": "Started ✅", "type": "invoke.function", "data": {"task_id": task_id, "action": "started"}},
+            {"label": "Blocked ⛔", "type": "invoke.function", "data": {"task_id": task_id, "action": "blocked"}},
+            {"label": "Extension 📅", "type": "invoke.function", "data": {"task_id": task_id, "action": "extension"}},
         ]
         return await self.send_dm(to_email, f"*{title}*\n{text}", buttons=buttons, org_id=org_id)
+
+    async def download_file(self, url: str, org_id: str = "") -> tuple[bytes, str] | None:
+        """Download a Cliq attachment (e.g. a voice note). Never raises."""
+        if not url:
+            return None
+        headers: dict[str, str] = {}
+        token = await self._resolve_token(org_id)
+        if token:
+            headers["Authorization"] = f"Zoho-oauthtoken {token}"
+        try:
+            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+                resp = await client.get(url, headers=headers)
+            if resp.status_code != 200 or not resp.content:
+                logger.warning("cliq file download failed %s: %s", resp.status_code, url[:120])
+                return None
+            name = ""
+            disposition = resp.headers.get("content-disposition", "")
+            if "filename=" in disposition:
+                name = disposition.split("filename=", 1)[1].strip().strip('"').strip("'")
+            if not name:
+                name = url.split("?")[0].rstrip("/").rsplit("/", 1)[-1] or "voice-note.webm"
+            return resp.content, name
+        except Exception as e:
+            logger.warning("cliq file download error: %s", e)
+            return None

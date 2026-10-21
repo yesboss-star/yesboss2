@@ -7,6 +7,8 @@ and without any Zoho Cliq bot configured (stub mode).
 import asyncio
 from datetime import datetime, timedelta
 
+import pytest
+
 from app.agents import task_interaction_agent as tia
 from app.agents.communication_agent import (
     extract_sender_email,
@@ -45,10 +47,12 @@ class _Collection:
         return True
 
     def find_one(self, flt, *args, **kwargs):
-        for d in self.docs:
-            if self._match(d, flt):
-                return d
-        return None
+        matches = [d for d in self.docs if self._match(d, flt)]
+        sort = kwargs.get("sort")
+        if sort:
+            for key, direction in reversed(list(sort)):
+                matches.sort(key=lambda d: (d.get(key) is None, d.get(key)), reverse=direction < 0)
+        return matches[0] if matches else None
 
     def find(self, flt=None, *args, **kwargs):
         flt = flt or {}
@@ -163,6 +167,15 @@ def test_on_task_assigned_creates_thread_and_links_task():
     assert db.tasks.docs[0]["cliq_thread_id"] == "id1"
 
 
+def test_on_task_assigned_opens_ack_window():
+    db = FakeDB()
+    db.tasks.insert_one(_task())
+    asyncio.run(tia.on_task_assigned(db, db.tasks.docs[0], "dev@x.com"))
+    thread = db.task_followups.docs[0]
+    delta = thread["next_followup_at"] - datetime.utcnow()
+    assert timedelta(hours=3, minutes=58) < delta < timedelta(hours=4, minutes=2)
+
+
 def test_on_task_assigned_idempotent():
     db = FakeDB()
     db.tasks.insert_one(_task())
@@ -247,6 +260,31 @@ def test_send_dm_resolves_email_to_zuid(monkeypatch):
     assert _FakeAsyncClient.last_post["json"]["userids"] == "zuid-123"
 
 
+def test_send_card_includes_three_buttons(monkeypatch):
+    from app.core.zoho import cliq as cliq_mod
+
+    cliq_mod._ZUID_CACHE.clear()
+    monkeypatch.setattr(cliq_mod.httpx, "AsyncClient", lambda *a, **k: _FakeAsyncClient())
+    monkeypatch.setattr(cliq_mod.settings, "ZOHO_CLIQ_BOT_ID", "yesboss")
+    monkeypatch.setattr(cliq_mod.settings, "ZOHO_CLIQ_ENABLED", True)
+
+    db = FakeDB()
+    db.zoho_tokens.insert_one({
+        "user_id": "owner",
+        "org_id": "org1",
+        "access_token": "tok",
+        "expires_at": (datetime.utcnow() + timedelta(hours=1)).isoformat(),
+    })
+    res = asyncio.run(
+        cliq_mod.ZohoCliq(db).send_card("dev@x.com", "Title", "Body", task_id="t1", org_id="org1")
+    )
+    assert res and res["chat_id"] == "c1"
+    buttons = _FakeAsyncClient.last_post["json"]["buttons"]
+    assert [b["data"]["action"] for b in buttons] == ["started", "blocked", "extension"]
+    assert all(b["type"] == "invoke.function" for b in buttons)
+    assert all(b["data"]["task_id"] == "t1" for b in buttons)
+
+
 def test_send_dm_without_token_is_skipped(monkeypatch):
     from app.core.zoho import cliq as cliq_mod
 
@@ -278,6 +316,31 @@ def test_on_reply_updates_status_and_risk():
     assert thread["next_followup_at"] is not None
     assert len(thread["messages"]) == 1
     assert thread_id
+
+
+@pytest.mark.parametrize(
+    "text,expected_status",
+    [
+        ("Started working on it", tia.STATUS_IN_PROGRESS),
+        ("Making progress, halfway there", tia.STATUS_IN_PROGRESS),
+        ("I'm blocked by the API keys", tia.STATUS_BLOCKED),
+        ("Can I get an extension?", tia.STATUS_EXTENSION),
+        ("Done, shipped it", tia.STATUS_COMPLETED),
+        ("hmm ok sure", tia.STATUS_ACKNOWLEDGED),
+    ],
+)
+def test_on_reply_intent_lifecycle(text, expected_status):
+    db = FakeDB()
+    db.tasks.insert_one(_task(org=""))
+    asyncio.run(tia.on_task_assigned(db, db.tasks.docs[0], "dev@x.com"))
+    thread = db.task_followups.docs[0]
+    res = asyncio.run(tia.on_reply(db, thread, text, cliq_msg_id=f"m-{expected_status}"))
+    assert res["deduped"] is False
+    assert res["status"] == expected_status
+    assert res["criticality"] in ("low", "medium", "high", "critical")
+    assert thread["next_followup_at"] is not None
+    assert thread["last_reply_at"] is not None
+    assert len(thread["messages"]) == 1
 
 
 def test_on_reply_dedupes_by_cliq_msg_id():
@@ -351,6 +414,31 @@ def test_route_reply_without_thread_is_not_routed():
     ident = {"uid": "nobody@x.com", "email": "nobody@x.com", "org_id": ""}
     res = asyncio.run(route(db, normalized, ident))
     assert res["routed"] is False
+
+
+def test_route_text_reply_targets_latest_open_thread():
+    db = FakeDB()
+    older = _task(title="Older task", org="")
+    older["_id"] = "ta"
+    newer = _task(title="Newer task", org="")
+    newer["_id"] = "tb"
+    db.tasks.insert_one(older)
+    db.tasks.insert_one(newer)
+    asyncio.run(tia.on_task_assigned(db, db.tasks.docs[0], "dev@x.com"))
+    asyncio.run(tia.on_task_assigned(db, db.tasks.docs[1], "dev@x.com"))
+    old_thread, new_thread = db.task_followups.docs
+    old_thread["updated_at"] = datetime.utcnow() - timedelta(minutes=5)
+    new_thread["updated_at"] = datetime.utcnow()
+
+    normalized = normalize_input(
+        {"sender": {"email": "dev@x.com"}, "message": {"text": "started", "id": "m-latest"}}
+    )
+    ident = {"uid": "dev@x.com", "email": "dev@x.com", "org_id": ""}
+    res = asyncio.run(route(db, normalized, ident))
+    assert res["routed"] is True
+    assert res["kind"] == "reply"
+    assert new_thread["status"] == tia.STATUS_IN_PROGRESS
+    assert old_thread["status"] == tia.STATUS_ASSIGNED
 
 
 def test_notify_cliq_assignments_dispatches_only_emails(monkeypatch):

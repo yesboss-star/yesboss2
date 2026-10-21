@@ -15,6 +15,7 @@ authoritative in Phase 1.
 """
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import Any
@@ -114,6 +115,87 @@ def classify_reply(text: str) -> dict[str, Any]:
         "risk_summary": "Assignee replied but status is not explicit.",
         "next_action": "Ask assignee to confirm current status.",
     }
+
+
+def _parse_llm_json(raw: str) -> dict[str, Any] | None:
+    """Parse a JSON object out of an LLM response (tolerates code fences)."""
+    if not raw:
+        return None
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.strip("`").strip()
+        if text.lower().startswith("json"):
+            text = text[4:]
+    start = text.find("{")
+    end = text.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        data = json.loads(text[start : end + 1])
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    intent = str(data.get("intent") or "").lower()
+    if intent not in INTENT_TO_STATUS:
+        return None
+    try:
+        confidence = float(data.get("confidence") or 0)
+    except Exception:
+        confidence = 0.0
+    suggested = str(data.get("suggested_criticality") or "").lower()
+    if suggested not in ("low", "medium", "high", "critical"):
+        suggested = ""
+    return {
+        "intent": intent,
+        "confidence": max(0.0, min(confidence, 1.0)),
+        "blocker_severity": str(data.get("blocker_severity") or "none").lower(),
+        "sentiment": str(data.get("sentiment") or "neutral").lower(),
+        "suggested_criticality": suggested,
+        "risk_summary": str(data.get("risk_summary") or ""),
+        "next_action": str(data.get("next_action") or ""),
+    }
+
+
+async def classify_reply_llm(text: str, task: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Optional LLM classifier (§9). Fail-safe: any error → None (rules win)."""
+    task = task or {}
+    try:
+        from ..core.ai_client import get_ai_response
+
+        prompt = (
+            f"Classify the assignee's reply for task {task.get('title', '')} "
+            f"due {str(task.get('due_date') or '')[:10]} priority {task.get('priority', '')}.\n"
+            f'Reply: "{text}".\n'
+            "Return JSON ONLY: {intent: started|progress|blocked|extension_requested|completed|unclear, "
+            "confidence 0-1, blocker_severity: none|low|med|high, sentiment, "
+            "suggested_criticality: low|medium|high|critical, risk_summary (1-2 lines, manager-safe), next_action}."
+        )
+        raw = await get_ai_response(
+            prompt,
+            system_prompt="You are a strict JSON classifier. Return JSON only, no prose.",
+            temperature=0.0,
+            max_tokens=300,
+        )
+        return _parse_llm_json(raw)
+    except Exception as e:
+        logger.debug("cliq llm classify failed: %s", e)
+        return None
+
+
+def _merge_classification(rules: dict[str, Any], llm: dict[str, Any] | None) -> dict[str, Any]:
+    """Rules-first merge: LLM may only resolve an `unclear` rules result."""
+    merged = dict(rules)
+    if not llm or float(llm.get("confidence") or 0) < 0.7:
+        return merged
+    if merged.get("intent") == "unclear" and llm.get("intent") in INTENT_TO_STATUS:
+        merged["intent"] = llm["intent"]
+        merged["confidence"] = float(llm.get("confidence") or merged.get("confidence", 0.3))
+        if llm.get("risk_summary"):
+            merged["risk_summary"] = llm["risk_summary"]
+        if llm.get("next_action"):
+            merged["next_action"] = llm["next_action"]
+    return merged
 
 
 def _summarize_intent(intent: str, text: str) -> str:
@@ -252,13 +334,31 @@ def _load_thread(db: Any, task_id: str, email: str) -> dict[str, Any] | None:
         return None
 
 
+def _load_thread_by_id(db: Any, thread_id: str) -> dict[str, Any] | None:
+    if db is None or not thread_id:
+        return None
+    try:
+        oid = ObjectId(str(thread_id)) if ObjectId.is_valid(str(thread_id)) else thread_id
+        return db.task_followups.find_one({"_id": oid})
+    except Exception as e:
+        logger.debug("load thread by id failed: %s", e)
+        return None
+
+
 def _find_open_thread(db: Any, email: str) -> dict[str, Any] | None:
     if db is None or not email:
         return None
+    query = {"assignee_email": email, "status": {"$nin": list(CLOSED_STATUSES)}}
     try:
-        return db.task_followups.find_one(
-            {"assignee_email": email, "status": {"$nin": list(CLOSED_STATUSES)}}
-        )
+        # Latest open thread wins when a sender has several in-flight tasks.
+        return db.task_followups.find_one(query, sort=[("updated_at", -1)])
+    except TypeError:
+        # Some lightweight db doubles don't accept sort; fall back gracefully.
+        try:
+            return db.task_followups.find_one(query)
+        except Exception as e:
+            logger.debug("find open thread failed: %s", e)
+            return None
     except Exception as e:
         logger.debug("find open thread failed: %s", e)
         return None
@@ -369,15 +469,17 @@ async def on_task_assigned(db: Any, task_doc: dict[str, Any], assignee_email: st
         from ..core.zoho.cliq import ZohoCliq
 
         due_note = str(task_doc.get("due_date") or "no deadline")[:10]
-        # Text-first (Phase 1): buttons arrive in a later phase once the Cliq
-        # button Function is wired. Text replies are captured via the bot's
-        # Deluge Message Handler -> /api/v1/zoho/cliq/webhook.
         prompt = (
-            f"📋 *New task:* {title}\n"
             f"Due: {due_note}\n\n"
-            "Reply with *started*, *blocked*, or *extension* to update me."
+            "Tap a button below or reply *started*, *blocked*, or *extension* to update me."
         )
-        res = await ZohoCliq(db).send_dm(email, prompt, org_id=org_id)
+        cliq = ZohoCliq(db)
+        res = await cliq.send_card(
+            email, f"📋 New task: {title}", prompt, task_id=task_id, org_id=org_id
+        )
+        if res is None:
+            # Fall back to a plain text DM if the button card is rejected.
+            res = await cliq.send_dm(email, f"📋 *New task:* {title}\n{prompt}", org_id=org_id)
         if res is not None:
             # send_dm returns a dict only on HTTP 2xx (None on skip/failure); a
             # Cliq bot DM 200 body may carry no chat_id, so don't gate on it.
@@ -439,14 +541,18 @@ async def on_reply(
     text: str,
     modality: str = "text",
     cliq_msg_id: str = "",
+    use_llm: bool = False,
 ) -> dict[str, Any]:
-    """Capture an assignee reply: classify, update status/risk, ack."""
+    """Capture an assignee reply: classify (rules + optional LLM), update status/risk, ack."""
     if cliq_msg_id and cliq_msg_id in (thread.get("cliq_message_ids") or []):
         return {"deduped": True, "thread_id": str(thread.get("_id") or "")}
 
-    classification = classify_reply(text)
-    intent = classification["intent"]
     now = _utcnow()
+    task = _load_task(db, thread.get("task_id", ""))
+    classification = classify_reply(text)
+    llm = await classify_reply_llm(text, task) if use_llm else None
+    classification = _merge_classification(classification, llm)
+    intent = classification["intent"]
 
     thread.setdefault("messages", []).append({
         "dir": "in",
@@ -467,11 +573,10 @@ async def on_reply(
         thread["status"] = STATUS_ACKNOWLEDGED
 
     thread["last_reply_at"] = now
-    task = _load_task(db, thread.get("task_id", ""))
-    crit = evaluate_criticality(task, thread)
+    crit = evaluate_criticality(task, thread, llm)
     thread["criticality"] = crit["criticality"]
     thread["risk_score"] = crit["risk_score"]
-    thread["risk_notes"] = classification.get("risk_summary") or crit["risk_notes"]
+    thread["risk_notes"] = (llm or {}).get("risk_summary") or crit["risk_notes"]
     thread["next_followup_at"] = compute_next_followup(
         thread["criticality"], thread["status"], (task or {}).get("due_date"), thread.get("nudge_count", 0), now
     )
@@ -587,10 +692,53 @@ async def escalate_risk_summary(db: Any, thread: dict[str, Any]) -> None:
         logger.warning("escalate_risk_summary failed: %s", e)
 
 
+def _rules_summary(thread: dict[str, Any]) -> str:
+    """Deterministic, manager-safe thread summary (LLM polish lands in Phase 3)."""
+    messages = thread.get("messages") or []
+    replies = len([m for m in messages if m.get("dir") == "in"])
+    blockers = len([m for m in messages if m.get("intent") == "blocked"])
+    parts = [
+        f"Status: {thread.get('status', 'unknown')}",
+        f"Criticality: {thread.get('criticality', 'low')}",
+        f"Replies: {replies}",
+    ]
+    if blockers:
+        parts.append(f"Blockers raised: {blockers}")
+    note = thread.get("risk_notes")
+    if note:
+        parts.append(f"Risk: {note}")
+    return "Task summary — " + "; ".join(parts)
+
+
 async def summarize_thread(db: Any, thread_id: str) -> dict[str, Any]:
-    """Phase 3 placeholder — mark the thread summarized (LLM summary later)."""
-    logger.info("summarize_thread called for %s (Phase 3 stub)", thread_id)
-    return {"summarized": False, "thread_id": thread_id}
+    """Summarize a thread, persist the outbound summary and post it to the DM."""
+    thread = _load_thread_by_id(db, thread_id)
+    if thread is None:
+        return {"summarized": False, "thread_id": thread_id, "reason": "not_found"}
+    if thread.get("summarized"):
+        return {"summarized": True, "thread_id": str(thread.get("_id") or thread_id), "deduped": True}
+
+    now = _utcnow()
+    summary = _rules_summary(thread)
+    thread.setdefault("messages", []).append({
+        "dir": "out",
+        "text": summary,
+        "modality": "summary",
+        "intent": "summary",
+        "confidence": 1.0,
+        "ts": now,
+        "cliq_msg_id": "",
+    })
+    thread["summarized"] = True
+    thread["updated_at"] = now
+    _persist_thread(db, thread)
+    await _send_dm(db, thread, summary)
+    logger.info("thread summarized thread_id=%s", thread_id)
+    return {
+        "summarized": True,
+        "thread_id": str(thread.get("_id") or thread_id),
+        "summary": summary,
+    }
 
 
 # ── internal helpers ────────────────────────────────────────────────────────

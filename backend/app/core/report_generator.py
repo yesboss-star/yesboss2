@@ -1,4 +1,5 @@
 import logging
+from collections import Counter
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -150,6 +151,8 @@ async def generate_employee_report(
         logger.warning(f"AI feedback failed for employee report: {e}")
         ai_feedback = "AI feedback unavailable at this time."
 
+    cliq_engagement = _cliq_engagement(db, org_id, employee_email, cutoff)
+
     return {
         "employee_email": employee_email,
         "employee_name": employee_name,
@@ -179,6 +182,7 @@ async def generate_employee_report(
             "org_comparison": comparison_lines,
         },
         "ai_feedback": ai_feedback,
+        "cliq_engagement": cliq_engagement,
     }
 
 
@@ -213,6 +217,186 @@ def _is_overdue(due_date) -> bool:
         return d < datetime.utcnow()
     except Exception:
         return False
+
+
+def _as_dt(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "").replace("+00:00", ""))
+    except Exception:
+        return None
+
+
+def _response_hours(messages: list[dict[str, Any]]) -> list[float]:
+    """Hours between each outbound nudge and the next inbound reply."""
+    hours: list[float] = []
+    pending_out: datetime | None = None
+    for msg in sorted(messages, key=lambda m: _as_dt(m.get("ts")) or datetime.min):
+        ts = _as_dt(msg.get("ts"))
+        if msg.get("dir") == "out":
+            pending_out = ts
+        elif msg.get("dir") == "in" and pending_out and ts:
+            delta = (ts - pending_out).total_seconds() / 3600
+            if delta >= 0:
+                hours.append(delta)
+            pending_out = None
+    return hours
+
+
+def _cliq_engagement(db: Any, org_id: str, employee_email: str, cutoff: datetime) -> dict[str, Any]:
+    """Additive Cliq stats for one employee (never breaks report generation)."""
+    empty = {
+        "threads": 0,
+        "replies": 0,
+        "avg_response_hours": 0.0,
+        "nudges": 0,
+        "criticality_trend": {},
+    }
+    try:
+        docs = list(db.task_followups.find({
+            "org_id": org_id,
+            "assignee_email": (employee_email or "").lower(),
+        }))
+    except Exception as e:
+        logger.debug("cliq engagement lookup failed: %s", e)
+        return empty
+
+    threads = [
+        t for t in docs
+        if (_as_dt(t.get("created_at")) or datetime.min) >= cutoff
+    ]
+    replies = 0
+    nudges = 0
+    hours: list[float] = []
+    trend: dict[str, int] = {}
+    for thread in threads:
+        messages = [m for m in (thread.get("messages") or []) if isinstance(m, dict)]
+        replies += sum(1 for m in messages if m.get("dir") == "in")
+        nudges += int(thread.get("nudge_count") or 0)
+        hours.extend(_response_hours(messages))
+        crit = str(thread.get("criticality") or "low")
+        trend[crit] = trend.get(crit, 0) + 1
+
+    return {
+        "threads": len(threads),
+        "replies": replies,
+        "avg_response_hours": round(sum(hours) / len(hours), 1) if hours else 0.0,
+        "nudges": nudges,
+        "criticality_trend": trend,
+    }
+
+
+async def generate_task_thread_summary(
+    db: Any,
+    thread_id: str,
+    use_llm: bool = True,
+) -> dict[str, Any]:
+    """Summarize one follow-up thread (outcome, blockers, response stats)."""
+    thread = None
+    try:
+        from bson import ObjectId
+
+        if ObjectId.is_valid(str(thread_id)):
+            thread = db.task_followups.find_one({"_id": ObjectId(str(thread_id))})
+    except Exception:
+        thread = None
+    if thread is None:
+        try:
+            thread = db.task_followups.find_one({"_id": str(thread_id)})
+        except Exception:
+            thread = None
+    if thread is None:
+        return {"thread_id": str(thread_id), "found": False}
+
+    messages = [m for m in (thread.get("messages") or []) if isinstance(m, dict)]
+    inbound = [m for m in messages if m.get("dir") == "in"]
+    blockers = [m for m in inbound if m.get("intent") == "blocked"]
+    hours = _response_hours(messages)
+    status = str(thread.get("status") or "unknown")
+    criticality = str(thread.get("criticality") or "low")
+    outcome = "completed" if status == "completed" else ("blocked" if status == "blocked" else status)
+    response_stats = {
+        "replies": len(inbound),
+        "avg_response_hours": round(sum(hours) / len(hours), 1) if hours else 0.0,
+        "nudges": int(thread.get("nudge_count") or 0),
+    }
+    blocker_texts = [str(b.get("text") or "")[:160] for b in blockers]
+    summary = (
+        f"Task thread outcome: {outcome}; criticality {criticality}; "
+        f"{response_stats['replies']} reply(ies), avg response {response_stats['avg_response_hours']}h"
+    )
+    if blocker_texts:
+        summary += f"; blockers: {'; '.join(blocker_texts[:3])}"
+
+    if use_llm and messages:
+        transcript = "\n".join(
+            f"{m.get('dir')}: {str(m.get('text') or '')[:400]}" for m in messages[-12:]
+        )
+        prompt = (
+            "Summarize this task follow-up thread for a manager in 2-3 sentences.\n"
+            "State the outcome, blockers, and response behaviour. Do not invent facts.\n"
+            f"Status: {status}\nCriticality: {criticality}\nThread:\n{transcript}"
+        )
+        try:
+            generated = (await get_ai_response(prompt) or "").strip()
+            if generated:
+                summary = generated
+        except Exception as e:
+            logger.debug("thread summary LLM failed: %s", e)
+
+    return {
+        "thread_id": str(thread.get("_id") or thread_id),
+        "task_id": str(thread.get("task_id") or ""),
+        "found": True,
+        "status": status,
+        "criticality": criticality,
+        "outcome": outcome,
+        "blockers": blocker_texts,
+        "response_stats": response_stats,
+        "summary": summary,
+    }
+
+
+def generate_cliq_rollup(db: Any, org_id: str, reports: list[dict]) -> dict[str, Any]:
+    """Manager rollup for the weekly digest (additive, never raises)."""
+    at_risk = 0
+    escalations: list[dict[str, str]] = []
+    for report in reports or []:
+        engagement = report.get("cliq_engagement") or {}
+        trend = engagement.get("criticality_trend") or {}
+        at_risk += int(trend.get("high") or 0) + int(trend.get("critical") or 0)
+        for item in ((report.get("escalation") or {}).get("items") or []):
+            task = item.split('"')[1] if '"' in item else str(item)
+            escalations.append({
+                "employee": report.get("employee_name") or report.get("employee_email") or "",
+                "task": task,
+            })
+
+    blockers: Counter = Counter()
+    try:
+        for thread in db.task_followups.find({"org_id": org_id, "status": "blocked"}).limit(50):
+            note = str(thread.get("risk_notes") or "Blocked without details").strip()
+            blockers[note] += 1
+    except Exception as e:
+        logger.debug("cliq rollup blockers failed: %s", e)
+
+    top_blockers = [{"reason": reason, "count": count} for reason, count in blockers.most_common(5)]
+    if at_risk:
+        coaching = f"{at_risk} high/critical thread(s) need attention; review blockers before they slip."
+    elif top_blockers:
+        coaching = "Clear blockers early; acknowledge replies within the same day."
+    else:
+        coaching = "No Cliq risks flagged this week."
+
+    return {
+        "at_risk_count": at_risk,
+        "escalations": escalations[:10],
+        "top_blockers": top_blockers,
+        "coaching": coaching,
+    }
 
 
 def generate_weekly_dept_pdf(reports: list[dict], org_name: str = "YesBoss") -> bytes:

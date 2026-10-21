@@ -31,10 +31,25 @@ const NOTIF_TYPES = [
   { key: "alert", label: "Alerts" },
 ];
 
+const CLIQ_TYPES = [
+  { key: "task_assigned", label: "Task Assigned" },
+  { key: "task_status", label: "Task Status Changed" },
+  { key: "task_completed", label: "Task Completed" },
+  { key: "task_escalation", label: "Escalations" },
+  { key: "cliq_followup", label: "Follow-up Nudges" },
+  { key: "weekly_digest", label: "Weekly Summary" },
+  { key: "alert", label: "Alerts" },
+];
+
+const DEFAULT_CLIQ_PREFS: Record<string, boolean> = Object.fromEntries(
+  CLIQ_TYPES.map((t) => [t.key, t.key !== "weekly_digest"])
+);
+
 const DEFAULT_PREFS = {
   email: Object.fromEntries(NOTIF_TYPES.map((t) => [t.key, true])),
   push: Object.fromEntries(NOTIF_TYPES.map((t) => [t.key, true])),
   in_app: Object.fromEntries(NOTIF_TYPES.map((t) => [t.key, true])),
+  cliq: DEFAULT_CLIQ_PREFS,
   sound: true,
   digest: { enabled: false, frequency: "never" },
 };
@@ -45,9 +60,11 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [understanding, setUnderstanding] = useState<any>(null);
   const [understandingLoading, setUnderstandingLoading] = useState(true);
+  const { cliqStatus } = useZohoStore();
 
   useEffect(() => {
     const headers = getAuthHeaders();
+    useZohoStore.getState().checkCliqStatus();
     fetch(`${API_URL}/notification-preferences`, { headers })
       .then((r) => r.json())
       .then((data) => {
@@ -196,6 +213,21 @@ export default function SettingsPage() {
                     ))}
                   </CardContent>
                 </Card>
+
+                <Card>
+                  <CardHeader><CardTitle><MessageSquare className="w-4 h-4 inline mr-2" />Zoho Cliq</CardTitle></CardHeader>
+                  <CardContent className="space-y-1">
+                    <p className="text-xs text-text-muted mb-2">
+                      1-1 bot DMs and follow-up nudges. Email and push are unaffected.
+                    </p>
+                    {CLIQ_TYPES.map((t) => (
+                      <div key={t.key} className="flex items-center justify-between py-1.5">
+                        <span className="text-sm">{t.label}</span>
+                        <Toggle checked={prefs.cliq?.[t.key] ?? DEFAULT_CLIQ_PREFS[t.key]} onChange={() => toggleChannelType("cliq", t.key)} />
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
               </div>
             )}
           </TabsContent>
@@ -214,6 +246,27 @@ export default function SettingsPage() {
                     </p>
                   </div>
                   <ZohoConnectButton />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">Zoho Cliq bot</p>
+                    <p className="text-xs text-text-muted mt-1">
+                      {cliqStatus?.configured && cliqStatus?.enabled
+                        ? `Connected (${cliqStatus.dc || "zoho.com"}, ${cliqStatus.bot || "YesBoss"})`
+                        : cliqStatus?.enabled
+                          ? "Bot ID not configured on the server yet"
+                          : "Cliq integration is disabled"}
+                    </p>
+                  </div>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${
+                      cliqStatus?.configured && cliqStatus?.enabled
+                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                        : "bg-gray-500/10 text-gray-400 border-gray-500/20"
+                    }`}
+                  >
+                    {cliqStatus?.configured && cliqStatus?.enabled ? "Connected" : "Not configured"}
+                  </span>
                 </div>
                 <div className="p-3 rounded-xl bg-surface border border-border/50">
                   <h4 className="text-xs font-medium text-text-muted mb-2">What gets connected?</h4>

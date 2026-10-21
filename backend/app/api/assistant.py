@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Any
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -3715,3 +3715,31 @@ async def add_session_message(session_id: str, request: AddMessageRequest, curre
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not add message: {e}")
     return {"success": True}
+
+class TranscribeResponse(BaseModel):
+    text: str
+    provider: str
+
+
+@router.post("/transcribe", response_model=TranscribeResponse)
+async def transcribe_audio(
+    file: UploadFile = File(...),
+    language: str = Form("en-US"),
+):
+    """Transcribe an uploaded audio clip (optional server-side STT).
+
+    Browser SpeechRecognition is the default voice path; this endpoint is used
+    when `STT_PROVIDER` is configured to `whisper` or `gemini`.
+    """
+    from ..core.config import settings as _settings
+    from ..core.stt import SttNotConfigured, SttProviderError, transcribe_bytes
+
+    provider = (getattr(_settings, "STT_PROVIDER", "none") or "none").strip().lower()
+    try:
+        audio = await file.read()
+        text = await transcribe_bytes(audio, file.filename or "audio.webm", language)
+    except SttNotConfigured as e:
+        raise HTTPException(status_code=501, detail=str(e))
+    except SttProviderError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"text": text, "provider": provider}

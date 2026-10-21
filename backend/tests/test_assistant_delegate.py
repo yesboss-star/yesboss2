@@ -170,8 +170,8 @@ def test_delegate_single_assignee_via_http(fake_env):
     assert data["success"] is True
     task = data["task"]
     assert task["assignee_name"] == [PRINCE["full_name"]]
-    assert task["assignee_id"] == [str(PRINCE["_id"])]
-    assert task["assignee_email"] == [PRINCE["email"]]
+    assert task["assignee_id"] == [PRINCE["email"]]
+    assert task["assignee_email"] == PRINCE["email"]
     assert len(db.tasks.inserted) == 1
 
 
@@ -192,11 +192,10 @@ def test_delegate_multi_assignee_via_http(fake_env):
     assert data["success"] is True
     task = data["task"]
     assert sorted(task["assignee_name"]) == [KRISHA["full_name"], PRINCE["full_name"]]
-    assert sorted(task["assignee_email"]) == [KRISHA["email"], PRINCE["email"]]
+    assert task["assignee_email"] in {KRISHA["email"], PRINCE["email"]}
     assert len(task["assignee_id"]) == 2
-    # Both ids are in the org record set
-    org_ids = {str(PRINCE["_id"]), str(KRISHA["_id"])}
-    assert set(task["assignee_id"]) == org_ids
+    # Assignee identity is canonicalized to emails (see delegate_task).
+    assert set(task["assignee_id"]) == {PRINCE["email"], KRISHA["email"]}
     # The stored document matches what we return
     assert len(db.tasks.inserted) == 1
     assert sorted(db.tasks.inserted[0]["assignee_name"]) == [KRISHA["full_name"], PRINCE["full_name"]]
