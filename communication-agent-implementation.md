@@ -325,11 +325,156 @@ Final: bucket rules score (0-39 low, 40-59 medium, 60-79 high, 80+ critical), th
 ## 16. Env + Cliq setup checklist (human, one-time)
 
 - [x] Cliq (`.com` org, id `669272586`) → Developers/Bots → create `YesBoss` bot (`yesboss`) → copy Bot ID → `ZOHO_CLIQ_BOT_ID`.
-- [ ] Bot → Message Handler/Webhook → URL `https://<backend-host>/api/v1/zoho/cliq/webhook` → secret → `ZOHO_CLIQ_VERIFY_TOKEN` (still forwarding to the default sample handler).
+- [ ] Bot → Message Handler/Webhook → URL `https://<backend-host>/api/v1/zoho/cliq/webhook` → secret → `ZOHO_CLIQ_VERIFY_TOKEN` (replace the default sample with §16.1).
 - [x] Zoho API Console → OAuth client → add scopes `ZohoCliq.Webhooks.CREATE,ZohoCliq.Messages.READ,ZohoCliq.Channels.CREATE,ZohoCliq.Users.READ` (+ existing Mail/Calendar) → re-consent → confirm `zoho_tokens` refresh works on `.com`.
 - [x] Backend `.env`: set §5 keys + `ZOHO_CLIQ_ENABLED=true`; redeploy; hit `/bot/capabilities` (prod returns `configured:true, enabled:true, dc:zoho.com`).
 - [ ] Test users: assignee + manager emails both in `employees/org_chart_members` with `manager_email` chain set (needed for escalation test).
 - [ ] Staged test while the bot is still Personal: `ZOHO_CLIQ_ENABLED=true` + `ZOHO_CLIQ_TEST_EMAILS=valuescore@value-score.co.in`; add `krisha@`/`prince@` only after confirming they can receive bot DMs (testers) or after Organization scope.
+
+### 16.1 Cliq button Function + Message Handler
+
+Assignment cards use `invoke.function` with `action.data.name = ZOHO_CLIQ_BUTTON_FUNCTION`
+(default `yesboss_task_action`). Create the function before testing buttons:
+
+1. Cliq → profile picture → **Bots and Tools** → **Functions** → **Create Function**.
+2. Name `yesboss_task_action`, Function Type **Button**, paste:
+
+```deluge
+taskId = "";
+action = "";
+if(arguments != null)
+{
+    taskId = arguments.get("task_id");
+    action = arguments.get("action");
+}
+
+payload = Map();
+
+sender = Map();
+sender.put("email", user.get("email"));
+payload.put("sender", sender);
+
+chatMap = Map();
+chatMap.put("id", chat.get("id"));
+payload.put("chat", chatMap);
+
+msgMap = Map();
+msgMap.put("text", "");
+msgMap.put("id", message.get("id"));
+payload.put("message", msgMap);
+
+buttonPayload = Map();
+buttonPayload.put("task_id", taskId);
+buttonPayload.put("action", action);
+buttonMap = Map();
+buttonMap.put("payload", buttonPayload);
+payload.put("button", buttonMap);
+
+headers = Map();
+headers.put("Content-Type", "application/json");
+headers.put("X-Cliq-Signature", "<ZOHO_CLIQ_VERIFY_TOKEN>");
+
+response = invokeUrl
+[
+    url: "https://vsllp.live/api/v1/zoho/cliq/webhook"
+    type: POST
+    headers: headers
+    body: payload.toString()
+    detailed: true
+];
+info response;
+
+response = Map();
+return response;
+```
+
+3. Replace the bot Message Handler (Bots and Tools → Bots → YesBoss → Message Handler):
+
+```deluge
+payload = Map();
+
+sender = Map();
+sender.put("email", user.get("email"));
+payload.put("sender", sender);
+
+chatMap = Map();
+chatMap.put("id", chat.get("id"));
+payload.put("chat", chatMap);
+
+msgMap = Map();
+files = List();
+msgText = "";
+msgId = "";
+
+try
+{
+    details = message_details.get("message");
+    msgType = details.get("type");
+
+    if(msgType == "text")
+    {
+        msgText = details.get("text");
+    }
+    else if(msgType == "attachment" || msgType == "file")
+    {
+        f = details.get("file");
+        if(f != null)
+        {
+            entry = Map();
+            entry.put("name", f.get("name"));
+            entry.put("type", f.get("type"));
+            entry.put("url", f.get("url"));
+            entry.put("download_url", f.get("url"));
+            files.add(entry);
+        }
+        msgText = details.get("comment");
+    }
+
+    msgId = details.get("id");
+    if(msgId == null || msgId == "")
+    {
+        msgId = "" + message_details.get("time");
+    }
+}
+catch(e)
+{
+    msgText = message;
+}
+
+if(msgText == null)
+{
+    msgText = message;
+}
+if(msgId == null)
+{
+    msgId = "";
+}
+
+msgMap.put("text", msgText);
+msgMap.put("id", msgId);
+payload.put("message", msgMap);
+payload.put("files", files);
+
+headers = Map();
+headers.put("Content-Type", "application/json");
+headers.put("X-Cliq-Signature", "<ZOHO_CLIQ_VERIFY_TOKEN>");
+
+response = invokeUrl
+[
+    url: "https://vsllp.live/api/v1/zoho/cliq/webhook"
+    type: POST
+    headers: headers
+    body: payload.toString()
+    detailed: true
+];
+info response;
+
+response = Map();
+return response;
+```
+
+Replace `<ZOHO_CLIQ_VERIFY_TOKEN>` in both handlers with the value from `backend/.env.live`.
+If the function name differs, set `ZOHO_CLIQ_BUTTON_FUNCTION` to it and rebuild.
 
 ## 17. Definition of done (all must pass)
 

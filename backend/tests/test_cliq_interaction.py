@@ -267,6 +267,7 @@ def test_send_card_includes_three_buttons(monkeypatch):
     monkeypatch.setattr(cliq_mod.httpx, "AsyncClient", lambda *a, **k: _FakeAsyncClient())
     monkeypatch.setattr(cliq_mod.settings, "ZOHO_CLIQ_BOT_ID", "yesboss")
     monkeypatch.setattr(cliq_mod.settings, "ZOHO_CLIQ_ENABLED", True)
+    monkeypatch.setattr(cliq_mod.settings, "ZOHO_CLIQ_BUTTON_FUNCTION", "yesboss_task_action")
 
     db = FakeDB()
     db.zoho_tokens.insert_one({
@@ -280,9 +281,10 @@ def test_send_card_includes_three_buttons(monkeypatch):
     )
     assert res and res["chat_id"] == "c1"
     buttons = _FakeAsyncClient.last_post["json"]["buttons"]
-    assert [b["data"]["action"] for b in buttons] == ["started", "blocked", "extension"]
-    assert all(b["type"] == "invoke.function" for b in buttons)
-    assert all(b["data"]["task_id"] == "t1" for b in buttons)
+    assert [b["arguments"]["action"] for b in buttons] == ["started", "blocked", "extension"]
+    assert all(b["action"]["type"] == "invoke.function" for b in buttons)
+    assert all(b["action"]["data"]["name"] == "yesboss_task_action" for b in buttons)
+    assert all(b["arguments"]["task_id"] == "t1" for b in buttons)
 
 
 def test_send_dm_without_token_is_skipped(monkeypatch):

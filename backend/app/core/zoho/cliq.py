@@ -207,7 +207,7 @@ class ZohoCliq:
         # Buttons (when present) go as a top-level array with an accompanying "card".
         payload: dict[str, Any] = {"text": text, "userids": userid}
         if buttons:
-            payload["card"] = {"title": "YesBoss"}
+            payload["card"] = {"title": "YesBoss", "theme": "modern-inline"}
             payload["buttons"] = buttons
         url = f"{self._base()}/bots/{bot_id}/message"
         headers: dict[str, str] = {"Authorization": f"Zoho-oauthtoken {token}"}
@@ -243,10 +243,26 @@ class ZohoCliq:
         org_id: str = "",
     ) -> dict[str, Any] | None:
         """Assignment card with Started/Blocked/Extension buttons."""
+        function_name = getattr(settings, "ZOHO_CLIQ_BUTTON_FUNCTION", "") or ""
         buttons = [
-            {"label": "Started ✅", "type": "invoke.function", "data": {"task_id": task_id, "action": "started"}},
-            {"label": "Blocked ⛔", "type": "invoke.function", "data": {"task_id": task_id, "action": "blocked"}},
-            {"label": "Extension 📅", "type": "invoke.function", "data": {"task_id": task_id, "action": "extension"}},
+            {
+                "label": "Started ✅",
+                "type": "+",
+                "action": {"type": "invoke.function", "data": {"name": function_name}},
+                "arguments": {"task_id": task_id, "action": "started"},
+            },
+            {
+                "label": "Blocked ⛔",
+                "type": "+",
+                "action": {"type": "invoke.function", "data": {"name": function_name}},
+                "arguments": {"task_id": task_id, "action": "blocked"},
+            },
+            {
+                "label": "Extension 📅",
+                "type": "+",
+                "action": {"type": "invoke.function", "data": {"name": function_name}},
+                "arguments": {"task_id": task_id, "action": "extension"},
+            },
         ]
         return await self.send_dm(to_email, f"*{title}*\n{text}", buttons=buttons, org_id=org_id)
 
