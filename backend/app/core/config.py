@@ -85,6 +85,7 @@ class Settings:
     ZOHO_CLIQ_ORG_ID: str = os.getenv("ZOHO_CLIQ_ORG_ID", "")
     ZOHO_CLIQ_VERIFY_TOKEN: str = os.getenv("ZOHO_CLIQ_VERIFY_TOKEN", "")
     ZOHO_CLIQ_ENABLED: bool = os.getenv("ZOHO_CLIQ_ENABLED", "true").lower() == "true"
+    ZOHO_CLIQ_TEST_EMAILS: str = os.getenv("ZOHO_CLIQ_TEST_EMAILS", "")
     STT_PROVIDER: str = os.getenv("STT_PROVIDER", "none")
 
     GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")

@@ -806,14 +806,14 @@ async def send_morning_journal_prompts():
 async def _send_cliq_weekly_digests(db, org_id: str, reports: list[dict]) -> None:
     """Opt-in per-assignee weekly Cliq summary (never breaks the report run)."""
     try:
-        from ..core.zoho.cliq import ZohoCliq
+        from ..core.zoho.cliq import ZohoCliq, _cliq_allowed
 
         cliq = ZohoCliq(db)
     except Exception:
         return
     for report in reports or []:
         email = str(report.get("employee_email") or "")
-        if not email:
+        if not email or not _cliq_allowed(email):
             continue
         try:
             user = (
@@ -1551,7 +1551,7 @@ async def check_cliq_followups(db):
             escalate_risk_summary,
             evaluate_criticality,
         )
-        from ..core.zoho.cliq import ZohoCliq, _cliq_enabled
+        from ..core.zoho.cliq import ZohoCliq, _cliq_allowed, _cliq_enabled
 
         if not _cliq_enabled():
             return
@@ -1570,6 +1570,9 @@ async def check_cliq_followups(db):
             try:
                 email = thread.get("assignee_email", "")
                 if not email:
+                    continue
+                if not _cliq_allowed(email):
+                    logger.info("cliq allowlist: skipping follow-up for %s", email)
                     continue
                 task = _load_task(db, thread.get("task_id", ""))
                 res = await cliq.send_dm(

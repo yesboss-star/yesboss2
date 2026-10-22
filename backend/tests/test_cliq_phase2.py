@@ -385,3 +385,138 @@ def test_summarize_thread_marks_summarized(monkeypatch):
     assert result["summarized"] is True
     assert thread["summarized"] is True
     assert any(m.get("intent") == "summary" for m in thread["messages"])
+
+
+# ── staged rollout allowlist ────────────────────────────────────────────────
+
+
+def test_cliq_allowlist_empty_allows_all(monkeypatch):
+    from app.core.zoho import cliq as cliq_mod
+
+    monkeypatch.setattr(cliq_mod.settings, "ZOHO_CLIQ_TEST_EMAILS", "")
+    assert cliq_mod._cliq_allowed("anyone@x.com") is True
+
+
+def test_cliq_allowlist_normalizes_and_filters(monkeypatch):
+    from app.core.zoho import cliq as cliq_mod
+
+    monkeypatch.setattr(
+        cliq_mod.settings,
+        "ZOHO_CLIQ_TEST_EMAILS",
+        " valuescore@value-score.co.in, Prince@Value-Score.co.in ",
+    )
+    assert cliq_mod._cliq_allowed("PRINCE@value-score.co.in") is True
+    assert cliq_mod._cliq_allowed("other@x.com") is False
+
+
+def test_send_dm_skips_non_allowlisted_recipient(monkeypatch):
+    from app.core.zoho import cliq as cliq_mod
+    from app.core.zoho.cliq import ZohoCliq
+
+    resolved = []
+
+    async def fake_resolve(self, org_id=""):
+        resolved.append(org_id)
+        return "tok"
+
+    monkeypatch.setattr(ZohoCliq, "_resolve_token", fake_resolve)
+    monkeypatch.setattr(cliq_mod.settings, "ZOHO_CLIQ_ENABLED", True)
+    monkeypatch.setattr(cliq_mod.settings, "ZOHO_CLIQ_TEST_EMAILS", "ok@x.com")
+
+    result = asyncio.run(ZohoCliq().send_dm("no@x.com", "hi"))
+
+    assert result is None
+    assert resolved == []
+
+
+def test_check_cliq_followups_skips_non_allowlisted_thread(monkeypatch):
+    from app.core.zoho import cliq as cliq_mod
+
+    sent = []
+
+    async def fake_send(self, email, text, buttons=None, org_id=""):
+        sent.append(email)
+        return {"chat_id": "z1"}
+
+    monkeypatch.setattr("app.core.zoho.cliq.ZohoCliq.send_dm", fake_send)
+    monkeypatch.setattr(cliq_mod.settings, "ZOHO_CLIQ_ENABLED", True)
+    monkeypatch.setattr(cliq_mod.settings, "ZOHO_CLIQ_TEST_EMAILS", "other@x.com")
+    db = FakeDB()
+    db.tasks.insert_one(_task(due_days=-3, priority="high"))
+    next_at = datetime.utcnow() - timedelta(minutes=1)
+    db.task_followups.insert_one(_thread(next_followup_at=next_at))
+
+    asyncio.run(sched.check_cliq_followups(db))
+
+    thread = db.task_followups.docs[0]
+    assert sent == []
+    assert thread["nudge_count"] == 0
+    assert thread["last_nudge_at"] is None
+    assert thread["status"] == "assigned"
+    assert thread["next_followup_at"] == next_at
+    assert db.tasks.docs[0].get("escalation_level") is None
+
+
+def test_check_cliq_followups_processes_allowlisted_thread(monkeypatch):
+    from app.core.zoho import cliq as cliq_mod
+
+    sent = []
+
+    async def fake_send(self, email, text, buttons=None, org_id=""):
+        sent.append(email)
+        return {"chat_id": "z1"}
+
+    monkeypatch.setattr("app.core.zoho.cliq.ZohoCliq.send_dm", fake_send)
+    monkeypatch.setattr(cliq_mod.settings, "ZOHO_CLIQ_ENABLED", True)
+    monkeypatch.setattr(cliq_mod.settings, "ZOHO_CLIQ_TEST_EMAILS", "DEV@x.com")
+    db = FakeDB()
+    db.tasks.insert_one(_task(due_days=5))
+    db.task_followups.insert_one(_thread())
+
+    asyncio.run(sched.check_cliq_followups(db))
+
+    assert sent == ["dev@x.com"]
+    assert db.task_followups.docs[0]["nudge_count"] == 1
+
+
+def test_bot_test_dm_reports_not_allowlisted(monkeypatch):
+    from app.api import zoho_cliq as api
+    from app.core.zoho import cliq as cliq_mod
+
+    class _Payload:
+        email = "no@x.com"
+
+    monkeypatch.setattr(cliq_mod.settings, "ZOHO_CLIQ_TEST_EMAILS", "ok@x.com")
+
+    result = asyncio.run(api.bot_test_dm(_Payload(), current_user=None))
+
+    assert result["ok"] is False
+    assert result["error"] == "not_allowlisted"
+
+
+def test_process_inbound_ignores_non_allowlisted_sender(monkeypatch):
+    from app.api import zoho_cliq as api
+    from app.core import database as db_module
+    from app.core.zoho import cliq as cliq_mod
+
+    routed = []
+
+    async def fake_route(*args, **kwargs):
+        routed.append(True)
+        return {"kind": "text", "routed": True}
+
+    monkeypatch.setattr(
+        "app.agents.communication_agent.extract_sender_email",
+        lambda body: "no@x.com",
+    )
+    monkeypatch.setattr(
+        "app.agents.communication_agent.resolve_identity",
+        lambda db, sender: {"email": "no@x.com", "org_id": "org1"},
+    )
+    monkeypatch.setattr("app.agents.communication_agent.route", fake_route)
+    monkeypatch.setattr(db_module, "db", object())
+    monkeypatch.setattr(cliq_mod.settings, "ZOHO_CLIQ_TEST_EMAILS", "ok@x.com")
+
+    asyncio.run(api._process_inbound({"sender": {"email": "no@x.com"}}))
+
+    assert routed == []

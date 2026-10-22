@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from ..core.config import settings
-from ..core.zoho.cliq import verify_webhook_signature
+from ..core.zoho.cliq import _cliq_allowed, verify_webhook_signature
 from ..dependencies.auth import get_current_user
 
 logger = logging.getLogger("yesboss.api.zoho_cliq")
@@ -62,6 +62,9 @@ async def _process_inbound(body: dict[str, Any]) -> None:
         identity = resolve_identity(db, sender)
         if not identity.get("email"):
             logger.warning("cliq inbound: unresolved sender — ack only")
+            return
+        if not _cliq_allowed(identity.get("email") or sender):
+            logger.info("cliq inbound: sender not allowlisted — ack only")
             return
         normalized = normalize_input(body)
         if normalized.get("modality") == "voice" and not normalized.get("text"):
@@ -302,6 +305,9 @@ async def nudge_thread(thread_id: str, current_user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Thread not found")
     await _authorize_thread_admin(db, thread, current_user)
 
+    if not _cliq_allowed(str(thread.get("assignee_email") or "")):
+        raise HTTPException(status_code=409, detail="Recipient is not in the Cliq test allowlist")
+
     now = datetime.utcnow()
     task = _load_task(db, thread.get("task_id", ""))
     title = (task or {}).get("title") or "your task"
@@ -361,6 +367,8 @@ async def bot_test_dm(payload: _TestDMRequest, current_user=Depends(get_current_
     from ..core.zoho.cliq import ZohoCliq
 
     db = db_module.db
+    if not _cliq_allowed(payload.email):
+        return {"ok": False, "has_token": False, "chat_id": "", "error": "not_allowlisted"}
     cliq = ZohoCliq(db)
     token = await cliq._resolve_token("") if db is not None else None
     if not token:

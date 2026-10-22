@@ -320,6 +320,7 @@ Final: bucket rules score (0-39 low, 40-59 medium, 60-79 high, 80+ critical), th
 3. ✅ `report_generator.py` ADD `generate_task_thread_summary()` + additive `cliq_engagement` on employee reports + `generate_cliq_rollup()`; `send_auto_reports` attaches rollup metadata and sends opt-in weekly Cliq DMs. `summarize_thread` (Phase 1/2) already posts the close summary to the same DM.
 4. ✅ Tests: `tests/test_stt.py` (disabled/unknown/empty/providers/endpoint) and `tests/test_weekly_report.py` (engagement stats, rollup, thread summary, LLM path). Frontend `tsc --noEmit` + `npm run build` green.
 5. ⚠️ **Verify**: automated checks green; full live demo (voice note → risk escalation → close summary → Monday digest) still needs the §16 webhook handler + `STT_PROVIDER` on the server.
+6. ✅ Staged-rollout allowlist: `ZOHO_CLIQ_TEST_EMAILS` (comma-separated) limits outbound DMs, scheduler follow-ups, weekly Cliq digests, and inbound webhook senders to the listed addresses. Empty/unset = no restriction. This lets the Personal bot be enabled for creator-only testing without consuming other users' follow-up timers.
 
 ## 16. Env + Cliq setup checklist (human, one-time)
 
@@ -328,6 +329,7 @@ Final: bucket rules score (0-39 low, 40-59 medium, 60-79 high, 80+ critical), th
 - [x] Zoho API Console → OAuth client → add scopes `ZohoCliq.Webhooks.CREATE,ZohoCliq.Messages.READ,ZohoCliq.Channels.CREATE,ZohoCliq.Users.READ` (+ existing Mail/Calendar) → re-consent → confirm `zoho_tokens` refresh works on `.com`.
 - [x] Backend `.env`: set §5 keys + `ZOHO_CLIQ_ENABLED=true`; redeploy; hit `/bot/capabilities` (prod returns `configured:true, enabled:true, dc:zoho.com`).
 - [ ] Test users: assignee + manager emails both in `employees/org_chart_members` with `manager_email` chain set (needed for escalation test).
+- [ ] Staged test while the bot is still Personal: `ZOHO_CLIQ_ENABLED=true` + `ZOHO_CLIQ_TEST_EMAILS=valuescore@value-score.co.in`; add `krisha@`/`prince@` only after confirming they can receive bot DMs (testers) or after Organization scope.
 
 ## 17. Definition of done (all must pass)
 
@@ -336,4 +338,4 @@ Final: bucket rules score (0-39 low, 40-59 medium, 60-79 high, 80+ critical), th
 - [x] Silence → scheduler nudges on Cliq only, at cadence §11. *(Phase 2: `check_cliq_followups`, unit-tested.)*
 - [x] High/critical/blocked → manager gets risk summary ONLY (assert no transcript). *(Phase 2: no-transcript test in `test_cliq_phase2.py`.)*
 - [x] Deadline/close → summary card in same DM; Monday digest includes Cliq stats; existing report keys unchanged. *(Phase 3: `summarize_thread` posts the close summary; `send_auto_reports` adds `cliq_engagement` + manager rollup without renaming keys.)*
-- [ ] `ruff check`, `mypy`, `pytest` green; no deleted routes/collections/fields (`git diff --stat` shows only ADD + small anchor edits). *(ruff + pytest green: 100 passed; frontend `tsc` + `build` green; `mypy` still has pre-existing repo-wide errors.)*
+- [ ] `ruff check`, `mypy`, `pytest` green; no deleted routes/collections/fields (`git diff --stat` shows only ADD + small anchor edits). *(ruff + pytest green: 108 passed; frontend `tsc` + `build` green; `mypy` still has pre-existing repo-wide errors.)*

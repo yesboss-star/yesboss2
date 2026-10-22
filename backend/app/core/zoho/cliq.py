@@ -74,6 +74,19 @@ def _cliq_enabled() -> bool:
     return bool(getattr(settings, "ZOHO_CLIQ_ENABLED", True))
 
 
+def _cliq_test_emails() -> set[str]:
+    raw = getattr(settings, "ZOHO_CLIQ_TEST_EMAILS", "") or ""
+    return {e.strip().lower() for e in raw.split(",") if e.strip()}
+
+
+def _cliq_allowed(email: str) -> bool:
+    """Allowlist gate for staged rollout. Empty allowlist means everyone."""
+    allow = _cliq_test_emails()
+    if not allow:
+        return True
+    return (email or "").strip().lower() in allow
+
+
 def verify_webhook_signature(raw_body: bytes, signature_header: str) -> bool:
     """Verify Cliq bot webhook authenticity.
 
@@ -166,6 +179,9 @@ class ZohoCliq:
         """Send a 1-1 DM from the YesBoss bot. Never raises; None on skip/fail."""
         if not _cliq_enabled():
             logger.info("cliq disabled (ZOHO_CLIQ_ENABLED=false) — skipping DM to %s", to_email)
+            return None
+        if not _cliq_allowed(to_email):
+            logger.info("cliq allowlist: skipping DM to %s", to_email)
             return None
         bot_id = self._bot_id()
         if not bot_id:
