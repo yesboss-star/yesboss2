@@ -87,7 +87,7 @@ class Settings:
     ZOHO_CLIQ_ENABLED: bool = os.getenv("ZOHO_CLIQ_ENABLED", "true").lower() == "true"
     ZOHO_CLIQ_TEST_EMAILS: str = os.getenv("ZOHO_CLIQ_TEST_EMAILS", "")
     ZOHO_CLIQ_BUTTON_FUNCTION: str = os.getenv(
-        "ZOHO_CLIQ_BUTTON_FUNCTION", "yesboss_task_action"
+        "ZOHO_CLIQ_BUTTON_FUNCTION", "YesBossTaskAction"
     )
     STT_PROVIDER: str = os.getenv("STT_PROVIDER", "none")
 

@@ -334,10 +334,11 @@ Final: bucket rules score (0-39 low, 40-59 medium, 60-79 high, 80+ critical), th
 ### 16.1 Cliq button Function + Message Handler
 
 Assignment cards use `invoke.function` with `action.data.name = ZOHO_CLIQ_BUTTON_FUNCTION`
-(default `yesboss_task_action`). Create the function before testing buttons:
+(default `YesBossTaskAction`). Cliq rejects underscores in function names, so the name must
+match exactly, including case. Create the function before testing buttons:
 
 1. Cliq → profile picture → **Bots and Tools** → **Functions** → **Create Function**.
-2. Name `yesboss_task_action`, Function Type **Button**, paste:
+2. Name `YesBossTaskAction`, Function Type **Button**, paste:
 
 ```deluge
 taskId = "";
