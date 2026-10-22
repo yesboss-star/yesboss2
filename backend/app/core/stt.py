@@ -115,7 +115,11 @@ async def _gemini(audio: bytes, filename: str) -> str:
             ],
         }],
     }
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+    model = getattr(settings, "GEMINI_STT_MODEL", "gemini-3.8-flash") or "gemini-3.8-flash"
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{model}:generateContent"
+    )
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(url, params={"key": key}, json=payload)

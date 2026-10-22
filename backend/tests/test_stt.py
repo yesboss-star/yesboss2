@@ -41,6 +41,39 @@ def test_stt_gemini_stub(monkeypatch):
     assert asyncio.run(stt.transcribe_bytes(b"audio")) == "bonjour"
 
 
+def test_gemini_stt_uses_configured_model(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"candidates": [{"content": {"parts": [{"text": "blocked"}]}}]}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, params=None, json=None):
+            captured["url"] = url
+            return FakeResponse()
+
+    monkeypatch.setattr(stt.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(stt.settings, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(stt.settings, "STT_PROVIDER", "gemini")
+    monkeypatch.setattr(stt.settings, "GEMINI_STT_MODEL", "gemini-3.8-flash")
+
+    assert asyncio.run(stt.transcribe_bytes(b"audio")) == "blocked"
+    assert "gemini-3.8-flash" in captured["url"]
+    assert "gemini-2.5-flash" not in captured["url"]
+
+
 def test_transcribe_endpoint_returns_501_when_disabled(client, monkeypatch):
     monkeypatch.setattr(stt.settings, "STT_PROVIDER", "none")
     resp = client.post(

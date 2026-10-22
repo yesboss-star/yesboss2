@@ -133,7 +133,7 @@ class AIClient:
     async def _gemini_complete(
         self,
         messages: list[dict[str, str]],
-        model: str | None = "gemini-2.5-flash",
+        model: str | None = "gemini-3.8-flash",
         temperature: float = 0.7,
         max_tokens: int = 2000,
     ) -> dict[str, Any]:
