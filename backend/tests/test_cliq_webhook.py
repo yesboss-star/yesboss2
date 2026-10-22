@@ -6,6 +6,7 @@ import hmac
 import json
 import time
 
+from app.api.zoho_cliq import _run_and_drain
 from app.core.config import settings
 from app.core.zoho.cliq import ZohoCliq, verify_webhook_signature
 
@@ -74,6 +75,21 @@ def test_webhook_plain_token_acks_verified(client, monkeypatch):
     )
     assert resp.status_code == 200
     assert resp.json() == {"ok": True, "verified": True}
+
+
+def test_webhook_runner_drains_fire_and_forget_tasks():
+    completed = []
+
+    async def child():
+        await asyncio.sleep(0.05)
+        completed.append(True)
+
+    async def parent():
+        asyncio.create_task(child())
+
+    asyncio.run(_run_and_drain(parent(), timeout=2))
+
+    assert completed == [True]
 
 
 def test_cliq_stub_returns_none_when_unconfigured(monkeypatch):

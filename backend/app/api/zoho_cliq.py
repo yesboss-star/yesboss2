@@ -137,14 +137,45 @@ async def cliq_webhook(
     return {"ok": True, "verified": True}
 
 
+async def _run_and_drain(coro, timeout: float = 10.0) -> None:
+    """Run a webhook coroutine and let its fire-and-forget tasks finish.
+
+    The webhook path runs in a short-lived event loop (asyncio.run) so the
+    request thread is never blocked. Without draining, asyncio.run cancels
+    tasks created by create_and_deliver (Cliq/email/push fan-out) as soon as
+    the main coroutine returns, so those notifications silently disappear.
+    """
+    before = {t for t in asyncio.all_tasks() if not t.done()}
+    try:
+        await coro
+    finally:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while True:
+            current = asyncio.current_task()
+            pending = [
+                t
+                for t in asyncio.all_tasks()
+                if t is not current and t not in before and not t.done()
+            ]
+            if not pending:
+                break
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                break
+            _, not_done = await asyncio.wait(pending, timeout=remaining)
+            if not_done:
+                break
+
+
 def _dispatch(coro) -> None:
     """Fire-and-forget a coroutine on a worker thread so the loop stays free."""
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        asyncio.run(coro)
+        asyncio.run(_run_and_drain(coro))
         return
-    loop.run_in_executor(None, asyncio.run, coro)
+    loop.run_in_executor(None, lambda: asyncio.run(_run_and_drain(coro)))
 
 
 @router.get("/bot/capabilities")
