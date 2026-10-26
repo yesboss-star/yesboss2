@@ -19,6 +19,7 @@ Analyze the given entry and return a JSON object with:
   "suggested_goal_titles": [],
   "category": "product|operations|sales|marketing|hr|finance|strategy|general",
   "mood_analysis": "brief mood interpretation",
+  "mood_category": "great|good|okay|bad",
   "should_create_tasks": true/false,
   "should_link_goals": true/false
 }
@@ -28,6 +29,7 @@ Rules:
 - For journal entries about daily work, identify follow-up tasks
 - suggested_goal_titles should match actual business goals (be specific)
 - Category must be one of the listed options
+- mood_category is the writer's overall mood, one of: great, good, okay, bad
 - urgency_create_tasks: true only if there are clear action items
 - Be concise and practical"""
 
@@ -71,6 +73,17 @@ async def analyze_entry(entry_id: str, content: str, entry_type: str, org_id: st
                 {"_id": ObjectId(entry_id)},
                 {"$set": update},
             )
+
+            mood = analysis.get("mood_category")
+            if mood in ("great", "good", "okay", "bad"):
+                # Only fill a missing mood; never overwrite the writer's own choice.
+                db.journal_entries.update_one(
+                    {
+                        "_id": ObjectId(entry_id),
+                        "$or": [{"mood": {"$exists": False}}, {"mood": None}, {"mood": ""}],
+                    },
+                    {"$set": {"mood": mood}},
+                )
 
         return result
     except json.JSONDecodeError:

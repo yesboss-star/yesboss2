@@ -157,11 +157,12 @@ function EntryCard({ entry, onDelete, orgId }: { entry: any; onDelete: (id: stri
         </div>
       )}
       <div className="mt-2 flex items-center gap-2 flex-wrap">
-        {entry.pipeline_status && PIPELINE_LABELS[entry.pipeline_status] && (
+        {entry.type !== "journal" && entry.pipeline_status && PIPELINE_LABELS[entry.pipeline_status] && (
           <Badge variant="outline" className={`text-[10px] ${PIPELINE_LABELS[entry.pipeline_status].color}`}>
             {PIPELINE_LABELS[entry.pipeline_status].label}
           </Badge>
         )}
+        {entry.type !== "journal" && (
         <div className="flex items-center gap-1 ml-auto">
           <select
             value={entry.pipeline_status || "backlog"}
@@ -202,6 +203,7 @@ function EntryCard({ entry, onDelete, orgId }: { entry: any; onDelete: (id: stri
             <Share2 className="w-3 h-3" />
           </button>
         </div>
+        )}
       </div>
       {entry.is_shared && (
         <span className="text-[9px] text-primary/60 flex items-center gap-1 mt-1">
@@ -272,7 +274,7 @@ export default function IdeasPage() {
     status,
     label: PIPELINE_LABELS[status].label,
     color: PIPELINE_LABELS[status].color,
-    items: entries.filter((e) => (e.pipeline_status || "backlog") === status),
+    items: entries.filter((e) => e.type !== "journal" && (e.pipeline_status || "backlog") === status),
   }));
 
   return (

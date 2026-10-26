@@ -47,6 +47,8 @@ import CollapsibleSection from "@/components/owners/CollapsibleSection";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
+const SHOW_EXTRA_DASHBOARD_SECTIONS = false;
+
 function EmptyStateTemplate({ title, hint }: { title: string; hint: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
@@ -2271,7 +2273,7 @@ function DepartmentDrillView({
 
 
 
-function GoalSection() {
+export function GoalSection() {
   const { organization } = useOrganizationStore();
   const { user } = useAuth();
   const { goals, fetchGoals, updateGoal } = useGoalStore();
@@ -3560,6 +3562,7 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
   }, [orgId, fetchGoals]);
 
   useEffect(() => {
+    if (!SHOW_EXTRA_DASHBOARD_SECTIONS) return;
     if (adaptation.stage !== "new") {
       const run = () => getAISummary().then(setAiSummary);
       if (typeof (window as any).requestIdleCallback === "function") {
@@ -3606,7 +3609,7 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
         </div>
       </div>
 
-      {aiSummary && (
+      {SHOW_EXTRA_DASHBOARD_SECTIONS && aiSummary && (
         <Card className="border-primary/20 bg-gradient-to-br from-primary/5 to-purple-500/5 animate-in fade-in slide-in-from-top-1 duration-300">
           <CardContent className="p-4">
             <div className="flex items-start gap-3">
@@ -3617,7 +3620,7 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
         </Card>
       )}
 
-      {showSetupCards && (
+      {SHOW_EXTRA_DASHBOARD_SECTIONS && showSetupCards && (
         <Card className="border-amber-500/20 bg-gradient-to-br from-amber-500/5 to-transparent">
           <CardContent className="p-6">
             <div className="flex items-start gap-4">
@@ -3761,34 +3764,29 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
         </div>
       </CollapsibleSection>
 
-      {adaptation.showExecutiveKPIs && (
-        <CollapsibleSection title="Progress" icon={BarChart3} defaultExpanded={false}>
-          <DataCharts goals={goals} />
-        </CollapsibleSection>
-      )}
+      <CollapsibleSection title="Progress" icon={BarChart3} defaultExpanded={false}>
+        <DataCharts goals={goals} />
+      </CollapsibleSection>
 
-      {adaptation.showGrokInsights && (
-        <CollapsibleSection title="Weekly Report Generator" icon={FileText} defaultExpanded={false}>
-          <WeeklyReportGenerator />
-        </CollapsibleSection>
-      )}
+      <CollapsibleSection title="Weekly Report" icon={FileText} defaultExpanded={false}>
+        <WeeklyReportGenerator />
+      </CollapsibleSection>
 
-      {adaptation.showGrokInsights && (
+      {SHOW_EXTRA_DASHBOARD_SECTIONS && (
         <div className="h-[600px]">
           <AISummaryChat />
         </div>
       )}
 
-      {adaptation.showRevenueRisk && (
-        <>
-          <CollapsibleSection title="Financial Metrics" icon={DollarSign} defaultExpanded={false}>
-            <FinancialMetricsCard organizationId={organization?.id || ""} />
-          </CollapsibleSection>
-          <IndustryBenchmarksCard industry={organization?.industry || ""} microVertical={organization?.micro_vertical} />
-        </>
+      <CollapsibleSection title="Financial Metrics" icon={DollarSign} defaultExpanded={false}>
+        <FinancialMetricsCard organizationId={organization?.id || ""} />
+      </CollapsibleSection>
+
+      {SHOW_EXTRA_DASHBOARD_SECTIONS && (
+        <IndustryBenchmarksCard industry={organization?.industry || ""} microVertical={organization?.micro_vertical} />
       )}
 
-      {escalatedTasks.length > 0 && (
+      {SHOW_EXTRA_DASHBOARD_SECTIONS && escalatedTasks.length > 0 && (
         <Card className="border-rose-500/20 bg-gradient-to-br from-rose-500/5 to-transparent">
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -3841,17 +3839,21 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
         </Card>
       )}
 
-      <CollapsibleSection title="AI KPI Advisor" icon={BarChart3} defaultExpanded={false}>
-        <KPISuggestionsCard />
-      </CollapsibleSection>
+      {SHOW_EXTRA_DASHBOARD_SECTIONS && (
+        <CollapsibleSection title="AI KPI Advisor" icon={BarChart3} defaultExpanded={false}>
+          <KPISuggestionsCard />
+        </CollapsibleSection>
+      )}
 
       <CollapsibleSection title="Market Impact" icon={TrendingUp} defaultExpanded={false}>
         <MarketImpactCard orgId={orgId} />
       </CollapsibleSection>
 
-      <CollapsibleSection title="Goals Pipeline" icon={Target} badge={goalsBadge} badgeVariant={urgentGoals > 0 ? "warning" : "default"} defaultExpanded={goalsExpanded}>
-        <GoalSection />
-      </CollapsibleSection>
+      {SHOW_EXTRA_DASHBOARD_SECTIONS && (
+        <CollapsibleSection title="Goals Pipeline" icon={Target} badge={goalsBadge} badgeVariant={urgentGoals > 0 ? "warning" : "default"} defaultExpanded={goalsExpanded}>
+          <GoalSection />
+        </CollapsibleSection>
+      )}
 
       <MeetingUploadModal
         open={showMeetingModal}

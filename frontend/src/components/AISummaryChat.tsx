@@ -354,7 +354,7 @@ export default function AISummaryChat() {
     if (initRef.current || !organization?.id) return;
     initRef.current = true;
     const orgId = organization.id;
-    useSessionStore.getState().fetchSessions(orgId);
+    useSessionStore.getState().fetchSessions(orgId, "assistant");
     useOrgChartStore.getState().fetchOrgMembers(orgId);
     useGoalStore.getState().fetchGoals(orgId);
     useTaskStore.getState().fetchTasks(orgId);
@@ -408,7 +408,7 @@ export default function AISummaryChat() {
   const ensureSession = async () => {
     if (activeSession) return activeSession;
     if (!organization?.id) return null;
-    const s = await createSession(organization.id, "Dashboard Chat");
+    const s = await createSession(organization.id, "Dashboard Chat", "assistant");
     return s || null;
   };
 
@@ -1544,7 +1544,7 @@ export default function AISummaryChat() {
 
   const handleNewSession = async () => {
     if (!organization?.id) return;
-    await createSession(organization.id, "New Chat");
+    await createSession(organization.id, "New Chat", "assistant");
     setMessages([]);
   };
 

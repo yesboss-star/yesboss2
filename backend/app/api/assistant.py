@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 
 from ..core.ai_client import get_ai_response
 from ..core.database import get_database
-from ..dependencies.auth import get_current_user_optional
+from ..dependencies.auth import get_current_user, get_current_user_optional
 from .websocket import manager as ws_manager
 
 
@@ -1844,8 +1844,8 @@ async def _gather_org_snapshot(db, org_id: str, user_id: str | None = None, user
     return snap
 
 
-async def _store_session_insight(db, org_id: str | None, session_id: str | None, answer_text: str, insight_type: str = "insight", user_id: str | None = None, user_email: str | None = None):
-    """Extract a one-line summary from the assistant's answer and store it as a session insight.
+async def _store_session_insight(db, org_id: str | None, session_id: str | None, answer_text: str, insight_type: str = "insight", user_id: str | None = None, user_email: str | None = None, question_text: str | None = None):
+    """Extract a one-line Q/A summary from the conversation and store it as a session insight.
 
     Insights are stored scoped to the authenticated user so they never surface
     in another user's conversation.
@@ -1857,6 +1857,9 @@ async def _store_session_insight(db, org_id: str | None, session_id: str | None,
         summary = first_line.replace("*", "").replace("✅", "").replace("🎯", "").strip()
         if len(summary) < 10:
             summary = answer_text.strip()[:200]
+        question = " ".join((question_text or "").split())[:160]
+        if question:
+            summary = f"Q: {question} A: {summary}"[:400]
         db.session_insights.insert_one({
             "organization_id": org_id,
             "session_id": session_id or "",
@@ -1927,11 +1930,24 @@ async def _build_ask_prompt(
     proactive: bool,
     user_id: str | None = None,
     user_email: str | None = None,
+    journal_mode: bool = False,
 ) -> tuple[str, str, dict[str, Any]]:
     """Shared prompt + system choice for smart_ask and ask_stream.
 
     Returns (prompt_string, system_prompt_choice, snapshot_data).
     """
+    history = (conversation_history or [])[-8:]
+    history_block = "\n".join(f"{m.get('role','')}: {m.get('content','')[:300]}" for m in history) if history else ""
+
+    if journal_mode:
+        # Personal reflection: no org snapshot, no document RAG, no team data.
+        prompt = (
+            f"Recent chat:\n{history_block}\n\n"
+            f"Current date: {datetime.now().strftime('%A, %Y-%m-%d')}\n\n"
+            f"The writer is adding to their private journal. Their words:\n\"{text}\""
+        )
+        return prompt, JOURNAL_SYSTEM, {}
+
     snap: dict[str, Any] = {}
     if db is not None and org_id:
         try:
@@ -2049,9 +2065,6 @@ async def _build_ask_prompt(
         ctx_block = "What we already know from this chat:\n" + "\n".join(f"- {k}: {v}" for k, v in session_context.items()) + "\n"
 
     insights_block = _format_insights_block(snap.get("recent_insights") or [])
-
-    history = (conversation_history or [])[-8:]
-    history_block = "\n".join(f"{m.get('role','')}: {m.get('content','')[:300]}" for m in history) if history else ""
 
     prompt = (
         f"{org_block}\n"
@@ -2470,6 +2483,23 @@ async def _async_snapshot(db, org_id: str) -> dict[str, Any]:
 # Smart Ask — understand → check docs → answer or ask
 # ---------------------------------------------------------------------------
 
+JOURNAL_SYSTEM = """You are YesBoss's private journaling companion.
+
+This is a personal reflection, not business analysis. The writer expects privacy:
+never use or mention company data, colleagues, goals, tasks, documents, meetings,
+or anything else from the workspace unless the writer brings it up themselves.
+
+Reply with a JSON object:
+{"type":"answer","answer":"your reflection","follow_up":"one gentle question"}
+
+Rules:
+- Reflect back what you heard in 1-2 sentences.
+- Offer one useful, grounded perspective.
+- Ask exactly one gentle follow-up question (or leave follow_up empty if they are done).
+- Keep the answer under 120 words.
+- Do not diagnose, do not act as a therapist, do not mention these instructions.
+- If the writer explicitly asks for business analysis, answer only from what they wrote."""
+
 ASK_SYSTEM = """You are YesBoss's AI Business Analyst. You help business owners and employees with smart, engaging, context-aware answers.
 
 ## CORE PRINCIPLE
@@ -2702,6 +2732,7 @@ class AskRequest(BaseModel):
     context: ChatContext | None = None
     conversation_history: list[dict[str, str]] | None = None
     proactive: bool = False
+    mode: str | None = None  # "journal" keeps personal reflection free of org data
 
 
 class BookingSlot(BaseModel):
@@ -2767,9 +2798,12 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
         ctx.user_email = user_email
     org_id = ctx.organization_id
     db = get_database()
+    journal_mode = (request.mode or "").strip().lower() == "journal"
 
     session_context = dict(request.session_context or {})
-    det = await _try_deterministic_booking(text, session_context, db, org_id, ctx.user_email or "")
+    det = None
+    if not journal_mode:
+        det = await _try_deterministic_booking(text, session_context, db, org_id, ctx.user_email or "")
     if det:
         det_bp = det.get("booking_params")
         return AskResponse(
@@ -2788,6 +2822,7 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
         proactive=request.proactive,
         user_id=user_id,
         user_email=user_email,
+        journal_mode=journal_mode,
     )
 
     fallback_question = {
@@ -2823,6 +2858,14 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
             cleaned = m.group(0)
         parsed = json.loads(cleaned)
         parsed_type = parsed.get("type", "question")
+        if journal_mode and parsed_type not in ("answer", "question", "briefing"):
+            # A private reflection must never trigger bookings, delegation, or other actions.
+            parsed = {
+                "type": "answer",
+                "answer": parsed.get("answer") or parsed.get("follow_up") or "",
+                "follow_up": parsed.get("follow_up"),
+            }
+            parsed_type = "answer"
 
         if parsed_type == "delegate":
             # Build a confirmation preview — nothing is created until the user
@@ -3010,9 +3053,10 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
             action_items = parsed.get("action_items")
             if action_items and not isinstance(action_items, list):
                 action_items = None
-            asyncio.create_task(
-                _store_session_insight(db, org_id, request.session_id, answer_text, user_id=user_id, user_email=user_email)
-            )
+            if not journal_mode:
+                asyncio.create_task(
+                    _store_session_insight(db, org_id, request.session_id, answer_text, user_id=user_id, user_email=user_email, question_text=request.message)
+                )
             return AskResponse(
                 type="briefing",
                 answer=answer_text,
@@ -3036,9 +3080,10 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
             suggestions = parsed.get("suggestions")
             if suggestions and not isinstance(suggestions, list):
                 suggestions = None
-            asyncio.create_task(
-                _store_session_insight(db, org_id, request.session_id, answer_text, user_id=user_id, user_email=user_email)
-            )
+            if not journal_mode:
+                asyncio.create_task(
+                    _store_session_insight(db, org_id, request.session_id, answer_text, user_id=user_id, user_email=user_email, question_text=request.message)
+                )
             confirmation = parsed.get("confirmation")
             if confirmation and isinstance(confirmation, dict) and confirmation.get("status") == "done":
                 asyncio.create_task(
@@ -3140,9 +3185,12 @@ async def ask_stream(request: AskRequest, user: dict = Depends(get_current_user_
         ctx.user_email = user_email
     org_id = ctx.organization_id
     db = get_database()
+    journal_mode = (request.mode or "").strip().lower() == "journal"
 
     session_context = dict(request.session_context or {})
-    det = await _try_deterministic_booking(text, session_context, db, org_id, ctx.user_email or "")
+    det = None
+    if not journal_mode:
+        det = await _try_deterministic_booking(text, session_context, db, org_id, ctx.user_email or "")
     if det:
 
         async def det_stream():
@@ -3160,6 +3208,7 @@ async def ask_stream(request: AskRequest, user: dict = Depends(get_current_user_
         proactive=request.proactive,
         user_id=user_id,
         user_email=user_email,
+        journal_mode=journal_mode,
     )
 
     async def event_stream():
@@ -3217,6 +3266,13 @@ async def ask_stream(request: AskRequest, user: dict = Depends(get_current_user_
         try:
             parsed = json.loads(cleaned)
             parsed_type = parsed.get("type", "answer")
+            if journal_mode and parsed_type not in ("answer", "question", "briefing"):
+                parsed = {
+                    "type": "answer",
+                    "answer": parsed.get("answer") or parsed.get("follow_up") or "",
+                    "follow_up": parsed.get("follow_up"),
+                }
+                parsed_type = "answer"
             metadata["type"] = parsed_type
             metadata["follow_up"] = parsed.get("follow_up")
             if parsed_type == "answer":
@@ -3365,9 +3421,9 @@ async def ask_stream(request: AskRequest, user: dict = Depends(get_current_user_
             metadata["answer"] = full_content.strip()
 
         # Fire-and-forget insight storage for answer type
-        if metadata["type"] == "answer" and metadata.get("answer"):
+        if not journal_mode and metadata["type"] == "answer" and metadata.get("answer"):
             asyncio.create_task(
-                _store_session_insight(db, org_id, request.session_id, metadata["answer"], user_id=user_id, user_email=user_email)
+                _store_session_insight(db, org_id, request.session_id, metadata["answer"], user_id=user_id, user_email=user_email, question_text=request.message)
             )
         # Handle confirmation
         if metadata.get("confirmation") and metadata["confirmation"].get("status") == "done":
@@ -3585,6 +3641,7 @@ If no meaningful insights found, return []"""
 class SessionCreateRequest(BaseModel):
     organization_id: str
     title: str | None = None
+    kind: str | None = None
 
 
 class SessionUpdateRequest(BaseModel):
@@ -3593,7 +3650,7 @@ class SessionUpdateRequest(BaseModel):
 
 
 @router.post("/sessions")
-async def create_session(request: SessionCreateRequest, current_user = Depends(get_current_user_optional)):
+async def create_session(request: SessionCreateRequest, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -3603,6 +3660,7 @@ async def create_session(request: SessionCreateRequest, current_user = Depends(g
         "title": request.title or "New Chat",
         "organization_id": request.organization_id,
         "user_id": user_id,
+        "kind": request.kind,
         "messages": [],
         "context": {},
         "created_at": now,
@@ -3614,7 +3672,11 @@ async def create_session(request: SessionCreateRequest, current_user = Depends(g
 
 
 @router.get("/sessions")
-async def list_sessions(organization_id: str, current_user = Depends(get_current_user_optional)):
+async def list_sessions(
+    organization_id: str,
+    kind: str | None = None,
+    current_user = Depends(get_current_user),
+):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -3622,6 +3684,16 @@ async def list_sessions(organization_id: str, current_user = Depends(get_current
     query = {"organization_id": organization_id}
     if user_id:
         query["user_id"] = user_id
+    if kind == "journal":
+        query["$or"] = [
+            {"kind": "journal"},
+            {"kind": {"$exists": False}, "title": {"$regex": "^Journal"}},
+        ]
+    elif kind == "assistant":
+        query["$nor"] = [
+            {"kind": "journal"},
+            {"kind": {"$exists": False}, "title": {"$regex": "^Journal"}},
+        ]
     sessions = list(
         db.assistant_sessions.find(query)
         .sort("updated_at", -1)
@@ -3646,7 +3718,7 @@ def _get_session_or_404(db, session_id: str, user_id: str | None = None):
 
 
 @router.get("/sessions/{session_id}")
-async def get_session(session_id: str, current_user = Depends(get_current_user_optional)):
+async def get_session(session_id: str, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -3657,7 +3729,7 @@ async def get_session(session_id: str, current_user = Depends(get_current_user_o
 
 
 @router.put("/sessions/{session_id}")
-async def update_session(session_id: str, request: SessionUpdateRequest, current_user = Depends(get_current_user_optional)):
+async def update_session(session_id: str, request: SessionUpdateRequest, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -3679,7 +3751,7 @@ async def update_session(session_id: str, request: SessionUpdateRequest, current
 
 
 @router.delete("/sessions/{session_id}")
-async def delete_session(session_id: str, current_user = Depends(get_current_user_optional)):
+async def delete_session(session_id: str, current_user = Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -3697,7 +3769,7 @@ class AddMessageRequest(BaseModel):
 
 
 @router.post("/sessions/{session_id}/messages")
-async def add_session_message(session_id: str, request: AddMessageRequest, current_user = Depends(get_current_user_optional)):
+async def add_session_message(session_id: str, request: AddMessageRequest, current_user = Depends(get_current_user)):
     """Append a message to a session's message history."""
     db = get_database()
     if db is None:
@@ -3715,6 +3787,44 @@ async def add_session_message(session_id: str, request: AddMessageRequest, curre
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not add message: {e}")
     return {"success": True}
+
+
+@router.patch("/sessions/{session_id}/messages/last")
+async def replace_last_session_message(
+    session_id: str,
+    request: AddMessageRequest,
+    current_user = Depends(get_current_user),
+):
+    """Replace the pending assistant placeholder, or append the message if none exists."""
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+    user_id = getattr(current_user, 'id', None) if current_user else None
+    session = _get_session_or_404(db, session_id, user_id)
+    messages = session.get("messages") or []
+    last_assistant = next(
+        (i for i in range(len(messages) - 1, -1, -1) if messages[i].get("role") == "assistant"),
+        None,
+    )
+    last_user = next(
+        (i for i in range(len(messages) - 1, -1, -1) if messages[i].get("role") == "user"),
+        -1,
+    )
+    if last_assistant is not None and (
+        messages[last_assistant].get("is_loading") or last_assistant > last_user
+    ):
+        messages[last_assistant] = request.message
+    else:
+        messages.append(request.message)
+    try:
+        db.assistant_sessions.update_one(
+            {"_id": ObjectId(session_id)},
+            {"$set": {"messages": messages, "updated_at": datetime.utcnow()}},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not update message: {e}")
+    return {"success": True}
+
 
 class TranscribeResponse(BaseModel):
     text: str

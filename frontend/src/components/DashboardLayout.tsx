@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useUIStore } from "@/stores/uiStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import {
+  House,
   LayoutDashboard,
   Settings,
   ChevronLeft,
@@ -20,6 +21,7 @@ import {
   Zap,
   FolderOpen,
   Lightbulb,
+  BookOpen,
 } from "lucide-react";
 import { Avatar, Badge, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui";
 import { ThemeToggleInline } from "@/components/ThemeToggleInline";
@@ -31,15 +33,20 @@ interface NavItem {
   href: string;
   badge?: string;
   section?: string;
+  hidden?: boolean;
 }
 
 const navItems: NavItem[] = [
+  { icon: House, label: "Home", href: "/dashboard/home" },
   { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
-  { icon: Lightbulb, label: "Have an Idea", href: "/dashboard/ideas" },
-  { icon: Share2, label: "Orchestration", href: "/dashboard/orchestration" },
-  { icon: Zap, label: "AI Task Cascade", href: "/dashboard/task" },
+  { icon: Lightbulb, label: "Have an Idea", href: "/dashboard/ideas", hidden: true },
+  { icon: Share2, label: "Orchestration", href: "/dashboard/orchestration", hidden: true },
+  { icon: Zap, label: "Task", href: "/dashboard/task" },
+  { icon: BookOpen, label: "Journal", href: "/dashboard/journal" },
   { icon: FolderOpen, label: "Uploaded Data", href: "/dashboard/data" },
 ];
+
+const visibleNavItems = navItems.filter((item) => !item.hidden);
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, role, signOut } = useAuth();
@@ -124,8 +131,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       )}
 
       <nav className="flex-1 overflow-y-auto p-3 space-y-1">
-        {navItems.map((item, i) => {
-          const showSection = item.section && (!navItems[i - 1] || navItems[i - 1].section !== item.section);
+        {visibleNavItems.map((item, i) => {
+          const showSection = item.section && (!visibleNavItems[i - 1] || visibleNavItems[i - 1].section !== item.section);
           return (
             <div key={item.href}>
               {showSection && sidebarOpen && (

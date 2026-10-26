@@ -13,12 +13,10 @@ import { Card, CardContent, Button } from "@/components/ui";
 import {
   Loader2, Sparkles, Send, MessageSquare, Plus, X, Trash2, Edit3, Check,
   ChevronRight, PanelLeftOpen, PanelLeftClose, FileText, Lightbulb, ArrowRight,
-  Mic, MicOff,
+  Mic, MicOff, Volume2, VolumeX,
 } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
-
-const generateId = () => `msg_${Math.random().toString(36).substring(7)}`;
 
 const WELCOME_MESSAGE = "Hi, I'm your AI analyst. Ask me anything about your business, and I'll either answer directly or ask smart questions to give you the best response.";
 
@@ -28,6 +26,15 @@ const QUICK_ACTIONS = [
   { id: "team", label: "How is my team doing?", icon: MessageSquare },
   { id: "priorities", label: "What should I focus on?", icon: Sparkles },
 ];
+
+function toSpeech(text: string) {
+  return text
+    .replace(/```[\s\S]*?```/g, " code block ")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[#*_`>|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 export default function AssistantPage() {
   return (
@@ -181,15 +188,76 @@ function AssistantInner() {
 
   const [input, setInput] = useState("");
   const [isAsking, setIsAsking] = useState(false);
-  const { listening, startListening, stopListening } = useVoiceInput();
+  const [voiceOn, setVoiceOn] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const { listening, interimText, startListening, stopListening } = useVoiceInput();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const initialized = useRef(false);
+  const autoSpeakRef = useRef(false);
 
   const activeSession = useMemo(() => getActiveSession(), [sessions, activeSessionId, getActiveSession]);
   const messages = activeSession?.messages || [];
+  const visibleSessions = useMemo(
+    () =>
+      sessions.filter(
+        (s) => s.kind !== "journal" && !(s.kind == null && (s.title || "").startsWith("Journal"))
+      ),
+    [sessions]
+  );
+
+  const stopSpeaking = useCallback(() => {
+    window.speechSynthesis?.cancel();
+    setSpeaking(false);
+  }, []);
+
+  const speakText = useCallback((text: string) => {
+    if (!("speechSynthesis" in window)) return;
+    const clean = toSpeech(text);
+    if (!clean) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(clean);
+    const preferred = window.speechSynthesis
+      .getVoices()
+      .find((voice) => voice.lang.startsWith("en") && /natural|samantha|google/i.test(voice.name));
+    if (preferred) utterance.voice = preferred;
+    utterance.lang = "en-US";
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    utterance.onstart = () => setSpeaking(true);
+    utterance.onend = () => setSpeaking(false);
+    utterance.onerror = () => setSpeaking(false);
+    window.speechSynthesis.speak(utterance);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      window.speechSynthesis?.cancel();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!autoSpeakRef.current) return;
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== "assistant" || last.is_loading || !last.content) return;
+    autoSpeakRef.current = false;
+    speakText(last.content);
+  }, [messages, speakText]);
+
+  const handleToggleVoice = () => {
+    if (voiceOn) {
+      stopSpeaking();
+      setVoiceOn(false);
+      return;
+    }
+    setVoiceOn(true);
+    const lastAnswer = [...messages].reverse().find(
+      (message) => message.role === "assistant" && !message.is_loading && message.content
+    );
+    if (lastAnswer) speakText(lastAnswer.content);
+  };
 
   useEffect(() => {
     setBreadcrumbs([
@@ -206,9 +274,9 @@ function AssistantInner() {
     if (!initialized.current && organization?.id) {
       initialized.current = true;
       const init = async () => {
-        await fetchSessions(organization.id);
+        await fetchSessions(organization.id, "assistant");
         if (!useSessionStore.getState().activeSessionId) {
-          createSession(organization.id, "New Chat");
+          createSession(organization.id, "New Chat", "assistant");
         }
       };
       init();
@@ -221,28 +289,29 @@ function AssistantInner() {
 
   const handleNewSession = async () => {
     if (!organization?.id) return;
-    await createSession(organization.id, "New Chat");
+    await createSession(organization.id, "New Chat", "assistant");
   };
 
-  const handleSend = async () => {
-    const text = input.trim();
+  const handleSend = async (raw?: string, options?: { voice?: boolean }) => {
+    const text = (raw ?? input).trim();
     if (!text || !activeSession || isAsking) return;
     setInput("");
     setIsAsking(true);
+    stopSpeaking();
+    autoSpeakRef.current = Boolean(options?.voice || voiceOn);
 
     const userMsg: SessionMessage = { role: "user", content: text, timestamp: Date.now() };
-    addMessage(activeSession.id, userMsg);
+    await addMessage(activeSession.id, userMsg);
 
-    const loadingId = generateId();
     const loadingMsg: SessionMessage = { role: "assistant", content: "", is_loading: true, timestamp: Date.now() };
-    addMessage(activeSession.id, loadingMsg);
+    await addMessage(activeSession.id, loadingMsg);
 
     try {
       const history = messages.map((m) => ({ role: m.role, content: m.content }));
 
       const res = await fetch(`${API_URL}/assistant/ask`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           message: text,
           session_id: activeSession.id,
@@ -320,17 +389,30 @@ function AssistantInner() {
     }
   };
 
+  const handleMicClick = () => {
+    if (listening) {
+      stopListening();
+      return;
+    }
+    stopSpeaking();
+    startListening((text) => {
+      void handleSend(text, { voice: true });
+    });
+  };
+
   const handleAnswerQuestion = async (fieldId: string, value: string, valueLabel: string) => {
     if (!activeSession) return;
 
+    stopSpeaking();
+    autoSpeakRef.current = voiceOn;
+
     const userMsg: SessionMessage = { role: "user", content: valueLabel, timestamp: Date.now() };
-    addMessage(activeSession.id, userMsg);
+    await addMessage(activeSession.id, userMsg);
 
     updateSessionContext(activeSession.id, { [fieldId]: value });
 
-    const loadingId = generateId();
     const loadingMsg: SessionMessage = { role: "assistant", content: "", is_loading: true, timestamp: Date.now() };
-    addMessage(activeSession.id, loadingMsg);
+    await addMessage(activeSession.id, loadingMsg);
 
     setIsAsking(true);
 
@@ -428,12 +510,14 @@ function AssistantInner() {
 
   const bookSlot = async (time: string) => {
     if (!activeSession || isAsking) return;
+    stopSpeaking();
+    autoSpeakRef.current = voiceOn;
     const text = `book the meeting at ${time}`;
     const userMsg: SessionMessage = { role: "user", content: text, timestamp: Date.now() };
-    addMessage(activeSession.id, userMsg);
+    await addMessage(activeSession.id, userMsg);
     setIsAsking(true);
     const loadingMsg: SessionMessage = { role: "assistant", content: "", is_loading: true, timestamp: Date.now() };
-    addMessage(activeSession.id, loadingMsg);
+    await addMessage(activeSession.id, loadingMsg);
     try {
       const history = [...activeSession.messages, userMsg].map((m) => ({ role: m.role, content: m.content }));
       const res = await fetch(`${API_URL}/assistant/ask`, {
@@ -480,6 +564,8 @@ function AssistantInner() {
     const params = lastMsg?.delegate_params;
     if (!params) return;
 
+    stopSpeaking();
+    autoSpeakRef.current = voiceOn;
     setIsAsking(true);
     try {
       const res = await fetch(`${API_URL}/assistant/delegate`, {
@@ -585,7 +671,7 @@ function AssistantInner() {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
-              {sessions.map((session) => (
+              {visibleSessions.map((session) => (
                 <div
                   key={session.id}
                   onClick={() => setActiveSession(session.id)}
@@ -646,6 +732,21 @@ function AssistantInner() {
               <h1 className="text-sm font-semibold">Let's Talk</h1>
               <p className="text-[10px] text-text-muted">Ask, answer, get insights</p>
             </div>
+            <button
+              type="button"
+              onClick={handleToggleVoice}
+              aria-pressed={voiceOn}
+              aria-label={voiceOn ? "Turn off voice replies" : "Turn on voice replies"}
+              title={voiceOn ? "Turn off voice replies" : "Turn on voice replies"}
+              className={`ml-auto inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium transition-colors cursor-pointer ${
+                voiceOn
+                  ? "border-primary/30 bg-primary/10 text-primary"
+                  : "border-border bg-surface text-text-muted hover:text-foreground"
+              } ${speaking ? "animate-pulse" : ""}`}
+            >
+              {voiceOn ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
+              Voice
+            </button>
           </div>
 
           {/* Messages */}
@@ -712,6 +813,20 @@ function AssistantInner() {
                       <div className="whitespace-pre-wrap">{msg.content}</div>
                     </div>
                   )}
+                  {msg.role === "assistant" && msg.content && !msg.is_loading && (
+                    <div className="mt-1 flex">
+                      <button
+                        type="button"
+                        onClick={() => (speaking ? stopSpeaking() : speakText(msg.content))}
+                        aria-label={speaking ? "Stop reading aloud" : "Read this answer aloud"}
+                        title={speaking ? "Stop reading aloud" : "Read this answer aloud"}
+                        className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-text-muted transition-colors hover:bg-surface-light hover:text-foreground cursor-pointer"
+                      >
+                        <Volume2 className="h-3.5 w-3.5" />
+                        {speaking ? "Stop" : "Listen"}
+                      </button>
+                    </div>
+                  )}
                 </div>
                 {msg.role === "user" && (
                   <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 mt-1">
@@ -738,15 +853,8 @@ function AssistantInner() {
               />
               <button
                 type="button"
-                onClick={
-                  listening
-                    ? stopListening
-                    : () =>
-                        startListening((text: string) =>
-                          setInput((prev) => (prev ? `${prev} ${text}` : text))
-                        )
-                }
-                title={listening ? "Stop recording" : "Start voice input"}
+                onClick={handleMicClick}
+                title={listening ? "Stop and send" : "Ask by voice"}
                 disabled={isAsking || !activeSession}
                 className={`px-3 rounded-xl border transition-all cursor-pointer disabled:opacity-50 ${
                   listening
@@ -757,13 +865,18 @@ function AssistantInner() {
                 {listening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
               </button>
               <Button
-                onClick={handleSend}
+                onClick={() => handleSend()}
                 disabled={!input.trim() || isAsking || !activeSession}
                 className="cursor-pointer"
               >
                 {isAsking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
               </Button>
             </div>
+            {listening && (
+              <p role="status" aria-live="polite" className="mt-2 text-xs text-text-muted">
+                {interimText || "Listening…"}
+              </p>
+            )}
           </div>
         </div>
       </div>

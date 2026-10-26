@@ -5,11 +5,15 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, Tabs, TabsList, TabsTrigger, TabsContent, Button } from "@/components/ui";
-import { Bell, ArrowLeft, Volume2, Mail, Smartphone, Plug, MessageSquare, User, Sparkles, Lightbulb, Activity } from "lucide-react";
+import { Bell, ArrowLeft, Volume2, Mail, Smartphone, Plug, MessageSquare, User, Sparkles, Lightbulb, Activity, Network, FolderOpen } from "lucide-react";
+import OrchestrationView from "@/components/owners/OrchestrationView";
+import { SuggestedDocumentsCard } from "@/components/owners/SuggestedDocumentsCard";
+import { YourFilesCard } from "@/components/owners/YourFilesCard";
 import ZohoConnectButton from "@/components/owners/ZohoConnectButton";
 import GoogleConnectButton from "@/components/owners/GoogleConnectButton";
 import { useZohoStore } from "@/stores/zohoStore";
 import { useGoogleStore } from "@/stores/googleStore";
+import { useOrganizationStore } from "@/stores/organizationStore";
 import { useUIStore } from "@/stores/uiStore";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
@@ -61,6 +65,7 @@ export default function SettingsPage() {
   const [understanding, setUnderstanding] = useState<any>(null);
   const [understandingLoading, setUnderstandingLoading] = useState(true);
   const { cliqStatus } = useZohoStore();
+  const { organization } = useOrganizationStore();
 
   useEffect(() => {
     const headers = getAuthHeaders();
@@ -156,12 +161,33 @@ export default function SettingsPage() {
         </div>
 
         <Tabs defaultValue="notifications">
-          <TabsList className="mb-4">
+          <TabsList className="mb-4 flex-wrap">
+            <TabsTrigger value="org-chart"><Network className="w-4 h-4 mr-2" /> Org Chart</TabsTrigger>
+            <TabsTrigger value="data"><FolderOpen className="w-4 h-4 mr-2" /> Uploaded Data</TabsTrigger>
             <TabsTrigger value="notifications"><Bell className="w-4 h-4 mr-2" /> Notifications</TabsTrigger>
             <TabsTrigger value="integrations"><Plug className="w-4 h-4 mr-2" /> Integrations</TabsTrigger>
             <TabsTrigger value="feedback"><MessageSquare className="w-4 h-4 mr-2" /> Feedback</TabsTrigger>
             <TabsTrigger value="about-you"><User className="w-4 h-4 mr-2" /> About You</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="org-chart">
+            <OrchestrationView />
+          </TabsContent>
+
+          <TabsContent value="data">
+            <div className="space-y-6">
+              <SuggestedDocumentsCard
+                orgMeta={{
+                  organizationName: organization?.name || "",
+                  industry: organization?.industry || "",
+                  microVertical: organization?.micro_vertical || "",
+                  size: organization?.size || "",
+                  domain: organization?.domain || "",
+                }}
+              />
+              <YourFilesCard />
+            </div>
+          </TabsContent>
 
           <TabsContent value="notifications">
             {loading ? (

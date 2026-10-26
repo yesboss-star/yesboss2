@@ -8,7 +8,7 @@ import { useTaskStore } from "@/stores/taskStore";
 import { useGoalStore } from "@/stores/goalStore";
 import { useOrgChartStore } from "@/stores/orgChartStore";
 import DashboardLayout from "@/components/DashboardLayout";
-import TaskView from "@/components/owners/TaskView";
+import { GoalSection } from "@/components/owners/DashboardView";
 import TaskCard from "@/components/TaskCard";
 import TaskModal from "@/components/TaskModal";
 import { Card, CardContent, Badge, Button, Input } from "@/components/ui";
@@ -25,7 +25,7 @@ export default function TaskPage() {
   const router = useRouter();
   const { organization } = useOrganizationStore();
   const { tasks, fetchTasks, loading: tasksLoading } = useTaskStore();
-  const { goals, fetchGoals } = useGoalStore();
+  const { fetchGoals } = useGoalStore();
   const { members, fetchOrgMembers } = useOrgChartStore();
 
   const [viewMode, setViewMode] = useState<ViewMode>("list");
@@ -103,11 +103,6 @@ export default function TaskPage() {
     });
   }, [tasks, role, taskView, userEmail, directReportEmails]);
 
-  const visibleGoals = useMemo(() => {
-    if (role !== "owner") return [];
-    return goals;
-  }, [goals, role]);
-
   const filteredTasks = visibleTasks.filter((task) => {
     if (filterStatus !== "all" && task.status !== filterStatus) return false;
     if (searchQuery && !task.title.toLowerCase().includes(searchQuery.toLowerCase())) return false;
@@ -134,7 +129,7 @@ export default function TaskPage() {
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl md:text-3xl font-bold">AI Task Cascade</h1>
+            <h1 className="text-2xl md:text-3xl font-bold">Tasks</h1>
             <p className="text-text-muted mt-1">
               {role === "employee"
                 ? taskView === "my"
@@ -230,10 +225,7 @@ export default function TaskPage() {
           </Card>
         </div>
 
-        <div className="border-t border-border pt-6">
-          <h2 className="text-lg font-semibold mb-4">Task Cascade</h2>
-          <TaskView goals={visibleGoals} />
-        </div>
+        {role === "owner" && <GoalSection />}
 
         <div className="flex flex-col sm:flex-row items-center gap-4">
           <div className="relative flex-1 max-w-md">

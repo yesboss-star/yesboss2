@@ -98,6 +98,7 @@ export interface ChatSession {
   id: string;
   title: string;
   organization_id: string;
+  kind?: string;
   messages: SessionMessage[];
   context: Record<string, string>;
   created_at: string;
@@ -109,12 +110,12 @@ interface SessionState {
   activeSessionId: string | null;
   isLoading: boolean;
 
-  fetchSessions: (orgId: string) => Promise<void>;
-  createSession: (orgId: string, title?: string) => Promise<ChatSession>;
+  fetchSessions: (orgId: string, kind?: "journal" | "assistant") => Promise<void>;
+  createSession: (orgId: string, title?: string, kind?: "journal" | "assistant") => Promise<ChatSession>;
   deleteSession: (sessionId: string) => void;
   renameSession: (sessionId: string, title: string) => void;
   setActiveSession: (sessionId: string | null) => void;
-  addMessage: (sessionId: string, message: SessionMessage) => void;
+  addMessage: (sessionId: string, message: SessionMessage) => Promise<void>;
   updateLastMessage: (sessionId: string, patch: Partial<SessionMessage>) => void;
   updateSessionContext: (sessionId: string, context: Record<string, string>) => void;
   getActiveSession: () => ChatSession | null;
@@ -129,17 +130,19 @@ export const useSessionStore = create<SessionState>()(
       activeSessionId: null,
       isLoading: false,
 
-      fetchSessions: async (orgId) => {
+      fetchSessions: async (orgId, kind) => {
         if (!orgId) return;
         set({ isLoading: true });
         try {
-          const res = await fetch(`${API_URL}/assistant/sessions?organization_id=${orgId}`, { headers: getAuthHeaders() });
+          const kindParam = kind ? `&kind=${kind}` : "";
+          const res = await fetch(`${API_URL}/assistant/sessions?organization_id=${orgId}${kindParam}`, { headers: getAuthHeaders() });
           if (res.ok) {
             const data = await res.json();
             const mapped: ChatSession[] = (data.sessions || []).map((s: any) => ({
               id: s._id || s.id,
               title: s.title || "New Chat",
               organization_id: s.organization_id || orgId,
+              kind: s.kind,
               messages: s.messages || [],
               context: s.context || {},
               created_at: s.created_at,
@@ -160,12 +163,13 @@ export const useSessionStore = create<SessionState>()(
         }
       },
 
-      createSession: async (orgId, title) => {
+      createSession: async (orgId, title, kind) => {
         const localId = `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         const newSession: ChatSession = {
           id: localId,
           title: title || "New Chat",
           organization_id: orgId,
+          kind,
           messages: [],
           context: {},
           created_at: new Date().toISOString(),
@@ -180,7 +184,7 @@ export const useSessionStore = create<SessionState>()(
           const res = await fetch(`${API_URL}/assistant/sessions`, {
             method: "POST",
             headers: getAuthHeaders(),
-            body: JSON.stringify({ organization_id: orgId, title: title || "New Chat" }),
+            body: JSON.stringify({ organization_id: orgId, title: title || "New Chat", kind }),
           });
           if (res.ok) {
             const serverSession = await res.json();
@@ -188,6 +192,7 @@ export const useSessionStore = create<SessionState>()(
               id: serverSession._id || serverSession.id,
               title: serverSession.title || "New Chat",
               organization_id: orgId,
+              kind: serverSession.kind,
               messages: serverSession.messages || [],
               context: serverSession.context || {},
               created_at: serverSession.created_at,
@@ -238,7 +243,7 @@ export const useSessionStore = create<SessionState>()(
         set({ activeSessionId: sessionId });
       },
 
-      addMessage: (sessionId, message) => {
+      addMessage: async (sessionId, message) => {
         set((s) => ({
           sessions: s.sessions.map((sess) =>
             sess.id === sessionId
@@ -252,11 +257,15 @@ export const useSessionStore = create<SessionState>()(
         }));
         // Persist to backend
         if (!sessionId.startsWith("local_")) {
-          fetch(`${API_URL}/assistant/sessions/${sessionId}/messages`, {
-            method: "POST",
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ message }),
-          }).catch(() => {});
+          try {
+            await fetch(`${API_URL}/assistant/sessions/${sessionId}/messages`, {
+              method: "POST",
+              headers: getAuthHeaders(),
+              body: JSON.stringify({ message }),
+            });
+          } catch {
+            // Keep local message if persistence fails.
+          }
         }
       },
 
@@ -271,6 +280,13 @@ export const useSessionStore = create<SessionState>()(
             return { ...sess, messages: msgs, updated_at: new Date().toISOString() };
           }),
         }));
+        if (patch.content?.trim() && !sessionId.startsWith("local_")) {
+          fetch(`${API_URL}/assistant/sessions/${sessionId}/messages/last`, {
+            method: "PATCH",
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ message: patch }),
+          }).catch(() => {});
+        }
       },
 
       updateSessionContext: (sessionId, context) => {

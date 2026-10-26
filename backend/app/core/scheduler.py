@@ -780,6 +780,7 @@ async def send_morning_journal_prompts():
                 continue
             existing = db.journal_entries.find_one({
                 "user_id": uid,
+                "type": "journal",
                 "created_at": {"$gte": today_start},
             })
             if existing:
@@ -791,7 +792,7 @@ async def send_morning_journal_prompts():
                     type="journal_prompt",
                     title="Good morning!",
                     message="Start your day with a quick journal entry. Capture your thoughts, ideas, or reflections.",
-                    link="/dashboard/ideas",
+                    link="/dashboard/journal",
                 )
                 sent += 1
             except Exception:
@@ -1481,11 +1482,13 @@ async def send_weekly_idea_digest():
                 continue
             new_ideas = db.journal_entries.count_documents({
                 "org_id": org_id,
+                "type": {"$ne": "journal"},
                 "created_at": {"$gte": week_ago},
             })
-            total_ideas = db.journal_entries.count_documents({"org_id": org_id})
+            total_ideas = db.journal_entries.count_documents({"org_id": org_id, "type": {"$ne": "journal"}})
             unworked = db.journal_entries.count_documents({
                 "org_id": org_id,
+                "type": {"$ne": "journal"},
                 "$or": [
                     {"linked_tasks": {"$exists": False}},
                     {"linked_tasks": []},
@@ -1509,6 +1512,7 @@ async def send_weekly_idea_digest():
                 member_ideas = db.journal_entries.count_documents({
                     "org_id": org_id,
                     "user_id": uid,
+                    "type": {"$ne": "journal"},
                     "created_at": {"$gte": week_ago},
                 })
                 if member_ideas > 0:

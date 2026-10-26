@@ -165,3 +165,88 @@ def test_store_session_insight_defaults_no_owner():
     stored = db.session_insights._docs[0]
     assert stored.get("user_id") is None
     assert stored.get("user_email") is None
+
+
+def test_store_session_insight_includes_question():
+    db = _FakeDB()
+    asyncio.run(
+        assistant._store_session_insight(
+            db,
+            "org-1",
+            "sess-1",
+            "A sufficiently long AI answer for memory storage",
+            question_text="How are my finances?",
+        )
+    )
+
+    summary = db.session_insights._docs[0]["summary"]
+    assert summary.startswith("Q: How are my finances? A:")
+
+
+def _session_db(messages):
+    from bson import ObjectId
+
+    session_id = "507f1f77bcf86cd799439011"
+    doc = {"_id": ObjectId(session_id), "user_id": "user-a", "messages": list(messages)}
+
+    class _Collection:
+        def find_one(self, query):
+            if doc["_id"] == query["_id"] and doc.get("user_id") == query.get("user_id"):
+                return doc
+            return None
+
+        def update_one(self, query, update):
+            doc.update(update["$set"])
+
+    return session_id, doc, SimpleNamespace(assistant_sessions=_Collection())
+
+
+def test_replace_last_session_message_updates_placeholder(monkeypatch):
+    session_id, doc, db = _session_db([{"role": "assistant", "content": "", "is_loading": True}])
+    monkeypatch.setattr(assistant, "get_database", lambda: db)
+
+    asyncio.run(
+        assistant.replace_last_session_message(
+            session_id,
+            assistant.AddMessageRequest(message={"role": "assistant", "content": "final"}),
+            current_user=SimpleNamespace(id="user-a"),
+        )
+    )
+
+    assert doc["messages"] == [{"role": "assistant", "content": "final"}]
+
+
+def test_replace_last_session_message_appends_after_user(monkeypatch):
+    session_id, doc, db = _session_db([{"role": "user", "content": "hello"}])
+    monkeypatch.setattr(assistant, "get_database", lambda: db)
+
+    asyncio.run(
+        assistant.replace_last_session_message(
+            session_id,
+            assistant.AddMessageRequest(message={"role": "assistant", "content": "final"}),
+            current_user=SimpleNamespace(id="user-a"),
+        )
+    )
+
+    assert [m["role"] for m in doc["messages"]] == ["user", "assistant"]
+
+
+def test_replace_last_session_message_handles_new_user_during_save(monkeypatch):
+    session_id, doc, db = _session_db(
+        [
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": "", "is_loading": True},
+            {"role": "user", "content": "second"},
+        ]
+    )
+    monkeypatch.setattr(assistant, "get_database", lambda: db)
+
+    asyncio.run(
+        assistant.replace_last_session_message(
+            session_id,
+            assistant.AddMessageRequest(message={"role": "assistant", "content": "first answer"}),
+            current_user=SimpleNamespace(id="user-a"),
+        )
+    )
+
+    assert [m["content"] for m in doc["messages"]] == ["first", "first answer", "second"]
