@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from ..core.database import get_database
@@ -111,6 +112,29 @@ async def create_journal_entry(
         logger.warning("Failed to schedule analysis: %s", e)
 
     return {"success": True, "entry": entry}
+
+
+class JournalSpeakRequest(BaseModel):
+    text: str
+    voice: str | None = None
+
+
+@router.post("/tts")
+async def journal_text_to_speech(
+    data: JournalSpeakRequest,
+    current_user=Depends(get_current_user),
+):
+    """Read journal text aloud in a natural voice (Gemini TTS). Returns audio/wav."""
+    from ..core.tts import TtsNotConfigured, TtsProviderError, synthesize
+
+    try:
+        audio = await synthesize(data.text, voice=data.voice)
+    except TtsNotConfigured as e:
+        raise HTTPException(status_code=501, detail=str(e))
+    except TtsProviderError as e:
+        logger.warning("Journal TTS failed: %s", e)
+        raise HTTPException(status_code=502, detail="Voice is unavailable right now")
+    return Response(content=audio, media_type="audio/wav", headers={"Cache-Control": "private, max-age=3600"})
 
 
 @router.post("/sync")

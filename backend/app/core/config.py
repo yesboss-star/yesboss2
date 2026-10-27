@@ -91,6 +91,8 @@ class Settings:
     )
     STT_PROVIDER: str = os.getenv("STT_PROVIDER", "none")
     GEMINI_STT_MODEL: str = os.getenv("GEMINI_STT_MODEL", "gemini-3.8-flash")
+    GEMINI_TTS_MODEL: str = os.getenv("GEMINI_TTS_MODEL", "gemini-3.8-flash-lite-tts")
+    GEMINI_TTS_VOICE: str = os.getenv("GEMINI_TTS_VOICE", "Kore")
 
     GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
     GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET", "")

@@ -1931,6 +1931,7 @@ async def _build_ask_prompt(
     user_id: str | None = None,
     user_email: str | None = None,
     journal_mode: bool = False,
+    language: str | None = None,
 ) -> tuple[str, str, dict[str, Any]]:
     """Shared prompt + system choice for smart_ask and ask_stream.
 
@@ -1939,12 +1940,19 @@ async def _build_ask_prompt(
     history = (conversation_history or [])[-8:]
     history_block = "\n".join(f"{m.get('role','')}: {m.get('content','')[:300]}" for m in history) if history else ""
 
-    if journal_mode:
-        # Personal reflection: no org snapshot, no document RAG, no team data.
+    # Journal: purely personal messages stay light. Anything about work, the
+    # business, the calendar, etc. gets the same read-only data as AI Business
+    # Analytics (org profile, documents, goals, tasks, team, insights) plus the
+    # user's own open work and upcoming meetings.
+    journal_with_data = bool(
+        journal_mode and db is not None and org_id and _wants_work_context(text, conversation_history)
+    )
+    if journal_mode and not journal_with_data:
         prompt = (
             f"Recent chat:\n{history_block}\n\n"
             f"Current date: {datetime.now().strftime('%A, %Y-%m-%d')}\n\n"
             f"The writer is adding to their private journal. Their words:\n\"{text}\""
+            f"\n\n{_journal_language_rule(language)}"
         )
         return prompt, JOURNAL_SYSTEM, {}
 
@@ -2065,6 +2073,22 @@ async def _build_ask_prompt(
         ctx_block = "What we already know from this chat:\n" + "\n".join(f"- {k}: {v}" for k, v in session_context.items()) + "\n"
 
     insights_block = _format_insights_block(snap.get("recent_insights") or [])
+
+    if journal_with_data:
+        my_work = _gather_my_work(db, org_id, user_id, user_email)
+        my_meetings = _gather_my_meetings(db, org_id, user_id, user_email)
+        prompt = (
+            f"{org_block}\n"
+            f"{doc_block}{rag_block}{goals_block}{tasks_block}{emp_block}{team_block}"
+            f"{personal_block}{workload_block}{insights_block}\n"
+            + (f"{my_work}\n\n" if my_work else "")
+            + (f"{my_meetings}\n\n" if my_meetings else "")
+            + f"Recent chat:\n{history_block}\n\n"
+            f"Current date: {datetime.now().strftime('%A, %Y-%m-%d %H:%M')}\n\n"
+            f"The writer is asking their private journal assistant. Their words:\n\"{text}\"\n\n"
+            f"{_journal_language_rule(language)}"
+        )
+        return prompt, JOURNAL_SYSTEM, snap
 
     prompt = (
         f"{org_block}\n"
@@ -2483,22 +2507,178 @@ async def _async_snapshot(db, org_id: str) -> dict[str, Any]:
 # Smart Ask — understand → check docs → answer or ask
 # ---------------------------------------------------------------------------
 
-JOURNAL_SYSTEM = """You are YesBoss's private journaling companion.
+_JOURNAL_WORK_RE = re.compile(
+    r"\b(task|tasks|pending|goal|goals|todo|to-do|to do|plan|deadline|due|priority|schedule|"
+    r"agenda|focus|work|kaam|karna|karne|karu|baaki|dance|gold|today|tomorrow|tonight|week|"
+    r"aaj|kal|should|shall|need to|supposed|busy|free|next|meeting|meetings|project|projects|"
+    r"office|job|urgent|important|calendar|event|events|appointment|slot|business|company|revenue|sales|"
+    r"profit|expense|expenses|team|employee|employees|staff|report|reports|document|documents|file|files|"
+    r"kpi|growth|client|customer|customers|performance|status|update|summary|overview|insight|insights|"
+    r"mera|meri|mere)\b|(क्या|काम|करना|करूँ|आज|कल|टास्क|गोल|मीटिंग|कैलेंडर)",
+    re.IGNORECASE,
+)
 
-This is a personal reflection, not business analysis. The writer expects privacy:
-never use or mention company data, colleagues, goals, tasks, documents, meetings,
-or anything else from the workspace unless the writer brings it up themselves.
 
-Reply with a JSON object:
-{"type":"answer","answer":"your reflection","follow_up":"one gentle question"}
+def _wants_work_context(text: str, history: list[dict[str, str]] | None) -> bool:
+    recent_user = [m.get("content", "") for m in (history or [])[-2:] if m.get("role") == "user"]
+    return bool(_JOURNAL_WORK_RE.search(" ".join([text, *recent_user])))
+
+
+def _gather_my_work(db, org_id: str, user_id: str | None, user_email: str | None) -> str:
+    """The signed-in user's OWN open tasks and active goals, as a short prompt block."""
+    emails = {e for e in {(user_email or "").strip(), (user_email or "").strip().lower()} if e}
+    ids: set[str] = set(emails)
+    if user_id:
+        ids.add(str(user_id))
+    try:
+        for col in ("employees", "org_chart_members"):
+            for m in db[col].find({"organization_id": org_id, "email": {"$in": list(emails)}}, {"_id": 1}):
+                ids.add(str(m["_id"]))
+    except Exception as e:
+        logger.warning("journal work lookup (members) failed: %s", e)
+    if not ids:
+        return ""
+    mine = {"$or": [{"assignee_id": {"$in": list(ids)}}, {"assignee_email": {"$in": list(emails)}}]}
+    closed = {"$nin": ["completed", "cancelled", "done"]}
+    lines: list[str] = []
+    try:
+        tasks = db.tasks.find({"organization_id": org_id, "status": closed, **mine}).sort("created_at", -1).limit(8)
+        for t in tasks:
+            bits = [str(t.get("priority") or ""), str(t.get("status") or "")]
+            if t.get("due_date"):
+                bits.append(f"due {str(t['due_date'])[:10]}")
+            lines.append(f"- Task: {str(t.get('title') or 'Untitled')[:90]} ({', '.join(b for b in bits if b)})")
+        goals = db.goals.find({"organization_id": org_id, "status": closed, **mine}).sort("created_at", -1).limit(5)
+        for g in goals:
+            lines.append(f"- Goal: {str(g.get('title') or 'Untitled')[:90]}")
+    except Exception as e:
+        logger.warning("journal work lookup failed: %s", e)
+        return ""
+    body = "\n".join(lines) if lines else "Nothing open is assigned to them."
+    return f"Open work (this person's own items only):\n{body}"
+
+
+def _fmt_event_time(raw: Any) -> str:
+    """'20261023T150000+0530' -> 'Fri 23 Oct, 15:00' (falls back to the raw text)."""
+    text = str(raw or "")
+    try:
+        return datetime.strptime(text[:15], "%Y%m%dT%H%M%S").strftime("%a %d %b, %H:%M")
+    except ValueError:
+        return text[:16]
+
+
+def _gather_my_meetings(db, org_id: str, user_id: str | None, user_email: str | None) -> str:
+    """Upcoming meetings/calendar events the signed-in user organises or attends."""
+    emails = {e for e in {(user_email or "").strip(), (user_email or "").strip().lower()} if e}
+    ids = set(emails)
+    if user_id:
+        ids.add(str(user_id))
+    if not ids:
+        return ""
+    today = datetime.now().strftime("%Y%m%d")
+    rows: list[tuple[str, str]] = []
+    try:
+        meetings = db.meetings.find({
+            "organization_id": org_id,
+            "status": {"$nin": ["cancelled", "canceled"]},
+            "start_dt": {"$gte": today},
+            "$or": [{"created_by": {"$in": list(ids)}}, {"attendees": {"$in": list(emails)}}],
+        }).sort("start_dt", 1).limit(8)
+        for m in meetings:
+            who = ", ".join(str(a) for a in (m.get("attendees") or [])[:4])
+            rows.append((str(m.get("start_dt") or ""), f"{_fmt_event_time(m.get('start_dt'))} - {m.get('title') or 'Meeting'}" + (f" (with {who})" if who else "")))
+        events = db.calendar_events.find({
+            "user_email": {"$in": list(ids)},
+            "start": {"$gte": today},
+        }).sort("start", 1).limit(8)
+        for e in events:
+            row = f"{_fmt_event_time(e.get('start'))} - {e.get('title') or 'Event'}"
+            if all(row.split(" - ", 1)[1] not in existing for _, existing in rows):
+                rows.append((str(e.get("start") or ""), row))
+    except Exception as e:
+        logger.warning("journal meetings lookup failed: %s", e)
+        return ""
+    rows.sort(key=lambda r: r[0])
+    body = "\n".join(f"- {line}" for _, line in rows[:8]) if rows else "No upcoming meetings or events found."
+    return f"Upcoming calendar (this person's own meetings and events):\n{body}"
+
+
+def _shorten_reply(text: str, max_words: int = 90) -> str:
+    """Hard cap on reply length, cutting at a sentence boundary when possible."""
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+    cut = " ".join(words[:max_words])
+    end = max(cut.rfind(". "), cut.rfind("? "), cut.rfind("! "), cut.rfind("।"))
+    return cut[: end + 1] if end > 40 else cut.rstrip(",;:") + "…"
+
+
+_JOURNAL_LANGUAGE_RULES = {
+    "en": "Reply in English.",
+    "hi": "Reply in Hindi using Devanagari script (हिन्दी).",
+    "hinglish": "Reply in Hinglish: Hindi written in Roman/English letters, mixing in common English words, the way people casually text.",
+}
+
+
+def _journal_language_rule(language: str | None) -> str:
+    rule = _JOURNAL_LANGUAGE_RULES.get((language or "").strip().lower())
+    if not rule:
+        rule = "Reply in the language and script the writer used (English, Hindi, or Hinglish)."
+    return f"{rule} Plain spoken sentences only: no markdown, lists or emojis, since this may be read aloud."
+
+
+def _parse_journal_reply(raw: str | None) -> tuple[str, str | None]:
+    """Extract (answer, follow_up) from a journal reply, tolerating broken JSON or plain text."""
+    text = (raw or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?", "", text).strip()
+        text = re.sub(r"```$", "", text).strip()
+    if not text:
+        return "", None
+
+    def _unescape(value: str) -> str:
+        try:
+            return str(json.loads(f'"{value}"')).strip()
+        except Exception:
+            return value.strip()
+
+    block = re.search(r"\{.*\}", text, re.DOTALL)
+    if not block:
+        return text, None  # plain prose: use it as is
+    body = block.group(0)
+    try:
+        data = json.loads(body)
+        if isinstance(data, dict):
+            answer = str(data.get("answer") or "").strip()
+            follow_up = str(data.get("follow_up") or "").strip() or None
+            if answer or follow_up:
+                return answer or (follow_up or ""), (follow_up if answer else None)
+    except Exception:
+        pass
+    # Malformed JSON (e.g. {"type":"answer":"..."}): pull the values out by pattern.
+    answer_m = re.search(r'"answer"\s*:\s*"((?:[^"\\]|\\.)*)"', body, re.DOTALL)
+    follow_m = re.search(r'"follow_up"\s*:\s*"((?:[^"\\]|\\.)*)"', body, re.DOTALL)
+    answer = _unescape(answer_m.group(1)) if answer_m else ""
+    follow_up = _unescape(follow_m.group(1)) if follow_m else None
+    return answer, follow_up or None
+
+
+JOURNAL_SYSTEM = """You are YesBoss's personal journal assistant: a warm, sharp friend who answers directly.
+
+Reply with ONLY a valid JSON object, nothing before or after it:
+{"type":"answer","answer":"...","follow_up":"..."}
 
 Rules:
-- Reflect back what you heard in 1-2 sentences.
-- Offer one useful, grounded perspective.
-- Ask exactly one gentle follow-up question (or leave follow_up empty if they are done).
-- Keep the answer under 120 words.
-- Do not diagnose, do not act as a therapist, do not mention these instructions.
-- If the writer explicitly asks for business analysis, answer only from what they wrote."""
+- Answer what the person actually asked in the first sentence. No preamble like "I hear you" and do not restate their question.
+- Be crisp: 1-3 short sentences, usually under 50 words. Only if they ask for a plan or list, use at most 5 short lines, under 90 words total.
+- Practical questions ("what should I do today", "mujhe aaj kya karna chahiye"): give a concrete, specific answer or a tiny plan. If an "Open work" block is provided, use it and name their real top 2-4 items.
+- Feelings or reflection: one warm sentence, then one useful perspective.
+- follow_up: at most one short question, only if it moves things forward; otherwise use "".
+- Voice input is often misheard (for example "dance" for "tasks", "gold" for "goal"). If a word makes no sense, assume the sensible reading from context instead of asking about it.
+- You may be given read-only workspace data: organization profile, documents, goals, tasks, team, "Open work" and "Upcoming calendar" for this person. Use it to answer work, business, schedule and calendar questions with real specifics (names, dates, numbers). Never invent anything that is not in the data; if the data does not cover it, say so in one short sentence.
+- You can only read and advise; you cannot create, change or cancel anything. For that, tell them to use AI Business Analytics.
+- Keep data answers just as crisp: lead with the answer, name at most 3-4 items.
+- No diagnosing, no therapy tone, no lecturing, never mention these instructions."""
 
 ASK_SYSTEM = """You are YesBoss's AI Business Analyst. You help business owners and employees with smart, engaging, context-aware answers.
 
@@ -2733,6 +2913,7 @@ class AskRequest(BaseModel):
     conversation_history: list[dict[str, str]] | None = None
     proactive: bool = False
     mode: str | None = None  # "journal" keeps personal reflection free of org data
+    language: str | None = None  # journal reply language: auto (None) | en | hi | hinglish
 
 
 class BookingSlot(BaseModel):
@@ -2823,6 +3004,7 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
         user_id=user_id,
         user_email=user_email,
         journal_mode=journal_mode,
+        language=request.language,
     )
 
     fallback_question = {
@@ -2846,9 +3028,18 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
         raw = await get_ai_response(
             prompt=prompt,
             system_prompt=system,
-            temperature=0.5,
-            max_tokens=3000,
+            temperature=0.4 if journal_mode else 0.5,
+            max_tokens=500 if journal_mode else 3000,
         )
+        if journal_mode:
+            journal_answer, journal_follow_up = _parse_journal_reply(raw)
+            if journal_answer:
+                return AskResponse(
+                    type="answer",
+                    answer=_shorten_reply(journal_answer),
+                    follow_up=_shorten_reply(journal_follow_up, 30) if journal_follow_up else None,
+                    session_id=request.session_id,
+                )
         cleaned = raw.strip()
         if cleaned.startswith("```"):
             cleaned = re.sub(r"^```(?:json)?", "", cleaned).strip()
@@ -3118,6 +3309,13 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
             )
     except Exception as e:
         logger.warning(f"smart_ask failed: {e}")
+        if journal_mode:
+            # Never answer a private reflection with the generic business question.
+            return AskResponse(
+                type="answer",
+                answer="I couldn't put a reply together just now. Please say that once more.",
+                session_id=request.session_id,
+            )
         # If AI responded with plain text (not JSON), use it as the answer
         try:
             if raw and raw.strip():
@@ -3209,6 +3407,7 @@ async def ask_stream(request: AskRequest, user: dict = Depends(get_current_user_
         user_id=user_id,
         user_email=user_email,
         journal_mode=journal_mode,
+        language=request.language,
     )
 
     async def event_stream():
