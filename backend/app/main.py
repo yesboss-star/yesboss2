@@ -107,6 +107,7 @@ from .api.google_calendar import router as google_calendar_router
 from .api.health import router as health_router
 from .api.intelligence import router as intelligence_router
 from .api.journal import router as journal_router
+from .api.journal_intel import router as journal_intel_router
 from .api.learning import router as learning_router
 from .api.market_trends import router as market_trends_router
 from .api.master_agent import router as agent_router
@@ -372,6 +373,7 @@ app.include_router(check_ins_router, prefix="/api/v1/organizations", tags=["Chec
 app.include_router(smart_suggestions_router, prefix="/api/v1/smart", tags=["Smart Suggestions"])
 app.include_router(websocket_router, tags=["WebSocket"])
 app.include_router(journal_router, prefix="/api/v1/journal", tags=["Journal"])
+app.include_router(journal_intel_router, prefix="/api/v1/journal-intel", tags=["Journal Intelligence"])
 app.include_router(finance_router, prefix="/api/v1/finance", tags=["Finance"])
 app.include_router(sessions_router, prefix="/api/v1/sessions", tags=["Sessions"])
 app.include_router(me_router, prefix="/api/v1/me", tags=["Me"])

@@ -4,11 +4,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganizationStore } from "@/stores/organizationStore";
-import { useSessionStore, type SessionMessage } from "@/stores/sessionStore";
+import { useSessionStore, delegateAssigneeLabel, type GeneratedSubTask, type SessionMessage } from "@/stores/sessionStore";
 import { getAuthHeaders } from "@/lib/utils";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { SPEEDS, useJournalSpeaker } from "@/hooks/useJournalSpeaker";
 import DashboardLayout from "@/components/DashboardLayout";
+import DelegatePreviewCard from "@/components/DelegatePreviewCard";
+import JournalPanel, { PANEL_TABS, type PanelTab } from "@/components/journal/JournalPanel";
+import { DailyCheckin, RecapNudge } from "@/components/journal/ChatNudges";
+import GeminiSpark from "@/components/journal/GeminiSpark";
+import MessageChips from "@/components/journal/MessageChips";
+import { journalApi, type EntryRow } from "@/lib/journalApi";
 import {
   AudioLines,
   Check,
@@ -29,6 +35,15 @@ import {
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
 type Mode = "write" | "talk";
+type PanelState = { open: boolean; tab: PanelTab; prefill?: string };
+
+/** Notification links can open the panel directly: /dashboard/journal?view=decisions */
+function initialPanel(): PanelState {
+  if (typeof window === "undefined") return { open: false, tab: "overview" };
+  const requested = new URLSearchParams(window.location.search).get("view");
+  const tab = PANEL_TABS.find((item) => item.id === requested)?.id;
+  return { open: !!tab || requested === "overview", tab: tab ?? "overview" };
+}
 type LangId = "auto" | "en" | "hi" | "hinglish";
 
 const LANGUAGES: { id: LangId; label: string; recognition: string; voice: string }[] = [
@@ -80,9 +95,11 @@ export default function JournalPage() {
   const { user, role, loading: authLoading } = useAuth();
   const router = useRouter();
   const { organization } = useOrganizationStore();
-  const { sessions, fetchSessions, createSession, setActiveSession, addMessage, getActiveSession } =
+  const { sessions, fetchSessions, createSession, setActiveSession, addMessage, updateLastMessage, getActiveSession } =
     useSessionStore();
 
+  const [panel, setPanel] = useState<PanelState>(initialPanel);
+  const deepLinked = useRef(false);
   const [mode, setMode] = useState<Mode>(() => (loadPrefs().mode === "talk" ? "talk" : "write"));
   const [lang, setLang] = useState<LangId>(() => {
     const saved = loadPrefs().lang;
@@ -94,11 +111,12 @@ export default function JournalPage() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const { listening, interimText, startListening, stopListening } = useVoiceInput();
+  const { listening, liveText, startListening, stopListening } = useVoiceInput();
   const speaker = useJournalSpeaker();
   const initialized = useRef<string | null>(null);
   const mountedRef = useRef(true);
   const endRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const langConfig = LANGUAGES.find((item) => item.id === lang) ?? LANGUAGES[0];
 
@@ -150,9 +168,19 @@ export default function JournalPage() {
     })();
   }, [organization?.id, fetchSessions, createSession, setActiveSession]);
 
+  // While the mic is on, show everything said so far in the box, and let the box grow with it.
+  const shownInput = listening ? [input, liveText].filter(Boolean).join(" ") : input;
+  useEffect(() => {
+    const box = inputRef.current;
+    if (!box) return;
+    box.style.height = "auto";
+    box.style.height = `${Math.min(box.scrollHeight, 160)}px`;
+    if (listening) box.scrollTop = box.scrollHeight;
+  }, [shownInput, listening, mode]);
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isAsking, interimText]);
+  }, [messages, isAsking, liveText]);
 
   useEffect(() => {
     if (!historyOpen) return;
@@ -220,6 +248,22 @@ export default function JournalPage() {
       });
       if (!res.ok) throw new Error("Journal request failed");
       const data = await res.json();
+
+      // A task request: show the confirm card; nothing is created until the user confirms.
+      if (data.type === "delegate_preview" && data.delegate_params) {
+        const cardMessage: SessionMessage = {
+          role: "assistant",
+          content: data.answer || `I can assign "${data.delegate_params.title}". Confirm below.`,
+          is_delegate: true,
+          delegate_params: data.delegate_params,
+          generated_sub_tasks: data.generated_sub_tasks || [],
+          timestamp: new Date().getTime(),
+        };
+        await addMessage(activeSession.id, cardMessage);
+        await syncJournalEntry(activeSession.id, [...activeSession.messages, userMessage, cardMessage]);
+        return;
+      }
+
       const reply =
         (data.type === "question" && data.question?.text) ||
         [data.answer, data.follow_up].filter(Boolean).join("\n\n") ||
@@ -238,6 +282,101 @@ export default function JournalPage() {
       }
     } catch {
       setError("I couldn't reach your journal just now. Please try again.");
+    } finally {
+      setIsAsking(false);
+    }
+  };
+
+  /** Jump from an insight/recap/source link to the original conversation. */
+  const openSession = (sessionId: string) => {
+    if (!useSessionStore.getState().sessions.some((item) => item.id === sessionId)) {
+      setError("That conversation is no longer available.");
+      setPanel((prev) => ({ ...prev, open: false }));
+      return;
+    }
+    stopListening();
+    speaker.stop();
+    setError(null);
+    setActiveSession(sessionId);
+    setPanel((prev) => ({ ...prev, open: false }));
+  };
+
+  const openEntryById = async (entryId: string) => {
+    if (!organization?.id) return;
+    try {
+      const data = await journalApi<{ entry: EntryRow }>(`/entries/${entryId}`, organization.id);
+      if (data.entry.session_id) openSession(data.entry.session_id);
+      else setPanel({ open: true, tab: "insights" });
+    } catch {
+      setError("Couldn't open that journal entry.");
+    }
+  };
+
+  // Notification links: /dashboard/journal?entry=<id>
+  useEffect(() => {
+    if (!activeSession || deepLinked.current) return;
+    const entryId = new URLSearchParams(window.location.search).get("entry");
+    if (!entryId) {
+      deepLinked.current = true;
+      return;
+    }
+    const timer = setTimeout(() => {
+      deepLinked.current = true;
+      void openEntryById(entryId);
+    }, 0);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSession?.id]);
+
+  /** Send a suggested question (follow-up, pattern to explore) into the chat. */
+  const askInChat = (question: string) => {
+    setPanel((prev) => ({ ...prev, open: false }));
+    void send(question);
+  };
+
+  const openPanel = (tab: PanelTab, prefill?: string) => {
+    stopListening();
+    speaker.stop();
+    setPanel({ open: true, tab, prefill });
+  };
+
+  /** Create the task/goal after the user confirms the card (same endpoint as AI Business Analytics). */
+  const confirmDelegate = async (message: SessionMessage, selected: GeneratedSubTask[]) => {
+    const params = message.delegate_params;
+    if (!params || !organization?.id || !activeSession || isAsking) return;
+    setIsAsking(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/assistant/delegate`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          title: params.title,
+          description: params.description ?? null,
+          assignee_id: params.assignee_id,
+          assignee_name: params.assignee_name,
+          assignees: params.assignees,
+          priority: params.priority,
+          item_type: params.item_type,
+          department: params.department ?? null,
+          sub_tasks: selected,
+          context: { user_email: user?.email, organization_id: organization.id },
+        }),
+      });
+      if (!res.ok) throw new Error("Delegate failed");
+      await res.json();
+      const typeLabel =
+        params.item_type === "goal" ? "goal" : params.item_type === "both" ? "goal and task" : "task";
+      const steps = selected.length ? ` with ${selected.length} sub-step${selected.length > 1 ? "s" : ""}` : "";
+      updateLastMessage(activeSession.id, {
+        content: `Done. "${params.title}" is assigned to ${delegateAssigneeLabel(params)} as a ${typeLabel}${steps}.`,
+        is_delegate: false,
+        delegate_params: null,
+        generated_sub_tasks: undefined,
+        is_answer: true,
+      });
+    } catch {
+      setError("I couldn't create that task just now. Please try again.");
     } finally {
       setIsAsking(false);
     }
@@ -375,6 +514,14 @@ export default function JournalPage() {
               ))}
             </select>
             <button
+              onClick={() => openPanel("overview")}
+              aria-label="Journal insights"
+              title="Mood, decisions, ideas, recaps and reminders"
+              className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-border bg-surface transition-transform hover:scale-110"
+            >
+              <GeminiSpark className="h-5 w-5" />
+            </button>
+            <button
               onClick={() => setHistoryOpen(true)}
               aria-label="Past entries"
               title="Past entries"
@@ -402,8 +549,15 @@ export default function JournalPage() {
             </p>
           )}
 
+          {organization?.id && (
+            <div className="pt-1">
+              <DailyCheckin orgId={organization.id} onMore={() => openPanel("overview")} />
+              <RecapNudge orgId={organization.id} onOpen={() => openPanel("recaps")} />
+            </div>
+          )}
+
           {messages.length === 0 && !isAsking && (
-            <div className="flex h-full flex-col items-center justify-center gap-6 pb-8 text-center">
+            <div className="flex min-h-[50%] flex-col items-center justify-center gap-6 py-10 text-center">
               <div>
                 <h1 className="bg-gradient-to-r from-primary to-purple-500 bg-clip-text text-3xl font-semibold text-transparent md:text-4xl">
                   {greeting()}
@@ -447,6 +601,18 @@ export default function JournalPage() {
                         <div className="whitespace-pre-wrap text-[15px] leading-relaxed text-foreground">
                           {message.content}
                         </div>
+                        {message.is_delegate && message.delegate_params && index === messages.length - 1 ? (
+                          <div className="mt-3">
+                            <DelegatePreviewCard
+                              params={message.delegate_params}
+                              subTasks={message.generated_sub_tasks || []}
+                              onConfirm={(selected) => void confirmDelegate(message, selected)}
+                              disabled={isAsking}
+                            />
+                          </div>
+                        ) : message.is_delegate ? (
+                          <p className="mt-2 text-xs text-text-muted">This task suggestion was not assigned.</p>
+                        ) : (
                         <div className="mt-2 flex items-center gap-1">
                           <button
                             onClick={() => void speaker.toggle(id, message.content, voiceLangFor(message.content))}
@@ -498,6 +664,21 @@ export default function JournalPage() {
                             {copiedId === id ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
                           </button>
                         </div>
+                        )}
+                        {!message.is_delegate &&
+                          index === messages.length - 1 &&
+                          !isAsking &&
+                          organization?.id &&
+                          activeSession &&
+                          messages[index - 1]?.role === "user" && (
+                            <MessageChips
+                              key={id}
+                              orgId={organization.id}
+                              sessionId={activeSession.id}
+                              userText={messages[index - 1].content}
+                              onLogDecision={(text) => openPanel("decisions", text)}
+                            />
+                          )}
                       </div>
                     </>
                   )}
@@ -523,12 +704,14 @@ export default function JournalPage() {
             <div className="rounded-3xl border border-border bg-surface px-3 py-2 shadow-sm focus-within:border-primary/50">
               {listening && (
                 <p className="px-2 pb-1 text-xs italic text-primary">
-                  Listening… {interimText || "speak now, then tap the mic again"}
+                  Listening… tap the mic again when you are done.
                 </p>
               )}
               <div className="flex items-end gap-2">
                 <textarea
-                  value={input}
+                  ref={inputRef}
+                  value={shownInput}
+                  readOnly={listening}
                   onChange={(event) => setInput(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -564,8 +747,8 @@ export default function JournalPage() {
             </div>
           ) : (
             <div className="flex flex-col items-center gap-2 pb-1">
-              {listening && interimText && (
-                <p className="max-w-md text-center text-sm italic text-text-muted">{interimText}</p>
+              {listening && liveText && (
+                <p className="max-h-24 max-w-md overflow-y-auto text-center text-sm italic text-text-muted">{liveText}</p>
               )}
               <div className="relative flex h-20 w-20 items-center justify-center">
                 {listening && (
@@ -609,6 +792,20 @@ export default function JournalPage() {
             Your journal is private. Voice is never recorded or stored, only the text.
           </p>
         </footer>
+
+        {/* Insights side panel */}
+        {panel.open && organization?.id && (
+          <JournalPanel
+            orgId={organization.id}
+            tab={panel.tab}
+            decisionPrefill={panel.prefill}
+            onTab={(tab) => setPanel((prev) => ({ ...prev, tab, prefill: undefined }))}
+            onClose={() => setPanel((prev) => ({ ...prev, open: false }))}
+            onAsk={askInChat}
+            onOpenSession={openSession}
+            onOpenEntry={(entryId) => void openEntryById(entryId)}
+          />
+        )}
 
         {/* Past entries drawer */}
         {historyOpen && (

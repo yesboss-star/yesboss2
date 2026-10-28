@@ -1670,6 +1670,12 @@ async def scheduler_loop():
                     pass
                 if db is not None:
                     await check_goal_deadlines(db)
+                    try:
+                        from .journal_intel import run_journal_jobs
+                        _now_ist = datetime.now(ZoneInfo("Asia/Kolkata"))
+                        await run_journal_jobs(db, _now_ist.hour, _now_ist.weekday())
+                    except Exception as e:
+                        logger.error("Journal jobs failed: %s", e)
                 hour = datetime.now(ZoneInfo("Asia/Kolkata")).hour
                 if hour == 8:
                     await send_digests()

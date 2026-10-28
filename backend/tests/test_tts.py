@@ -155,3 +155,53 @@ def test_gather_my_meetings_formats_and_scopes():
     assert "Board sync (with a@x.com)" in block and "Dentist" in block
     assert queries[0]["organization_id"] == "org1"
     assert "uid1" in queries[0]["$or"][0]["created_by"]["$in"]
+
+
+def _run_journal_ask(monkeypatch, ai_reply: str, message: str):
+    from app.api import assistant as a
+
+    async def fake_ai(*args, **kwargs):
+        return ai_reply
+
+    async def fake_preview(parsed, db, org_id):
+        return (
+            {"title": parsed["title"], "assignee_name": "Me", "assignee_id": ["1"], "assignees": [],
+             "priority": "medium", "item_type": "task", "description": None, "department": None},
+            [],
+            None,
+        )
+
+    monkeypatch.setattr(a, "get_ai_response", fake_ai)
+    monkeypatch.setattr(a, "_build_delegate_preview", fake_preview)
+    monkeypatch.setattr(a, "get_database", lambda: None)
+    request = a.AskRequest(message=message, mode="journal", context=a.ChatContext(organization_id="org1"))
+    return asyncio.run(a.smart_ask(request, current_user=None))
+
+
+def test_journal_task_request_returns_confirm_preview(monkeypatch):
+    reply = '{"type":"delegate","item_type":"task","assignee_name":"Me","title":"Send invoice","answer":"Ready."}'
+    resp = _run_journal_ask(monkeypatch, reply, "create a task to send the invoice")
+    assert resp.type == "delegate_preview"
+    assert resp.delegate_params["title"] == "Send invoice"
+
+
+def test_journal_without_task_intent_never_delegates(monkeypatch):
+    reply = '{"type":"delegate","item_type":"task","assignee_name":"Me","title":"Sneaky","answer":"Hi there."}'
+    resp = _run_journal_ask(monkeypatch, reply, "I felt tired today")
+    assert resp.type == "answer"
+    assert resp.delegate_params is None
+
+
+def test_journal_task_intent_with_plain_reply_still_answers(monkeypatch):
+    resp = _run_journal_ask(monkeypatch, '{"type":"answer","answer":"Which task did you mean?"}', "assign this to someone")
+    assert resp.type == "answer" and "Which task" in resp.answer
+
+
+def test_task_intent_does_not_match_nouns():
+    from app.api.assistant import _wants_task_creation
+
+    assert _wants_task_creation("Assign the vendor report to Krisha")
+    assert _wants_task_creation("mujhe task bana do invoice bhejna")
+    assert _wants_task_creation("remind me to call Rahul")
+    assert not _wants_task_creation("the assignment was hard")
+    assert not _wants_task_creation("I felt low today")

@@ -75,7 +75,7 @@ def connect_mongodb():
 
 def _ensure_collections(db: Database):
     collections = db.list_collection_names()
-    required = ["users", "organizations", "employees", "goals", "tasks", "workflows", "task_outcomes", "bottlenecks", "learning_patterns", "documents", "conversations", "uploads", "org_chart_members", "reports", "user_patterns", "notifications", "notification_preferences", "push_subscriptions", "team_updates", "meetings", "zoho_tokens", "google_tokens", "calendar_events", "check_ins", "employee_frequencies", "goal_outcomes", "industry_intelligence", "assistant_sessions", "strategy_chat_sessions", "market_trends", "market_impacts", "files", "approval_requests", "password_reset_codes", "signup_otps", "role_registry", "journal_entries", "financial_metrics", "task_followups"]
+    required = ["users", "organizations", "employees", "goals", "tasks", "workflows", "task_outcomes", "bottlenecks", "learning_patterns", "documents", "conversations", "uploads", "org_chart_members", "reports", "user_patterns", "notifications", "notification_preferences", "push_subscriptions", "team_updates", "meetings", "zoho_tokens", "google_tokens", "calendar_events", "check_ins", "employee_frequencies", "goal_outcomes", "industry_intelligence", "assistant_sessions", "strategy_chat_sessions", "market_trends", "market_impacts", "files", "approval_requests", "password_reset_codes", "signup_otps", "role_registry", "journal_entries", "journal_checkins", "journal_decisions", "journal_ideas", "journal_recaps", "journal_patterns", "journal_reminders", "financial_metrics", "task_followups"]
     for col in required:
         if col not in collections:
             db.create_collection(col)
@@ -171,6 +171,13 @@ def _ensure_indexes(db: Database):
         db.journal_entries.create_index([("user_id", 1), ("org_id", 1)])
         db.journal_entries.create_index([("org_id", 1), ("created_at", -1)])
         db.journal_entries.create_index([("user_id", 1), ("created_at", -1)])
+        db.journal_checkins.create_index([("user_id", 1), ("org_id", 1), ("date", -1)], unique=True)
+        db.journal_decisions.create_index([("user_id", 1), ("org_id", 1), ("created_at", -1)])
+        db.journal_ideas.create_index([("user_id", 1), ("org_id", 1), ("created_at", -1)])
+        db.journal_ideas.create_index([("user_id", 1), ("entry_id", 1)])
+        db.journal_recaps.create_index([("user_id", 1), ("period", 1), ("range_key", 1)], unique=True)
+        db.journal_patterns.create_index([("user_id", 1), ("key", 1)], unique=True)
+        db.journal_reminders.create_index([("status", 1), ("user_id", 1)])
 
         db.financial_metrics.create_index("organization_id")
         db.financial_metrics.create_index([("organization_id", 1), ("extracted_at", -1)])

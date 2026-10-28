@@ -1945,7 +1945,10 @@ async def _build_ask_prompt(
     # Analytics (org profile, documents, goals, tasks, team, insights) plus the
     # user's own open work and upcoming meetings.
     journal_with_data = bool(
-        journal_mode and db is not None and org_id and _wants_work_context(text, conversation_history)
+        journal_mode
+        and db is not None
+        and org_id
+        and (_wants_work_context(text, conversation_history) or _wants_task_creation(text))
     )
     if journal_mode and not journal_with_data:
         prompt = (
@@ -2087,6 +2090,7 @@ async def _build_ask_prompt(
             f"Current date: {datetime.now().strftime('%A, %Y-%m-%d %H:%M')}\n\n"
             f"The writer is asking their private journal assistant. Their words:\n\"{text}\"\n\n"
             f"{_journal_language_rule(language)}"
+            + (f"\n\n{_journal_task_rules(user_email)}" if _wants_task_creation(text) else "")
         )
         return prompt, JOURNAL_SYSTEM, snap
 
@@ -2558,6 +2562,72 @@ def _gather_my_work(db, org_id: str, user_id: str | None, user_email: str | None
     return f"Open work (this person's own items only):\n{body}"
 
 
+_TASK_INTENT_RE = re.compile(
+    r"\b(?:assign|delegate|(?:create|add|make|new|set)\s+(?:a\s+|an\s+)?(?:new\s+)?(?:task|todo|to-do|goal)"
+    r"|task\s+(?:bana\w*|add\w*|create|de\w*)|remind\s+me\s+to|kaam\s+de\w*)\b"
+    r"|(?:टास्क\s*(?:बना|जोड़|दे))",
+    re.IGNORECASE,
+)
+
+
+def _wants_task_creation(text: str) -> bool:
+    return bool(_TASK_INTENT_RE.search(text or ""))
+
+
+def _journal_task_rules(user_email: str | None) -> str:
+    me = f' use assignee_email "{user_email}" and their exact name from the team list.' if user_email else " use their own name from the team list."
+    return (
+        "The writer wants a task created. Reply with ONLY this JSON object: "
+        '{"type":"delegate","item_type":"task","assignee_name":"exact full name from the team list",'
+        '"assignee_email":"email if known","title":"short title (2-8 words)","description":"optional detail",'
+        '"priority":"medium|high|low","answer":"one short confirmation sentence"}. '
+        f"If no person is named, the task is for the writer:{me} "
+        "If it turns out not to be a task request, reply with the normal answer JSON instead."
+    )
+
+
+_RECALL_RE = re.compile(
+    r"\b(what|which)\s+(was|were)\s+i\b|\bhave\s+i\s+been\b|\bdid\s+i\s+(decide|say|mention|write|note|think)\b"
+    r"|\bideas?\b.*\bnever\b|\bwhat\s+did\s+i\s+(decide|say|think|write)\b|\bi\s+(mentioned|wrote|said)\b.*\b(before|earlier|ago)\b"
+    r"|\bmaine\s+(kya|kab)\b|\bmere\s+purane\b",
+    re.IGNORECASE,
+)
+_WHAT_IF_RE = re.compile(r"^\s*(what\s+if|agar\s+main|kya\s+hoga\s+agar)\b|\bwhat\s+if\s+i\b", re.IGNORECASE)
+
+
+def _format_what_if(result: dict[str, Any]) -> str:
+    def line(label: str, key: str) -> str:
+        items = result.get(key) or []
+        if not items:
+            return ""
+        tagged = "; ".join(f"{i['text']} ({'fact' if i['basis'] == 'fact' else 'estimate'})" for i in items[:2])
+        return f"{label}: {tagged}."
+
+    parts = [
+        result.get("summary", ""), line("Upside", "benefits"), line("Cost", "costs"), line("Risk", "risks"),
+        ("To check first: " + "; ".join(result.get("info_needed", [])[:2]) + ".") if result.get("info_needed") else "",
+        f"Try: {result['first_step']}" if result.get("first_step") else "",
+    ]
+    return " ".join(p for p in parts if p)
+
+
+async def _journal_special_reply(db, org_id: str, user_id: str, user_email: str | None, text: str) -> str | None:
+    """Journal chat shortcuts: recall questions (past entries) and what-if exploration."""
+    from ..core import journal_intel
+
+    if _WHAT_IF_RE.search(text):
+        from .journal_intel import _org_context
+
+        result = await journal_intel.what_if(text[:600], await _org_context(db, org_id, user_id, user_email))
+        return _format_what_if(result) if result else None
+    if _RECALL_RE.search(text):
+        result = await journal_intel.ask_journal(db, user_id, org_id, text[:500])
+        dates = ", ".join(dict.fromkeys(c["date"] for c in result.get("citations", [])[:3]))
+        answer = result.get("answer") or ""
+        return f"{answer} (From your entries on {dates}.)" if answer and dates else answer or None
+    return None
+
+
 def _fmt_event_time(raw: Any) -> str:
     """'20261023T150000+0530' -> 'Fri 23 Oct, 15:00' (falls back to the raw text)."""
     text = str(raw or "")
@@ -2981,6 +3051,11 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
     db = get_database()
     journal_mode = (request.mode or "").strip().lower() == "journal"
 
+    if journal_mode and db is not None and org_id and user_id:
+        special = await _journal_special_reply(db, org_id, user_id, user_email, text)
+        if special:
+            return AskResponse(type="answer", answer=special, session_id=request.session_id)
+
     session_context = dict(request.session_context or {})
     det = None
     if not journal_mode:
@@ -3024,6 +3099,8 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
         "answer": None,
     }
 
+    task_intent = journal_mode and _wants_task_creation(text)
+    raw = ""
     try:
         raw = await get_ai_response(
             prompt=prompt,
@@ -3031,7 +3108,7 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
             temperature=0.4 if journal_mode else 0.5,
             max_tokens=500 if journal_mode else 3000,
         )
-        if journal_mode:
+        if journal_mode and not task_intent:
             journal_answer, journal_follow_up = _parse_journal_reply(raw)
             if journal_answer:
                 return AskResponse(
@@ -3049,8 +3126,9 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
             cleaned = m.group(0)
         parsed = json.loads(cleaned)
         parsed_type = parsed.get("type", "question")
-        if journal_mode and parsed_type not in ("answer", "question", "briefing"):
-            # A private reflection must never trigger bookings, delegation, or other actions.
+        allowed_journal_types = ("answer", "question", "briefing") + (("delegate",) if task_intent else ())
+        if journal_mode and parsed_type not in allowed_journal_types:
+            # A private reflection must never trigger bookings or other actions (tasks only when asked).
             parsed = {
                 "type": "answer",
                 "answer": parsed.get("answer") or parsed.get("follow_up") or "",
@@ -3311,6 +3389,14 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
         logger.warning(f"smart_ask failed: {e}")
         if journal_mode:
             # Never answer a private reflection with the generic business question.
+            salvaged, salvaged_follow_up = _parse_journal_reply(raw)
+            if salvaged:
+                return AskResponse(
+                    type="answer",
+                    answer=_shorten_reply(salvaged),
+                    follow_up=_shorten_reply(salvaged_follow_up, 30) if salvaged_follow_up else None,
+                    session_id=request.session_id,
+                )
             return AskResponse(
                 type="answer",
                 answer="I couldn't put a reply together just now. Please say that once more.",

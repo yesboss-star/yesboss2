@@ -175,7 +175,15 @@ async def sync_journal_entry(
             update["mood"] = data.mood
         db.journal_entries.update_one({"_id": existing["_id"]}, {"$set": update})
         existing.update(update)
-        existing["_id"] = str(existing["_id"])
+        entry_id = str(existing["_id"])
+        existing["_id"] = entry_id
+        try:
+            import asyncio
+
+            from ..agents.journal_agent import maybe_reanalyze
+            asyncio.create_task(maybe_reanalyze(entry_id, resolved_org))
+        except Exception as e:
+            logger.warning("Failed to schedule journal re-analysis: %s", e)
         return {"success": True, "entry": existing, "created": False}
 
     entry = {
