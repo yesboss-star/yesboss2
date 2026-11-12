@@ -4,7 +4,7 @@ import uuid
 from collections import defaultdict
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import JSONResponse
@@ -94,6 +94,11 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
 from .api.assistant import router as assistant_router
 from .api.auth import router as auth_router
+from .api.capture_chat import router as capture_chat_router
+from .api.capture_inbox import public_router as capture_inbox_public_router
+from .api.capture_inbox import router as capture_inbox_router
+from .api.business_profile import router as business_profile_router
+from .api.captures import router as captures_router
 from .api.chatbot import router as chatbot_router
 from .api.check_ins import router as check_ins_router
 from .api.dashboard import router as dashboard_router
@@ -129,6 +134,8 @@ from .api.strategy_chat import router as strategy_chat_router
 from .api.tasks import router as tasks_router
 from .api.upload import router as upload_router
 from .api.websocket import router as websocket_router
+from .api.weekly_review import public_router as weekly_review_public_router
+from .api.weekly_review import router as weekly_review_router
 from .api.zoho_auth import router as zoho_auth_router
 from .api.zoho_calendar import router as zoho_calendar_router
 from .api.zoho_cliq import router as zoho_cliq_router
@@ -136,6 +143,7 @@ from .core import settings
 from .core.database import close_mongodb, connect_mongodb, get_database
 from .core.qdrant import close_qdrant, connect_qdrant
 from .core.supabase_client import connect_supabase
+from .dependencies.tenant import require_auth, require_tenant
 
 logger = logging.getLogger("yesboss.api")
 
@@ -148,10 +156,13 @@ async def lifespan(app: FastAPI):
     connect_qdrant()
     connect_supabase()
 
-    from .core.qdrant import create_collection
+    from .core.qdrant import create_collection, ensure_payload_indexes
     create_collection("documents", 1536)
     create_collection("conversations", 1536)
     create_collection("workflows", 1536)
+    ensure_payload_indexes("documents", keyword=("file_id", "org_id", "user_id"))  # the cloud refuses filters on unindexed fields
+    from .core.memory import ensure_collection as ensure_memory_collection
+    ensure_memory_collection()
 
     import asyncio
 
@@ -159,12 +170,15 @@ async def lifespan(app: FastAPI):
     bind_main_loop(asyncio.get_running_loop())
 
     scheduler_thread = None
-    try:
-        from .core.scheduler import start_scheduler
-        scheduler_thread = start_scheduler()
-        logger.info("Scheduler started")
-    except Exception as e:
-        logger.warning(f"Scheduler not started: {e}")
+    if not settings.SCHEDULER_ENABLED:
+        logger.warning("SCHEDULER_ENABLED=false: background jobs (reminders, digests, syncs) are OFF")
+    else:
+        try:
+            from .core.scheduler import start_scheduler
+            scheduler_thread = start_scheduler()
+            logger.info("Scheduler started")
+        except Exception as e:
+            logger.warning(f"Scheduler not started: {e}")
 
     try:
         db = get_database()
@@ -239,7 +253,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["X-Request-Id", "X-Response-Time"],
 )
@@ -342,38 +356,45 @@ app.include_router(auth_router, prefix="/api/v1/auth", tags=["Auth"])
 app.include_router(organizations_router, prefix="/api/v1/organizations", tags=["Organizations"])
 app.include_router(owner_requests_router, prefix="/api/v1", tags=["Owner Requests"])
 app.include_router(employees_router, prefix="/api/v1/employees", tags=["Employees"])
-app.include_router(upload_router, prefix="/api/v1/upload", tags=["Upload"])
-app.include_router(scrape_router, prefix="/api/v1/scrape", tags=["Scraper"])
-app.include_router(intelligence_router, prefix="/api/v1/intelligence", tags=["Intelligence"])
-app.include_router(agent_router, prefix="/api/v1/agent", tags=["Master Agent"])
-app.include_router(expert_agents_router, prefix="/api/v1/expert-agents", tags=["Expert Agents"])
-app.include_router(chatbot_router, prefix="/api/v1/chatbot", tags=["Chatbot"])
-app.include_router(file_processing_router, prefix="/api/v1/files", tags=["File Processing"])
-app.include_router(social_router, prefix="/api/v1/social", tags=["Social Detection"])
-app.include_router(goals_router, prefix="/api/v1/goals", tags=["Goals"])
-app.include_router(tasks_router, prefix="/api/v1/tasks", tags=["Tasks"])
-app.include_router(dashboard_router, prefix="/api/v1/dashboard", tags=["Dashboard"])
-app.include_router(strategy_chat_router, prefix="/api/v1/strategy-chat", tags=["Strategy Chat"])
-app.include_router(learning_router, prefix="/api/v1/learning", tags=["Continuous Learning"])
-app.include_router(org_chart_router, prefix="/api/v1/org-chart", tags=["Org Chart"])
-app.include_router(reports_router, prefix="/api/v1/reports", tags=["Reports"])
-app.include_router(market_trends_router, prefix="/api/v1/trends", tags=["Market Trends"])
-app.include_router(prompt_router, prefix="/api/v1/prompt", tags=["Prompt Engine"])
-app.include_router(assistant_router, prefix="/api/v1/assistant", tags=["AI Assistant"])
-app.include_router(notifications_router, prefix="/api/v1/notifications", tags=["Notifications"])
-app.include_router(notification_preferences_router, prefix="/api/v1/notification-preferences", tags=["Notification Preferences"])
-app.include_router(meetings_router, prefix="/api/v1/meetings", tags=["Meetings"])
-app.include_router(push_subscriptions_router, prefix="/api/v1/push", tags=["Push Notifications"])
+app.include_router(upload_router, prefix="/api/v1/upload", tags=["Upload"], dependencies=[Depends(require_tenant)])
+app.include_router(scrape_router, prefix="/api/v1/scrape", tags=["Scraper"], dependencies=[Depends(require_auth)])
+app.include_router(intelligence_router, prefix="/api/v1/intelligence", tags=["Intelligence"], dependencies=[Depends(require_auth)])
+app.include_router(agent_router, prefix="/api/v1/agent", tags=["Master Agent"], dependencies=[Depends(require_auth)])
+app.include_router(expert_agents_router, prefix="/api/v1/expert-agents", tags=["Expert Agents"], dependencies=[Depends(require_tenant)])
+app.include_router(chatbot_router, prefix="/api/v1/chatbot", tags=["Chatbot"], dependencies=[Depends(require_auth)])
+app.include_router(file_processing_router, prefix="/api/v1/files", tags=["File Processing"], dependencies=[Depends(require_tenant)])
+app.include_router(social_router, prefix="/api/v1/social", tags=["Social Detection"], dependencies=[Depends(require_auth)])
+app.include_router(goals_router, prefix="/api/v1/goals", tags=["Goals"], dependencies=[Depends(require_tenant)])
+app.include_router(tasks_router, prefix="/api/v1/tasks", tags=["Tasks"], dependencies=[Depends(require_tenant)])
+app.include_router(dashboard_router, prefix="/api/v1/dashboard", tags=["Dashboard"], dependencies=[Depends(require_tenant)])
+app.include_router(strategy_chat_router, prefix="/api/v1/strategy-chat", tags=["Strategy Chat"], dependencies=[Depends(require_tenant)])
+app.include_router(learning_router, prefix="/api/v1/learning", tags=["Continuous Learning"], dependencies=[Depends(require_tenant)])
+app.include_router(org_chart_router, prefix="/api/v1/org-chart", tags=["Org Chart"], dependencies=[Depends(require_tenant)])
+app.include_router(reports_router, prefix="/api/v1/reports", tags=["Reports"], dependencies=[Depends(require_tenant)])
+app.include_router(market_trends_router, prefix="/api/v1/trends", tags=["Market Trends"], dependencies=[Depends(require_tenant)])
+app.include_router(prompt_router, prefix="/api/v1/prompt", tags=["Prompt Engine"], dependencies=[Depends(require_tenant)])
+app.include_router(assistant_router, prefix="/api/v1/assistant", tags=["AI Assistant"], dependencies=[Depends(require_tenant)])
+app.include_router(notifications_router, prefix="/api/v1/notifications", tags=["Notifications"], dependencies=[Depends(require_tenant)])
+app.include_router(notification_preferences_router, prefix="/api/v1/notification-preferences", tags=["Notification Preferences"], dependencies=[Depends(require_tenant)])
+app.include_router(meetings_router, prefix="/api/v1/meetings", tags=["Meetings"], dependencies=[Depends(require_tenant)])
+app.include_router(push_subscriptions_router, prefix="/api/v1/push", tags=["Push Notifications"], dependencies=[Depends(require_auth)])
 app.include_router(zoho_auth_router, prefix="/api/v1/zoho", tags=["Zoho Auth"])
-app.include_router(zoho_calendar_router, prefix="/api/v1/zoho/calendar", tags=["Zoho Calendar"])
+app.include_router(zoho_calendar_router, prefix="/api/v1/zoho/calendar", tags=["Zoho Calendar"], dependencies=[Depends(require_tenant)])
 app.include_router(zoho_cliq_router, prefix="/api/v1/zoho/cliq", tags=["Zoho Cliq"])
 app.include_router(google_auth_router, prefix="/api/v1/google", tags=["Google Auth"])
-app.include_router(google_calendar_router, prefix="/api/v1/google/calendar", tags=["Google Calendar"])
-app.include_router(check_ins_router, prefix="/api/v1/organizations", tags=["Check-Ins"])
-app.include_router(smart_suggestions_router, prefix="/api/v1/smart", tags=["Smart Suggestions"])
+app.include_router(google_calendar_router, prefix="/api/v1/google/calendar", tags=["Google Calendar"], dependencies=[Depends(require_tenant)])
+app.include_router(check_ins_router, prefix="/api/v1/organizations", tags=["Check-Ins"], dependencies=[Depends(require_tenant)])
+app.include_router(smart_suggestions_router, prefix="/api/v1/smart", tags=["Smart Suggestions"], dependencies=[Depends(require_tenant)])
 app.include_router(websocket_router, tags=["WebSocket"])
+app.include_router(captures_router, prefix="/api/v1/captures", tags=["Captures"], dependencies=[Depends(require_tenant)])
+app.include_router(capture_chat_router, prefix="/api/v1/capture-chat", tags=["Capture Chat"], dependencies=[Depends(require_auth)])
+app.include_router(capture_inbox_router, prefix="/api/v1/capture-inbox", tags=["Capture Inbox"], dependencies=[Depends(require_tenant)])
+app.include_router(capture_inbox_public_router, prefix="/api/v1/capture-inbox", tags=["Capture Inbox"])
+app.include_router(weekly_review_router, prefix="/api/v1/weekly-review", tags=["Weekly Review"], dependencies=[Depends(require_tenant)])
+app.include_router(business_profile_router, prefix="/api/v1/business-profile", tags=["Business Profile"], dependencies=[Depends(require_tenant)])
+app.include_router(weekly_review_public_router, prefix="/api/v1/weekly-review", tags=["Weekly Review"])
 app.include_router(journal_router, prefix="/api/v1/journal", tags=["Journal"])
 app.include_router(journal_intel_router, prefix="/api/v1/journal-intel", tags=["Journal Intelligence"])
-app.include_router(finance_router, prefix="/api/v1/finance", tags=["Finance"])
-app.include_router(sessions_router, prefix="/api/v1/sessions", tags=["Sessions"])
+app.include_router(finance_router, prefix="/api/v1/finance", tags=["Finance"], dependencies=[Depends(require_tenant)])
+app.include_router(sessions_router, prefix="/api/v1/sessions", tags=["Sessions"], dependencies=[Depends(require_tenant)])
 app.include_router(me_router, prefix="/api/v1/me", tags=["Me"])

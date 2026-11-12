@@ -40,14 +40,20 @@ class OrganizationUpdate(BaseModel):
     check_in_frequency_days: int | None = None
 
 @router.post("")
-async def create_organization(request: OrganizationCreate, current_user: dict | None = Depends(get_current_user_optional)):
+async def create_organization(request: OrganizationCreate, current_user=Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
+    # The creator is the owner. Trusting a body `owner_id` / `co_owners` let anyone create an
+    # organization owned by someone else (and squat a company's domain).
+    caller_uid = getattr(current_user, "id", None) or getattr(current_user, "uid", None)
+    if not caller_uid:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
     domain = request.domain.lower().strip() if request.domain else ""
     if domain:
-        existing = db.organizations.find_one({"domain": {"$regex": f"^{domain}$", "$options": "i"}})
+        existing = db.organizations.find_one({"domain": {"$regex": f"^{re.escape(domain)}$", "$options": "i"}})
         if existing:
             raise HTTPException(
                 status_code=409,
@@ -63,8 +69,8 @@ async def create_organization(request: OrganizationCreate, current_user: dict | 
         "micro_vertical": request.micro_vertical,
         "micro_verticals": request.micro_verticals or ([request.micro_vertical] if request.micro_vertical else []),
         "size": request.size,
-        "owner_id": request.owner_id,
-        "co_owners": request.co_owners or [],
+        "owner_id": caller_uid,
+        "co_owners": [],
         "social_links": request.social_links or {},
         "persona_answers": request.persona_answers or [],
         "check_in_frequency_days": request.check_in_frequency_days or 7,
@@ -199,44 +205,55 @@ async def update_organization(org_id: str, request: OrganizationUpdate, current_
     return {"organization": org}
 
 
+_PUBLIC_ORG_FIELDS = ("_id", "name", "domain", "website_url", "industry", "micro_vertical", "size")
+
+
+def _public_org(org: dict) -> dict:
+    """What a non-member may see about a company: enough to pick it, nothing about ownership."""
+    return {k: (str(org[k]) if k == "_id" else org.get(k)) for k in _PUBLIC_ORG_FIELDS if k in org}
+
+
 @router.get("")
-async def list_organizations(search: str | None = None, limit: int = 20):
+async def list_organizations(search: str | None = None, limit: int = 20, current_user=Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
     query = {}
     if search:
+        pattern = re.escape(search)
         query["$or"] = [
-            {"name": {"$regex": search, "$options": "i"}},
-            {"domain": {"$regex": search, "$options": "i"}},
-            {"industry": {"$regex": search, "$options": "i"}},
+            {"name": {"$regex": pattern, "$options": "i"}},
+            {"domain": {"$regex": pattern, "$options": "i"}},
+            {"industry": {"$regex": pattern, "$options": "i"}},
         ]
 
-    organizations = list(db.organizations.find(query).limit(limit))
-
-    for org in organizations:
-        org["_id"] = str(org["_id"])
+    organizations = [_public_org(o) for o in db.organizations.find(query).limit(min(max(limit, 1), 200))]
 
     return {"organizations": organizations}
 
 
 @router.get("/by-domain/{domain}")
-async def get_organization_by_domain(domain: str):
+async def get_organization_by_domain(domain: str, current_user=Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
     domain = domain.lower().strip()
-    org = db.organizations.find_one({"domain": {"$regex": f"^{domain}$", "$options": "i"}})
+    org = db.organizations.find_one({"domain": {"$regex": f"^{re.escape(domain)}$", "$options": "i"}})
 
     if not org:
         return {"organization": None, "domain": domain}
 
+    # Owners / members get the full document (the onboarding flow reads owner_id/co_owners to
+    # work out the caller's rank). Anyone else only gets the public subset.
+    is_member = await is_org_member(db, str(org["_id"]), current_user)
+    owner_id = org.get("owner_id")
     org["_id"] = str(org["_id"])
+    if not is_member:
+        org = _public_org(org)
 
     primary_owner = None
-    owner_id = org.get("owner_id")
     if owner_id:
         user_doc = db.users.find_one({"uid": owner_id}, {"full_name": 1, "email": 1})
         if user_doc:

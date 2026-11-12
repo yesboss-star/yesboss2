@@ -4,6 +4,8 @@ import pytest
 
 from app.core import stt
 
+pytestmark = pytest.mark.usefixtures("bypass_guards")
+
 
 def test_stt_none_provider_is_not_configured(monkeypatch):
     monkeypatch.setattr(stt.settings, "STT_PROVIDER", "none")

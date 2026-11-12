@@ -5,8 +5,10 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 env_name = os.getenv("ENVIRONMENT", "development")
-env_file = ".env.live" if env_name == "production" else ".env"
-env_path = Path(__file__).resolve().parent.parent.parent / env_file
+# ENV_FILE lets you point a run at a different settings file (e.g. .env.offline for a local,
+# production-isolated run) without touching .env / .env.live.
+env_file = os.getenv("ENV_FILE") or (".env.live" if env_name == "production" else ".env")
+env_path = Path(env_file) if Path(env_file).is_absolute() else Path(__file__).resolve().parent.parent.parent / env_file
 load_dotenv(dotenv_path=env_path, override=True)
 
 logging.basicConfig(
@@ -115,6 +117,24 @@ class Settings:
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development").lower()
     ADMIN_API_KEY: str = os.getenv("ADMIN_API_KEY", "")
+    # Set to false for local/offline runs: the scheduler sends reminders, digests and imports
+    # for EVERY organization in the connected database.
+    SCHEDULER_ENABLED: bool = os.getenv("SCHEDULER_ENABLED", "true").lower() == "true"
+    # Let's Talk looks through a person's own earlier chats, notes and journal to answer better (needs Qdrant)
+    MEMORY_ENABLED: bool = os.getenv("MEMORY_ENABLED", "true").lower() == "true"
+    # Gemini embeddings score even unrelated texts around 0.65-0.70, so a memory must clear this to count as relevant
+    MEMORY_MIN_SCORE: float = float(os.getenv("MEMORY_MIN_SCORE", "0.68"))
+    # Analyse every new capture in the background (classify, extract, link, suggest). Without an AI
+    # key the built-in rules run instead, so this is safe to leave on.
+    CAPTURE_AUTO_ANALYZE: bool = os.getenv("CAPTURE_AUTO_ANALYZE", "true").lower() == "true"
+    # Forward-by-email intake. The mail provider (Mailgun / SendGrid / Postmark inbound routes, or a
+    # Zapier / Apps Script hook) posts each message to /api/v1/capture-inbox/email with this secret.
+    # Empty secret = the endpoint is off. The domain is only used to show each person their address.
+    CAPTURE_INBOUND_SECRET: str = os.getenv("CAPTURE_INBOUND_SECRET", "")
+    CAPTURE_INBOUND_DOMAIN: str = os.getenv("CAPTURE_INBOUND_DOMAIN", "")
+    # Local/offline runs share the real Firebase project: when true, nothing may create, change
+    # or delete a Firebase user (role claims, phone, deletion). Token verification still works.
+    FIREBASE_READ_ONLY: bool = os.getenv("FIREBASE_READ_ONLY", "false").lower() == "true"
 
     def validate(self):
         required = {

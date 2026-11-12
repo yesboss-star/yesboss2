@@ -13,9 +13,11 @@ from pydantic import BaseModel
 
 from ..api.websocket import manager as ws_manager
 from ..core.database import get_database
-from ..core.identity import canonical_assignee_payload, email_list, is_person_involved, person_scope_query
+from ..core.identity import canonical_assignee_payload, is_person_involved, person_scope_query
 from ..core.zoho import ZohoMailTasks, ZohoOAuth
 from ..dependencies.auth import get_current_user, get_current_user_optional
+from ..dependencies.tenant import assert_task_access
+from ..utils.dates import normalize_due_date
 
 router = APIRouter()
 
@@ -27,15 +29,12 @@ def get_user_org_id(user) -> str | None:
 
 
 async def _is_org_owner(db, org_id: str, user_id: str) -> bool:
-    """Check if user_id is the primary owner of the org."""
-    from bson import ObjectId
-    org = db.organizations.find_one(
-        {"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id},
-        {"owner_id": 1}
-    )
-    if not org:
-        return False
-    return org.get("owner_id") == user_id
+    """Primary owner OR co-owner (the rest of the app treats co-owners as owners)."""
+    from types import SimpleNamespace
+
+    from ..dependencies.scope import is_org_owner as _scope_is_org_owner
+
+    return await _scope_is_org_owner(db, org_id, SimpleNamespace(id=user_id, uid=user_id, email=None))
 
 
 async def create_notification(user_id: str, org_id: str, type: str, title: str, message: str, link: str = None, actor_id: str = None, actor_name: str = None, metadata: dict = None, email: str = None):
@@ -108,6 +107,8 @@ async def sync_task_to_zoho(db, task_doc: dict, org_id: str, old_data: dict = No
         zgid = None
         if owner_token and org_name:
             zgid = await zmt.ensure_group(org_name, owner_token)
+            if not zgid:
+                logger.warning("Zoho group 'YesBoss - %s' could not be found/created; owner-side copy of task %s skipped", org_name, task_doc.get("_id"))
 
         group_id = existing_group_id
         if owner_token and zgid:
@@ -169,9 +170,15 @@ async def sync_task_to_zoho(db, task_doc: dict, org_id: str, old_data: dict = No
             db.tasks.update_one({"_id": oid}, {"$set": updates})
 
         if not failures:
-            _write_zoho_sync_state(db, task_doc, "synced", error="", attempts=attempts)
+            _write_zoho_sync_state(db, task_doc, "synced", error="", attempts=0)
             return "synced"
-        _write_zoho_sync_state(db, task_doc, "pending", error="; ".join(failures), attempts=attempts)
+        # A missing connection isn't a failed attempt: the assignee may simply not have
+        # connected yet, and burning the retry cap would strand the task for good.
+        only_missing_token = all("no connected Zoho token" in f for f in failures)
+        _write_zoho_sync_state(
+            db, task_doc, "pending", error="; ".join(failures),
+            attempts=(attempts - 1) if only_missing_token else attempts,
+        )
         logger.warning("Zoho sync partial/errored for task %s: %s", task_doc.get("_id"), "; ".join(failures))
         return "pending"
     except Exception as e:
@@ -198,7 +205,8 @@ async def delete_zoho_task(task: dict, org_id: str):
         owner = db.organizations.find_one({"_id": ObjectId(org_id)}) if ObjectId.is_valid(org_id) else None
         owner_token = await zoho.get_valid_token(owner.get("owner_id", "")) if owner else None
         if zoho_group_id and owner_token:
-            await zmt.delete_task(owner_token, zoho_group_id, is_group=True, zgid=zgid)
+            if not await zmt.delete_task(owner_token, zoho_group_id, is_group=True, zgid=zgid):
+                logging.getLogger("yesboss.tasks").warning("Zoho group task %s was not deleted", zoho_group_id)
         per_assignee = task.get("zoho_task_ids") or {}
         if not isinstance(per_assignee, dict):
             per_assignee = {}
@@ -210,7 +218,8 @@ async def delete_zoho_task(task: dict, org_id: str):
                 continue
             personal_id = per_assignee.get(email) or task.get("zoho_personal_task_id")
             if personal_id:
-                await zmt.delete_task(token, personal_id)
+                if not await zmt.delete_task(token, personal_id):
+                    logging.getLogger("yesboss.tasks").warning("Zoho task %s for %s was not deleted", personal_id, email)
     except Exception as e:
         logger = __import__("logging").getLogger("yesboss.tasks")
         logger.warning("Zoho delete sync failed: %s", e)
@@ -277,15 +286,18 @@ async def sync_task_to_google(db, task_doc: dict, org_id: str, old_data: dict = 
                     task_logger.error("Google sync ensure_list failed for %s (task %s)", email, task_doc.get("_id"))
                     continue
 
-                existing_task_id = task_doc.get("google_task_id")
+                ids_map = task_doc.get("google_task_ids") or {}
+                existing_task_id = ids_map.get(email) or (task_doc.get("google_task_id") if not ids_map else None)
 
-                if old_data is None:
+                # Create when this assignee has no Google task yet - on first push AND on a
+                # later edit/complete after they connected (otherwise the task never appears).
+                if old_data is None or not existing_task_id:
                     task_id = await gtasks.create_task(assignee_token, google_list_id, task_doc)
                     if task_id:
                         synced_any = True
                         _write_google_sync_state(db, task_doc, "synced",
                                                  error="",
-                                                 attempts=attempts)
+                                                 attempts=0)
                         per_assignee = dict(task_doc.get("google_task_ids") or {})
                         per_assignee[email] = task_id
                         updates = {
@@ -305,9 +317,6 @@ async def sync_task_to_google(db, task_doc: dict, org_id: str, old_data: dict = 
                         failures.append(f"{email}: Google create_task returned no id (see Google Tasks API logs)")
                         task_logger.error("Google sync create_task failed for %s (task %s)", email, task_doc.get("_id"))
                 else:
-                    if not existing_task_id:
-                        failures.append(f"{email}: task not previously pushed to Google (no google_task_id)")
-                        continue
                     changes = {}
                     for f in ("title", "description", "status", "due_date"):
                         if task_doc.get(f) != old_data.get(f):
@@ -316,7 +325,7 @@ async def sync_task_to_google(db, task_doc: dict, org_id: str, old_data: dict = 
                         ok = await gtasks.update_task(assignee_token, google_list_id, existing_task_id, changes)
                         if ok:
                             synced_any = True
-                            _write_google_sync_state(db, task_doc, "synced", error="", attempts=attempts)
+                            _write_google_sync_state(db, task_doc, "synced", error="", attempts=0)
                         else:
                             failures.append(f"{email}: Google update_task returned error")
                             task_logger.error("Google sync update_task failed for %s (task %s)", email, task_doc.get("_id"))
@@ -327,10 +336,14 @@ async def sync_task_to_google(db, task_doc: dict, org_id: str, old_data: dict = 
         if not failures:
             # all assignees synced or skipped with no hard failure
             if synced_any or not assignee_emails:
-                _write_google_sync_state(db, task_doc, "synced", error="", attempts=attempts)
+                _write_google_sync_state(db, task_doc, "synced", error="", attempts=0)
             return "synced" if (synced_any or not assignee_emails) else "error"
         # some assignees failed — mark pending so the scheduler can retry
-        _write_google_sync_state(db, task_doc, "pending", error="; ".join(failures), attempts=attempts)
+        only_missing_token = all("no connected Google token" in f for f in failures)
+        _write_google_sync_state(
+            db, task_doc, "pending", error="; ".join(failures),
+            attempts=(attempts - 1) if only_missing_token else attempts,
+        )
         task_logger.warning("Google sync partial/errored for task %s: %s", task_doc.get("_id"), "; ".join(failures))
         return "pending"
     except Exception as e:
@@ -477,13 +490,8 @@ def _normalize_assignee_ids(v):
     return [x for x in result if x is not None]
 
 
-def _normalize_due_date(value):
-    if not value:
-        return value
-    v = str(value).strip().replace("Z", "").replace("+00:00", "").replace("T00:00:00.000", "")
-    if re.match(r"^\d{4}-\d{2}-\d{2}$", v):
-        v = v + "T00:00:00"
-    return v
+_normalize_due_date = normalize_due_date
+
 
 class TaskCreate(BaseModel):
     title: str
@@ -885,6 +893,8 @@ async def add_comment(task_id: str, comment: TaskComment, current_user = Depends
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
+    await assert_task_access(db, task_id, current_user)
+
     task = db.tasks.find_one({"_id": ObjectId(task_id)})
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -932,6 +942,10 @@ async def approve_task(task_id: str, current_user = Depends(get_current_user_opt
 
         user_id = getattr(current_user, 'id', None) or str(current_user) if current_user else None
 
+        if task.get("status") == "approved":
+            task["_id"] = str(task["_id"])
+            return {"task": task}
+
         db.tasks.update_one(
             {"_id": ObjectId(task_id)},
             {"$set": {"status": "approved", "approved_by": user_id, "updated_at": datetime.utcnow()}}
@@ -946,6 +960,10 @@ async def approve_task(task_id: str, current_user = Depends(get_current_user_opt
             task_obj["assignee_id"] = []
 
         org_id = task_obj.get("organization_id")
+
+        # Reflect approval (treated as done) in the assignee's Zoho To-Do / Google Tasks.
+        if org_id:
+            asyncio.create_task(sync_task_to_provider(db, dict(task_obj), org_id, old_data=dict(task)))
 
         if org_id:
             asyncio.create_task(ws_manager.broadcast_to_organization(
@@ -1055,6 +1073,11 @@ async def complete_task(task_id: str, current_user = Depends(get_current_user_op
                 ):
                     raise HTTPException(status_code=403, detail="Access denied")
 
+        if task.get("status") == "completed":
+            # Already done (double click, retry): don't re-notify the creator or re-run the pipeline.
+            task["_id"] = str(task["_id"])
+            return {"task": task}
+
         db.tasks.update_one(
             {"_id": ObjectId(task_id)},
             {"$set": {"status": "completed", "completed_at": datetime.utcnow(), "updated_at": datetime.utcnow()}}
@@ -1069,6 +1092,10 @@ async def complete_task(task_id: str, current_user = Depends(get_current_user_op
             task_obj["assignee_id"] = []
 
         org_id = task_obj.get("organization_id")
+
+        # Reflect completion in the assignee's Zoho To-Do / Google Tasks (was never pushed).
+        if org_id:
+            asyncio.create_task(sync_task_to_provider(db, dict(task_obj), org_id, old_data=dict(task)))
 
         if org_id:
             asyncio.create_task(ws_manager.broadcast_to_organization(
@@ -1282,7 +1309,7 @@ async def bulk_import_preview(
         if due_col:
             raw_d = row.get(due_col)
             if raw_d is not None and str(raw_d).strip():
-                due_date = str(raw_d).strip()
+                due_date = normalize_due_date(str(raw_d).strip())
 
         description = ""
         desc_col = next((c for c, v in column_mapping.items() if v == "description"), None)
@@ -1358,7 +1385,7 @@ async def bulk_import_confirm(
                 "assignee_email": assignee_email,
                 "assignee_name": assignee_name,
                 "department": None,
-                "due_date": td.get("due_date"),
+                "due_date": normalize_due_date(td.get("due_date")),
                 "dependencies": [],
                 "reviewers": [],
                 "organization_id": organization_id,

@@ -4,7 +4,9 @@ from datetime import datetime, timedelta
 from bson import ObjectId
 
 from ..core import journal_intel as intel
+from ..core.config import settings
 from ..core.database import get_database
+
 
 logger = logging.getLogger("yesboss.journal_agent")
 
@@ -54,6 +56,10 @@ async def analyze_entry(entry_id: str, content: str, entry_type: str, org_id: st
         fresh = db.journal_entries.find_one({"_id": ObjectId(entry_id)})
         if fresh:
             await intel.index_entry(fresh)
+            if settings.MEMORY_ENABLED:
+                from ..core import memory
+
+                await memory.aindex(memory.journal_items({**fresh, "_id": str(fresh["_id"])}))
             await intel.sync_idea(db, fresh, analysis)
         return analysis
     except Exception as e:

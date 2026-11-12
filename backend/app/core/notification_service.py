@@ -26,6 +26,11 @@ def _check_email_rate_limit(org_id: str, max_per_hour: int = 50) -> bool:
     return True
 
 
+def _json_safe(doc):
+    """Round-trip a Mongo-style document into plain JSON types (datetimes -> ISO strings)."""
+    return json.loads(json.dumps(doc, default=lambda o: o.isoformat() if hasattr(o, "isoformat") else str(o)))
+
+
 def _to_absolute_link(link: str | None) -> str | None:
     """Convert a relative /tasks/... or /goals/... link to an absolute FRONTEND_URL link for emails."""
     if not link:
@@ -154,10 +159,10 @@ async def create_and_deliver(
         result = db.notifications.insert_one(notif_doc)
         notif_doc["_id"] = str(result.inserted_id)
 
-        safe_ws(lambda: ws_manager.send_personal_message(
-            {"type": "notification", "data": notif_doc},
-            resolved_uid,
-        ))
+        # notif_doc holds a datetime; websockets serialise with plain json.dumps, which
+        # raised TypeError and silently dropped every live notification.
+        ws_payload = {"type": "notification", "data": _json_safe(notif_doc)}
+        safe_ws(lambda: ws_manager.send_personal_message(ws_payload, resolved_uid))
 
     if is_channel_enabled(prefs, "email", type) and is_email_configured():
         user_email = email or get_user_email(user_id)

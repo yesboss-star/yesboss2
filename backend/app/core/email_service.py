@@ -1,3 +1,5 @@
+import functools
+import html as _html
 import logging
 import re
 import smtplib
@@ -89,6 +91,21 @@ _TEMPLATE_FOOTER = """      <p style="margin-top:24px;font-size:12px;color:#999"
 </html>"""
 
 
+def _escaped(render):
+    """HTML-escape every string handed to an email template.
+
+    Task titles, names and org names are user-controlled; interpolating them raw let anyone
+    put markup / phishing links into mails sent to managers and owners.
+    """
+    @functools.wraps(render)
+    def wrapper(*args, **kwargs):
+        args = tuple(_html.escape(a) if isinstance(a, str) else a for a in args)
+        kwargs = {k: (_html.escape(v) if isinstance(v, str) else v) for k, v in kwargs.items()}
+        return render(*args, **kwargs)
+    return wrapper
+
+
+@_escaped
 def _render_basic(title: str, message: str, link: str | None = None, action_label: str | None = None) -> str:
     body = f"""<h2 style="margin:0 0 8px;font-size:18px">{title}</h2>
       <p style="margin:0 0 16px;color:#555;line-height:1.5">{message}</p>"""
@@ -97,6 +114,7 @@ def _render_basic(title: str, message: str, link: str | None = None, action_labe
     return _TEMPLATE_HEADER.format(app_name=APP_NAME) + body + _TEMPLATE_FOOTER.format(app_name=APP_NAME)
 
 
+@_escaped
 def _render_task_deadline_reminder(task_name: str, due_date: str, link: str | None = None) -> str:
     body = f"""<h2 style="margin:0 0 8px;font-size:18px;color:#1e293b">Task Due Soon</h2>
       <p style="margin:0 0 4px;color:#555;line-height:1.5">Your task <strong style="color:#6366f1">{task_name}</strong> is due on <strong>{due_date}</strong>.</p>
@@ -106,6 +124,7 @@ def _render_task_deadline_reminder(task_name: str, due_date: str, link: str | No
     return _TEMPLATE_HEADER.format(app_name=APP_NAME) + body + _TEMPLATE_FOOTER.format(app_name=APP_NAME)
 
 
+@_escaped
 def _render_task_overdue(task_name: str, link: str | None = None) -> str:
     body = f"""<h2 style="margin:0 0 8px;font-size:18px;color:#dc2626">Task Overdue</h2>
       <p style="margin:0 0 4px;color:#555;line-height:1.5">Task <strong style="color:#dc2626">{task_name}</strong> is now overdue.</p>
@@ -115,6 +134,7 @@ def _render_task_overdue(task_name: str, link: str | None = None) -> str:
     return _TEMPLATE_HEADER.format(app_name=APP_NAME) + body + _TEMPLATE_FOOTER.format(app_name=APP_NAME)
 
 
+@_escaped
 def _render_escalation_owner(task_name: str, assignee: str, days_overdue: int, link: str | None = None) -> str:
     body = f"""<h2 style="margin:0 0 8px;font-size:18px;color:#dc2626">Escalation - Task Overdue</h2>
       <p style="margin:0 0 4px;color:#555;line-height:1.5">Task <strong style="color:#dc2626">{task_name}</strong> assigned to <strong>{assignee}</strong> is <strong>{days_overdue} day(s)</strong> overdue.</p>
@@ -128,8 +148,8 @@ def _render_weekly_digest(items: list) -> str:
     items_html = ""
     for item in items[:20]:
         items_html += f"""<tr><td style="padding:8px 0;border-bottom:1px solid #eee">
-          <strong style="font-size:14px">{item.get('title','')}</strong>
-          <p style="margin:4px 0 0;font-size:13px;color:#666">{item.get('message','')}</p>
+          <strong style="font-size:14px">{_html.escape(str(item.get('title','')))}</strong>
+          <p style="margin:4px 0 0;font-size:13px;color:#666">{_html.escape(str(item.get('message','')))}</p>
         </td></tr>"""
     body = f"""<h2 style="margin:0 0 16px;font-size:18px;color:#1e293b">Your Weekly Digest</h2>
       <p style="margin:0 0 12px;color:#555;font-size:13px">Here's a summary of your notifications this week.</p>
@@ -148,10 +168,11 @@ def _render_monthly_report(report_data: dict) -> str:
         <tr><td style="padding:8px;border:1px solid #e2e8f0;font-size:14px;color:#555">Tasks Overdue</td><td style="padding:8px;border:1px solid #e2e8f0;font-size:14px;font-weight:bold">{overdue}</td></tr>
         <tr><td style="padding:8px;background:#f8fafc;border:1px solid #e2e8f0;font-size:14px;color:#555">Completion Rate</td><td style="padding:8px;background:#f8fafc;border:1px solid #e2e8f0;font-size:14px;font-weight:bold">{rate}%</td></tr>
       </table>
-      <p style="margin:0 0 8px;color:#555;font-size:13px"><strong>AI Feedback:</strong> {feedback}</p>"""
+      <p style="margin:0 0 8px;color:#555;font-size:13px"><strong>AI Feedback:</strong> {_html.escape(str(feedback))}</p>"""
     return _TEMPLATE_HEADER.format(app_name=APP_NAME) + body + _TEMPLATE_FOOTER.format(app_name=APP_NAME)
 
 
+@_escaped
 def _render_otp_email(otp: str, purpose: str = "verification") -> str:
     if purpose == "password_reset":
         title = "Reset Your Password"
@@ -170,6 +191,7 @@ def _render_otp_email(otp: str, purpose: str = "verification") -> str:
     return _TEMPLATE_HEADER.format(app_name=APP_NAME) + body + _TEMPLATE_FOOTER.format(app_name=APP_NAME)
 
 
+@_escaped
 def _render_owner_approval(requester_name: str, requester_email: str, org_name: str, approve_link: str, reject_link: str) -> str:
     body = f"""<h2 style="margin:0 0 8px;font-size:18px;color:#1e293b">Co-Owner Request</h2>
       <p style="margin:0 0 4px;color:#555;line-height:1.5"><strong style="color:#6366f1">{requester_name}</strong> ({requester_email}) has requested to join <strong>{org_name}</strong> as a co-owner.</p>
@@ -182,6 +204,7 @@ def _render_owner_approval(requester_name: str, requester_email: str, org_name: 
     return _TEMPLATE_HEADER.format(app_name=APP_NAME) + body + _TEMPLATE_FOOTER.format(app_name=APP_NAME)
 
 
+@_escaped
 def _render_owner_request_approved(org_name: str, requester_name: str) -> str:
     body = f"""<h2 style="margin:0 0 8px;font-size:18px;color:#1e293b">Request Approved</h2>
       <p style="margin:0 0 16px;color:#555;line-height:1.5">Hi {requester_name}, your request to join <strong>{org_name}</strong> as a co-owner has been approved.</p>
@@ -189,6 +212,7 @@ def _render_owner_request_approved(org_name: str, requester_name: str) -> str:
     return _TEMPLATE_HEADER.format(app_name=APP_NAME) + body + _TEMPLATE_FOOTER.format(app_name=APP_NAME)
 
 
+@_escaped
 def _render_owner_request_rejected(org_name: str, requester_name: str) -> str:
     body = f"""<h2 style="margin:0 0 8px;font-size:18px;color:#1e293b">Request Declined</h2>
       <p style="margin:0 0 16px;color:#555;line-height:1.5">Hi {requester_name}, your request to join <strong>{org_name}</strong> as a co-owner has been declined.</p>
@@ -247,6 +271,37 @@ def send_notification_email(to_email: str, title: str, message: str, link: str |
     else:
         html = TEMPLATE_RENDERERS["default"](title, message, link, action_label)
     send_email(to_email, f"{APP_NAME} - {title}", html, text_body=f"{title}\n\n{message}\n\n{link or ''}", attachments=attachments)
+
+
+def _render_weekly_review(name: str, scope: str, sections: list[tuple[str, list[str]]], counts: dict,
+                          app_link: str, unsubscribe_link: str) -> str:
+    """Weekly review mail. Section lines carry names and task text, so every one is escaped here."""
+    e = _html.escape
+    headline = "Your company this week" if scope == "company" else "Your week"
+    summary = " &middot; ".join(
+        f"{counts[k]} {label}" for k, label in (("done", "done"), ("open", "open"), ("missed", "missed"), ("no_evidence", "unclear"))
+        if counts.get(k))
+    body = f"""<h2 style="margin:0 0 4px;font-size:18px;color:#1e293b">{e(headline)}</h2>
+      <p style="margin:0 0 16px;color:#555">Hi {e(name)}, here is your weekly review.</p>
+      <p style="margin:0 0 16px;color:#6366f1;font-size:14px">{summary}</p>"""
+    for title, lines in sections:
+        items = "".join(f'<li style="margin:0 0 6px;color:#334155;line-height:1.4">{e(line)}</li>' for line in lines)
+        body += f'<h3 style="margin:16px 0 6px;font-size:15px;color:#1e293b">{e(title)}</h3><ul style="margin:0;padding-left:18px">{items}</ul>'
+    body += (f'<p style="margin:24px 0 0"><a href="{e(app_link)}" style="display:inline-block;padding:10px 20px;background:#6366f1;'
+             f'color:white;text-decoration:none;border-radius:8px;font-size:14px">Open the full review</a></p>')
+    footer = _TEMPLATE_FOOTER.format(app_name=APP_NAME).replace(
+        f"This notification was sent by {APP_NAME}.",
+        f'You get this every Monday. <a href="{e(unsubscribe_link)}" style="color:#999">Stop these emails</a>.')
+    return _TEMPLATE_HEADER.format(app_name=APP_NAME) + body + footer
+
+
+def send_weekly_review_email(to_email: str, name: str, scope: str, sections: list[tuple[str, list[str]]], counts: dict,
+                             app_link: str, unsubscribe_link: str) -> bool:
+    html = _render_weekly_review(name, scope, sections, counts, app_link, unsubscribe_link)
+    text = "\n\n".join([f"Hi {name}, here is your weekly review."] +
+                       [f"{title}\n" + "\n".join(f"- {line}" for line in lines) for title, lines in sections] +
+                       [f"Open the full review: {app_link}", f"Stop these emails: {unsubscribe_link}"])
+    return send_email(to_email, f"{APP_NAME} - Your weekly review", html, text_body=text)
 
 
 def send_otp_email(to_email: str, otp: str, purpose: str = "verification") -> bool:

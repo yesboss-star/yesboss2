@@ -13,6 +13,8 @@ import app.api.assistant as assistant
 from app.api.assistant import ChatContext, DelegateRequest, _build_delegate_preview
 from app.main import app
 
+pytestmark = pytest.mark.usefixtures("bypass_guards")
+
 
 class _InsertResult:
     def __init__(self, oid):

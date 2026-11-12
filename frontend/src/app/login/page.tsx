@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Eye, EyeOff, Mail, Lock, AlertCircle, Loader2, CheckCircle, Phone, User, ArrowRight } from "lucide-react";
 import { auth } from "@/lib/firebase";
+import { isSafeRedirect } from "@/lib/safeRedirect";
 import {
   setPersistence,
   browserLocalPersistence,
@@ -71,11 +72,11 @@ function LoginContent() {
 
   const getRedirectPath = () => {
     const redirect = searchParams.get("redirect");
-    if (redirect && redirect.startsWith("/") && !redirect.startsWith("//")) return redirect;
+    if (isSafeRedirect(redirect)) return redirect;
     // Fallback to pending stored redirect (e.g., after onboarding)
     try {
       const pending = localStorage.getItem("yesboss_pending_redirect");
-      if (pending && pending.startsWith("/") && !pending.startsWith("//")) {
+      if (isSafeRedirect(pending)) {
         localStorage.removeItem("yesboss_pending_redirect");
         return pending;
       }
@@ -105,9 +106,11 @@ function LoginContent() {
     } = { uid, email, full_name: storedName, role: "", phone_verified: true };
 
     try {
+      // sync-user is authenticated; send the fresh token explicitly (localStorage may not have it yet).
+      const idToken = await auth.currentUser?.getIdToken();
       const syncRes = await fetch(`${API_URL}/auth/sync-user`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}) },
         body: JSON.stringify({ uid, email, full_name: storedName, role: "", phone_verified: true }),
       });
       const syncData = await syncRes.json();
@@ -477,7 +480,7 @@ function LoginContent() {
             <Link
               href={(() => {
                 const p = searchParams.get("redirect");
-                return p && p.startsWith("/") && !p.startsWith("//") ? `/signup?redirect=${encodeURIComponent(p)}` : "/signup";
+                return isSafeRedirect(p) ? `/signup?redirect=${encodeURIComponent(p)}` : "/signup";
               })()}
               className="text-primary hover:text-primary-light transition-colors cursor-pointer font-medium"
             >

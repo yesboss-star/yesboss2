@@ -32,20 +32,20 @@ function writeDismissed(key: string) {
 }
 
 /** One-tap mood check-in, shown once a day at the top of the chat. */
-export function DailyCheckin({ orgId, onMore }: { orgId: string; onMore: () => void }) {
+export function DailyCheckin({ orgId, onMore, className = "mb-4" }: { orgId: string; onMore?: () => void; className?: string }) {
   const { data, loading } = useLoader<MoodInsights>(() => journalApi("/mood-insights", orgId, { query: { days: 7 } }), `nudge-mood-${orgId}`);
   const [dismissed, setDismissed] = useState(() => readDismissed("yesboss-journal-checkin-dismissed"));
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState<(typeof MOODS)[number] | null>(null);
   const [error, setError] = useState(false);
 
   if (dismissed) return null;
   if (!saved && (loading || data?.today_checkin)) return null;
 
-  const pick = async (mood: number) => {
+  const pick = async (mood: (typeof MOODS)[number]) => {
     setError(false);
     try {
-      await journalApi("/checkins", orgId, { method: "POST", body: { mood } });
-      setSaved(true);
+      await journalApi("/checkins", orgId, { method: "POST", body: { mood: mood.value } });
+      setSaved(mood);
     } catch {
       setError(true);
     }
@@ -57,14 +57,22 @@ export function DailyCheckin({ orgId, onMore }: { orgId: string; onMore: () => v
   };
 
   return (
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-surface px-4 py-3">
+    <div
+      className={`${className} flex flex-wrap items-center justify-between gap-3 rounded-3xl border-2 border-outline bg-surface px-5 py-2.5 shadow-[3px_3px_0_var(--shadow-hard)]`}
+      role="group"
+      aria-label="Daily mood check-in"
+    >
       {saved ? (
         <>
-          <p className="text-sm text-foreground">Noted, thank you.</p>
+          <p className="text-sm font-bold text-foreground">
+            Today: {saved.emoji} {saved.label}. Noted, thank you.
+          </p>
           <div className="flex items-center gap-3">
-            <button onClick={onMore} className="cursor-pointer text-xs text-primary hover:underline">
-              See your mood trend
-            </button>
+            {onMore && (
+              <button onClick={onMore} className="cursor-pointer text-xs text-primary hover:underline">
+                See your mood trend
+              </button>
+            )}
             <button onClick={dismiss} aria-label="Close" className="cursor-pointer text-text-muted hover:text-foreground">
               <X className="h-4 w-4" />
             </button>
@@ -72,17 +80,17 @@ export function DailyCheckin({ orgId, onMore }: { orgId: string; onMore: () => v
         </>
       ) : (
         <>
-          <p className="text-sm text-foreground">How are you feeling today?</p>
+          <p className="text-sm font-bold text-foreground">How are you feeling today?</p>
           <div className="flex items-center gap-1">
-            {MOODS.map(({ value, emoji, label }) => (
+            {MOODS.map((mood) => (
               <button
-                key={value}
-                onClick={() => void pick(value)}
-                title={label}
-                aria-label={label}
-                className="h-9 w-9 cursor-pointer rounded-full text-xl transition-transform hover:scale-110 hover:bg-background"
+                key={mood.value}
+                onClick={() => void pick(mood)}
+                title={mood.label}
+                aria-label={mood.label}
+                className="h-10 w-10 cursor-pointer rounded-full border-2 border-transparent text-2xl transition-all hover:scale-110 hover:border-outline hover:bg-highlight"
               >
-                {emoji}
+                {mood.emoji}
               </button>
             ))}
             <button onClick={dismiss} aria-label="Not now" title="Not now" className="ml-2 cursor-pointer text-text-muted hover:text-foreground">

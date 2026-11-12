@@ -453,27 +453,26 @@ Domain: {org.get('domain', 'N/A')}
         try:
             import re
 
-            import httpx
+            from .url_guard import safe_httpx_get
             last_err = None
             for attempt in range(2):
                 try:
                     headers = {}
                     if attempt > 0:
                         headers["Accept-Encoding"] = "identity"
-                    async with httpx.AsyncClient(timeout=8.0) as client:
-                        resp = await client.get(url, follow_redirects=True, headers=headers)
-                        if resp.status_code == 200:
-                            text = resp.text
-                            text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL)
-                            text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL)
-                            text = re.sub(r'<[^>]+>', ' ', text)
-                            text = re.sub(r'\s+', ' ', text).strip()
-                            content = text[:2000]
-                            return (
-                                f"===== WEBSITE CONTENT (from {url}) =====\n"
-                                f"{content}\n"
-                                f"=====================================\n"
-                            )
+                    resp = await safe_httpx_get(url, timeout=8.0, headers=headers)
+                    if resp.status_code == 200:
+                        text = resp.text
+                        text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL)
+                        text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL)
+                        text = re.sub(r'<[^>]+>', ' ', text)
+                        text = re.sub(r'\s+', ' ', text).strip()
+                        content = text[:2000]
+                        return (
+                            f"===== WEBSITE CONTENT (from {url}) =====\n"
+                            f"{content}\n"
+                            f"=====================================\n"
+                        )
                 except Exception as e2:
                     err_str = str(e2)
                     if "decompressobj" in err_str or "gzip" in err_str.lower():

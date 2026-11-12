@@ -11,6 +11,7 @@ from ..api.websocket import manager as ws_manager
 from ..core.database import get_database
 from ..core.zoho import ZohoMailTasks, ZohoOAuth
 from ..dependencies.auth import get_current_user, get_current_user_optional
+from ..utils.dates import normalize_due_date
 
 logger = logging.getLogger("yesboss.meetings")
 
@@ -433,7 +434,7 @@ async def create_task_from_meeting(
         "assignee_email": assignee_emails[0] if assignee_emails else "",
         "assignee_name": suggested,
         "department": None,
-        "due_date": task_data.get("suggested_deadline"),
+        "due_date": normalize_due_date(task_data.get("suggested_deadline")),
         "dependencies": [],
         "reviewers": [],
         "organization_id": org_id,
@@ -633,7 +634,7 @@ async def process_meeting(
                 "title": td.get("title", "Untitled Task"),
                 "description": td.get("description", ""),
                 "priority": td.get("suggested_priority", "medium"),
-                "due_date": td.get("suggested_deadline"),
+                "due_date": normalize_due_date(td.get("suggested_deadline")),
                 "suggested_assignee": suggested,
                 "resolved_assignee_email": resolved_email,
                 "assignee_suggestions": suggestions,
@@ -701,7 +702,7 @@ async def confirm_meeting_tasks(
             "assignee_email": assignee_email,
             "assignee_name": assignee_name,
             "department": None,
-            "due_date": td.get("due_date"),
+            "due_date": normalize_due_date(td.get("due_date")),
             "dependencies": [],
             "reviewers": [],
             "organization_id": org_id,

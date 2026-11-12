@@ -21,7 +21,9 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from ..core import memory as _memory
 from ..core.ai_client import get_ai_response
+from ..core.config import settings
 from ..core.database import get_database
 from ..dependencies.auth import get_current_user, get_current_user_optional
 from .websocket import manager as ws_manager
@@ -1919,6 +1921,21 @@ def _format_insights_block(insights: list[dict[str, Any]] | None) -> str:
     return "Recent insights from previous sessions:\n" + "\n".join(lines) + "\n"
 
 
+_NO_MEMORY_RE = re.compile(r"\b(book|schedule|reschedule|cancel|meeting|calendar|invite)\b", re.IGNORECASE)
+
+
+def _memory_worth_using(text: str, session_context: dict[str, Any] | None) -> bool:
+    """Whether to look through the person's memory for this message."""
+    if not settings.MEMORY_ENABLED:
+        return False
+    t = (text or "").strip()
+    if len(t) < 15:  # "yes", "3pm", a name: the answer to a question, nothing to recall
+        return False
+    if DELEGATION_KEYWORDS.search(t) or _TASK_INTENT_RE.search(t) or _NO_MEMORY_RE.search(t):
+        return False  # these end up in a task or an invite that someone else reads
+    return not (session_context or {}).get("pending_booking")
+
+
 async def _build_ask_prompt(
     *,
     text: str,
@@ -1932,6 +1949,7 @@ async def _build_ask_prompt(
     user_email: str | None = None,
     journal_mode: bool = False,
     language: str | None = None,
+    session_id: str | None = None,
 ) -> tuple[str, str, dict[str, Any]]:
     """Shared prompt + system choice for smart_ask and ask_stream.
 
@@ -2077,6 +2095,14 @@ async def _build_ask_prompt(
 
     insights_block = _format_insights_block(snap.get("recent_insights") or [])
 
+    # What this person said before, in their own chats, notes and journal: only theirs, never for journal mode
+    # (it has its own) and never when the message reaches other people (a task, a meeting).
+    memory_block = ""
+    if not journal_mode and _memory_worth_using(text, session_context):
+        memory_block = _memory.format_block(
+            await _memory.arecall(user_id, org_id, text, k=4, exclude_sources={session_id} if session_id else None)
+        )
+
     if journal_with_data:
         my_work = _gather_my_work(db, org_id, user_id, user_email)
         my_meetings = _gather_my_meetings(db, org_id, user_id, user_email)
@@ -2105,7 +2131,8 @@ async def _build_ask_prompt(
         f"{personal_block}"
         f"{workload_block}"
         f"{ctx_block}"
-        f"{insights_block}\n"
+        f"{insights_block}"
+        f"{memory_block}\n"
         f"Recent chat:\n{history_block}\n\n"
         f"Current date: {datetime.now().strftime('%A, %Y-%m-%d')}\n\n"
         f"User's message:\n\"{text}\"\n\n"
@@ -3079,6 +3106,7 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
         user_id=user_id,
         user_email=user_email,
         journal_mode=journal_mode,
+        session_id=request.session_id,
         language=request.language,
     )
 
@@ -3493,6 +3521,7 @@ async def ask_stream(request: AskRequest, user: dict = Depends(get_current_user_
         user_id=user_id,
         user_email=user_email,
         journal_mode=journal_mode,
+        session_id=request.session_id,
         language=request.language,
     )
 
@@ -3833,7 +3862,8 @@ async def re_analyze(request: ReAnalyzeRequest):
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
-    doc = db.documents.find_one({"file_id": request.file_id})
+    # Scope by the (guard-verified) organization so a file id from another company is not found.
+    doc = db.documents.find_one({"file_id": request.file_id, "org_id": request.organization_id})
     if not doc:
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -4046,11 +4076,26 @@ async def delete_session(session_id: str, current_user = Depends(get_current_use
         db.assistant_sessions.delete_one({"_id": ObjectId(session_id)})
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not delete session: {e}")
+    await _memory.aforget("chat", session_id)  # what was remembered from it goes too
     return {"success": True}
 
 
 class AddMessageRequest(BaseModel):
     message: dict[str, Any]
+
+
+_memory_tasks: set = set()
+
+
+def _remember_session(db, session_id: str, message: dict[str, Any]) -> None:
+    """After an assistant reply is saved, add the newest part of the conversation to the person's memory."""
+    if not settings.MEMORY_ENABLED or message.get("role") != "assistant" or message.get("is_loading"):
+        return
+    if not str(message.get("content") or "").strip():
+        return
+    task = asyncio.create_task(_memory.index_session_by_id(db, session_id))
+    _memory_tasks.add(task)  # keep a reference until it finishes
+    task.add_done_callback(_memory_tasks.discard)
 
 
 @router.post("/sessions/{session_id}/messages")
@@ -4071,6 +4116,7 @@ async def add_session_message(session_id: str, request: AddMessageRequest, curre
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not add message: {e}")
+    _remember_session(db, session_id, request.message)
     return {"success": True}
 
 
@@ -4108,6 +4154,7 @@ async def replace_last_session_message(
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not update message: {e}")
+    _remember_session(db, session_id, request.message)
     return {"success": True}
 
 

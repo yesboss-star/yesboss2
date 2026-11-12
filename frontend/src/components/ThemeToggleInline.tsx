@@ -10,7 +10,7 @@ export function ThemeToggleInline() {
   return (
     <button
       onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-      className="p-2 rounded-lg hover:bg-surface text-text-muted hover:text-foreground transition-colors cursor-pointer"
+      className="p-2 rounded-full border-2 border-outline bg-surface text-foreground shadow-[3px_3px_0_var(--shadow-hard)] hover:-translate-x-px hover:-translate-y-px transition-all cursor-pointer"
       title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
     >
       {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}

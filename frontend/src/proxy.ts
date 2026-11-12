@@ -4,6 +4,21 @@ const protectedRoutes = ["/dashboard", "/onboarding", "/tasks", "/goals"];
 const authRoutes = ["/login", "/signup"];
 const onboardingRoutes = ["/onboarding/owner", "/onboarding/employee"];
 
+// The cookie is client-written and not always URL-encoded; a malformed value used to throw
+// here and turn every matched route (including /login) into a 500 until the cookie expired.
+function parseUserCookie(raw: string | undefined): { role?: string; organization_completed?: boolean } | null {
+  if (!raw) return null;
+  const candidates = [raw];
+  try { candidates.push(decodeURIComponent(raw)); } catch { /* not URI-encoded */ }
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const search = request.nextUrl.search || "";
@@ -16,7 +31,7 @@ export async function proxy(request: NextRequest) {
   const userStr = request.cookies.get("yesboss_user")?.value;
   
   const hasAuth = token || userStr;
-  const user = userStr ? JSON.parse(userStr) : null;
+  const user = parseUserCookie(userStr);
   const role = user?.role;
   const orgCompleted = user?.organization_completed;
 

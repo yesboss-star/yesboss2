@@ -6,6 +6,8 @@ from pathlib import Path
 import firebase_admin
 from firebase_admin import auth, credentials
 
+from .config import settings
+
 logger = logging.getLogger("yesboss.firebase")
 
 _firebase_app: firebase_admin.App | None = None
@@ -98,8 +100,17 @@ def verify_id_token(id_token: str) -> AuthUser | None:
         return None
 
 
+def _read_only(action: str) -> bool:
+    if settings.FIREBASE_READ_ONLY:
+        logger.warning("FIREBASE_READ_ONLY=true: skipped Firebase %s", action)
+        return True
+    return False
+
+
 def create_user(email: str, password: str, phone: str | None = None,
                 display_name: str | None = None) -> auth.UserRecord:
+    if _read_only("create_user"):
+        raise RuntimeError("Firebase is read-only in this environment")
     fb_auth = get_firebase_auth()
     user_properties = {
         "email": email,
@@ -135,11 +146,15 @@ def get_user(uid: str) -> auth.UserRecord | None:
 
 
 def update_user(uid: str, **kwargs) -> auth.UserRecord:
+    if _read_only("update_user"):
+        return get_user(uid)
     fb_auth = get_firebase_auth()
     return fb_auth.update_user(uid, **kwargs)
 
 
 def delete_user(uid: str) -> bool:
+    if _read_only("delete_user"):
+        return False
     try:
         fb_auth = get_firebase_auth()
         fb_auth.delete_user(uid)
@@ -159,5 +174,7 @@ def generate_password_reset_link(email: str) -> str:
 
 
 def set_custom_user_claims(uid: str, claims: dict) -> None:
+    if _read_only("set_custom_user_claims"):
+        return
     fb_auth = get_firebase_auth()
     fb_auth.set_custom_user_claims(uid, claims)

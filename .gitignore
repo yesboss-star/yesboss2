@@ -45,3 +45,8 @@ logs/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Local offline test settings (copy of backend/.env.offline.example)
+.env.offline
+backend/.env.offline
+backend/.env.atlas-local

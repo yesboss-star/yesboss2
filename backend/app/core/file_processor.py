@@ -32,7 +32,10 @@ def get_file_type(filename: str) -> str:
 def extract_text_from_pdf(file_bytes: bytes) -> str:
     try:
         import fitz
-        doc = fitz.open(stream=file_bytes, doc_type="pdf")
+
+        # PyMuPDF's keyword is `filetype`; the old `doc_type=` raised TypeError, so every PDF
+        # fell through to the fallback (which wasn't installed) and came back empty.
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
         text = ""
         for page in doc:
             text += page.get_text()
@@ -41,8 +44,9 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
     except Exception as e:
         logger.error(f"PDF extraction failed: {e}")
         try:
-            import PyPDF2
-            pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
+            from pypdf import PdfReader
+
+            pdf_reader = PdfReader(io.BytesIO(file_bytes))
             text = ""
             for page in pdf_reader.pages:
                 text += page.extract_text() or ""
@@ -223,6 +227,9 @@ async def generate_embeddings(texts: list[str], provider: str | None = None) -> 
     return embeddings
 
 
+from .qdrant import redact_secrets  # noqa: E402
+
+
 async def _gemini_embed_all(texts: list[str], batch_size: int = 24) -> list[list[float]]:
     """Embed a (possibly large) list of chunks in safe Gemini batches.
 
@@ -237,12 +244,12 @@ async def _gemini_embed_all(texts: list[str], batch_size: int = 24) -> list[list
             batch_vectors = await _gemini_embed_batch(batch)
             vectors.extend(batch_vectors)
         except Exception as e:
-            logger.warning(f"Gemini embedding batch {start}-{start + len(batch)} failed ({e}); retrying once")
+            logger.warning(f"Gemini embedding batch {start}-{start + len(batch)} failed ({redact_secrets(e)}); retrying once")
             try:
                 batch_vectors = await _gemini_embed_batch(batch)
                 vectors.extend(batch_vectors)
             except Exception as e2:
-                logger.error(f"Gemini embedding batch retry failed ({e2}); storing zero vectors for {len(batch)} chunks")
+                logger.error(f"Gemini embedding batch retry failed ({redact_secrets(e2)}); storing zero vectors for {len(batch)} chunks")
                 vectors.extend([[0.0] * 1536 for _ in batch])
     return vectors
 
@@ -385,7 +392,7 @@ async def process_file(
 
             await store_embeddings_in_qdrant("documents", embeddings, payloads)
         except Exception as e:
-            logger.error(f"Failed to create embeddings: {e}")
+            logger.error(f"Failed to create embeddings: {redact_secrets(e)}")
 
     import asyncio
     asyncio.create_task(
@@ -592,13 +599,9 @@ async def search_documents(
             if user_id:
                 filter_conditions.append(FieldCondition(key="user_id", match=Match(value=user_id)))
 
-            results = client.search(
-                collection_name="documents",
-                query_vector=query_vector,
-                limit=top_k,
-                query_filter=Filter(must=filter_conditions),
-                with_payload=True
-            )
+            from .qdrant import vector_search
+
+            results = vector_search(client, "documents", query_vector, top_k, Filter(must=filter_conditions))
 
             search_results = []
             for result in results:

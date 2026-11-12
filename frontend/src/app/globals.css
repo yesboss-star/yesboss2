@@ -1,37 +1,81 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
- 
+
+/* "Pop" theme: bold tiles, thick outlines, hard offset shadows, yellow highlights.
+   --border is the thin divider; --outline is the thick edge of cards, buttons and fields. */
 :root {
-  --background: #030712;
-  --foreground: #f8fafc;
-  --primary: #0ea5e9;
-  --primary-light: #38bdf8;
-  --accent: #f97316;
-  --accent-hover: #ea580c;
-  --surface: #0f172a;
-  --surface-light: #1e293b;
-  --border: #1e293b;
-  --border-light: #334155;
-  --text-muted: #94a3b8;
-  --gradient-start: #0ea5e9;
-  --gradient-end: #8b5cf6;
+  --background: #17132A;
+  --foreground: #F7F3FF;
+  --primary: #FFD93D;
+  --primary-light: #FFE680;
+  --on-primary: #111111;
+  --accent: #FF5C8A;
+  --accent-hover: #FF3D73;
+  --surface: #241E3F;
+  --surface-light: #2E2750;
+  --border: #4A4170;
+  --border-light: #5B5189;
+  --text-muted: #B7ADD6;
+  --gradient-start: #FF5C8A;
+  --gradient-end: #7C3AED;
+  --highlight: #FFD93D;
+  --on-highlight: #111111;
+  --outline: #F7F3FF;
+  --shadow-hard: #000000;
 }
- 
+
 [data-theme="light"] {
-  --background: #ffffff;
-  --foreground: #2C2C2A;
-  --primary: #E42527;
-  --primary-light: #E24B4A;
-  --accent: #226DB4;
-  --accent-hover: #185FA5;
-  --surface: #FAFAF8;
-  --surface-light: #F1EFE8;
-  --border: #E3E2DD;
-  --border-light: #EDEBE5;
-  --text-muted: #6B6A63;
-  --gradient-start: #E42527;
-  --gradient-end: #226DB4;
-  --heading: #2C2C2A;
+  --background: #FFF4D6;
+  --foreground: #111111;
+  --primary: #111111;
+  --primary-light: #333333;
+  --on-primary: #FFFFFF;
+  --accent: #E11D74;
+  --accent-hover: #B00B56;
+  --surface: #FFFFFF;
+  --surface-light: #FFF0C2;
+  --border: #111111;
+  --border-light: #5C5646;
+  --text-muted: #5C5646;
+  --gradient-start: #FF5C8A;
+  --gradient-end: #7C3AED;
+  --heading: #111111;
+  --highlight: #FFD93D;
+  --on-highlight: #111111;
+  --outline: #111111;
+  --shadow-hard: #111111;
+
+  /* the light 300/400 shades used for text and icons are unreadable on cream and white: use darker ones here */
+  --color-emerald-300: #15803D;
+  --color-emerald-400: #15803D;
+  --color-green-400: #15803D;
+  --color-rose-300: #BE123C;
+  --color-rose-400: #BE123C;
+  --color-red-400: #B91C1C;
+  --color-amber-400: #8A5A00;
+  --color-yellow-400: #8A5A00;
+  --color-orange-400: #C2410C;
+  --color-blue-400: #1D4ED8;
+  --color-sky-400: #0369A1;
+  --color-cyan-400: #0E7490;
+  --color-indigo-400: #4338CA;
+  --color-violet-400: #6D28D9;
+  --color-purple-400: #6D28D9;
+  --color-purple-500: #6D28D9;
+  --color-gray-400: #5C5646;
+  --color-slate-400: #5C5646;
+  --color-zinc-400: #5C5646;
+  --color-neutral-400: #5C5646;
+}
+
+/* faded helper text (timestamps, counts) is too faint on white once it is also 60% transparent */
+[data-theme="light"] :is(.text-text-muted\/40, .text-text-muted\/50, .text-text-muted\/60) {
+  color: var(--text-muted);
+}
+
+/* white text sits on the dark theme's yellow and pink buttons, so it turns dark there */
+:root:not([data-theme="light"]) :is(.bg-primary, .bg-accent).text-white {
+  color: #111111;
 }
  
 [data-theme="light"] h1,
@@ -55,7 +99,11 @@
   --color-border: var(--border);
   --color-border-light: var(--border-light);
   --color-text-muted: var(--text-muted);
-  --font-sans: 'Inter', var(--font-geist-sans), system-ui, sans-serif;
+  --color-on-primary: var(--on-primary);
+  --color-highlight: var(--highlight);
+  --color-on-highlight: var(--on-highlight);
+  --color-outline: var(--outline);
+  --font-sans: 'Space Grotesk', 'Inter', var(--font-geist-sans), system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', var(--font-geist-mono), monospace;
 }
  
@@ -70,8 +118,11 @@ html {
  
 body {
   background: var(--background);
+  background-image: radial-gradient(color-mix(in srgb, var(--foreground) 9%, transparent) 1.4px, transparent 1.4px);
+  background-size: 22px 22px;
   color: var(--foreground);
   font-family: var(--font-sans);
+  font-weight: 500;
   overflow-x: hidden;
 }
  
@@ -126,30 +177,20 @@ body {
   animation: gradient-shift 4s ease infinite;
 }
  
+/* a Pop tile: flat surface, thick outline, hard shadow (the old "glass" name is kept so every card picks it up) */
 .glass {
-  background: rgba(15, 23, 42, 0.6);
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(30, 41, 59, 0.5);
+  background: var(--surface);
+  border: 2.5px solid var(--outline);
+  box-shadow: 5px 5px 0 var(--shadow-hard);
 }
- 
+
 .glass-light {
-  background: rgba(30, 41, 59, 0.4);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(51, 65, 85, 0.3);
+  background: var(--surface-light);
+  border: 2px solid var(--outline);
 }
- 
+
 [data-theme="light"] .hero-glow {
-  background: radial-gradient(circle, rgba(228, 37, 39, 0.12) 0%, transparent 70%);
-}
- 
-[data-theme="light"] .glass {
-  background: rgba(250, 250, 248, 0.7);
-  border-color: rgba(227, 226, 221, 0.6);
-}
- 
-[data-theme="light"] .glass-light {
-  background: rgba(250, 250, 248, 0.6);
-  border-color: rgba(235, 234, 230, 0.5);
+  background: radial-gradient(circle, rgba(255, 92, 138, 0.14) 0%, transparent 70%);
 }
  
 .gradient-text {
@@ -176,13 +217,8 @@ body {
 }
  
 .card-hover:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 20px 40px rgba(14, 165, 233, 0.1);
-  border-color: var(--primary);
-}
- 
-[data-theme="light"] .card-hover:hover {
-  box-shadow: 0 20px 40px rgba(228, 37, 39, 0.12);
+  transform: translate(-2px, -2px);
+  box-shadow: 7px 7px 0 var(--shadow-hard);
 }
  
 .claude-loader {

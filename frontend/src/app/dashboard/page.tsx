@@ -13,7 +13,6 @@ import GoalModal from "@/components/GoalModal";
 import DashboardView from "@/components/owners/DashboardView";
 import CalendarBooking from "@/components/owners/CalendarBooking";
 import MeetingUploadModal from "@/components/owners/MeetingUploadModal";
-import AISummaryChat from "@/components/AISummaryChat";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { fetchDeduped, getAuthHeaders } from "@/lib/utils";
 
@@ -602,12 +601,6 @@ export default function DashboardPage() {
             </div>
           </CardContent>
         </Card>
-
-        {role === "employee" && (
-          <div className="h-[600px]">
-            <AISummaryChat />
-          </div>
-        )}
 
         {role === "employee" && (
           <Card>

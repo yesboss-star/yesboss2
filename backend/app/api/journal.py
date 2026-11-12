@@ -330,10 +330,18 @@ async def update_journal_entry(
         raise HTTPException(status_code=500, detail="Database not configured")
 
     from bson import ObjectId
+    if not ObjectId.is_valid(entry_id):
+        raise HTTPException(status_code=404, detail="Entry not found")
     update: dict[str, Any] = {"updated_at": datetime.utcnow()}
     if data.content is not None:
         update["content"] = data.content
     if data.type is not None:
+        if data.type not in PERSONAL_ENTRY_TYPES:
+            # Private journal entries never become visible to the owner by editing them
+            # (sharing is only ever offered for non-journal entries).
+            current = db.journal_entries.find_one({"_id": ObjectId(entry_id), "user_id": current_user.uid}, {"type": 1})
+            if current and current.get("type") in PERSONAL_ENTRY_TYPES:
+                raise HTTPException(status_code=400, detail="Journal entries stay private")
         update["type"] = data.type
     if data.mood is not None:
         update["mood"] = data.mood
@@ -358,11 +366,21 @@ async def delete_journal_entry(
         raise HTTPException(status_code=500, detail="Database not configured")
 
     from bson import ObjectId
+    if not ObjectId.is_valid(entry_id):
+        raise HTTPException(status_code=404, detail="Entry not found")
     result = db.journal_entries.delete_one(
         {"_id": ObjectId(entry_id), "user_id": current_user.uid}
     )
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Entry not found")
+
+    # what was remembered from the entry goes with it
+    import asyncio
+
+    from ..core import journal_intel as _intel, memory as _memory
+
+    await asyncio.to_thread(_intel.forget_entry, entry_id)
+    await _memory.aforget("journal", entry_id)
 
     return {"success": True}
 

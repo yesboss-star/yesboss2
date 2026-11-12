@@ -20,8 +20,9 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
           <input
             type={type}
             className={cn(
-              "w-full h-10 px-4 rounded-xl bg-surface border border-border text-sm text-foreground placeholder:text-text-muted transition-colors",
-              "focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20",
+              "w-full h-10 px-4 rounded-2xl bg-surface border-2 text-sm text-foreground placeholder:text-text-muted transition-colors",
+              !error && "border-outline",
+              "focus:outline-none focus:ring-2 focus:ring-highlight",
               "disabled:pointer-events-none disabled:opacity-50",
               error && "border-rose-500 focus:border-rose-500 focus:ring-rose-500/20",
               icon && "pl-12",

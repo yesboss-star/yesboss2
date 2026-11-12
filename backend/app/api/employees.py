@@ -127,17 +127,20 @@ async def find_employee_by_email(email: str, current_user = Depends(get_current_
 
     clean_email = email.lower().strip()
 
-    # Look up the org for this employee and require membership.
-    from ..dependencies.scope import resolve_user_org_ids
+    # Anyone may look themselves up (an owner is often in neither list, which is not "access denied");
+    # another person's record needs a shared organization.
+    own_email = (getattr(current_user, "email", "") or "").lower().strip()
+    if clean_email != own_email:
+        from ..dependencies.scope import resolve_user_org_ids
 
-    user_org_ids = {str(o).lower() for o in await resolve_user_org_ids(db, current_user)}
-    emp_org_ids: set[str] = set()
-    for org_id in db.employees.distinct("organization_id", {"email": clean_email}):
-        emp_org_ids.add(str(org_id).lower())
-    for org_id in db.org_chart_members.distinct("organization_id", {"email": clean_email}):
-        emp_org_ids.add(str(org_id).lower())
-    if not emp_org_ids & user_org_ids:
-        raise HTTPException(status_code=403, detail="Access denied")
+        user_org_ids = {str(o).lower() for o in await resolve_user_org_ids(db, current_user)}
+        emp_org_ids: set[str] = set()
+        for org_id in db.employees.distinct("organization_id", {"email": clean_email}):
+            emp_org_ids.add(str(org_id).lower())
+        for org_id in db.org_chart_members.distinct("organization_id", {"email": clean_email}):
+            emp_org_ids.add(str(org_id).lower())
+        if not emp_org_ids & user_org_ids:
+            raise HTTPException(status_code=403, detail="Access denied")
 
     employee = db.employees.find_one({"email": clean_email})
 
@@ -332,6 +335,20 @@ def _sync_to_org_chart(db, request: EmployeePersonaRequest) -> None:
         logger.warning("Failed to sync employee %s to org chart: %s", request.email, e)
 
 
+async def _may_join_org(db, org_id: str, user) -> bool:
+    """Already a member / listed by the owner, or a verified address on the company's domain."""
+    if await is_org_member(db, org_id, user):
+        return True
+    email = (getattr(user, "email", "") or "").strip().lower()
+    uid = getattr(user, "id", None) or getattr(user, "uid", None)
+    org = db.organizations.find_one({"_id": ObjectId(org_id)}, {"domain": 1}) if ObjectId.is_valid(str(org_id)) else None
+    domain = ((org or {}).get("domain") or "").strip().lower()
+    if not (domain and email.endswith("@" + domain)):
+        return False
+    profile = db.users.find_one({"uid": uid}, {"email_otp_verified": 1}) or {}
+    return bool(profile.get("email_otp_verified"))
+
+
 @router.post("/persona")
 async def save_employee_persona(request: EmployeePersonaRequest, current_user = Depends(get_current_user)):
     db = get_database()
@@ -341,11 +358,29 @@ async def save_employee_persona(request: EmployeePersonaRequest, current_user = 
     if not request.email:
         raise HTTPException(status_code=400, detail="Email is required")
 
-    # Non-owners may only save their own persona.
-    if request.organization_id and not await is_org_owner(db, request.organization_id, current_user):
-        own_email = getattr(current_user, "email", None)
-        if not own_email or request.email.lower().strip() != own_email.lower().strip():
+    request.email = request.email.strip().lower()
+    own_email = (getattr(current_user, "email", "") or "").strip().lower()
+    is_self = bool(own_email) and request.email == own_email
+    org_id = request.organization_id
+
+    if org_id:
+        if not await is_org_owner(db, org_id, current_user):
+            # Non-owners may only save their own persona, and only into an organization they
+            # belong to or are entitled to join. Saving a persona also adds the person to the
+            # org chart, which is what grants access - so this is the "join" gate.
+            if not is_self:
+                raise HTTPException(status_code=403, detail="Access denied")
+            if not await _may_join_org(db, org_id, current_user):
+                raise HTTPException(
+                    status_code=403,
+                    detail="You are not listed in this organization. Ask the owner to add you.",
+                )
+        # Never overwrite a record that belongs to a different organization.
+        other = db.employees.find_one({"email": request.email}, {"organization_id": 1})
+        if other and other.get("organization_id") and str(other["organization_id"]) != str(org_id) and not is_self:
             raise HTTPException(status_code=403, detail="Access denied")
+    elif not is_self:
+        raise HTTPException(status_code=403, detail="Access denied")
 
     existing = db.employees.find_one({"email": request.email})
 
@@ -467,7 +502,9 @@ async def upload_avatar(
     return {"avatar_url": avatar_url}
 
 
-@router.get("/avatar/{email}")
+# HEAD too: the UI probes for an avatar with HEAD before showing it, and a GET-only route made
+# that probe fail with 405, so uploaded avatars never appeared.
+@router.api_route("/avatar/{email}", methods=["GET", "HEAD"])
 async def get_avatar(email: str):
     clean_email = email.lower().strip()
 

@@ -25,7 +25,9 @@ async def _require_member(user, org_id: str):
         raise HTTPException(status_code=403, detail="Access denied")
 
 
-@router.post("/suggest-assignees")
+# The UI calls this with GET (query params); the route was POST-only, so assignee suggestions
+# always failed with 405. Accept both.
+@router.api_route("/suggest-assignees", methods=["GET", "POST"])
 async def suggest_assignees(
     title: str,
     description: str | None = "",

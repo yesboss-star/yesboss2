@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
+import { isSafeRedirect } from "@/lib/safeRedirect";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
@@ -267,7 +268,7 @@ export default function EmployeeOnboarding() {
       const params = new URLSearchParams(window.location.search);
       redirect = params.get("redirect") || localStorage.getItem("yesboss_pending_redirect");
     } catch {}
-    if (redirect && redirect.startsWith("/") && !redirect.startsWith("//")) {
+    if (isSafeRedirect(redirect)) {
       try { localStorage.removeItem("yesboss_pending_redirect"); } catch {}
       router.push(redirect);
     } else {
@@ -881,7 +882,7 @@ export default function EmployeeOnboarding() {
                     const params = new URLSearchParams(window.location.search);
                     redirect = params.get("redirect") || localStorage.getItem("yesboss_pending_redirect");
                   } catch {}
-                  if (redirect && redirect.startsWith("/") && !redirect.startsWith("//")) {
+                  if (isSafeRedirect(redirect)) {
                     try { localStorage.removeItem("yesboss_pending_redirect"); } catch {}
                     router.push(redirect);
                   } else {

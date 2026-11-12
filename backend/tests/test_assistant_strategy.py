@@ -13,6 +13,8 @@ import pytest
 import app.api.assistant as assistant
 from app.main import app
 
+pytestmark = pytest.mark.usefixtures("bypass_guards")
+
 BRIEFING_DUMP = (
     "Okay so now are you listening to what I'm saying? I am really stressed out because all my "
     "business codes and dynamics are slightly off from what I had planned. Today we have planned "

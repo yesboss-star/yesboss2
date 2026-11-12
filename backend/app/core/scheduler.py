@@ -1,8 +1,12 @@
 import asyncio
 import logging
 import threading
-from datetime import datetime, timedelta
+import uuid
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
+
+from ..utils.dates import normalize_due_date
+from ..utils.dates import parse_meeting_dt as _parse_meeting_dt
 
 logger = logging.getLogger("yesboss.scheduler")
 
@@ -11,14 +15,42 @@ CHECK_INTERVAL = 300  # 5 min base — Zoho syncs use this; other jobs use count
 _scheduler_thread: threading.Thread | None = None
 _scheduler_stop = threading.Event()
 
+# Every uvicorn worker starts its own scheduler thread. A Mongo lease makes sure only one
+# of them runs the jobs, otherwise every email / notification / Zoho + Google import and
+# Cliq DM is sent once per worker.
+_SCHEDULER_ID = uuid.uuid4().hex
+LEADER_LEASE_SECONDS = CHECK_INTERVAL * 3
+
+
+def acquire_scheduler_lease(db, now: datetime | None = None) -> bool:
+    """Take or renew the scheduler leadership lease. True if this process is the leader."""
+    from pymongo.errors import DuplicateKeyError
+
+    now = now or datetime.utcnow()
+    try:
+        db.scheduler_locks.find_one_and_update(
+            {"_id": "scheduler", "$or": [{"owner": _SCHEDULER_ID}, {"expires_at": {"$lt": now}}]},
+            {"$set": {"owner": _SCHEDULER_ID, "renewed_at": now,
+                      "expires_at": now + timedelta(seconds=LEADER_LEASE_SECONDS)}},
+            upsert=True,
+        )
+        return True
+    except DuplicateKeyError:
+        return False  # another worker holds an unexpired lease
+    except Exception as e:
+        logger.warning("Scheduler lease check failed (skipping this cycle): %s", e)
+        return False
+
 
 def _days_overdue(due_date):
     """Parse a due_date string safely; returns days overdue or None."""
     if not due_date:
         return 0
     try:
-        v = str(due_date).strip().replace("Z", "").replace("+00:00", "")
-        return (datetime.utcnow() - datetime.fromisoformat(v)).days
+        due = datetime.fromisoformat(str(due_date).strip().replace("Z", "+00:00"))
+        if due.tzinfo is not None:
+            due = due.astimezone(UTC).replace(tzinfo=None)
+        return (datetime.utcnow() - due).days
     except Exception:
         return None
 
@@ -111,16 +143,30 @@ async def check_mom_reminders(db):
         from ..core.notification_service import create_and_deliver
         from ..core.zoho.taz import send_reminder as taz_send
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         two_hours_ago = now - timedelta(hours=2)
 
-        ended_meetings = list(db.meetings.find({
-            "end_dt": {"$gte": two_hours_ago, "$lte": now},
-            "mom_uploaded": False,
-            "reminder_sent": {"$ne": True},
+        # end_dt is stored as a string in several formats, so it can't be range-queried in
+        # Mongo; filter in Python. MoM has its own flag so a pre-meeting reminder doesn't
+        # suppress it.
+        candidates = list(db.meetings.find({
+            "mom_uploaded": {"$ne": True},
+            "mom_reminder_sent": {"$ne": True},
+            "status": {"$nin": ["cancelled", "canceled"]},
+            "end_dt": {"$exists": True, "$ne": None},
         }))
 
-        for mt in ended_meetings:
+        for mt in candidates:
+            end = _parse_meeting_dt(mt.get("end_dt"))
+            if end is None:
+                continue
+            if end > now:
+                continue  # not finished yet
+            if end < two_hours_ago:
+                # Window passed; mark so we stop re-scanning this meeting every tick.
+                db.meetings.update_one({"_id": mt["_id"]}, {"$set": {"mom_reminder_sent": True}})
+                continue
+
             title = mt.get("title", "Untitled")
             atts = mt.get("attendees", [])
             org_id = mt.get("organization_id", "")
@@ -142,7 +188,7 @@ async def check_mom_reminders(db):
 
             db.meetings.update_one(
                 {"_id": mt["_id"]},
-                {"$set": {"reminder_sent": True, "updated_at": now}},
+                {"$set": {"mom_reminder_sent": True, "updated_at": now.replace(tzinfo=None)}},
             )
             logger.info("MoM reminders sent for meeting '%s' to %d attendees", title, len(atts))
     except Exception as e:
@@ -158,7 +204,7 @@ async def check_meeting_reminders():
         if db is None:
             return
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         upcoming = list(db.meetings.find({
             "status": {"$ne": "cancelled"},
             "reminder_sent": {"$ne": True},
@@ -168,22 +214,16 @@ async def check_meeting_reminders():
         sent = 0
         for mt in upcoming:
             try:
-                start_raw = str(mt.get("start_dt") or "")
-                if not start_raw:
+                start_utc = _parse_meeting_dt(mt.get("start_dt"))
+                if start_utc is None:
                     continue
-                try:
-                    start_dt = datetime.fromisoformat(start_raw)
-                except ValueError:
-                    try:
-                        start_dt = datetime.strptime(start_raw, "%Y%m%dT%H%M%S%z")
-                    except ValueError:
-                        continue
-                if start_dt.tzinfo is None:
-                    start_dt = start_dt.replace(tzinfo=__import__("datetime").timezone.utc)
-                start_utc = start_dt.astimezone(__import__("datetime").timezone.utc)
                 remind_before = int(mt.get("remind_before_minutes", 30) or 30)
                 remind_at = start_utc - timedelta(minutes=remind_before)
-                if remind_at <= now < start_utc + timedelta(minutes=10):
+                if now >= start_utc + timedelta(minutes=10):
+                    # Window passed without a reminder; stop re-scanning this meeting.
+                    db.meetings.update_one({"_id": mt["_id"]}, {"$set": {"reminder_sent": True}})
+                    continue
+                if remind_at <= now:
                     for att in mt.get("attendees") or []:
                         await create_and_deliver(
                             user_id=att,
@@ -197,9 +237,10 @@ async def check_meeting_reminders():
                         sent += 1
                     db.meetings.update_one(
                         {"_id": mt["_id"]},
-                        {"$set": {"reminder_sent": True, "updated_at": now}},
+                        {"$set": {"reminder_sent": True, "updated_at": now.replace(tzinfo=None)}},
                     )
-            except Exception:
+            except Exception as e:
+                logger.warning("Meeting reminder failed for %s: %s", mt.get("_id"), e)
                 continue
         if sent:
             logger.info(f"Meeting reminders sent to {sent} recipients")
@@ -345,10 +386,13 @@ async def check_deadline_reminders():
                     metadata={"task_id": str(task.get("_id", "")), "assignee": assignee_id},
                 )
 
+        # 3-7 days overdue only: older tasks get the 7-day alert below, so the owner isn't
+        # escalated twice for one task in one run. `$not $gte` also matches tasks that have
+        # no escalation_level yet (legacy/imported).
         tasks_3d_overdue = list(db.tasks.find({
-            "due_date": {"$gt": "", "$lt": days_3_ago},
+            "due_date": {"$gte": days_7_ago, "$lt": days_3_ago},
             "status": {"$nin": ["completed", "approved"]},
-            "escalation_level": {"$lt": 2},
+            "escalation_level": {"$not": {"$gte": 2}},
         }))
 
         for task in tasks_3d_overdue:
@@ -397,7 +441,7 @@ async def check_deadline_reminders():
         tasks_7d_overdue = list(db.tasks.find({
             "due_date": {"$gt": "", "$lt": days_7_ago},
             "status": {"$nin": ["completed", "approved"]},
-            "escalation_level": {"$lt": 3},
+            "escalation_level": {"$not": {"$gte": 3}},
         }))
 
         org_groups = {}
@@ -497,6 +541,7 @@ async def check_goal_deadlines(db):
         goals_due_soon = list(db.goals.find({
             "due_date": {"$gte": now, "$lte": tomorrow},
             "status": {"$ne": "completed"},
+            "goal_deadline_reminded_1day": {"$ne": True},
         }))
 
         for g in goals_due_soon:
@@ -527,6 +572,10 @@ async def check_goal_deadlines(db):
                     link=f"/goals/{g.get('_id')}",
                     metadata={"goal_id": str(g.get("_id", "")), "assignee": aid},
                 )
+            db.goals.update_one(
+                {"_id": g["_id"]},
+                {"$set": {"goal_deadline_reminded_1day": True}},
+            )
 
         goals_due_3 = list(db.goals.find({
             "due_date": {"$gte": tomorrow, "$lte": in_3_days},
@@ -980,7 +1029,7 @@ async def sync_zoho_tasks():
                         "assignee_id": [user_id],
                         "assignee_email": user_id,
                         "organization_id": org_id,
-                        "due_date": ZohoMailTasks.parse_zoho_date(zt.get("dueDate", "")),
+                        "due_date": normalize_due_date(ZohoMailTasks.parse_zoho_date(zt.get("dueDate", ""))),
                         "zoho_personal_task_id": zoho_id,
                         "zoho_sync_status": "synced",
                         "zoho_last_synced_at": now_iso,
@@ -1134,7 +1183,7 @@ async def sync_google_tasks():
                         "assignee_id": [user_id],
                         "assignee_email": user_id,
                         "organization_id": org_id,
-                        "due_date": (gt.get("due") or "")[:10] or None,
+                        "due_date": normalize_due_date((gt.get("due") or "")[:10] or None),
                         "google_task_id": gtask_id,
                         "google_task_list_id": list_id,
                         "google_sync_status": "synced",
@@ -1183,7 +1232,7 @@ async def sync_pending_google_tasks(limit: int = 50):
                     "google_sync_status": {"$in": ["pending", "error"]},
                     "google_sync_attempts": {"$lt": 5},
                 }
-            ).limit(limit)
+            ).sort("google_last_synced_at", 1).limit(limit)  # least-recently tried first: no starvation
         )
         for task_doc in pending:
             task_doc["_id"] = str(task_doc["_id"])
@@ -1219,7 +1268,7 @@ async def sync_pending_zoho_tasks(limit: int = 50):
                     "zoho_sync_status": {"$in": ["pending", "error"]},
                     "zoho_sync_attempts": {"$lt": 5},
                 }
-            ).limit(limit)
+            ).sort("zoho_last_synced_at", 1).limit(limit)  # least-recently tried first: no starvation
         )
         for task_doc in pending:
             task_doc["_id"] = str(task_doc["_id"])
@@ -1463,6 +1512,16 @@ async def generate_weekly_owner_briefings():
         logger.error(f"Weekly briefing generation failed: {e}")
 
 
+async def send_weekly_review_emails():
+    """Monday 08:00 IST: each person's weekly review (opt-out per person, once per person per week)."""
+    from .database import get_database
+    from .weekly_review import send_weekly_reviews
+
+    db = get_database()
+    if db is not None:
+        await send_weekly_reviews(db)
+
+
 async def send_weekly_idea_digest():
     try:
         from ..core.database import get_database
@@ -1660,6 +1719,16 @@ async def scheduler_loop():
     await asyncio.sleep(30)
     while not _scheduler_stop.is_set():
         try:
+            from ..core.database import get_database as _lease_db
+            _db = _lease_db()
+            if _db is None or not acquire_scheduler_lease(_db):
+                await asyncio.sleep(CHECK_INTERVAL)
+                continue
+        except Exception as e:
+            logger.error(f"Scheduler lease error: {e}")
+            await asyncio.sleep(CHECK_INTERVAL)
+            continue
+        try:
             if deadline_counter % 12 == 0:  # every ~60 min
                 await check_deadline_reminders()
                 db = None
@@ -1680,6 +1749,7 @@ async def scheduler_loop():
                 if hour == 8:
                     await send_digests()
                     await send_morning_journal_prompts()
+                    await send_weekly_review_emails()
                 if hour == 9:
                     await send_auto_reports()
                     await send_weekly_idea_digest()
@@ -1688,6 +1758,13 @@ async def scheduler_loop():
                 if hour == 3:
                     await aggregate_cross_company_patterns()
                 await check_owner_check_ins()
+
+            try:
+                from .capture_analysis import sweep_pending_captures
+
+                await sweep_pending_captures()
+            except Exception as e:
+                logger.error("Capture sweep failed: %s", e)
 
             await sync_zoho_tasks()
             await sync_pending_zoho_tasks()

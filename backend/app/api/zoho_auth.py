@@ -4,6 +4,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from ..core.database import get_database
+from ..core.oauth_state import sign_state, verify_state
 from ..core.zoho import ZohoOAuth
 from ..dependencies.auth import get_current_user_optional
 
@@ -51,7 +52,7 @@ async def get_auth_url(
         raise HTTPException(status_code=401, detail="Not authenticated")
     zoho = ZohoOAuth(get_database())
     redirect_uri = f"{_request_origin(request)}/api/v1/zoho/callback"
-    url = zoho.get_auth_url(state=user_id, redirect_uri=redirect_uri)
+    url = zoho.get_auth_url(state=sign_state(user_id), redirect_uri=redirect_uri)
     return {"url": url}
 
 
@@ -70,7 +71,15 @@ async def zoho_callback(
         if not code:
             raise HTTPException(status_code=400, detail="Missing authorization code")
 
-        logger.info("Zoho callback received: code=%s... state=%s", code[:20] if code else "", state)
+        # `state` is a signed, expiring token minted by /auth-url for the signed-in user.
+        # Without this check anyone could bind their own Zoho account to any user id.
+        verified_uid = verify_state(state)
+        if not verified_uid:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid or expired authorization request. Please start the connection again.",
+            )
+        logger.info("Zoho callback received for user_id=%s", verified_uid)
 
         db = get_database()
         zoho = ZohoOAuth(db)
@@ -102,7 +111,7 @@ async def zoho_callback(
 
         zoho_mail_id = await zoho.get_zoho_mail_id(access_token)
 
-        user_id = state or ""
+        user_id = verified_uid
         org_id = ""
         user_email = ""
 

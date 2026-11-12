@@ -1,12 +1,14 @@
+import hmac
 import logging
 import re
 import secrets
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
 
+from ..core.config import settings
 from ..core.database import get_database
 from ..core.firebase_admin import (
     create_user,
@@ -30,6 +32,59 @@ except Exception as e:
 logger = logging.getLogger("yesboss.auth")
 
 router = APIRouter()
+
+
+def _expose_debug_otp() -> bool:
+    """OTPs may only be echoed back / logged outside production (dev convenience)."""
+    return settings.ENVIRONMENT != "production"
+
+
+def _otp_hint(otp: str) -> str:
+    return otp if _expose_debug_otp() else "<hidden>"
+
+
+def _require_admin_key(request: Request) -> None:
+    """Gate for operator-only endpoints: X-Admin-Key must match ADMIN_API_KEY.
+
+    Fails closed (404) when no key is configured, so these endpoints stay dark by default.
+    """
+    expected = settings.ADMIN_API_KEY or ""
+    provided = request.headers.get("X-Admin-Key", "")
+    if not expected or not hmac.compare_digest(provided.encode(), expected.encode()):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+
+OTP_MAX_ATTEMPTS = 5            # wrong guesses before the code is burned
+OTP_RESEND_COOLDOWN_SECONDS = 30  # minimum gap between codes for one address
+
+
+def _otp_cooldown_active(record: dict | None) -> bool:
+    created = (record or {}).get("created_at")
+    return bool(
+        created and OTP_RESEND_COOLDOWN_SECONDS
+        and (datetime.utcnow() - created).total_seconds() < OTP_RESEND_COOLDOWN_SECONDS
+    )
+
+
+def _check_otp_attempt(db, collection: str, record: dict, supplied: str) -> bool:
+    """Constant-time OTP comparison with a bounded number of guesses.
+
+    A 6-digit code has only a million values, so unlimited guesses within the 10-minute
+    window made it brute-forceable. After OTP_MAX_ATTEMPTS wrong tries the code is deleted
+    and a new one must be requested. Returns True when the code matches.
+    """
+    if int(record.get("attempts") or 0) >= OTP_MAX_ATTEMPTS:
+        db[collection].delete_one({"_id": record["_id"]})
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                            detail="Too many incorrect attempts. Request a new code.")
+    if hmac.compare_digest(str(record.get("otp") or "").encode(), supplied.encode()):
+        return True
+    attempts = int(record.get("attempts") or 0) + 1
+    if attempts >= OTP_MAX_ATTEMPTS:
+        db[collection].delete_one({"_id": record["_id"]})
+    else:
+        db[collection].update_one({"_id": record["_id"]}, {"$set": {"attempts": attempts}})
+    return False
 
 
 def _audit_log(action: str, uid: str, detail: str | None = None):
@@ -247,7 +302,11 @@ async def signup(request: SignupRequest):
 
 
 @router.post("/login", response_model=AuthResponse)
-async def login(request: LoginRequest):
+async def login(request: LoginRequest, current_user=Depends(get_current_user)):
+    # Passwords are verified by Firebase on the client; this endpoint never checked one,
+    # so it is limited to returning the profile of the already-authenticated caller.
+    if (getattr(current_user, "email", "") or "").strip().lower() != request.email.strip().lower():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     try:
         user = get_user_by_email(request.email)
         if not user:
@@ -308,10 +367,15 @@ async def send_otp(request: SendOTPRequest):
         otp = f"{secrets.randbelow(1000000):06d}"
         expires_at = datetime.utcnow() + timedelta(minutes=10)
 
+        if _otp_cooldown_active(db.signup_otps.find_one({"email": email})):
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                                detail="A code was just sent. Please wait a moment before requesting another.")
+
         db.signup_otps.delete_many({"email": email})
         db.signup_otps.insert_one({
             "email": email,
             "otp": otp,
+            "attempts": 0,
             "verified": False,
             "expires_at": expires_at,
             "created_at": datetime.utcnow(),
@@ -319,21 +383,24 @@ async def send_otp(request: SendOTPRequest):
 
         from ..core.email_service import is_email_configured, send_otp_email
         if not is_email_configured():
-            logger.warning("SMTP not configured - OTP not sent to %s. Debug OTP: %s", email, otp)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Email service not configured. Please set up SMTP credentials.",
-            )
+            logger.warning("SMTP not configured - OTP not sent to %s. Debug OTP: %s", email, _otp_hint(otp))
+            if not _expose_debug_otp():
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Email service not configured. Please set up SMTP credentials.",
+                )
+            # Local development without SMTP: the code is in the server log above.
+            return AuthResponse(success=True, message="OTP generated (development: see the server log)")
 
         email_sent = send_otp_email(email, otp, purpose="verification")
         if email_sent:
             logger.info("Signup OTP sent to %s", email)
         else:
-            logger.warning("SMTP send failed for %s. Debug OTP: %s", email, otp)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to send OTP email. Check SMTP configuration. Debug OTP: {otp}",
-            )
+            logger.warning("SMTP send failed for %s. Debug OTP: %s", email, _otp_hint(otp))
+            detail = "Failed to send OTP email. Check SMTP configuration."
+            if _expose_debug_otp():
+                detail += f" Debug OTP: {otp}"
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail)
 
         return AuthResponse(
             success=True,
@@ -372,7 +439,7 @@ async def verify_otp(request: VerifyOTPRequest):
             db.signup_otps.delete_one({"_id": record["_id"]})
             raise HTTPException(status_code=400, detail="OTP expired. Request a new one.")
 
-        if record.get("otp") != otp_code:
+        if not _check_otp_attempt(db, "signup_otps", record, otp_code):
             raise HTTPException(status_code=400, detail="Invalid OTP")
 
         verification_token = secrets.token_urlsafe(32)
@@ -589,11 +656,23 @@ class SyncUserRequest(BaseModel):
 
 
 @router.post("/sync-user", response_model=AuthResponse)
-async def sync_user(request: SyncUserRequest):
+async def sync_user(request: SyncUserRequest, current_user=Depends(get_current_user)):
+    # A caller may only sync THEIR OWN profile, and the e-mail comes from the verified token.
+    # This endpoint used to be anonymous and trust the body, so anyone could rewrite any user's
+    # name / e-mail / phone, flip phone_verified, and set Firebase role claims for any uid.
+    caller_uid = getattr(current_user, "id", None) or getattr(current_user, "uid", None)
+    if not caller_uid or request.uid != caller_uid:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    token_email = (getattr(current_user, "email", "") or "").strip().lower()
+    if token_email:
+        request.email = token_email
+
     try:
         db = get_database()
         if db is None:
             raise HTTPException(status_code=500, detail="Database not configured")
+
+        email_otp_proven = False
 
         # For email signups, validate the verification_token to prove OTP was verified
         if request.email and not request.phone_verified:
@@ -607,6 +686,7 @@ async def sync_user(request: SyncUserRequest):
             if not token_record:
                 raise HTTPException(status_code=400, detail="Invalid or expired verification token. Verify OTP first.")
             db.signup_otps.delete_one({"_id": token_record["_id"]})
+            email_otp_proven = True
 
         existing = db.users.find_one({"uid": request.uid})
         now = datetime.utcnow().isoformat()
@@ -624,6 +704,8 @@ async def sync_user(request: SyncUserRequest):
                 "organization_completed": existing.get("organization_completed", False),
                 "updated_at": now,
             }
+            if email_otp_proven or existing.get("email_otp_verified"):
+                user_doc["email_otp_verified"] = True
             db.users.update_one({"uid": request.uid}, {"$set": user_doc})
             logger.info("User synced (updated): %s", request.email)
             actual_role = existing_role
@@ -641,6 +723,8 @@ async def sync_user(request: SyncUserRequest):
                 "created_at": now,
                 "updated_at": now,
             }
+            if email_otp_proven:
+                user_doc["email_otp_verified"] = True
             db.users.insert_one(user_doc)
             logger.info("User synced (created): %s", request.email)
             actual_role = role_val
@@ -705,7 +789,8 @@ async def reset_password(request: ResetPasswordRequest):
 
 
 @router.put("/user/{uid}/role", response_model=AuthResponse)
-async def update_user_role(uid: str, role: str):
+async def update_user_role(uid: str, role: str, request: Request):
+    _require_admin_key(request)
     if role not in ("owner", "employee"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -736,7 +821,8 @@ async def update_user_role(uid: str, role: str):
 
 
 @router.delete("/user/by-email/{email}", response_model=AuthResponse)
-async def delete_firebase_user(email: str):
+async def delete_firebase_user(email: str, request: Request):
+    _require_admin_key(request)
     email = email.strip().lower()
     try:
         user = get_user_by_email(email)
@@ -826,7 +912,10 @@ class UpdatePhoneRequest(BaseModel):
 
 
 @router.post("/update-phone", response_model=AuthResponse)
-async def update_phone(request: UpdatePhoneRequest):
+async def update_phone_by_uid(request: UpdatePhoneRequest, current_user=Depends(get_current_user)):
+    caller_uid = getattr(current_user, "id", None) or getattr(current_user, "uid", None)
+    if not caller_uid or request.uid != caller_uid:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     try:
         db = get_database()
         if db is None:
@@ -975,6 +1064,14 @@ async def forgot_password_send_otp(request: ForgotSendOTPRequest):
     try:
         uid, contact, channel = _detect_channel(request)
 
+        if channel == "phone" and not _expose_debug_otp():
+            # There is no SMS delivery: the only way a phone user ever got the code was the
+            # OTP echoed back in this response, which lets anyone reset any account.
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password reset by phone is not available. Please use your email address.",
+            )
+
         otp = f"{secrets.randbelow(1000000):06d}"
         expires_at = datetime.utcnow() + timedelta(minutes=10)
         token = secrets.token_urlsafe(32)
@@ -983,12 +1080,17 @@ async def forgot_password_send_otp(request: ForgotSendOTPRequest):
         if db is None:
             raise HTTPException(status_code=500, detail="Database not configured")
 
+        if _otp_cooldown_active(db.password_reset_codes.find_one({"contact": contact})):
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                                detail="A code was just sent. Please wait a moment before requesting another.")
+
         db.password_reset_codes.delete_many({"contact": contact})
         db.password_reset_codes.insert_one({
             "contact": contact,
             "channel": channel,
             "uid": uid,
             "otp": otp,
+            "attempts": 0,
             "reset_token": token,
             "verified": False,
             "expires_at": expires_at,
@@ -1003,9 +1105,9 @@ async def forgot_password_send_otp(request: ForgotSendOTPRequest):
                 if email_sent:
                     logger.info("Password reset OTP sent to %s", contact)
                 else:
-                    logger.warning("SMTP send failed - password reset OTP not sent to %s. Debug OTP: %s", contact, otp)
+                    logger.warning("SMTP send failed - password reset OTP not sent to %s. Debug OTP: %s", contact, _otp_hint(otp))
             else:
-                logger.warning("SMTP not configured - password reset OTP not sent to %s. Debug OTP: %s", contact, otp)
+                logger.warning("SMTP not configured - password reset OTP not sent to %s. Debug OTP: %s", contact, _otp_hint(otp))
             try:
                 generate_password_reset_link(contact)
                 logger.info("Password reset link also generated for: %s", contact)
@@ -1018,7 +1120,7 @@ async def forgot_password_send_otp(request: ForgotSendOTPRequest):
             success=True,
             message="OTP sent" if uid else "OTP sent (user will be created at reset if needed)",
             channel=channel,
-            debug_otp=otp,
+            debug_otp=otp if _expose_debug_otp() else None,
             reset_token=None,
         )
     except HTTPException:
@@ -1049,7 +1151,7 @@ async def forgot_password_verify_otp(request: ForgotVerifyOTPRequest):
             db.password_reset_codes.delete_one({"_id": record["_id"]})
             raise HTTPException(status_code=400, detail="OTP expired. Request a new one.")
 
-        if record.get("otp") != request.otp.strip():
+        if not _check_otp_attempt(db, "password_reset_codes", record, request.otp.strip()):
             raise HTTPException(status_code=400, detail="Invalid OTP")
 
         db.password_reset_codes.update_one(

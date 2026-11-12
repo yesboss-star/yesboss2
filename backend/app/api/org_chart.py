@@ -1,6 +1,7 @@
 import csv
 import io
 import logging
+import re
 from datetime import datetime
 
 from bson import ObjectId
@@ -52,9 +53,20 @@ COLUMN_ALIASES = {
     "title": ["title", "sub department", "sub_department", "subdept", "team name", "team_name", "subdept"],
 }
 
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_EMPTY_CELLS = {"", "nan", "nat", "none", "null", "n/a"}
+
+
+def _cell(value) -> str:
+    """A spreadsheet cell as clean text. Blank Excel cells arrive as NaN and used to be stored as
+    the literal strings 'nan' (emails, roles, managers)."""
+    text = "" if value is None else str(value).strip()
+    return "" if text.lower() in _EMPTY_CELLS else text
+
+
 def normalize_columns(row: dict) -> dict:
     """Map varied column names to standard field names."""
-    row_lower = {str(k).strip().lower(): str(v).strip() for k, v in row.items()}
+    row_lower = {str(k).strip().lower(): _cell(v) for k, v in row.items()}
     normalized = {}
     for standard, aliases in COLUMN_ALIASES.items():
         for alias in aliases:
@@ -88,62 +100,58 @@ async def upload_org_chart(
     if not await is_org_owner(db, org_id, current_user):
         raise HTTPException(status_code=403, detail="Access denied")
 
+    filename = (file.filename or "").strip().lower()
+    if not filename.endswith((".csv", ".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Unsupported file format. Use CSV or Excel files.")
+
     content = await file.read()
-    errors = []
+    errors: list[str] = []
     inserted = 0
 
     try:
-        if file.filename.endswith('.csv'):
-            reader = csv.DictReader(io.StringIO(content.decode('utf-8-sig')))
-            members = []
-            for row in reader:
-                data = normalize_columns(row)
-                email = data.get('email', '').strip()
-                if not email:
-                    errors.append(f"Row {reader.line_num}: email is required")
-                    continue
-                full_name = data.get('full_name', '').strip()
-                members.append({
-                    "organization_id": org_id,
-                    "email": email,
-                    "full_name": full_name or email.split('@')[0],
-                    "role": data.get('role', 'employee').strip().lower(),
-                    "department": data.get('department', '').strip(),
-                    "manager_email": data.get('manager_email', '').strip() or None,
-                    "title": data.get('title', '').strip(),
-                    "created_at": datetime.utcnow(),
-                    "updated_at": datetime.utcnow(),
-                })
-            if members:
-                result = db.org_chart_members.insert_many(members)
-                inserted = len(result.inserted_ids)
-        elif file.filename.endswith(('.xlsx', '.xls')):
-            import pandas as pd
-            df = pd.read_excel(io.BytesIO(content))
-            members = []
-            for idx, row in df.iterrows():
-                data = normalize_columns(row)
-                email = data.get('email', '').strip()
-                if not email:
-                    errors.append(f"Row {idx + 2}: email is required")
-                    continue
-                full_name = data.get('full_name', '').strip()
-                members.append({
-                    "organization_id": org_id,
-                    "email": email,
-                    "full_name": full_name or email.split('@')[0],
-                    "role": data.get('role', 'employee').strip().lower(),
-                    "department": data.get('department', '').strip(),
-                    "manager_email": data.get('manager_email', '').strip() or None,
-                    "title": data.get('title', '').strip(),
-                    "created_at": datetime.utcnow(),
-                    "updated_at": datetime.utcnow(),
-                })
-            if members:
-                result = db.org_chart_members.insert_many(members)
-                inserted = len(result.inserted_ids)
+        if filename.endswith(".csv"):
+            reader = csv.DictReader(io.StringIO(content.decode("utf-8-sig")))
+            rows = [(reader.line_num, row) for row in reader]
         else:
-            raise HTTPException(status_code=400, detail="Unsupported file format. Use CSV or Excel files.")
+            import pandas as pd
+
+            # dtype=str + keep_default_na=False: blank cells stay "" instead of becoming NaN.
+            df = pd.read_excel(io.BytesIO(content), dtype=str, keep_default_na=False)
+            rows = [(idx + 2, row) for idx, row in df.iterrows()]
+
+        seen: set[str] = set()
+        now = datetime.utcnow()
+        for line_no, row in rows:
+            data = normalize_columns(row)
+            email = _cell(data.get("email")).lower()
+            if not email:
+                errors.append(f"Row {line_no}: email is required")
+                continue
+            if not EMAIL_RE.match(email):
+                errors.append(f"Row {line_no}: '{email}' is not a valid email")
+                continue
+            if email in seen:
+                continue  # a repeated address in the same sheet: first row wins
+            seen.add(email)
+            doc = {
+                "organization_id": org_id,
+                "email": email,
+                "full_name": _cell(data.get("full_name")) or email.split("@")[0],
+                "role": _cell(data.get("role")).lower() or "employee",
+                "department": _cell(data.get("department")),
+                "manager_email": _cell(data.get("manager_email")).lower() or None,
+                "title": _cell(data.get("title")),
+                "updated_at": now,
+            }
+            # Upsert: re-uploading the same sheet updates people instead of duplicating them.
+            db.org_chart_members.update_one(
+                {"organization_id": org_id, "email": email},
+                {"$set": doc, "$setOnInsert": {"created_at": now}},
+                upsert=True,
+            )
+            inserted += 1
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Org chart upload error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to process file: {str(e)}")
@@ -171,11 +179,11 @@ async def add_org_member(
 
     doc = {
         "organization_id": org_id,
-        "email": member.email,
+        "email": member.email.strip().lower(),
         "full_name": member.full_name,
         "role": member.role,
         "department": member.department,
-        "manager_email": member.manager_email,
+        "manager_email": (member.manager_email or "").strip().lower() or None,
         "title": member.title,
         "timezone": member.timezone or "Asia/Kolkata",
         "working_hours_start": member.working_hours_start or "09:00",

@@ -2,7 +2,8 @@
 
 import { createContext, useContext, useEffect, useState, useRef } from "react";
 import { auth } from "@/lib/firebase";
-import { User, onAuthStateChanged, signOut as firebaseSignOut, getIdToken } from "firebase/auth";
+import { installAuthFetch } from "@/lib/authFetch";
+import { User, onAuthStateChanged, onIdTokenChanged, signOut as firebaseSignOut, getIdToken } from "firebase/auth";
 import { useUserStore } from "@/stores/userStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
 
@@ -150,6 +151,10 @@ async function resolveOrganization(idToken: string) {
   }
 }
 
+// Module scope on purpose: child effects run before AuthProvider's effects, so installing
+// inside an effect would miss the first round of fetches.
+installAuthFetch();
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [role, setRole] = useState<UserRole>(null);
@@ -203,6 +208,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => unsubscribe();
   }, [setLastLoginAt]);
+
+  // Firebase ID tokens live ~1 hour. onAuthStateChanged does not fire on refresh, so the copy
+  // in localStorage (used by getAuthHeaders and the WebSockets) went stale and every call
+  // returned 401 after an hour. Keep it current.
+  useEffect(() => {
+    const store = (token: string) => {
+      try { localStorage.setItem("yesboss_id_token", token); } catch { /* storage unavailable */ }
+    };
+    const refresh = async () => {
+      const current = auth.currentUser;
+      if (!current) return;
+      try { store(await getIdToken(current)); } catch { /* offline: retry on next tick */ }
+    };
+    const unsubscribe = onIdTokenChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        try { store(await getIdToken(firebaseUser)); } catch { /* ignore */ }
+      }
+    });
+    const interval = setInterval(refresh, 10 * 60 * 1000);
+    const onVisible = () => { if (document.visibilityState === "visible") void refresh(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      unsubscribe();
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
 
   const signOut = async () => {
     await firebaseSignOut(auth);

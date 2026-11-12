@@ -3,22 +3,22 @@ import { cn } from "@/lib/utils";
 import { forwardRef } from "react";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-sm font-medium transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full border-2 text-sm font-bold transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
   {
     variants: {
       variant: {
-        default: "bg-accent text-white hover:bg-accent-hover hover:shadow-lg hover:shadow-accent/25",
-        primary: "bg-primary text-white hover:bg-primary-light hover:shadow-lg hover:shadow-primary/25",
-        secondary: "bg-surface border border-border text-foreground hover:bg-surface-light",
-        ghost: "text-text-muted hover:text-foreground hover:bg-surface",
-        outline: "border border-border text-foreground hover:bg-surface hover:border-primary",
-        danger: "bg-rose-500 text-white hover:bg-rose-600 hover:shadow-lg hover:shadow-rose-500/25",
-        link: "text-primary underline-offset-4 hover:underline",
+        default: "border-outline bg-accent text-white hover:bg-accent-hover shadow-[4px_4px_0_var(--shadow-hard)] hover:-translate-x-px hover:-translate-y-px hover:shadow-[5px_5px_0_var(--shadow-hard)]",
+        primary: "border-outline bg-primary text-white hover:bg-primary-light shadow-[4px_4px_0_var(--shadow-hard)] hover:-translate-x-px hover:-translate-y-px hover:shadow-[5px_5px_0_var(--shadow-hard)]",
+        secondary: "border-outline bg-surface text-foreground hover:bg-surface-light shadow-[4px_4px_0_var(--shadow-hard)] hover:-translate-x-px hover:-translate-y-px hover:shadow-[5px_5px_0_var(--shadow-hard)]",
+        ghost: "border-transparent text-text-muted hover:text-foreground hover:bg-surface-light",
+        outline: "border-outline bg-surface text-foreground hover:bg-surface-light shadow-[4px_4px_0_var(--shadow-hard)] hover:-translate-x-px hover:-translate-y-px hover:shadow-[5px_5px_0_var(--shadow-hard)]",
+        danger: "border-outline bg-rose-500 text-white hover:bg-rose-600 shadow-[4px_4px_0_var(--shadow-hard)] hover:-translate-x-px hover:-translate-y-px hover:shadow-[5px_5px_0_var(--shadow-hard)]",
+        link: "border-transparent text-primary underline-offset-4 hover:underline",
       },
       size: {
         default: "h-10 px-5 py-2.5",
-        sm: "h-8 px-3 text-xs rounded-lg",
-        lg: "h-14 px-8 text-base rounded-xl",
+        sm: "h-8 px-3 text-xs",
+        lg: "h-14 px-8 text-base",
         icon: "h-10 w-10",
         iconSm: "h-8 w-8",
       },

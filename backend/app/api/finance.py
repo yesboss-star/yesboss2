@@ -26,7 +26,7 @@ async def extract_metrics(
 
     doc = None
     if file_id:
-        doc = db.documents.find_one({"file_id": file_id})
+        doc = db.documents.find_one({"file_id": file_id, "org_id": organization_id})
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
     else:

@@ -21,7 +21,7 @@ const DropdownMenuContent = forwardRef<
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        "z-50 min-w-[8rem] overflow-hidden rounded-xl border border-border bg-surface p-1 shadow-lg",
+        "z-50 min-w-[8rem] overflow-hidden rounded-2xl border-2 border-outline bg-surface p-1 shadow-[4px_4px_0_var(--shadow-hard)]",
         "animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
         className
       )}
@@ -41,7 +41,7 @@ const DropdownMenuItem = forwardRef<
     ref={ref}
     className={cn(
       "relative flex cursor-pointer select-none items-center gap-2 rounded-lg px-3 py-2 text-sm outline-none transition-colors",
-      "data-[highlighted]:bg-primary/10 data-[highlighted]:text-foreground",
+      "data-[highlighted]:bg-highlight data-[highlighted]:text-on-highlight",
       "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       inset && "pl-8",
       className
@@ -59,7 +59,7 @@ const DropdownMenuCheckboxItem = forwardRef<
     ref={ref}
     className={cn(
       "relative flex cursor-pointer select-none items-center gap-2 rounded-lg py-2 pl-8 pr-3 text-sm outline-none transition-colors",
-      "data-[highlighted]:bg-primary/10 data-[highlighted]:text-foreground",
+      "data-[highlighted]:bg-highlight data-[highlighted]:text-on-highlight",
       "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className
     )}

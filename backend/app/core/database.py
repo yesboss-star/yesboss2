@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Optional
 
 from pymongo import MongoClient
@@ -48,14 +49,25 @@ def connect_mongodb():
         except ImportError:
             tls_ca = None
 
+        # Certificate + hostname verification is ON by default. Only networks that
+        # intercept TLS need the escape hatch (MONGODB_TLS_INSECURE=true); never in prod.
+        tls_insecure = os.getenv("MONGODB_TLS_INSECURE", "").lower() == "true"
+        if tls_insecure:
+            logger.warning("MONGODB_TLS_INSECURE=true: MongoDB TLS certificate verification is DISABLED")
+        # Hosted clusters (Atlas) need TLS; a Mongo running on this machine / in docker doesn't
+        # speak it, and forcing it made every local connection fail with "SSL handshake failed".
+        local_host = any(h in mongo_uri for h in ("//localhost", "//127.0.0.1", "//[::1]", "//host.docker.internal", "//mongo:", "//mongo/"))
+        tls_options: dict = {"tls": False} if local_host else {
+            "tls": True,
+            "tlsAllowInvalidCertificates": tls_insecure,
+            "tlsAllowInvalidHostnames": tls_insecure,
+            "tlsCAFile": tls_ca,
+        }
         client = MongoClient(
             mongo_uri,
             serverSelectionTimeoutMS=15000,
             connectTimeoutMS=15000,
-            tls=True,
-            tlsAllowInvalidCertificates=True,
-            tlsAllowInvalidHostnames=True,
-            tlsCAFile=tls_ca,
+            **tls_options,
         )
 
         client.admin.command("ping")
@@ -75,7 +87,7 @@ def connect_mongodb():
 
 def _ensure_collections(db: Database):
     collections = db.list_collection_names()
-    required = ["users", "organizations", "employees", "goals", "tasks", "workflows", "task_outcomes", "bottlenecks", "learning_patterns", "documents", "conversations", "uploads", "org_chart_members", "reports", "user_patterns", "notifications", "notification_preferences", "push_subscriptions", "team_updates", "meetings", "zoho_tokens", "google_tokens", "calendar_events", "check_ins", "employee_frequencies", "goal_outcomes", "industry_intelligence", "assistant_sessions", "strategy_chat_sessions", "market_trends", "market_impacts", "files", "approval_requests", "password_reset_codes", "signup_otps", "role_registry", "journal_entries", "journal_checkins", "journal_decisions", "journal_ideas", "journal_recaps", "journal_patterns", "journal_reminders", "financial_metrics", "task_followups"]
+    required = ["users", "organizations", "employees", "goals", "tasks", "workflows", "task_outcomes", "bottlenecks", "learning_patterns", "documents", "conversations", "uploads", "org_chart_members", "reports", "user_patterns", "notifications", "notification_preferences", "push_subscriptions", "team_updates", "meetings", "zoho_tokens", "google_tokens", "calendar_events", "check_ins", "employee_frequencies", "goal_outcomes", "industry_intelligence", "assistant_sessions", "strategy_chat_sessions", "market_trends", "market_impacts", "files", "approval_requests", "password_reset_codes", "signup_otps", "role_registry", "journal_entries", "journal_checkins", "journal_decisions", "journal_ideas", "journal_recaps", "journal_patterns", "journal_reminders", "financial_metrics", "task_followups", "captures", "commitments", "report_metrics", "weekly_review_sent", "business_profiles"]
     for col in required:
         if col not in collections:
             db.create_collection(col)
@@ -171,6 +183,22 @@ def _ensure_indexes(db: Database):
         db.journal_entries.create_index([("user_id", 1), ("org_id", 1)])
         db.journal_entries.create_index([("org_id", 1), ("created_at", -1)])
         db.journal_entries.create_index([("user_id", 1), ("created_at", -1)])
+
+        db.captures.create_index([("org_id", 1), ("user_id", 1), ("created_at", -1)])
+        db.captures.create_index([("org_id", 1), ("kind", 1), ("created_at", -1)])
+        db.captures.create_index([("org_id", 1), ("visibility", 1), ("created_at", -1)])
+        db.captures.create_index([("org_id", 1), ("shared_with_emails", 1)])
+        db.captures.create_index([("org_id", 1), ("user_id", 1), ("status", 1)])
+        db.captures.create_index([("org_id", 1), ("series_key", 1), ("created_at", -1)])
+        db.captures.create_index([("user_id", 1), ("external_id", 1)], sparse=True)
+        db.captures.create_index([("status", 1), ("updated_at", 1)])
+        db.users.create_index("capture_token", sparse=True)
+        db.commitments.create_index([("capture_id", 1), ("suggestion_id", 1)])
+        db.commitments.create_index([("org_id", 1), ("created_at", -1)])
+        db.report_metrics.create_index([("capture_id", 1)])
+        db.report_metrics.create_index([("org_id", 1), ("series_key", 1), ("metric", 1), ("period_date", 1)])
+        db.weekly_review_sent.create_index([("org_id", 1), ("email", 1), ("week", 1)], unique=True)
+        db.business_profiles.create_index("org_id", unique=True)
         db.journal_checkins.create_index([("user_id", 1), ("org_id", 1), ("date", -1)], unique=True)
         db.journal_decisions.create_index([("user_id", 1), ("org_id", 1), ("created_at", -1)])
         db.journal_ideas.create_index([("user_id", 1), ("org_id", 1), ("created_at", -1)])

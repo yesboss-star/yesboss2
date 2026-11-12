@@ -41,6 +41,7 @@ import {
   MICRO_VERTICAL_FILE_SUGGESTIONS,
 } from "@/lib/onboarding-data";
 import { downloadDocumentTemplate } from "@/lib/documentTemplates";
+import { isSafeRedirect } from "@/lib/safeRedirect";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
@@ -1910,7 +1911,7 @@ function OwnerOnboardingContent() {
               <button
                 onClick={() => {
                   const redirect = searchParams.get("redirect") || (typeof window !== "undefined" ? localStorage.getItem("yesboss_pending_redirect") : null);
-                  if (redirect && redirect.startsWith("/") && !redirect.startsWith("//")) {
+                  if (isSafeRedirect(redirect)) {
                     try { localStorage.removeItem("yesboss_pending_redirect"); } catch {}
                     router.push(redirect);
                   } else {

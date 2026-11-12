@@ -30,9 +30,13 @@ class ConnectionManager:
     def disconnect(self, websocket: WebSocket, organization_id: str = None, user_id: str = None):
         if organization_id and organization_id in self.active_connections:
             self.active_connections[organization_id].discard(websocket)
+            if not self.active_connections[organization_id]:
+                del self.active_connections[organization_id]
 
         if user_id and user_id in self.user_connections:
             self.user_connections[user_id].discard(websocket)
+            if not self.user_connections[user_id]:
+                del self.user_connections[user_id]
 
     async def send_personal_message(self, message: dict, user_id: str):
         if user_id in self.user_connections:
@@ -94,18 +98,9 @@ async def websocket_endpoint(websocket: WebSocket, organization_id: str, user_id
 
                 if message_type == "ping":
                     await websocket.send_json({"type": "pong"})
-                elif message_type == "task_update":
-                    await manager.broadcast_to_organization(
-                        {"type": "task_update", "data": message.get("data")},
-                        organization_id
-                    )
-                elif message_type == "notification":
-                    target_user = message.get("user_id")
-                    if target_user:
-                        await manager.send_personal_message(
-                            {"type": "notification", "data": message.get("data")},
-                            target_user
-                        )
+                # Clients may only ping. Server-originated events are the only source of
+                # task_update / notification frames: relaying client-supplied ones let any
+                # member spoof notifications to any user (including other organizations).
             except json.JSONDecodeError:
                 pass
     except WebSocketDisconnect:

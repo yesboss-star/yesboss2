@@ -12,8 +12,11 @@ from pydantic import BaseModel
 from ..core.ai_client import get_ai_response, get_chat_response
 from ..core.database import get_database
 from ..core.file_processor import ALLOWED_EXTENSIONS
+from ..core.url_guard import UnsafeURLError, safe_httpx_get
 from ..dependencies.auth import get_current_user, get_current_user_optional
 from ..dependencies.scope import is_org_member, is_org_owner
+from ..dependencies.tenant import assert_org_access
+from ..utils.helpers import safe_filename, safe_path_segment
 
 router = APIRouter()
 logger = logging.getLogger("yesboss.strategy_chat")
@@ -111,10 +114,11 @@ async def _fetch_url_text(url: str, timeout: float = 30.0, max_retries: int = 1)
             headers = {}
             if attempt > 0:
                 headers["Accept-Encoding"] = "identity"
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-                resp = await client.get(url, headers=headers)
-                resp.raise_for_status()
-                return resp.text
+            resp = await safe_httpx_get(url, timeout=timeout, headers=headers)
+            resp.raise_for_status()
+            return resp.text
+        except UnsafeURLError:
+            raise HTTPException(status_code=400, detail="That URL is not allowed.")
         except httpx.HTTPStatusError as e:
             raise HTTPException(status_code=400, detail=f"Failed to fetch URL (status {e.response.status_code})")
         except httpx.TimeoutException:
@@ -320,10 +324,16 @@ async def upload_and_analyze(
     if len(contents) > 25 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 25MB)")
 
-    import uuid
     import asyncio
+    import uuid
 
-    from ..core.file_processor import chunk_text, extract_text, generate_embeddings, store_embeddings_in_qdrant, _run_deep_analysis
+    from ..core.file_processor import (
+        _run_deep_analysis,
+        chunk_text,
+        extract_text,
+        generate_embeddings,
+        store_embeddings_in_qdrant,
+    )
 
     text = extract_text(contents, file.filename)
     if not text:
@@ -332,9 +342,9 @@ async def upload_and_analyze(
     file_id = str(uuid.uuid4())
     file_type = ext[1:]
 
-    upload_dir = f"uploads/chat/{organization_id}"
+    upload_dir = f"uploads/chat/{safe_path_segment(organization_id)}"
     os.makedirs(upload_dir, exist_ok=True)
-    unique_name = f"{file_id}_{file.filename}"
+    unique_name = f"{file_id}_{safe_filename(file.filename)}"
     file_path = os.path.join(upload_dir, unique_name)
     with open(file_path, "wb") as f:
         f.write(contents)
@@ -446,13 +456,14 @@ async def upload_from_url(
             headers = {}
             if attempt > 0:
                 headers["Accept-Encoding"] = "identity"
-            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-                resp = await client.get(url, headers=headers)
-                if resp.status_code != 200:
-                    raise HTTPException(status_code=400, detail=f"Failed to fetch URL (status {resp.status_code})")
-                contents = resp.content
-                content_type = resp.headers.get("content-type", "")
-                break
+            resp = await safe_httpx_get(url, timeout=30.0, headers=headers)
+            if resp.status_code != 200:
+                raise HTTPException(status_code=400, detail=f"Failed to fetch URL (status {resp.status_code})")
+            contents = resp.content
+            content_type = resp.headers.get("content-type", "")
+            break
+        except UnsafeURLError:
+            raise HTTPException(status_code=400, detail="That URL is not allowed.")
         except httpx.TimeoutException:
             raise HTTPException(status_code=400, detail="URL fetch timed out")
         except HTTPException:
@@ -502,9 +513,9 @@ async def upload_from_url(
         ext = ".txt"
         file_type = "text"
         file_id = str(uuid.uuid4())
-        upload_dir = f"uploads/chat/{organization_id}"
+        upload_dir = f"uploads/chat/{safe_path_segment(organization_id)}"
         os.makedirs(upload_dir, exist_ok=True)
-        unique_name = f"{file_id}_{filename}"
+        unique_name = f"{file_id}_{safe_filename(filename)}"
         file_path = os.path.join(upload_dir, unique_name)
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(text)
@@ -574,9 +585,9 @@ async def upload_from_url(
     file_id = str(uuid.uuid4())
     file_type = ext[1:]
 
-    upload_dir = f"uploads/chat/{organization_id}"
+    upload_dir = f"uploads/chat/{safe_path_segment(organization_id)}"
     os.makedirs(upload_dir, exist_ok=True)
-    unique_name = f"{file_id}_{filename}"
+    unique_name = f"{file_id}_{safe_filename(filename)}"
     file_path = os.path.join(upload_dir, unique_name)
     with open(file_path, "wb") as f:
         f.write(contents)
@@ -1306,6 +1317,17 @@ class SessionUpdate(BaseModel):
     context: dict[str, Any] | None = None
 
 
+async def _session_for(db, session_id: str, current_user) -> dict:
+    """Load a strategy-chat session the caller is allowed to touch (member of its org)."""
+    if not ObjectId.is_valid(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    session = db.strategy_chat_sessions.find_one({"_id": ObjectId(session_id)})
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    await assert_org_access(db, session.get("organization_id"), current_user)
+    return session
+
+
 @router.post("/sessions")
 async def create_session(request: SessionCreate, current_user = Depends(get_current_user_optional)):
     db = get_database()
@@ -1355,25 +1377,24 @@ async def list_sessions(organization_id: str | None = None, current_user = Depen
 
 
 @router.get("/sessions/{session_id}")
-async def get_session(session_id: str):
+async def get_session(session_id: str, current_user = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
-    session = db.strategy_chat_sessions.find_one({"_id": ObjectId(session_id)})
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    session = await _session_for(db, session_id, current_user)
 
     session["_id"] = str(session["_id"])
     return {"session": session}
 
 
 @router.delete("/sessions/{session_id}")
-async def delete_session(session_id: str):
+async def delete_session(session_id: str, current_user = Depends(get_current_user_optional)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
+    await _session_for(db, session_id, current_user)
     db.strategy_chat_sessions.delete_one({"_id": ObjectId(session_id)})
     return {"success": True}
 
@@ -1383,6 +1404,8 @@ async def save_session_message(session_id: str, message: Message, current_user =
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+
+    await _session_for(db, session_id, current_user)
 
     msg_doc = {
         "role": message.role,

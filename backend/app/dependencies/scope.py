@@ -124,3 +124,19 @@ async def is_org_member(db, org_id: str, user) -> bool:
         if db.org_chart_members.find_one({"organization_id": str(org_id), "email": email}):
             return True
     return False
+
+
+async def primary_org_id(db, user) -> str:
+    """The organization a user belongs to ('' if none). OAuth token records only carry an org id
+    for owners, so employees need this to avoid acting on an empty / unscoped organization."""
+    ids = await resolve_user_org_ids(db, user)
+    return sorted(ids)[0] if ids else ""
+
+
+async def email_is_org_member(db, org_id: str, email: str) -> bool:
+    """Is the person with this email an owner/member of org_id? (For attendees, not callers.)"""
+    if not org_id or not email:
+        return False
+    from types import SimpleNamespace
+
+    return await is_org_member(db, org_id, SimpleNamespace(id=None, uid=None, email=email))

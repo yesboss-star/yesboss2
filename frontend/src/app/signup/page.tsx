@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Eye, EyeOff, User, Mail, Lock, Shield, CheckCircle, AlertCircle, Loader2, MessageSquare, X, ArrowRight } from "lucide-react";
 import { auth } from "@/lib/firebase";
 import { createUserWithEmailAndPassword } from "firebase/auth";
+import { isSafeRedirect } from "@/lib/safeRedirect";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
@@ -139,9 +140,12 @@ export default function SignupPage() {
         email_verified: true,
         verification_token: verificationToken || undefined,
       };
+      // sync-user is authenticated; the token isn't in localStorage yet at this point.
+      const idToken = await credential.user.getIdToken();
+      try { localStorage.setItem("yesboss_id_token", idToken); } catch { /* storage unavailable */ }
       const syncRes = await fetch(`${API_URL}/auth/sync-user`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
         body: JSON.stringify(userData),
       });
       if (!syncRes.ok) {
@@ -159,7 +163,7 @@ export default function SignupPage() {
       let redirect: string | null = null;
       try {
         redirect = new URLSearchParams(window.location.search).get("redirect");
-        if (redirect && (!redirect.startsWith("/") || redirect.startsWith("//"))) redirect = null;
+        if (!isSafeRedirect(redirect)) redirect = null;
         if (redirect) localStorage.setItem("yesboss_pending_redirect", redirect);
       } catch {}
       const baseDest = role === "owner"

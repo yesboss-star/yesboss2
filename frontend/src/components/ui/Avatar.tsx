@@ -58,7 +58,7 @@ const Avatar = forwardRef<HTMLDivElement, AvatarProps>(
         <div
           ref={ref}
           className={cn(
-            "relative flex shrink-0 overflow-hidden rounded-full",
+            "relative flex shrink-0 overflow-hidden rounded-full border-2 border-outline",
             sizeClasses[size],
             className
           )}
@@ -80,7 +80,7 @@ const Avatar = forwardRef<HTMLDivElement, AvatarProps>(
         <div
           ref={ref}
           className={cn(
-            "relative flex shrink-0 overflow-hidden rounded-full",
+            "relative flex shrink-0 overflow-hidden rounded-full border-2 border-outline",
             sizeClasses[size],
             className
           )}
@@ -103,7 +103,7 @@ const Avatar = forwardRef<HTMLDivElement, AvatarProps>(
       <div
         ref={ref}
         className={cn(
-          "relative flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-white font-bold",
+          "relative flex shrink-0 items-center justify-center rounded-full border-2 border-outline bg-gradient-to-br text-white font-bold",
           gradient,
           sizeClasses[size],
           className

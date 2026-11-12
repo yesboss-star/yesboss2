@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from ..core.database import get_database
 from ..core.google import GoogleOAuth
+from ..core.oauth_state import sign_state, verify_state
 from ..dependencies.auth import get_current_user_optional
 
 logger = logging.getLogger("yesboss.google_auth")
@@ -51,7 +52,7 @@ async def get_auth_url(
     google = GoogleOAuth(get_database())
     try:
         redirect_uri = f"{_request_origin(request)}/api/v1/google/callback"
-        url = google.get_auth_url(state=user_id, redirect_uri=redirect_uri)
+        url = google.get_auth_url(state=sign_state(user_id), redirect_uri=redirect_uri)
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
     return {"url": url}
@@ -72,7 +73,15 @@ async def google_callback(
         if not code:
             raise HTTPException(status_code=400, detail="Missing authorization code")
 
-        logger.info("Google callback received: code=%s... state=%s", code[:20] if code else "", state)
+        # `state` is a signed, expiring token minted by /auth-url for the signed-in user.
+        # Without this check anyone could bind their own Google account to any user id.
+        verified_uid = verify_state(state)
+        if not verified_uid:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid or expired authorization request. Please start the connection again.",
+            )
+        logger.info("Google callback received for user_id=%s", verified_uid)
 
         db = get_database()
         google = GoogleOAuth(db)
@@ -102,7 +111,7 @@ async def google_callback(
 
         user_email = await google.get_user_email(access_token)
 
-        user_id = state or ""
+        user_id = verified_uid
         org_id = ""
         user_doc_email = ""
 
@@ -135,6 +144,34 @@ async def google_callback(
                 logger.info("Either/or: removed Zoho token for user_id=%s after Google connect", user_id)
             except Exception as e:
                 logger.warning("Either/or: could not remove Zoho token for user_id=%s: %s", user_id, e)
+
+        # Backfill: push YesBoss tasks assigned to this user that never reached Google
+        # (Zoho does the same on connect). Otherwise they wait for the ~30 min retry job.
+        try:
+            import asyncio
+            import re
+
+            from ..api.tasks import sync_task_to_google
+
+            match_email = (user_email or user_doc_email or "").strip().lower()
+            if match_email and db is not None:
+                pending_tasks = list(db.tasks.find({
+                    "google_sync_status": {"$ne": "synced"},
+                    "status": {"$nin": ["completed", "approved"]},
+                    "$or": [
+                        {"assignee_email": {"$regex": f"^{re.escape(match_email)}$", "$options": "i"}},
+                        {"assignee_id": match_email},
+                    ],
+                }))
+                for t in pending_tasks:
+                    t_org = t.get("organization_id", "")
+                    if t_org:
+                        t["_id"] = str(t["_id"])
+                        asyncio.create_task(sync_task_to_google(db, t, t_org))
+                if pending_tasks:
+                    logger.info("Scheduled Google backfill for %s pending tasks of %s", len(pending_tasks), match_email)
+        except Exception as e:
+            logger.warning("Google backfill scheduling failed: %s", e)
 
         from ..core.config import settings
         frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")

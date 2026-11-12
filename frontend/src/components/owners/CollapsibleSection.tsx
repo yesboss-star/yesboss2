@@ -26,8 +26,8 @@ export default function CollapsibleSection({
   const [expanded, setExpanded] = useState(defaultExpanded);
 
   return (
-    <div className="rounded-xl overflow-hidden border border-border/50">
-      <div className="flex items-center gap-3 px-4 py-3 bg-card">
+    <div className="rounded-3xl overflow-hidden border-[2.5px] border-outline bg-surface shadow-[4px_4px_0_var(--shadow-hard)]">
+      <div className="flex items-center gap-3 px-4 py-3">
         <button
           onClick={() => setExpanded(!expanded)}
           className="flex items-center gap-3 flex-1 cursor-pointer text-left bg-transparent border-0 p-0"
@@ -51,7 +51,7 @@ export default function CollapsibleSection({
           </div>
         )}
       </div>
-      {expanded && <div className="border-t border-border/50 bg-card">{children}</div>}
+      {expanded && <div className="border-t-2 border-outline">{children}</div>}
     </div>
   );
 }

@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from ..core.database import get_database
 from ..dependencies.auth import get_current_user
 from ..dependencies.scope import is_org_member, is_org_owner, resolve_user_org_ids
+from ..utils.helpers import safe_filename, safe_path_segment
 
 router = APIRouter()
 
@@ -59,10 +60,10 @@ async def process_upload(
     if file_type not in ["pdf", "excel", "image"]:
         raise HTTPException(status_code=400, detail="Invalid file type")
 
-    upload_dir = f"uploads/{organization_id}"
+    upload_dir = f"uploads/{safe_path_segment(organization_id)}"
     os.makedirs(upload_dir, exist_ok=True)
 
-    file_path = f"{upload_dir}/{file.filename}"
+    file_path = f"{upload_dir}/{safe_filename(file.filename)}"
 
     async with aiofiles.open(file_path, 'wb') as f:
         content = await file.read()

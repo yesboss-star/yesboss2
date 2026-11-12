@@ -12,6 +12,7 @@ from ..core.database import get_database
 from ..core.notification_service import create_and_deliver
 from ..core.zoho import ZohoCalendar, ZohoOAuth
 from ..dependencies.auth import get_current_user_optional
+from ..dependencies.scope import email_is_org_member, primary_org_id
 
 logger = logging.getLogger("yesboss.zoho_calendar")
 router = APIRouter()
@@ -71,6 +72,8 @@ async def get_calendar_events(
     events = []
     token_doc = db.zoho_tokens.find_one({"user_id": user_id}) if db else None
     org_id = token_doc.get("org_id", "") if token_doc else ""
+    if db is not None and not org_id:
+        org_id = await primary_org_id(db, current_user)
     for ev in raw_events:
         zoho_id = ev.get("uid")
         if not zoho_id:
@@ -130,6 +133,10 @@ async def search_users(
     token_doc = db.zoho_tokens.find_one({"user_id": user_id})
     if token_doc:
         org_id = token_doc.get("org_id")
+    if not org_id:
+        org_id = await primary_org_id(db, current_user)
+    if not org_id:
+        raise HTTPException(status_code=403, detail="Join an organization to search for colleagues")
 
     clean_q = q.strip().lstrip("@")
     ql = re.escape(clean_q)
@@ -220,7 +227,12 @@ async def check_freebusy(
 
     all_busy = []
     unchecked = []
+    caller_doc = db.zoho_tokens.find_one({"user_id": user_id}) or {}
+    caller_org = caller_doc.get("org_id") or await primary_org_id(db, current_user)
     for email in email_list:
+        if not await email_is_org_member(db, caller_org, email):
+            unchecked.append(email)  # other companies' calendars are not ours to read
+            continue
         att_token = await zoho.get_valid_token(email)
         if not att_token:
             att_token_doc = db.zoho_tokens.find_one({"$or": [{"zoho_mail_id": email}, {"email": email}, {"user_id": email}]})
@@ -299,6 +311,8 @@ async def book_event(
 
     token_doc = db.zoho_tokens.find_one({"user_id": user_id})
     org_id = token_doc.get("org_id", "") if token_doc else ""
+    if not org_id:
+        org_id = await primary_org_id(db, current_user)
 
     event_doc = {
         "zoho_event_id": event_id,
@@ -323,6 +337,10 @@ async def book_event(
         if email:
             if email == get_user_email(current_user):
                 attendee_results.append({"email": email, "event_id": event_id, "status": "booked"})
+                continue
+            if not await email_is_org_member(db, org_id, email):
+                # Never write into (or probe) a calendar that belongs to another company.
+                attendee_results.append({"email": email, "status": "external"})
                 continue
             att_token_doc = db.zoho_tokens.find_one({"$or": [{"zoho_mail_id": email}, {"email": email}, {"user_id": email}]})
             if att_token_doc:

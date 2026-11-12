@@ -1,25 +1,39 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 logger = logging.getLogger("yesboss.check_in")
+
+
+def _naive_utc(value) -> datetime | None:
+    """Any stored timestamp (naive/aware datetime or ISO string) as a naive UTC datetime.
+
+    Mixing aware and naive values raised TypeError, and the goal-health code only survived it
+    by swallowing the error (so aware deadlines were never counted as behind).
+    """
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is not None:
+        value = value.astimezone(UTC).replace(tzinfo=None)
+    return value
 
 async def check_org_due_for_check_in(db, org) -> bool:
     from bson import ObjectId
     str(org["_id"]) if isinstance(org["_id"], ObjectId) else org["_id"]
-    last = org.get("last_check_in")
+    last = _naive_utc(org.get("last_check_in"))
     frequency = org.get("check_in_frequency_days", 7)
-    if not last:
+    if last is None:
         return True
-    if isinstance(last, str):
-        try:
-            last = datetime.fromisoformat(last.replace("Z", "+00:00"))
-        except Exception:
-            return True
     return (datetime.utcnow() - last).days >= frequency
 
 
 async def generate_check_in(db, org_id: str, owner_id: str) -> dict:
     now = datetime.utcnow()
+    now_iso = now.replace(microsecond=0).isoformat()
     active_goals = list(db.goals.find({
         "organization_id": org_id,
         "created_by": owner_id,
@@ -52,7 +66,7 @@ async def generate_check_in(db, org_id: str, owner_id: str) -> dict:
                     {"$ne": ["$status", "approved"]},
                     {"$ne": ["$due_date", None]},
                     {"$ne": ["$due_date", ""]},
-                    {"$lt": ["$due_date", now]},
+                    {"$lt": ["$due_date", now_iso]},
                 ]}, 1, 0
             ]}},
             "escalated": {"$sum": {"$cond": [{"$gt": ["$escalation_level", 0]}, 1, 0]}},
@@ -74,7 +88,7 @@ async def generate_check_in(db, org_id: str, owner_id: str) -> dict:
                     {"$ne": ["$status", "approved"]},
                     {"$ne": ["$due_date", None]},
                     {"$ne": ["$due_date", ""]},
-                    {"$lt": ["$due_date", now]},
+                    {"$lt": ["$due_date", now_iso]},
                 ]}, 1, 0
             ]}},
             "escalated": {"$sum": {"$cond": [{"$gt": ["$escalation_level", 0]}, 1, 0]}},
@@ -95,22 +109,15 @@ async def generate_check_in(db, org_id: str, owner_id: str) -> dict:
         last_update = g.get("updated_at") or g.get("created_at")
         days_since_update = 0
         if last_update:
-            if isinstance(last_update, str):
-                try:
-                    last_update = datetime.fromisoformat(last_update.replace("Z", "+00:00"))
-                except Exception:
-                    last_update = now
+            last_update = _naive_utc(last_update) or now
             days_since_update = (now - last_update).days
 
         status_label = "on_track"
         if g.get("due_date"):
-            try:
-                due = datetime.fromisoformat(str(g["due_date"]).replace("Z", "+00:00"))
-                if due < now:
-                    status_label = "behind"
-                    behind_count += 1
-            except Exception:
-                pass
+            due = _naive_utc(g["due_date"])
+            if due is not None and due < now:
+                status_label = "behind"
+                behind_count += 1
         if days_since_update >= 7:
             status_label = "stale"
             stale_count += 1

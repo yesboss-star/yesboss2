@@ -52,8 +52,8 @@ export function Chip({ children, tone = "default" }: { children: ReactNode; tone
   const tones = {
     default: "bg-background text-text-muted border-border",
     primary: "bg-primary/10 text-primary border-primary/20",
-    warn: "bg-amber-500/10 text-amber-500 border-amber-500/20",
-    good: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
+    warn: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+    good: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
   };
   return <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${tones[tone]}`}>{children}</span>;
 }

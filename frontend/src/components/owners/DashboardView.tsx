@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganizationStore } from "@/stores/organizationStore";
@@ -36,7 +37,6 @@ import {
 import { fetchDeduped, getAuthHeaders } from "@/lib/utils";
 import KPISuggestionsCard from "@/components/owners/KPISuggestionsCard";
 import AcceptedKPIBanner from "@/components/owners/AcceptedKPIBanner";
-import AISummaryChat from "@/components/AISummaryChat";
 import MeetingUploadModal from "@/components/owners/MeetingUploadModal";
 import CalendarBooking from "@/components/owners/CalendarBooking";
 import MarketImpactCard from "@/components/owners/MarketImpactCard";
@@ -3768,15 +3768,21 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
         <DataCharts goals={goals} />
       </CollapsibleSection>
 
-      <CollapsibleSection title="Weekly Report" icon={FileText} defaultExpanded={false}>
+      <CollapsibleSection
+        title="Weekly Report"
+        icon={FileText}
+        defaultExpanded={false}
+        actions={
+          <Link
+            href="/dashboard/review"
+            className="inline-flex items-center gap-1 rounded-full border-2 border-outline bg-surface px-3 py-1 text-xs font-bold text-foreground shadow-[2px_2px_0_var(--shadow-hard)] transition-all hover:-translate-x-px hover:-translate-y-px hover:bg-surface-light"
+          >
+            Open weekly review
+          </Link>
+        }
+      >
         <WeeklyReportGenerator />
       </CollapsibleSection>
-
-      {SHOW_EXTRA_DASHBOARD_SECTIONS && (
-        <div className="h-[600px]">
-          <AISummaryChat />
-        </div>
-      )}
 
       <CollapsibleSection title="Financial Metrics" icon={DollarSign} defaultExpanded={false}>
         <FinancialMetricsCard organizationId={organization?.id || ""} />

@@ -1,8 +1,9 @@
 import logging
 import uuid
 from datetime import datetime
+from html import escape as html_escape
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
@@ -14,6 +15,8 @@ from ..core.email_service import (
     _render_owner_request_rejected,
     send_email,
 )
+from ..dependencies.auth import get_current_user
+from ..dependencies.scope import is_org_owner
 
 logger = logging.getLogger("yesboss.owner_requests")
 router = APIRouter()
@@ -75,10 +78,20 @@ _request_rejected_page = """<!DOCTYPE html>
 
 
 @router.post("/organizations/{org_id}/request-owner")
-async def request_owner(org_id: str, body: RequestOwnerBody):
+async def request_owner(org_id: str, body: RequestOwnerBody, current_user=Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+
+    # Who is asking comes from the verified token, never from the body: otherwise anyone could
+    # put a CEO's name and email in front of the owner (phishing) or request on someone's behalf.
+    caller_uid = getattr(current_user, "id", None) or getattr(current_user, "uid", None)
+    caller_email = (getattr(current_user, "email", "") or "").strip().lower()
+    if not caller_uid:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    body.uid = caller_uid
+    body.email = caller_email or body.email
+    body.full_name = (body.full_name or "").strip()[:100] or caller_email
 
     from bson import ObjectId
     org = db.organizations.find_one({"_id": ObjectId(org_id)})
@@ -148,29 +161,105 @@ async def request_owner(org_id: str, body: RequestOwnerBody):
         if not sent:
             logger.info("SMTP failed — test links:\nApprove: %s\nReject: %s", approve_link, reject_link)
 
-    return {
+    response = {
         "request_id": request_doc["_id"],
         "status": "pending",
         "message": "Request sent to primary owner for approval",
-        "approve_link": approve_link,
-        "reject_link": reject_link,
         "resend": is_resend,
     }
+    # The approve/reject links are bearer secrets for the primary owner. Never hand them
+    # back to the requester in production (they could approve themselves).
+    if settings.ENVIRONMENT != "production":
+        response["approve_link"] = approve_link
+        response["reject_link"] = reject_link
+    return response
+
+
+REQUEST_TTL_DAYS = 7
+
+_confirm_page = """<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>{title} - {app_name}</title>
+<style>
+  body {{ font-family:-apple-system,sans-serif;background:#f5f5f5;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0 }}
+  .card {{ max-width:480px;background:white;border-radius:12px;padding:40px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,0.08) }}
+  h1 {{ font-size:22px;color:#1e293b;margin:0 0 8px }}
+  p {{ color:#64748b;font-size:15px;line-height:1.5;margin:0 0 20px }}
+  button {{ padding:12px 32px;border:0;border-radius:8px;color:white;font-size:15px;font-weight:600;cursor:pointer;background:{color} }}
+</style></head>
+<body>
+  <div class="card">
+    <h1>{title}</h1>
+    <p><strong>{name}</strong> ({email}) wants to be a co-owner of <strong>{org}</strong>.</p>
+    <form method="post"><button type="submit">{button}</button></form>
+  </div>
+</body>
+</html>"""
+
+
+def _expired(request_doc: dict) -> bool:
+    created = request_doc.get("created_at")
+    try:
+        created_dt = created if isinstance(created, datetime) else datetime.fromisoformat(str(created))
+    except (TypeError, ValueError):
+        return False
+    return (datetime.utcnow() - created_dt).days >= REQUEST_TTL_DAYS
+
+
+def _load_pending_request(db, token: str):
+    """Return (request_doc, None) or (None, error HTMLResponse)."""
+    request_doc = db.owner_requests.find_one({"token": token})
+    if not request_doc:
+        return None, HTMLResponse(content="<h1>Invalid or expired link</h1>", status_code=404)
+    if request_doc["status"] != "pending":
+        msg = "already approved" if request_doc["status"] == "approved" else "already rejected"
+        return None, HTMLResponse(content=f"<h1>Request {msg}</h1>", status_code=400)
+    if _expired(request_doc):
+        return None, HTMLResponse(content="<h1>This request has expired. Ask the person to send a new one.</h1>", status_code=410)
+    return request_doc, None
+
+
+def _confirmation_page(token: str, action: str) -> HTMLResponse:
+    """A GET only shows what will happen. Mail scanners and link previews open every link in an
+    email, so approving/rejecting must need a deliberate click (a POST)."""
+    db = get_database()
+    if db is None:
+        return HTMLResponse(content="<h1>Server error</h1>", status_code=500)
+    request_doc, error = _load_pending_request(db, token)
+    if error:
+        return error
+    org = _get_org_by_id(db, request_doc["org_id"])
+    approve = action == "approve"
+    return HTMLResponse(content=_confirm_page.format(
+        app_name=APP_NAME,
+        title="Approve co-owner request" if approve else "Decline co-owner request",
+        color="#22c55e" if approve else "#ef4444",
+        button="Approve" if approve else "Decline",
+        name=html_escape(request_doc.get("requester_name", "")),
+        email=html_escape(request_doc.get("requester_email", "")),
+        org=html_escape((org or {}).get("name", "the organization")),
+    ))
 
 
 @router.get("/owner-requests/{token}/approve", response_class=HTMLResponse)
+async def approve_owner_request_page(token: str):
+    return _confirmation_page(token, "approve")
+
+
+@router.get("/owner-requests/{token}/reject", response_class=HTMLResponse)
+async def reject_owner_request_page(token: str):
+    return _confirmation_page(token, "reject")
+
+
+@router.post("/owner-requests/{token}/approve", response_class=HTMLResponse)
 async def approve_owner_request(token: str):
     db = get_database()
     if db is None:
         return HTMLResponse(content="<h1>Server error</h1>", status_code=500)
 
-    request_doc = db.owner_requests.find_one({"token": token})
-    if not request_doc:
-        return HTMLResponse(content="<h1>Invalid or expired link</h1>", status_code=404)
-
-    if request_doc["status"] != "pending":
-        msg = "already approved" if request_doc["status"] == "approved" else "already rejected"
-        return HTMLResponse(content=f"<h1>Request {msg}</h1>", status_code=400)
+    request_doc, error = _load_pending_request(db, token)
+    if error:
+        return error
 
     from bson import ObjectId
     org = db.organizations.find_one({"_id": ObjectId(request_doc["org_id"])})
@@ -214,19 +303,15 @@ async def approve_owner_request(token: str):
     )
 
 
-@router.get("/owner-requests/{token}/reject", response_class=HTMLResponse)
+@router.post("/owner-requests/{token}/reject", response_class=HTMLResponse)
 async def reject_owner_request(token: str):
     db = get_database()
     if db is None:
         return HTMLResponse(content="<h1>Server error</h1>", status_code=500)
 
-    request_doc = db.owner_requests.find_one({"token": token})
-    if not request_doc:
-        return HTMLResponse(content="<h1>Invalid or expired link</h1>", status_code=404)
-
-    if request_doc["status"] != "pending":
-        msg = "already approved" if request_doc["status"] == "approved" else "already rejected"
-        return HTMLResponse(content=f"<h1>Request {msg}</h1>", status_code=400)
+    request_doc, error = _load_pending_request(db, token)
+    if error:
+        return error
 
     db.owner_requests.update_one(
         {"_id": request_doc["_id"]},
@@ -264,6 +349,8 @@ async def get_request_status(request_id: str):
         raise HTTPException(status_code=500, detail="Database not configured")
 
     from bson import ObjectId
+    if not ObjectId.is_valid(request_id):
+        raise HTTPException(status_code=404, detail="Request not found")
     request_doc = db.owner_requests.find_one({"_id": ObjectId(request_id)})
     if not request_doc:
         raise HTTPException(status_code=404, detail="Request not found")
@@ -276,12 +363,14 @@ async def get_request_status(request_id: str):
 
 
 @router.get("/organizations/{org_id}/owner-requests")
-async def list_org_owner_requests(org_id: str):
+async def list_org_owner_requests(org_id: str, current_user=Depends(get_current_user)):
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+    if not await is_org_owner(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
 
-    requests_list = list(db.owner_requests.find({"org_id": org_id}).sort("created_at", -1))
+    requests_list = list(db.owner_requests.find({"org_id": org_id}, {"token": 0}).sort("created_at", -1))
     for r in requests_list:
         r["_id"] = str(r["_id"])
 

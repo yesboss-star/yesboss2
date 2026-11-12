@@ -83,6 +83,12 @@ async def _process_inbound(body: dict[str, Any]) -> None:
         if not normalized.get("text"):
             logger.info("cliq inbound: no text (modality=%s) — ack only", normalized.get("modality"))
             return
+        from ..core.capture_intake import capture_from_cliq
+
+        # "capture: ..." saves a note to the person's Capture inbox instead of replying to a task
+        if await capture_from_cliq(db, identity, normalized):
+            logger.info("cliq inbound: saved a capture for %s", sender)
+            return
         result = await route(
             db,
             normalized,
@@ -90,6 +96,9 @@ async def _process_inbound(body: dict[str, Any]) -> None:
             context={"task_id": normalized.get("button_task_id") or ""},
             use_llm=True,
         )
+        if result.get("reason") == "no_open_thread" and await capture_from_cliq(db, identity, normalized, no_open_thread=True):
+            logger.info("cliq inbound: voice note with no open task saved as a capture for %s", sender)
+            return
         logger.info(
             "cliq inbound routed sender=%s kind=%s routed=%s",
             sender,

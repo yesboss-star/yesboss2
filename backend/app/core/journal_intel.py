@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from ..utils.dates import parse_meeting_dt
 from .ai_client import get_ai_response
 
 logger = logging.getLogger("yesboss.journal_intel")
@@ -212,13 +213,14 @@ async def analyze_content(content: str, entry_type: str = "journal") -> dict[str
 def _index_entry_sync(entry: dict[str, Any]) -> bool:
     from qdrant_client.models import PointStruct
 
-    from .qdrant import create_collection, get_embedding, get_qdrant_client
+    from .qdrant import create_collection, ensure_payload_indexes, get_embedding_strict, get_qdrant_client
 
     text = f"{(entry.get('ai_analysis') or {}).get('summary', '')}\n{entry_text(entry)}".strip()
     if not text:
         return False
     if not create_collection(COLLECTION):
         return False
+    ensure_payload_indexes(COLLECTION, keyword=("user_id", "org_id"), number=("ts",))
     client = get_qdrant_client()
     if client is None:
         return False
@@ -227,7 +229,7 @@ def _index_entry_sync(entry: dict[str, Any]) -> bool:
         collection_name=COLLECTION,
         points=[PointStruct(
             id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"journal:{entry['_id']}")),
-            vector=get_embedding(text),
+            vector=get_embedding_strict(text),
             payload={
                 "entry_id": str(entry["_id"]),
                 "user_id": entry.get("user_id"),
@@ -238,6 +240,21 @@ def _index_entry_sync(entry: dict[str, Any]) -> bool:
         )],
     )
     return True
+
+
+def forget_entry(entry_id: Any) -> None:
+    """Remove an entry's vector from the journal search when the entry is deleted."""
+    from qdrant_client.models import PointIdsList
+
+    from .qdrant import get_qdrant_client
+
+    client = get_qdrant_client()
+    if client is None:
+        return
+    try:
+        client.delete(collection_name=COLLECTION, points_selector=PointIdsList(points=[str(uuid.uuid5(uuid.NAMESPACE_URL, f"journal:{entry_id}"))]))
+    except Exception as e:
+        logger.warning("journal vector not removed for %s: %s", entry_id, e)
 
 
 async def index_entry(entry: dict[str, Any]) -> bool:
@@ -251,7 +268,7 @@ async def index_entry(entry: dict[str, Any]) -> bool:
 def _semantic_search_sync(user_id: str, org_id: str, query: str, k: int, since: datetime | None, until: datetime | None) -> list[dict[str, Any]]:
     from qdrant_client.models import FieldCondition, Filter, Match, Range
 
-    from .qdrant import get_embedding, get_qdrant_client
+    from .qdrant import get_embedding_strict, get_qdrant_client, vector_search
 
     client = get_qdrant_client()
     if client is None:
@@ -262,13 +279,7 @@ def _semantic_search_sync(user_id: str, org_id: str, query: str, k: int, since: 
             gte=_as_utc(since).timestamp() if since else None,
             lte=_as_utc(until).timestamp() if until else None,
         )))
-    results = client.search(
-        collection_name=COLLECTION,
-        query_vector=get_embedding(query),
-        limit=k,
-        query_filter=Filter(must=conds),
-        with_payload=True,
-    )
+    results = vector_search(client, COLLECTION, get_embedding_strict(query), k, Filter(must=conds))
     return [{"entry_id": r.payload.get("entry_id"), "score": float(r.score)} for r in results if r.payload]
 
 
@@ -726,11 +737,9 @@ def create_reminder(db, user_id: str, org_id: str, text: str, trigger: dict[str,
     return doc
 
 
-def _meeting_time_passed(end_dt: str, now_ist: datetime) -> bool:
-    try:
-        return datetime.strptime(str(end_dt)[:15], "%Y%m%dT%H%M%S") <= now_ist.replace(tzinfo=None)
-    except ValueError:
-        return False
+def _meeting_time_passed(end_dt: Any, now_ist: datetime) -> bool:
+    end = parse_meeting_dt(end_dt, naive_tz=IST)
+    return end is not None and end <= now_ist.astimezone(UTC)
 
 
 def reminder_is_due(db, rem: dict[str, Any], now: datetime | None = None) -> bool:
@@ -751,7 +760,10 @@ def reminder_is_due(db, rem: dict[str, Any], now: datetime | None = None) -> boo
             "status": {"$nin": ["cancelled", "canceled"]},
             "$or": [{"created_by": {"$in": ids}}, {"attendees": {"$in": ids}}],
         }).limit(10):
-            if _meeting_time_passed(m.get("end_dt", ""), now_ist) and str(m.get("end_dt", ""))[:8] >= _as_utc(rem.get("created_at")).astimezone(IST).strftime("%Y%m%d"):
+            end = parse_meeting_dt(m.get("end_dt", ""), naive_tz=IST)
+            if end is None or not _meeting_time_passed(m.get("end_dt", ""), now_ist):
+                continue
+            if end.astimezone(IST).date() >= _as_utc(rem.get("created_at")).astimezone(IST).date():
                 return True
         return False
     if kind == "project_active":
@@ -773,7 +785,11 @@ async def check_journal_reminders(db) -> int:
         try:
             if not reminder_is_due(db, rem):
                 continue
-            db.journal_reminders.update_one({"_id": rem["_id"], "status": "active"}, {"$set": {"status": "fired", "fired_at": datetime.utcnow()}})
+            # Claim the reminder atomically: with several scheduler workers only the one
+            # that actually flips active -> fired may deliver it.
+            claim = db.journal_reminders.update_one({"_id": rem["_id"], "status": "active"}, {"$set": {"status": "fired", "fired_at": datetime.utcnow()}})
+            if not claim.modified_count:
+                continue
             link = "/dashboard/journal"
             if rem.get("entry_id"):
                 link += f"?entry={rem['entry_id']}"

@@ -17,11 +17,8 @@ import {
   LogOut,
   User,
   Building2,
-  Share2,
   Zap,
   FolderOpen,
-  Lightbulb,
-  BookOpen,
 } from "lucide-react";
 import { Avatar, Badge, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui";
 import { ThemeToggleInline } from "@/components/ThemeToggleInline";
@@ -37,13 +34,10 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { icon: House, label: "Home", href: "/dashboard/home" },
+  { icon: House, label: "Let's Talk", href: "/dashboard/home" },
   { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
-  { icon: Lightbulb, label: "Have an Idea", href: "/dashboard/ideas", hidden: true },
-  { icon: Share2, label: "Orchestration", href: "/dashboard/orchestration", hidden: true },
   { icon: Zap, label: "Task", href: "/dashboard/task" },
-  { icon: BookOpen, label: "Journal", href: "/dashboard/journal" },
-  { icon: FolderOpen, label: "Uploaded Data", href: "/dashboard/data" },
+  { icon: FolderOpen, label: "My Data", href: "/dashboard/data" },
 ];
 
 const visibleNavItems = navItems.filter((item) => !item.hidden);
@@ -142,10 +136,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               )}
               <Link
                 href={item.href}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-2xl border-2 text-sm font-bold transition-all cursor-pointer ${
                   isActive(item.href)
-                    ? "bg-primary/10 text-primary"
-                    : "text-text-muted hover:text-foreground hover:bg-surface"
+                    ? "border-outline bg-highlight text-on-highlight shadow-[3px_3px_0_var(--shadow-hard)]"
+                    : "border-transparent text-foreground hover:bg-surface-light hover:border-outline"
                 }`}
               >
                 <item.icon className="w-5 h-5 flex-shrink-0" />
@@ -197,7 +191,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       )}
 
       <aside
-        className={`fixed top-0 left-0 z-50 h-full bg-surface border-r border-border transition-all duration-300 ${
+        className={`fixed top-0 left-0 z-50 h-full bg-surface border-r-[2.5px] border-outline transition-all duration-300 ${
           isMobile
             ? `w-72 ${mobileSidebarOpen ? "translate-x-0" : "-translate-x-full"}`
             : sidebarOpen
@@ -213,7 +207,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           isMobile ? "ml-0" : sidebarOpen ? "ml-64" : "ml-20"
         }`}
       >
-        <header className="sticky top-0 z-30 glass border-b border-border">
+        <header className="sticky top-0 z-30 bg-surface border-b-[2.5px] border-outline">
           <div className="flex items-center justify-between px-4 md:px-6 py-3">
             <div className="flex items-center gap-4">
               {isMobile && (

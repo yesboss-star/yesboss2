@@ -5,6 +5,8 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
+from .url_guard import safe_get, safe_head
+
 logger = logging.getLogger("yesboss.scraper")
 
 
@@ -159,7 +161,7 @@ def search_social_profiles(company_name: str, domain: str) -> dict:
 
             try:
                 search_url = f"https://html.duckduckgo.com/html/?q={query.replace(' ', '+')}"
-                resp = requests.get(search_url, headers=headers, timeout=5)
+                resp = safe_get(search_url, headers=headers, timeout=5)
 
                 if resp.status_code == 200:
                     soup = BeautifulSoup(resp.text, "html.parser")
@@ -219,7 +221,7 @@ def try_common_social_urls(company_name: str, domain: str) -> dict:
 
             for url in urls:
                 try:
-                    resp = requests.head(url, timeout=3, allow_redirects=True)
+                    resp = safe_head(url, timeout=3, allow_redirects=True)
                     if resp.status_code in [200, 301, 302]:
                         final_url = resp.url
                         if "not found" not in final_url.lower() and "blocked" not in final_url.lower() and resp.status_code != 404:
@@ -260,7 +262,7 @@ async def scrape_company(domain: str) -> dict:
     company_name = domain.split(".")[0].replace("-", " ").replace("_", " ").title()
 
     try:
-        response = requests.get(base_url, headers=headers, timeout=15)
+        response = safe_get(base_url, headers=headers, timeout=15)
         response.raise_for_status()
 
         soup = BeautifulSoup(response.text, "html.parser")
@@ -292,7 +294,7 @@ async def scrape_company(domain: str) -> dict:
             if any(kw in href for kw in about_keywords):
                 about_url = urljoin(base_url, href)
                 try:
-                    about_response = requests.get(about_url, headers=headers, timeout=10)
+                    about_response = safe_get(about_url, headers=headers, timeout=10)
                     about_soup = BeautifulSoup(about_response.text, "html.parser")
                     for script in about_soup(["script", "style"]):
                         script.decompose()
@@ -308,7 +310,7 @@ async def scrape_company(domain: str) -> dict:
             if any(kw in href for kw in services_keywords):
                 services_url = urljoin(base_url, href)
                 try:
-                    services_response = requests.get(services_url, headers=headers, timeout=10)
+                    services_response = safe_get(services_url, headers=headers, timeout=10)
                     services_soup = BeautifulSoup(services_response.text, "html.parser")
 
                     service_items = []
@@ -379,7 +381,7 @@ async def scrape_company(domain: str) -> dict:
                 break
             try:
                 page_url = urljoin(base_url, page)
-                resp = requests.get(page_url, headers=headers, timeout=5)
+                resp = safe_get(page_url, headers=headers, timeout=5)
                 if resp.status_code == 200:
                     page_soup = BeautifulSoup(resp.text, "html.parser")
                     for a in page_soup.find_all("a", href=True):

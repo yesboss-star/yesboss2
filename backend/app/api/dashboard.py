@@ -676,30 +676,18 @@ async def get_module_metrics(
     base_q = {"organization_id": org_id, **scope}
 
     # Real metrics from DB
-    total_goals = db.goals.count_documents(base_q)
-    active_goals = db.goals.count_documents({**base_q, "status": "active"})
-    completed_goals = db.goals.count_documents({**base_q, "status": "completed"})
     total_tasks = db.tasks.count_documents(base_q)
     completed_tasks = db.tasks.count_documents({**base_q, "status": "completed"})
     in_progress_tasks = db.tasks.count_documents({**base_q, "status": "in_progress"})
     pending_tasks = db.tasks.count_documents({**base_q, "status": "pending"})
     total_members = db.org_chart_members.count_documents({"organization_id": org_id}) if is_owner else 0
 
+    # Only figures this app really holds are shown. Business metrics it has no data for (revenue, growth
+    # rate, customer count, profitability, ...) come back as value None / "no data", never as a stand-in.
     real_metrics = {}
     for metric in module_config.get("metrics", []):
-        if metric == "revenue":
-            val = total_tasks * 100
-            real_metrics[metric] = {"value": val, "change": round(completed_tasks / max(total_tasks, 1) * 100, 1), "trend": "up" if completed_tasks > pending_tasks else "down"}
-        elif metric == "growth_rate":
-            val = round(completed_goals / max(total_goals, 1) * 100, 1)
-            real_metrics[metric] = {"value": val, "change": f"{active_goals} active", "trend": "up" if active_goals > 0 else "neutral"}
-        elif metric == "headcount":
+        if metric == "headcount":
             real_metrics[metric] = {"value": total_members, "change": "0 this period", "trend": "neutral"}
-        elif metric == "customer_count":
-            real_metrics[metric] = {"value": total_members, "change": "team size", "trend": "neutral"}
-        elif metric == "profitability":
-            val = round(completed_tasks / max(total_tasks, 1) * 100, 1)
-            real_metrics[metric] = {"value": val, "change": "% tasks complete", "trend": "up" if val > 50 else "down"}
         elif "completion" in metric or "velocity" in metric or "output" in metric:
             val = round(completed_tasks / max(total_tasks, 1) * 100, 1)
             real_metrics[metric] = {"value": val, "change": f"{in_progress_tasks} in progress", "trend": "up" if val > 30 else "neutral"}
@@ -710,7 +698,7 @@ async def get_module_metrics(
             val = round(completed_tasks / max(total_tasks, 1) * 100, 1)
             real_metrics[metric] = {"value": val, "change": "completion rate", "trend": "up" if completed_tasks > 0 else "neutral"}
         else:
-            real_metrics[metric] = {"value": 0, "change": "no data", "trend": "neutral"}
+            real_metrics[metric] = {"value": None, "change": "no data", "trend": "neutral"}
 
     return {
         "module": module,

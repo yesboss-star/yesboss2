@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from ..api.websocket import manager as ws_manager
 from ..core.database import get_database
 from ..dependencies.auth import get_current_user, get_current_user_optional
+from ..dependencies.tenant import assert_goal_access
 
 router = APIRouter()
 
@@ -298,14 +299,12 @@ def get_user_org_id(user) -> str | None:
 
 
 async def _is_org_owner(db, org_id: str, user_id: str) -> bool:
-    """Check if user_id is the primary owner of the org."""
-    org = db.organizations.find_one(
-        {"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id},
-        {"owner_id": 1}
-    )
-    if not org:
-        return False
-    return org.get("owner_id") == user_id
+    """Primary owner OR co-owner (the rest of the app treats co-owners as owners)."""
+    from types import SimpleNamespace
+
+    from ..dependencies.scope import is_org_owner as _scope_is_org_owner
+
+    return await _scope_is_org_owner(db, org_id, SimpleNamespace(id=user_id, uid=user_id, email=None))
 
 
 @router.post("")
@@ -767,6 +766,8 @@ async def suggest_child_goals(goal_id: str, current_user = Depends(get_current_u
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
+    await assert_goal_access(db, goal_id, current_user)
+
     goal = db.goals.find_one({"_id": ObjectId(goal_id)})
     if not goal:
         raise HTTPException(status_code=404, detail="Goal not found")
@@ -969,6 +970,8 @@ async def review_goal(goal_id: str, request: ReviewRequest, current_user = Depen
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+
+    await assert_goal_access(db, goal_id, current_user)
 
     goal = db.goals.find_one({"_id": ObjectId(goal_id)})
     if not goal:
@@ -1197,6 +1200,8 @@ async def generate_tasks_from_goal(request: TaskGenerate, current_user = Depends
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
+    await assert_goal_access(db, request.goal_id, current_user)
+
     goal = db.goals.find_one({"_id": ObjectId(request.goal_id)})
     if not goal:
         raise HTTPException(status_code=404, detail="Goal not found")
@@ -1281,6 +1286,8 @@ async def generate_strategies(
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+
+    await assert_goal_access(db, goal_id, current_user)
 
     goal = db.goals.find_one({"_id": ObjectId(goal_id)})
     if not goal:
@@ -1368,6 +1375,8 @@ async def select_strategy(
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+
+    await assert_goal_access(db, goal_id, current_user)
 
     goal = db.goals.find_one({"_id": ObjectId(goal_id)})
     if not goal:
@@ -1510,6 +1519,8 @@ async def create_tasks_from_suggestions(
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
+    await assert_goal_access(db, request.goal_id, current_user)
+
     goal = db.goals.find_one({"_id": ObjectId(request.goal_id)})
     if not goal:
         raise HTTPException(status_code=404, detail="Goal not found")
@@ -1586,6 +1597,8 @@ async def patch_goal_breakdown(
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
+    await assert_goal_access(db, goal_id, current_user)
+
     update_data = {}
     for field in ["success_criteria", "kpis", "timeline_detail", "dependencies"]:
         val = getattr(update, field, None)
@@ -1651,6 +1664,8 @@ async def goal_breakdown_chat(
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+
+    await assert_goal_access(db, goal_id, current_user)
 
     goal = db.goals.find_one({"_id": ObjectId(goal_id)})
     if not goal:

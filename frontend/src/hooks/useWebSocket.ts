@@ -20,10 +20,23 @@ interface WebSocketMessage {
   user_id?: string;
 }
 
+/** False only when the token is a JWT that has expired (or is about to). A stale one from an earlier visit
+ *  is replaced by the sign-in refresh a moment after load, and the server rejects it until then. */
+function tokenIsStale(token: string | null): boolean {
+  if (!token) return true;
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return typeof payload.exp === "number" && payload.exp * 1000 < Date.now() + 30_000;
+  } catch {
+    return false; // not a JWT we can read: let the server decide
+  }
+}
+
 export function useWebSocket(options: UseWebSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef<number>(0);
   const timerRef = useRef<any>(null);
+  const connectRef = useRef<() => void>(() => {});
   const [isConnected, setIsConnected] = useState(false);
   const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
 
@@ -65,6 +78,13 @@ export function useWebSocket(options: UseWebSocketOptions) {
 
     let wsUrl = "";
     const token = typeof window !== "undefined" ? localStorage.getItem("yesboss_id_token") : "";
+    if (tokenIsStale(token)) {
+      // wait for the sign-in refresh instead of opening a connection the server will refuse
+      const delay = Math.min(1000 * 2 ** retryRef.current, 15000);
+      retryRef.current += 1;
+      timerRef.current = setTimeout(() => connectRef.current(), delay);
+      return;
+    }
     if (options.organizationId) {
       wsUrl = `${baseWsUrl}/ws/${encodeURIComponent(options.organizationId)}?user_id=${encodeURIComponent(options.userId || "")}&token=${encodeURIComponent(token || "")}`;
     } else if (options.userId) {
@@ -130,6 +150,7 @@ export function useWebSocket(options: UseWebSocketOptions) {
   }, [sendMessage]);
 
   useEffect(() => {
+    connectRef.current = connect;
     connect();
     return () => { disconnect(); if (timerRef.current) clearTimeout(timerRef.current); };
   }, [connect, disconnect]);

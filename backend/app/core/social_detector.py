@@ -3,6 +3,8 @@ import logging
 import re
 from urllib.parse import urljoin
 
+from .url_guard import safe_get
+
 logger = logging.getLogger("yesboss.social_detector")
 
 SOCIAL_PLATFORMS = {
@@ -135,8 +137,7 @@ def _url_exists(url: str, company_name: str = "", domain: str = "") -> bool:
     appears to belong to the company. Pure 200 OK is not enough — many platforms
     return 200 with a generic landing page even for non-existent profiles."""
     try:
-        import requests
-        resp = requests.get(url, timeout=8, allow_redirects=True, headers={
+        resp = safe_get(url, timeout=8, allow_redirects=True, headers={
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         })
         if resp.status_code in [404, 410]:
@@ -257,12 +258,11 @@ async def _source_firecrawl(domain: str, base_url: str, api_key: str) -> dict:
 async def _source_beautifulsoup(domain: str, base_url: str) -> dict:
     detected = {}
     try:
-        import requests as sync_req
         from bs4 import BeautifulSoup
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        resp = sync_req.get(base_url, headers=headers, timeout=10)
+        resp = safe_get(base_url, headers=headers, timeout=10)
         html = resp.text
         soup = BeautifulSoup(html, "html.parser")
 
@@ -327,7 +327,6 @@ async def _source_duckduckgo(company_name: str, domain: str) -> dict:
     if not company_name:
         return detected
     try:
-        import requests as sync_req
         from bs4 import BeautifulSoup
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -350,7 +349,7 @@ async def _source_duckduckgo(company_name: str, domain: str) -> dict:
                 continue
             try:
                 search_url = f"https://html.duckduckgo.com/html/?q={query_text.replace(' ', '+')}"
-                resp = sync_req.get(search_url, headers=headers, timeout=5)
+                resp = safe_get(search_url, headers=headers, timeout=5)
                 if resp.status_code == 200:
                     soup = BeautifulSoup(resp.text, "html.parser")
                     for a in soup.find_all("a", href=True):
@@ -466,10 +465,9 @@ async def detect_social_presence(domain: str, company_name: str = "") -> dict:
 
     # Get page content for AI validation
     try:
-        import requests as sync_req
         from bs4 import BeautifulSoup
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        resp = sync_req.get(base_url, headers=headers, timeout=10)
+        resp = safe_get(base_url, headers=headers, timeout=10)
         soup = BeautifulSoup(resp.text, "html.parser")
         for s in soup(["script", "style"]):
             s.decompose()
@@ -603,7 +601,7 @@ async def verify_social_url(url: str, platform: str) -> dict:
     try:
         import requests
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        response = requests.get(url, headers=headers, timeout=10, allow_redirects=True)
+        response = safe_get(url, headers=headers, timeout=10, allow_redirects=True)
         if response.status_code == 200:
             result["valid"] = True
             result["exists"] = True

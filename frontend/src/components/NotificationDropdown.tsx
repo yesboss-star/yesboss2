@@ -83,7 +83,7 @@ export function NotificationDropdown() {
     <div ref={dropdownRef} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="relative p-2 rounded-lg hover:bg-surface text-text-muted hover:text-foreground transition-colors cursor-pointer"
+        className="relative p-2 rounded-full border-2 border-outline bg-surface text-foreground shadow-[3px_3px_0_var(--shadow-hard)] hover:-translate-x-px hover:-translate-y-px transition-all cursor-pointer"
       >
         <Bell className="w-5 h-5" />
         {unreadCount > 0 && (
@@ -94,7 +94,7 @@ export function NotificationDropdown() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-80 sm:w-96 rounded-2xl border border-border bg-surface shadow-2xl z-50 overflow-hidden">
+        <div className="absolute right-0 top-full mt-2 w-80 sm:w-96 rounded-2xl border-2 border-outline bg-surface shadow-[4px_4px_0_var(--shadow-hard)] z-50 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-border">
             <h3 className="text-sm font-semibold">Notifications</h3>
             <div className="flex items-center gap-2">

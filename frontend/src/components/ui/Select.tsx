@@ -29,9 +29,10 @@ const SelectComponent = ({
       <Select.Root value={value} onValueChange={onValueChange} disabled={disabled}>
         <Select.Trigger
           className={cn(
-            "w-full h-10 px-4 rounded-xl bg-surface border border-border text-sm text-foreground transition-colors",
+            "w-full h-10 px-4 rounded-2xl bg-surface border-2 text-sm text-foreground transition-colors",
+            !error && "border-outline",
             "flex items-center justify-between gap-2",
-            "focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20",
+            "focus:outline-none focus:ring-2 focus:ring-highlight",
             "disabled:pointer-events-none disabled:opacity-50",
             "data-[placeholder]:text-text-muted",
             error && "border-rose-500",
@@ -46,7 +47,7 @@ const SelectComponent = ({
 
         <Select.Portal>
           <Select.Content
-            className="z-50 overflow-hidden rounded-xl border border-border bg-surface shadow-xl"
+            className="z-50 overflow-hidden rounded-2xl border-2 border-outline bg-surface shadow-[4px_4px_0_var(--shadow-hard)]"
             position="popper"
             sideOffset={8}
           >
@@ -62,7 +63,7 @@ const SelectComponent = ({
                   disabled={option.disabled}
                   className={cn(
                     "relative flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm cursor-pointer select-none",
-                    "data-[highlighted]:bg-primary/10 data-[highlighted]:text-foreground",
+                    "data-[highlighted]:bg-highlight data-[highlighted]:text-on-highlight",
                     "data-[disabled]:opacity-50 data-[disabled]:pointer-events-none",
                     "outline-none"
                   )}

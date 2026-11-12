@@ -50,13 +50,16 @@ export default function ReportsPage() {
   const [empReportsLoading, setEmpReportsLoading] = useState(false);
   const [genSingleLoading, setGenSingleLoading] = useState(false);
 
-  const fetchSummary = async () => {
+  // goals and tasks are listed per organisation; the backend refuses a request without one
+  const fetchSummary = async (org: string) => {
     setLoading(true);
     try {
+      const query = `?organization_id=${encodeURIComponent(org)}`;
       const [goalsRes, tasksRes] = await Promise.all([
-        fetch(`${API_URL}/goals`, { headers: getAuthHeaders() }),
-        fetch(`${API_URL}/tasks`, { headers: getAuthHeaders() }),
+        fetch(`${API_URL}/goals${query}`, { headers: getAuthHeaders() }),
+        fetch(`${API_URL}/tasks${query}`, { headers: getAuthHeaders() }),
       ]);
+      if (!goalsRes.ok || !tasksRes.ok) throw new Error("Could not load goals and tasks");
       const goalsData = await goalsRes.json();
       const tasksData = await tasksRes.json();
 
@@ -80,16 +83,18 @@ export default function ReportsPage() {
   };
 
   useEffect(() => {
-    fetchSummary();
     fetch(`${API_URL}/organizations/me`, { headers: getAuthHeaders() })
       .then((r) => r.json())
       .then((data) => {
-        if (data.organization?.id) setOrgId(data.organization.id);
-        else if (data.id) setOrgId(data.id);
-        else if (data._id) setOrgId(data._id);
-        else if (data.organization?._id) setOrgId(data.organization._id);
+        const id: string | undefined = data.organization?.id ?? data.id ?? data._id ?? data.organization?._id;
+        if (id) {
+          setOrgId(id);
+          void fetchSummary(id);
+        } else {
+          setLoading(false);
+        }
       })
-      .catch(() => {});
+      .catch(() => setLoading(false));
   }, []);
 
   const handleGenerate = async () => {
@@ -168,7 +173,8 @@ export default function ReportsPage() {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={fetchSummary}
+              onClick={() => orgId && void fetchSummary(orgId)}
+              aria-label="Refresh"
               className="p-2 rounded-lg hover:bg-surface text-text-muted hover:text-foreground transition-colors cursor-pointer"
             >
               <RefreshCw className="w-4 h-4" />
