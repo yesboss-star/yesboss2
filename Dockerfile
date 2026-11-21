@@ -29,7 +29,10 @@ ARG NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 RUN npm run build
 
 # ── Run stage: Python 3.11 slim + Node from build stage ──
-FROM python:3.11-slim
+# Pinned to bookworm on purpose. The unpinned python:3.11-slim now ships OpenSSL 3.5, whose larger TLS handshake gets cut off
+# by the VPS's network (pip to pypi.org times out / SSL EOF), while bookworm's OpenSSL 3.0 connects fine. Don't unpin
+# without re-testing a build on the VPS.
+FROM python:3.11-slim-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -49,8 +52,7 @@ WORKDIR /app
 
 # ── Install Python dependencies ──
 COPY backend/requirements.txt .
-# Patient on a slow connection: pip's defaults (15 s, 5 retries) gave up after ~100 s when pypi.org was slow to answer.
-RUN pip install --no-cache-dir --retries 10 --timeout 120 -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # ── Copy backend source ──
 COPY backend/ .
