@@ -49,7 +49,8 @@ WORKDIR /app
 
 # ── Install Python dependencies ──
 COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Patient on a slow connection: pip's defaults (15 s, 5 retries) gave up after ~100 s when pypi.org was slow to answer.
+RUN pip install --no-cache-dir --retries 10 --timeout 120 -r requirements.txt
 
 # ── Copy backend source ──
 COPY backend/ .

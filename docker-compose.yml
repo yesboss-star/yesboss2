@@ -11,6 +11,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # Build on the server's own network. Through Docker's bridge the pip download from pypi.org timed out on the VPS
+      # (npm and apt were fine), which stopped every deploy at "pip install".
+      network: host
       args:
         # Frontend build-time vars (public Firebase/Supabase config — safe to commit)
         NEXT_PUBLIC_FIREBASE_API_KEY: AIzaSyBjFwWVhr92mNi4VXs1O9UbJ1WGdJmhSiY
