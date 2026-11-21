@@ -19,7 +19,9 @@ export interface Task {
   department?: string;
   due_date?: string;
   dependencies: string[];
+  /** The people this task is shared with (emails). */
   reviewers: string[];
+  created_by?: string;
   created_at: string;
   updated_at: string;
   zoho_sync_status?: string;
@@ -361,8 +363,10 @@ export const useTaskStore = create<TaskState>()(
           });
           if (!response.ok) throw new Error("Failed to add comment");
           const result = await response.json();
+          // the API answers with _id only; a comment without `id` has no list key and cannot be told apart
+          const comment = { ...result.comment, id: result.comment._id || result.comment.id };
           set((state) => ({
-            comments: [...state.comments, result.comment],
+            comments: [...state.comments, comment],
           }));
         } catch (error: any) {
           set({ error: error.message });

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useState, useMemo } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { useTaskStore } from "@/stores/taskStore";
@@ -13,34 +13,55 @@ import TaskBoardCard, { firstAssignee, isFinished, needsAttention } from "@/comp
 import QuickAddTask from "@/components/QuickAddTask";
 import TaskSummaryCard from "@/components/TaskSummaryCard";
 import TaskModal from "@/components/TaskModal";
+import TaskPanel from "@/components/TaskPanel";
 import { Button, Input } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { Plus, Search, Zap, CheckCheck, Users, User, UserX, Flag } from "lucide-react";
+import { isAssignedTo, isInShared, matchesFilter, sharedLabel, taskDepartments, type FilterId, type TabId } from "@/lib/taskBoard";
+import { Plus, Search, Zap, CheckCheck, Users, User, UserX, Flag, Layers, Share2, Clock, ListFilter } from "lucide-react";
 
 const COLUMN_PREVIEW = 8;
 
 const pill =
   "inline-flex items-center gap-2 rounded-full border-[2.5px] border-outline px-4 py-2 text-sm font-bold shadow-[3px_3px_0_var(--shadow-hard)] transition-all cursor-pointer hover:-translate-x-px hover:-translate-y-px";
 
+const TAB_META: Record<TabId, { label: string; icon: typeof User }> = {
+  everyone: { label: "Everyone", icon: Layers },
+  mine: { label: "Mine", icon: User },
+  shared: { label: "Shared", icon: Share2 },
+  team: { label: "My team", icon: Users },
+};
+
 export default function TaskPage() {
+  // useSearchParams needs a Suspense boundary on a statically built page
+  return (
+    <Suspense fallback={null}>
+      <TaskPageContent />
+    </Suspense>
+  );
+}
+
+function TaskPageContent() {
   const { user, role, loading } = useAuth();
   const router = useRouter();
   const { organization } = useOrganizationStore();
   const { tasks, fetchTasks, loading: tasksLoading } = useTaskStore();
-  const { fetchGoals } = useGoalStore();
+  const { goals, fetchGoals } = useGoalStore();
   const { members, fetchOrgMembers } = useOrgChartStore();
 
-  const [onlyAttention, setOnlyAttention] = useState(false);
-  const [onlyApprove, setOnlyApprove] = useState(false);
-  const [onlyUnassigned, setOnlyUnassigned] = useState(false);
-  const [onlyHigh, setOnlyHigh] = useState(false);
+  const [tabChoice, setTabChoice] = useState<TabId | null>(null);
+  const [filter, setFilter] = useState<FilterId>("all");
+  const [dept, setDept] = useState("");
   const [expandedCols, setExpandedCols] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [showTaskModal, setShowTaskModal] = useState(false);
-  const [taskView, setTaskView] = useState<"my" | "team">("my");
+  // The open task lives in the address (/dashboard/task?task=<id>), so the old task page, emails and notification links
+  // can all open it, and Back / refresh behave.
+  const openId = useSearchParams().get("task");
 
+  const isOwner = role === "owner";
   const userEmail = (user as any)?.email || "";
+  const userId = (user as any)?.uid || (user as any)?.id || "";
 
   const directReports = useMemo(() => {
     return members.filter((m) => m.manager_email?.toLowerCase() === userEmail.toLowerCase());
@@ -73,11 +94,12 @@ export default function TaskPage() {
 
   useEffect(() => {
     if (organization?.id) {
-      if (role === "owner") fetchGoals(organization.id);
+      // Goals for everyone: the goal tag on a card only appears for goals the person is allowed to see
+      fetchGoals(organization.id);
       fetchTasks(organization.id);
       fetchOrgMembers(organization.id);
     }
-  }, [organization?.id, role, fetchGoals, fetchTasks, fetchOrgMembers]);
+  }, [organization?.id, fetchGoals, fetchTasks, fetchOrgMembers]);
 
   // Refresh tasks from the backend when the user returns to this tab, so statuses
   // flipped by the Google Tasks sync-back reflect immediately.
@@ -88,26 +110,37 @@ export default function TaskPage() {
     return () => window.removeEventListener("focus", onFocus);
   }, [organization?.id, fetchTasks]);
 
-  const visibleTasks = useMemo(() => {
-    if (role === "owner") return tasks;
-    const aeList = (t: any) =>
-      Array.isArray(t.assignee_email)
-        ? t.assignee_email.map((x: any) => String(x).toLowerCase())
-        : [String(t.assignee_email || "").toLowerCase()];
-    if (taskView === "my") {
-      return tasks.filter((t) => {
-        const ids = t.assignee_id || [];
-        const target = userEmail.toLowerCase();
-        return ids.some((id) => id.toLowerCase() === target) ||
-          aeList(t).includes(target);
-      });
-    }
-    return tasks.filter((t) => {
-      const ids = t.assignee_id || [];
-      return ids.some((id) => directReportEmails.has(id.toLowerCase())) ||
-        aeList(t).some((e: string) => directReportEmails.has(e));
+  // Next keeps useSearchParams in step with history.replaceState, so this opens and closes the panel without a page load.
+  const openTask = useCallback((id: string) => {
+    window.history.replaceState(null, "", `${window.location.pathname}?task=${encodeURIComponent(id)}`);
+  }, []);
+  const closeTask = useCallback(() => {
+    window.history.replaceState(null, "", window.location.pathname);
+  }, []);
+
+  const tabs: TabId[] = isOwner ? ["everyone", "mine", "shared"] : directReports.length > 0 ? ["mine", "shared", "team"] : ["mine", "shared"];
+  const tab: TabId = tabChoice && tabs.includes(tabChoice) ? tabChoice : tabs[0];
+
+  const inTab = useCallback(
+    (t: (typeof tasks)[number], which: TabId) => {
+      if (which === "everyone") return true;
+      if (which === "mine") return isAssignedTo(t, userEmail);
+      if (which === "shared") return isInShared(t, userEmail, isOwner);
+      const reports = directReportEmails;
+      return [...(t.assignee_id || []), t.assignee_email || ""].some((e) => reports.has(String(e).toLowerCase()));
+    },
+    [userEmail, isOwner, directReportEmails]
+  );
+
+  const tabCounts = useMemo(() => {
+    const out = {} as Record<TabId, number>;
+    (["everyone", "mine", "shared", "team"] as TabId[]).forEach((k) => {
+      out[k] = tasks.filter((t) => inTab(t, k)).length;
     });
-  }, [tasks, role, taskView, userEmail, directReportEmails]);
+    return out;
+  }, [tasks, inTab]);
+
+  const tabTasks = useMemo(() => tasks.filter((t) => inTab(t, tab)), [tasks, inTab, tab]);
 
   const emailToName = useMemo(() => {
     const map = new Map<string, string>();
@@ -115,25 +148,52 @@ export default function TaskPage() {
     return map;
   }, [members]);
 
-  const assigneeOf = (t: (typeof tasks)[number]) => {
-    const raw = (Array.isArray(t.assignee_id) && t.assignee_id[0]) || t.assignee_email || "";
-    const email = String(raw).toLowerCase();
-    const name = emailToName.get(email) || email.split("@")[0];
-    const first = name.split(/[\s._-]+/)[0] || "";
-    return first ? first.charAt(0).toUpperCase() + first.slice(1) : "";
-  };
+  const emailToDept = useMemo(() => {
+    const map = new Map<string, string>();
+    members.forEach((m) => m.department && map.set(m.email.toLowerCase(), m.department));
+    return map;
+  }, [members]);
+  const departmentOf = useCallback((email: string) => emailToDept.get((email || "").toLowerCase()), [emailToDept]);
 
+  const goalTitles = useMemo(() => new Map(goals.map((g) => [g.id, g.title])), [goals]);
+
+  const nameOfEmail = useCallback((email: string) => emailToName.get((email || "").toLowerCase()) || (email || "").split("@")[0], [emailToName]);
+  const firstNameOf = useCallback(
+    (email: string) => {
+      const first = nameOfEmail(email).split(/[\s._-]+/)[0] || "";
+      return first ? first.charAt(0).toUpperCase() + first.slice(1) : "";
+    },
+    [nameOfEmail]
+  );
+
+  const assigneeOf = (t: (typeof tasks)[number]) => firstNameOf(firstAssignee(t));
+
+  // Departments present in this tab, for the department filter.
+  const deptOptions = useMemo(() => {
+    const set = new Set<string>();
+    tabTasks.forEach((t) => taskDepartments(t, departmentOf).forEach((d) => set.add(d)));
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [tabTasks, departmentOf]);
+  const activeDept = dept && deptOptions.includes(dept) ? dept : "";
+
+  // Everything the header counts and filter chips count: this tab, this department.
+  const visibleTasks = useMemo(
+    () => (activeDept ? tabTasks.filter((t) => taskDepartments(t, departmentOf).includes(activeDept)) : tabTasks),
+    [tabTasks, activeDept, departmentOf]
+  );
+
+  const counts: Record<FilterId, number> = {
+    all: visibleTasks.length,
+    approve: visibleTasks.filter((t) => matchesFilter(t, "approve")).length,
+    unassigned: visibleTasks.filter((t) => matchesFilter(t, "unassigned")).length,
+    high: visibleTasks.filter((t) => matchesFilter(t, "high")).length,
+    late: visibleTasks.filter((t) => matchesFilter(t, "late")).length,
+  };
   const attentionCount = visibleTasks.filter(needsAttention).length;
-  const approveCount = visibleTasks.filter((t) => t.status === "completed").length;
-  const unassignedCount = visibleTasks.filter((t) => !isFinished(t) && !firstAssignee(t)).length;
-  const highCount = visibleTasks.filter((t) => !isFinished(t) && (t.priority === "high" || t.priority === "urgent")).length;
   const finishedCount = visibleTasks.filter(isFinished).length;
 
   const filteredTasks = visibleTasks.filter((task) => {
-    if (onlyAttention && !needsAttention(task)) return false;
-    if (onlyApprove && task.status !== "completed") return false;
-    if (onlyUnassigned && (isFinished(task) || firstAssignee(task))) return false;
-    if (onlyHigh && (isFinished(task) || (task.priority !== "high" && task.priority !== "urgent"))) return false;
+    if (!matchesFilter(task, filter)) return false;
     if (searchQuery && !task.title.toLowerCase().includes(searchQuery.toLowerCase())) return false;
     return true;
   });
@@ -153,9 +213,26 @@ export default function TaskPage() {
     { key: "done", title: "Done", head: "bg-[#B6F36B]", empty: "Nothing finished yet", tasks: filteredTasks.filter((t) => t.status === "completed" || t.status === "approved").sort((a, b) => Number(b.status === "completed") - Number(a.status === "completed") || byRecent(a, b)) },
   ];
 
+  const filterChips: { id: FilterId; text: string; icon: typeof Zap; on: string; show: boolean }[] = [
+    { id: "all", text: "All", icon: ListFilter, on: "bg-highlight text-on-highlight", show: true },
+    { id: "approve", text: "Needs your OK", icon: CheckCheck, on: "bg-[#C9A7FF] text-[#111]", show: isOwner },
+    { id: "unassigned", text: "Nobody yet", icon: UserX, on: "bg-[#FF9FD2] text-[#111]", show: isOwner },
+    { id: "high", text: "High priority", icon: Flag, on: "bg-[#FFD93D] text-[#111]", show: true },
+    { id: "late", text: "Late", icon: Clock, on: "bg-[#FF7A6B] text-[#111]", show: true },
+  ];
+
+  const captions: Record<TabId, string> = {
+    everyone: "Everything your team is working on, in one place.",
+    mine: "Tasks assigned to you.",
+    shared: "Tasks that have a reviewer, or that you share with someone.",
+    team: `Tasks from your ${directReports.length} direct report${directReports.length !== 1 ? "s" : ""}.`,
+  };
+
   if (loading || !user) {
     return null;
   }
+
+  const filtering = !!searchQuery || filter !== "all" || !!activeDept;
 
   return (
     <DashboardLayout>
@@ -163,13 +240,7 @@ export default function TaskPage() {
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold">Tasks</h1>
-            <p className="text-text-muted mt-1">
-              {role === "employee"
-                ? taskView === "my"
-                  ? "Your personal tasks and assignments"
-                  : `Tasks from your ${directReports.length} direct report${directReports.length !== 1 ? "s" : ""}`
-                : "Everything your team is working on, in one place."}
-            </p>
+            <p className="text-text-muted mt-1">{captions[tab]}</p>
           </div>
           <Button onClick={() => setShowTaskModal(true)} className="flex items-center gap-2 cursor-pointer">
             <Plus className="w-4 h-4" />
@@ -181,77 +252,54 @@ export default function TaskPage() {
           <TaskSummaryCard
             finished={finishedCount}
             total={visibleTasks.length}
-            waiting={approveCount}
-            isOwner={role === "owner"}
-            onReview={() => {
-              setOnlyApprove(true);
-              setOnlyAttention(false);
-              setOnlyUnassigned(false);
-              setOnlyHigh(false);
-            }}
+            waiting={counts.approve}
+            isOwner={isOwner}
+            onReview={() => setFilter("approve")}
           />
           {organization?.id && (
-            <QuickAddTask orgId={organization.id} members={members} userEmail={userEmail} isOwner={role === "owner"} onError={setError} />
+            <QuickAddTask orgId={organization.id} members={members} userEmail={userEmail} isOwner={isOwner} onError={setError} />
           )}
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {role === "employee" && directReports.length > 0 && (
-            <div className="inline-flex gap-2" role="tablist" aria-label="Whose tasks">
-              {([["my", "My tasks", User], ["team", "Team tasks", Users]] as const).map(([key, label, Icon]) => (
+          <div className="inline-flex flex-wrap gap-2" role="tablist" aria-label="Whose tasks">
+            {tabs.map((key) => {
+              const { label, icon: Icon } = TAB_META[key];
+              return (
                 <button
                   key={key}
                   type="button"
                   role="tab"
-                  aria-selected={taskView === key}
-                  onClick={() => setTaskView(key)}
-                  className={cn(pill, taskView === key ? "bg-highlight text-on-highlight" : "bg-surface text-foreground")}
+                  aria-selected={tab === key}
+                  onClick={() => setTabChoice(key)}
+                  className={cn(pill, tab === key ? "bg-highlight text-on-highlight" : "bg-surface text-foreground")}
                 >
                   <Icon className="w-4 h-4" />
                   {label}
+                  <span className="rounded-full border-2 border-outline bg-background/60 px-2 text-xs font-extrabold text-foreground">{tabCounts[key]}</span>
                 </button>
-              ))}
-            </div>
-          )}
-          <button
-            type="button"
-            aria-pressed={onlyAttention}
-            onClick={() => setOnlyAttention((v) => !v)}
-            className={cn(pill, onlyAttention ? "bg-[#FF7A6B] text-[#111]" : "bg-surface text-foreground")}
-          >
-            <Zap className="w-4 h-4" />
-            {attentionCount} need attention
-          </button>
-          {role === "owner" && (
-            <button
-              type="button"
-              aria-pressed={onlyUnassigned}
-              onClick={() => setOnlyUnassigned((v) => !v)}
-              className={cn(pill, onlyUnassigned ? "bg-[#FF9FD2] text-[#111]" : "bg-surface text-foreground")}
-            >
-              <UserX className="w-4 h-4" />
-              Nobody yet · {unassignedCount}
-            </button>
-          )}
-          <button
-            type="button"
-            aria-pressed={onlyHigh}
-            onClick={() => setOnlyHigh((v) => !v)}
-            className={cn(pill, onlyHigh ? "bg-[#FFD93D] text-[#111]" : "bg-surface text-foreground")}
-          >
-            <Flag className="w-4 h-4" />
-            High priority · {highCount}
-          </button>
-          {role === "owner" && approveCount > 0 && (
-            <button
-              type="button"
-              aria-pressed={onlyApprove}
-              onClick={() => setOnlyApprove((v) => !v)}
-              className={cn(pill, onlyApprove ? "bg-[#C9A7FF] text-[#111]" : "bg-surface text-foreground")}
-            >
-              <CheckCheck className="w-4 h-4" />
-              {approveCount} to approve
-            </button>
+              );
+            })}
+          </div>
+          {deptOptions.length > 0 && (
+            <>
+              <label htmlFor="task-dept" className="sr-only">
+                Department
+              </label>
+              <select
+                id="task-dept"
+                value={activeDept}
+                onChange={(e) => setDept(e.target.value)}
+                className={cn(pill, "cursor-pointer appearance-auto", activeDept ? "bg-[#7CC8FF] text-[#111]" : "bg-surface text-foreground", "[&>option]:bg-surface [&>option]:text-foreground")}
+              >
+                <option value="">All departments</option>
+                {deptOptions.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </>
           )}
           <div className="relative ml-auto w-full sm:w-64">
             <Search className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 w-4 h-4 text-text-muted" />
@@ -264,6 +312,29 @@ export default function TaskPage() {
               className="pl-10"
             />
           </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3" role="group" aria-label="Show">
+          {filterChips
+            .filter((c) => c.show)
+            .map(({ id, text, icon: Icon, on }) => (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={filter === id}
+                onClick={() => setFilter(id)}
+                className={cn(pill, filter === id ? on : "bg-surface text-foreground")}
+              >
+                <Icon className="w-4 h-4" />
+                {text} · {counts[id]}
+              </button>
+            ))}
+          {attentionCount > 0 && filter === "all" && (
+            <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-text-muted">
+              <Zap className="w-4 h-4" />
+              {attentionCount} due today or late
+            </span>
+          )}
         </div>
 
         {error && (
@@ -292,14 +363,16 @@ export default function TaskPage() {
                         task={task}
                         assignee={assigneeOf(task)}
                         members={members}
-                        isOwner={role === "owner"}
+                        isOwner={isOwner}
                         onError={setError}
+                        onOpen={openTask}
+                        departments={taskDepartments(task, departmentOf)}
+                        goalTitle={task.goal_id ? goalTitles.get(task.goal_id) : undefined}
+                        sharedLabel={sharedLabel(task, userEmail, firstNameOf)}
                       />
                     ))}
                     {shown.length === 0 && (
-                      <p className="py-6 text-center text-sm font-semibold text-text-muted">
-                        {searchQuery || onlyAttention || onlyApprove || onlyUnassigned || onlyHigh ? "No matching tasks" : col.empty}
-                      </p>
+                      <p className="py-6 text-center text-sm font-semibold text-text-muted">{filtering ? "No matching tasks" : col.empty}</p>
                     )}
                   </div>
                   {col.tasks.length > COLUMN_PREVIEW && (
@@ -317,10 +390,21 @@ export default function TaskPage() {
           </div>
         )}
 
-        {role === "owner" && <GoalSection />}
+        {isOwner && <GoalSection />}
       </div>
 
       <TaskModal isOpen={showTaskModal} onClose={() => setShowTaskModal(false)} />
+      {openId && (
+        <TaskPanel
+          taskId={openId}
+          onClose={closeTask}
+          isOwner={isOwner}
+          userEmail={userEmail}
+          userId={userId}
+          members={members}
+          goals={goals}
+        />
+      )}
     </DashboardLayout>
   );
 }

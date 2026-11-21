@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { ArrowRight, Check, Link2, Loader2 } from "lucide-react";
+import { ArrowRight, Check, Flag, Link2, Loader2, Users } from "lucide-react";
 import { useTaskStore, Task } from "@/stores/taskStore";
 import { cn } from "@/lib/utils";
 
@@ -65,10 +64,17 @@ interface Props {
   members: BoardMember[];
   isOwner: boolean;
   onError: (message: string) => void;
+  /** Opens the task's side panel. */
+  onOpen: (taskId: string) => void;
+  /** Departments to show as tags (the task's own, or its assignee's, plus those of people it is shared with). */
+  departments?: string[];
+  /** Title of the goal this task belongs to, when the viewer is allowed to see that goal. */
+  goalTitle?: string;
+  /** "Shared with Asha +1" / "You review this", or null when the task is not shared. */
+  sharedLabel?: string | null;
 }
 
-export default function TaskBoardCard({ task, assignee, members, isOwner, onError }: Props) {
-  const router = useRouter();
+export default function TaskBoardCard({ task, assignee, members, isOwner, onError, onOpen, departments = [], goalTitle, sharedLabel }: Props) {
   const { completeTask, approveTask, updateTask } = useTaskStore();
   const [busy, setBusy] = useState(false);
 
@@ -94,7 +100,7 @@ export default function TaskBoardCard({ task, assignee, members, isOwner, onErro
   };
 
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
-  const open = () => router.push(`/tasks/${task.id}`);
+  const open = () => onOpen(task.id);
 
   // Finished work is approved by the owner with the button; anything else is completed with the tick.
   const showTick = !awaiting;
@@ -145,6 +151,36 @@ export default function TaskBoardCard({ task, assignee, members, isOwner, onErro
       )}
 
       <h3 className={cn("text-base font-bold leading-snug", showTick && "pr-10", approved && "line-through opacity-60")}>{task.title}</h3>
+
+      {(departments.length > 0 || goalTitle || sharedLabel) && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {goalTitle && (
+            <span
+              title={`Goal: ${goalTitle}`}
+              className="inline-flex max-w-full items-center gap-1 rounded-full border-2 border-outline bg-[#FFD93D] px-2 py-0.5 text-[11px] font-bold leading-tight text-[#111]"
+            >
+              <Flag className="h-3 w-3 flex-shrink-0" />
+              <span className="truncate">{goalTitle}</span>
+            </span>
+          )}
+          {departments.slice(0, 2).map((d) => (
+            <span key={d} className="rounded-full border-2 border-outline bg-surface-light px-2 py-0.5 text-[11px] font-bold leading-tight">
+              {d}
+            </span>
+          ))}
+          {departments.length > 2 && (
+            <span title={departments.slice(2).join(", ")} className="rounded-full border-2 border-outline px-2 py-0.5 text-[11px] font-bold leading-tight text-text-muted">
+              +{departments.length - 2}
+            </span>
+          )}
+          {sharedLabel && (
+            <span className="inline-flex max-w-[11rem] items-center gap-1 rounded-full border-2 border-outline bg-surface-light px-2 py-0.5 text-[11px] font-bold leading-tight">
+              <Users className="h-3 w-3 flex-shrink-0" />
+              <span className="truncate">{sharedLabel}</span>
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="mt-3 flex flex-wrap items-center gap-2.5">
         {isOwner && !approved ? (

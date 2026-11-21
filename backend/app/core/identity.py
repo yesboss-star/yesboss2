@@ -71,8 +71,12 @@ def identities(user_id: Any, user_email: Any) -> list[str]:
     return vals
 
 
-def person_scope_query(user_id: Any, user_email: Any) -> dict[str, Any]:
-    """Mongo query fragment scoping goals/tasks to one user (as creator, assignee, reviewer)."""
+def person_scope_query(user_id: Any, user_email: Any, include_shared: bool = False) -> dict[str, Any]:
+    """Mongo query fragment scoping goals/tasks to one user (as creator, assignee, reviewer).
+
+    `include_shared` also matches tasks shared with the user: a task keeps the people it is shared with in its
+    `reviewers` list (emails). Only the Tasks list asks for this; everything else keeps its old meaning.
+    """
     ids = identities(user_id, user_email)
     email = normalize_email(user_email) if user_email else ""
     uid = str(user_id or "").strip() or (email if email else None)
@@ -86,6 +90,8 @@ def person_scope_query(user_id: Any, user_email: Any) -> dict[str, Any]:
     if ids:
         or_clauses.append({"assignee_id": {"$in": ids}})
         or_clauses.append({"reviewer_id": {"$in": ids}})
+        if include_shared:
+            or_clauses.append({"reviewers": {"$in": ids}})
     if not or_clauses:
         return {"$or": [{"created_by": "__none__"}]}
     return {"$or": or_clauses}
@@ -103,11 +109,12 @@ def _assignee_values(doc: dict[str, Any]) -> list[str]:
     return out
 
 
-def is_person_involved(doc: dict[str, Any], user_id: Any, user_email: Any) -> bool:
+def is_person_involved(doc: dict[str, Any], user_id: Any, user_email: Any, shared: bool = False) -> bool:
     """Python-level involvement check for permission guards.
 
     Handles assignee_id as emails, UIDs or ObjectIds, assignee_email as scalar
-    or array, plus legacy assigned_to.
+    or array, plus legacy assigned_to. With `shared=True` a person a task was shared with (its `reviewers`
+    list) counts too; that is for reading and commenting, never for editing or deleting.
     """
     uid = str(user_id or "").strip()
     email = normalize_email(user_email) if user_email else ""
@@ -131,7 +138,8 @@ def is_person_involved(doc: dict[str, Any], user_id: Any, user_email: Any) -> bo
     for field in ("assignee_email", "assigned_to", "reviewer_email"):
         if hit(doc.get(field)):
             return True
-    for field in ("assignee_id", "reviewer_id"):
+    fields = ["assignee_id", "reviewer_id"] + (["reviewers"] if shared else [])
+    for field in fields:
         vals = doc.get(field)
         if isinstance(vals, str):
             vals = [vals]
