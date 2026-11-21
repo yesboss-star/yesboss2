@@ -76,7 +76,7 @@ export function AcceptedKPITile({
         {kpi.title}
       </p>
       <p className="text-xl font-bold text-foreground mt-0.5 truncate">
-        {value?.formatted || kpi.formatted || "—"}
+        {value?.formatted || "—"}
       </p>
       {value?.change && (
         <p className="text-[10px] text-text-muted mt-1 truncate">{value.change}</p>

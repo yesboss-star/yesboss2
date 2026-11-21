@@ -1,5 +1,6 @@
 "use client";
 
+import { InlineConfirm } from "@/components/ui/InlineConfirm";
 import { Fragment, useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useGoalStore, Goal } from "@/stores/goalStore";
@@ -211,8 +212,7 @@ export default function TaskView({ goals: propGoals }: { goals?: any[] }) {
     setEditingGoal(null);
   };
 
-  const handleDeleteGoal = async (goalId: string, title: string) => {
-    if (!confirm(`Delete goal "${title}"? This will also remove all associated tasks.`)) return;
+  const handleDeleteGoal = async (goalId: string) => {
     try {
       await deleteGoal(goalId);
     } catch { /* handled by store */ }
@@ -431,9 +431,18 @@ export default function TaskView({ goals: propGoals }: { goals?: any[] }) {
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${getPriorityColor(goal.priority)}`}>{goal.priority}</span>
                           <Badge variant={goal.status === "completed" ? "success" : goal.status === "active" ? "info" : "warning"}>{goal.status}</Badge>
                           {!isEditing && (
-                            <button onClick={(e) => { e.stopPropagation(); handleDeleteGoal(goal.id, goal.title); }} className="p-1.5 rounded-lg hover:bg-rose-500/10 text-text-muted hover:text-rose-400 transition-colors cursor-pointer" title="Delete goal">
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            <span onClick={(e) => e.stopPropagation()}>
+                              <InlineConfirm
+                                label="Delete goal"
+                                warning="This also removes all its tasks."
+                                onConfirm={() => void handleDeleteGoal(goal.id)}
+                                trigger={(arm) => (
+                                  <button onClick={arm} className="p-1.5 rounded-lg hover:bg-rose-500/10 text-text-muted hover:text-rose-400 transition-colors cursor-pointer" title="Delete goal">
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              />
+                            </span>
                           )}
                         </div>
                       </div>

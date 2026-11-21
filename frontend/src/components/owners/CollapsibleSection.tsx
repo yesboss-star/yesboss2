@@ -23,14 +23,18 @@ export default function CollapsibleSection({
   actions,
   children,
 }: CollapsibleSectionProps) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
+  // `defaultExpanded` can change after the first render (it often depends on data that is still loading),
+  // so it is followed until the person opens or closes the section themselves.
+  const [chosen, setChosen] = useState<boolean | null>(null);
+  const expanded = chosen ?? defaultExpanded;
+  const setExpanded = (next: boolean) => setChosen(next);
 
   return (
     <div className="rounded-3xl overflow-hidden border-[2.5px] border-outline bg-surface shadow-[4px_4px_0_var(--shadow-hard)]">
-      <div className="flex items-center gap-3 px-4 py-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
         <button
           onClick={() => setExpanded(!expanded)}
-          className="flex items-center gap-3 flex-1 cursor-pointer text-left bg-transparent border-0 p-0"
+          className="flex min-w-0 items-center gap-3 flex-1 cursor-pointer text-left bg-transparent border-0 p-0"
         >
           {expanded ? (
             <ChevronDown className="w-5 h-5 text-text-muted flex-shrink-0" />
@@ -46,7 +50,7 @@ export default function CollapsibleSection({
           </Badge>
         )}
         {actions && (
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2 flex-shrink-0 max-md:order-last max-md:w-full max-md:flex-wrap">
             {actions}
           </div>
         )}

@@ -45,6 +45,7 @@ def _request_origin(request: Request) -> str:
 @router.get("/auth-url")
 async def get_auth_url(
     request: Request,
+    mail: bool = Query(False, description="Also ask for permission to read the inbox (read-only). Opt-in."),
     current_user=Depends(get_current_user_optional),
 ):
     user_id = get_user_id(current_user)
@@ -52,7 +53,7 @@ async def get_auth_url(
         raise HTTPException(status_code=401, detail="Not authenticated")
     zoho = ZohoOAuth(get_database())
     redirect_uri = f"{_request_origin(request)}/api/v1/zoho/callback"
-    url = zoho.get_auth_url(state=sign_state(user_id), redirect_uri=redirect_uri)
+    url = zoho.get_auth_url(state=sign_state(user_id), redirect_uri=redirect_uri, with_mail=mail)
     return {"url": url}
 
 
@@ -216,6 +217,7 @@ async def get_zoho_status(
         "connected": True,
         "email": token.get("zoho_mail_id", "") or get_user_email(current_user),
         "scopes": token.get("scope", "").split(","),
+        "mail_enabled": bool(token.get("mail_enabled")),
         "connected_at": token.get("connected_at", ""),
     }
 
@@ -231,5 +233,9 @@ async def disconnect_zoho(
     db = get_database()
     zoho = ZohoOAuth(db)
     await zoho.disconnect(user_id)
+    try:
+        db.mail_digests.delete_many({"user_id": user_id})  # their mail summary goes with the connection
+    except Exception as e:
+        logger.warning("Could not remove mail digests for %s: %s", user_id, e)
 
     return {"disconnected": True}

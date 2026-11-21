@@ -18,7 +18,6 @@ import {
   User,
   Building2,
   Zap,
-  FolderOpen,
 } from "lucide-react";
 import { Avatar, Badge, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui";
 import { ThemeToggleInline } from "@/components/ThemeToggleInline";
@@ -28,16 +27,21 @@ interface NavItem {
   icon: React.ElementType;
   label: string;
   href: string;
+  /** other addresses that belong to this item, so it stays highlighted there */
+  alsoActive?: string[];
   badge?: string;
   section?: string;
   hidden?: boolean;
 }
 
 const navItems: NavItem[] = [
-  { icon: House, label: "Let's Talk", href: "/dashboard/home" },
+  // Journal has no sidebar entry and no top-bar icon: it lives in Let's Talk (the Journal chip, "My journals" with entries, reminders and ideas)
+  // and the full page opens from "Open the full Journal" links there and from the brief on the Dashboard
   { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
+  { icon: House, label: "Let's Talk", href: "/dashboard/home" },
   { icon: Zap, label: "Task", href: "/dashboard/task" },
-  { icon: FolderOpen, label: "My Data", href: "/dashboard/data" },
+  // Profile, settings and the uploaded-data pages are one screen now
+  { icon: User, label: "Profile", href: "/dashboard/profile", alsoActive: ["/dashboard/settings", "/dashboard/data"] },
 ];
 
 const visibleNavItems = navItems.filter((item) => !item.hidden);
@@ -76,9 +80,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
-  const isActive = (href: string) => {
-    if (href === "/dashboard") return pathname === href;
-    return pathname === href || pathname?.startsWith(href + "/");
+  const isActive = (item: NavItem) => {
+    const matches = (href: string) => (href === "/dashboard" ? pathname === href : pathname === href || !!pathname?.startsWith(href + "/"));
+    return matches(item.href) || (item.alsoActive ?? []).some(matches);
   };
 
   const sidebarContent = (
@@ -137,7 +141,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <Link
                 href={item.href}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-2xl border-2 text-sm font-bold transition-all cursor-pointer ${
-                  isActive(item.href)
+                  isActive(item)
                     ? "border-outline bg-highlight text-on-highlight shadow-[3px_3px_0_var(--shadow-hard)]"
                     : "border-transparent text-foreground hover:bg-surface-light hover:border-outline"
                 }`}

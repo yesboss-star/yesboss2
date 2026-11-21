@@ -1,5 +1,6 @@
 "use client";
 
+import { InlineConfirm } from "@/components/ui/InlineConfirm";
 import { useEffect, useState } from "react";
 import {
   AlertTriangle,
@@ -199,15 +200,15 @@ function SavedItem({ capture }: { capture: Capture }) {
               <RefreshCw className="h-3.5 w-3.5" /> Re-analyse
             </Button>
           )}
-          <Button
-            variant="ghost"
-            size="iconSm"
-            aria-label="Delete note"
-            disabled={busy}
-            onClick={() => window.confirm(deleteWarning(capture)) && guard(() => deleteCapture(capture.id))}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          <InlineConfirm
+            warning={deleteWarning(capture)}
+            onConfirm={() => guard(() => deleteCapture(capture.id))}
+            trigger={(arm) => (
+              <Button variant="ghost" size="iconSm" aria-label="Delete note" disabled={busy} onClick={arm}>
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            )}
+          />
         </div>
       </div>
     </li>

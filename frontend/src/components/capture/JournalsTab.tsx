@@ -1,5 +1,6 @@
 "use client";
 
+import { InlineConfirm } from "@/components/ui/InlineConfirm";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, RefreshCw, Trash2 } from "lucide-react";
 import { useOrganizationStore } from "@/stores/organizationStore";
@@ -99,7 +100,6 @@ function EntryItem({
   }, [expanded]);
 
   const remove = async () => {
-    if (!window.confirm("Delete this journal entry? This can't be undone.")) return;
     setBusy(true);
     setError(null);
     try {
@@ -125,9 +125,15 @@ function EntryItem({
             {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
             Conversation
           </GhostButton>
-          <GhostButton onClick={() => void remove()} disabled={busy} aria-label="Delete entry">
-            <Trash2 className="h-3.5 w-3.5" />
-          </GhostButton>
+          <InlineConfirm
+            label="Delete? Can't be undone"
+            onConfirm={() => void remove()}
+            trigger={(arm) => (
+              <GhostButton onClick={arm} disabled={busy} aria-label="Delete entry">
+                <Trash2 className="h-3.5 w-3.5" />
+              </GhostButton>
+            )}
+          />
         </div>
       </div>
       <EntryAnalysisCard entry={entry} orgId={orgId} onAsk={onAsk} onOpen={onOpenSession} onUpdated={onUpdated} />

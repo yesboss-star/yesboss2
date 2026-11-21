@@ -20,12 +20,14 @@ interface ZohoState {
   email: string;
   scopes: string[];
   connectedAt: string;
+  /** Permission to read this person's own inbox (read-only). Separate from the normal Zoho connection. */
+  mailEnabled: boolean;
   loading: boolean;
   connecting: boolean;
   cliqStatus: CliqStatus | null;
   checkStatus: () => Promise<void>;
   checkCliqStatus: () => Promise<void>;
-  connect: () => Promise<void>;
+  connect: (opts?: { mail?: boolean }) => Promise<void>;
   disconnect: () => Promise<void>;
 }
 
@@ -41,6 +43,7 @@ export const useZohoStore = create<ZohoState>()((set, get) => ({
   email: "",
   scopes: [],
   connectedAt: "",
+  mailEnabled: false,
   loading: false,
   connecting: false,
   cliqStatus: null,
@@ -59,6 +62,7 @@ export const useZohoStore = create<ZohoState>()((set, get) => ({
           email: data.email || "",
           scopes: data.scopes || [],
           connectedAt: data.connected_at || "",
+          mailEnabled: !!data.mail_enabled,
         });
       }
     } catch {
@@ -82,10 +86,11 @@ export const useZohoStore = create<ZohoState>()((set, get) => ({
     }
   },
 
-  connect: async () => {    try {
+  connect: async (opts) => {
+    try {
       set({ connecting: true });
       await refreshAuthToken();
-      const res = await fetch(`${API_URL}/zoho/auth-url`, {
+      const res = await fetch(`${API_URL}/zoho/auth-url${opts?.mail ? "?mail=true" : ""}`, {
         credentials: "include",
         headers: { ...getAuthHeaders() },
       });
@@ -118,11 +123,13 @@ export const useZohoStore = create<ZohoState>()((set, get) => ({
           window.clearInterval(pollTimer);
           set({ connecting: false });
           get().checkStatus().then(() => {
-            if (get().connected) {
+            if (opts?.mail ? get().mailEnabled : get().connected) {
               useUIStore.getState().addNotification({
                 type: "success",
-                title: "Zoho Connected",
-                message: "Your Zoho account has been connected successfully.",
+                title: opts?.mail ? "Inbox connected" : "Zoho Connected",
+                message: opts?.mail
+                  ? "YesBoss can now read your Zoho inbox to summarise it. Only you can see the summary."
+                  : "Your Zoho account has been connected successfully.",
               });
             }
           });
@@ -142,7 +149,7 @@ export const useZohoStore = create<ZohoState>()((set, get) => ({
         credentials: "include",
         headers: { ...getAuthHeaders() },
       });
-      set({ connected: false, email: "", scopes: [], connectedAt: "" });
+      set({ connected: false, email: "", scopes: [], connectedAt: "", mailEnabled: false });
     } catch (err) {
       console.error("Zoho disconnect failed:", err);
     } finally {

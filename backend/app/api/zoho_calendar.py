@@ -70,7 +70,7 @@ async def get_calendar_events(
     raw_events = await ZohoCalendar.get_events(token, cal_uid, range_start, range_end)
 
     events = []
-    token_doc = db.zoho_tokens.find_one({"user_id": user_id}) if db else None
+    token_doc = db.zoho_tokens.find_one({"user_id": user_id}) if db is not None else None
     org_id = token_doc.get("org_id", "") if token_doc else ""
     if db is not None and not org_id:
         org_id = await primary_org_id(db, current_user)

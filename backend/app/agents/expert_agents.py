@@ -13,7 +13,7 @@ class BaseExpertAgent:
     def __init__(self, agent_type: str, provider: str | None = None, db=None):
         self.agent_type = agent_type
         self.provider = provider
-        self.db = db or get_database()
+        self.db = db if db is not None else get_database()
         # Get persona from MasterPromptEngine
         engine = MasterPromptEngine(self.db)
         persona_key = f"expert_{agent_type}" if not agent_type.startswith("expert_") else agent_type

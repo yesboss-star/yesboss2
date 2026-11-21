@@ -835,15 +835,36 @@ async def list_meeting_titles(
     return {"titles": [t["title"] for t in titles if t.get("title")]}
 
 
+def _has_calendar_event(meeting: dict) -> bool:
+    return bool(meeting.get("zoho_event_id") or meeting.get("google_event_id") or meeting.get("event_ids"))
+
+
+def _starts_in_future(meeting: dict) -> bool:
+    """Booked meetings store their start as 20261121T090000+0530. An unknown start counts as past, so nobody
+    is told that a meeting which already happened (or can't be dated) was cancelled."""
+    try:
+        start = datetime.strptime(str(meeting.get("start_dt")), "%Y%m%dT%H%M%S%z")
+    except (TypeError, ValueError):
+        return False
+    return start > datetime.now(start.tzinfo)
+
+
 @router.delete("/{meeting_id}")
 async def delete_meeting(
     meeting_id: str,
     organization_id: str | None = Query(None),
-    current_user=Depends(get_current_user_optional),
+    current_user=Depends(get_current_user),
 ):
+    """Remove a meeting from the history.
+
+    - A meeting that is still ahead and has a calendar event is cancelled there too, and its attendees are told.
+    - Tasks created from an upload are NOT deleted (they may be in progress); the answer says how many stay.
+    - Only the person who made the meeting, or an owner, may delete it: it can cancel other people's calendar events."""
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+
+    from ..dependencies.scope import is_org_owner
 
     org_id = organization_id or await get_user_org_id(current_user)
     if not org_id:
@@ -861,11 +882,33 @@ async def delete_meeting(
         logger.warning(f"Meeting not found with _id={meeting_id}, org_id={org_id}. Exists without org filter: {db.meetings.find_one({'_id': oid}) is not None}")
         raise HTTPException(status_code=404, detail="Meeting not found")
 
+    me = {
+        str(getattr(current_user, "id", "") or "").lower(),
+        str(getattr(current_user, "uid", "") or "").lower(),
+        str(getattr(current_user, "email", "") or "").lower(),
+    } - {""}
+    creator = str(existing.get("created_by") or "").lower()
+    if not (await is_org_owner(db, org_id, current_user) or (creator and creator in me)):
+        raise HTTPException(status_code=403, detail="Only the person who made this meeting, or an owner, can delete it")
+
+    cancelled = False
+    attendees = [a for a in (existing.get("attendees") or []) if a]
+    if _has_calendar_event(existing) and existing.get("status") != "cancelled" and _starts_in_future(existing):
+        from .assistant import _cancel_meeting  # imported here: assistant imports this module
+
+        outcome = await _cancel_meeting(db, org_id, {"meeting_id": meeting_id})
+        cancelled = bool(outcome.get("calendar_removed"))
+
     result = db.meetings.delete_one({"_id": oid, "organization_id": org_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Meeting not found")
 
-    return {"deleted": True}
+    return {
+        "deleted": True,
+        "tasks_kept": len(existing.get("tasks_created") or []),
+        "calendar_cancelled": cancelled,
+        "attendees_told": len(attendees) if cancelled else 0,
+    }
 
 
 @router.get("/history")

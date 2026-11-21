@@ -53,7 +53,7 @@ def build_report_content(db, org_id: str, request: ReportRequest) -> dict[str, A
     completed_goals = len([g for g in goals if g.get("status") == "completed"])
 
     total_tasks = len(tasks)
-    completed_tasks = len([t for t in tasks if t.get("status") == "completed"])
+    completed_tasks = len([t for t in tasks if t.get("status") in ("completed", "approved")])
     pending_tasks = len([t for t in tasks if t.get("status") == "pending"])
     in_progress_tasks = len([t for t in tasks if t.get("status") == "in_progress"])
 
@@ -75,20 +75,17 @@ def build_report_content(db, org_id: str, request: ReportRequest) -> dict[str, A
         email = m.get("email", "")
         name = m.get("full_name", email)
         emp_tasks = [t for t in tasks if t.get("assignee_email") == email or email in (t.get("assignee_id") or [])]
-        emp_completed = len([t for t in emp_tasks if t.get("status") == "completed"])
+        emp_completed = len([t for t in emp_tasks if t.get("status") in ("completed", "approved")])
         emp_pending = len([t for t in emp_tasks if t.get("status") == "pending"])
         emp_in_progress = len([t for t in emp_tasks if t.get("status") == "in_progress"])
         emp_overdue = len([t for t in emp_tasks if t.get("due_date") and t.get("status") not in ("completed", "approved") and _is_overdue_from(t.get("due_date"), now)])
         stuck_tasks = [t for t in emp_tasks if t.get("blocked") or (t.get("status") == "pending" and t.get("created_at") and (now - _parse_dt(t["created_at"])).days > 7)]
+        # facts only: a count, never a verdict about the person
         suggestion = ""
         if emp_overdue > 0:
-            suggestion = f"Has {emp_overdue} overdue task(s) — review and reprioritize"
+            suggestion = f"{emp_overdue} overdue task(s)"
         elif emp_pending > 3:
-            suggestion = f"Has {emp_pending} pending tasks — may need unblocking"
-        elif emp_completed > 0 and emp_pending == 0:
-            suggestion = "On track"
-        else:
-            suggestion = "Needs attention — low task assignment"
+            suggestion = f"{emp_pending} pending tasks"
         employee_insights.append({
             "name": name,
             "email": email,
@@ -228,10 +225,7 @@ def generate_pdf(content: dict[str, Any], org_name: str = "YesBoss") -> bytes:
     story.append(tbl)
     story.append(Spacer(1, 6))
 
-    if summary["completion_rate"] >= 50:
-        status_text = f"Overall completion rate is <b>{summary['completion_rate']}%</b> — your team is on track."
-    else:
-        status_text = f"Overall completion rate is <b>{summary['completion_rate']}%</b> — review priorities to improve."
+    status_text = f"Overall completion rate is <b>{summary['completion_rate']}%</b> ({summary['completed_tasks']} of {summary['total_tasks']} tasks)."
     story.append(Paragraph(status_text, body_style))
     story.append(Spacer(1, 12))
 
@@ -625,10 +619,7 @@ def generate_docx(content: dict[str, Any], org_name: str = "YesBoss") -> bytes:
         row[1].text = value
 
     doc.add_paragraph("")
-    if summary['completion_rate'] >= 50:
-        status_text = f"Overall completion rate is {summary['completion_rate']}% — your team is on track."
-    else:
-        status_text = f"Overall completion rate is {summary['completion_rate']}% — review priorities to improve."
+    status_text = f"Overall completion rate is {summary['completion_rate']}% ({summary['completed_tasks']} of {summary['total_tasks']} tasks)."
     doc.add_paragraph(status_text)
 
     goals = content.get("goals", [])

@@ -237,61 +237,6 @@ INDUSTRY_MODULES = {
 }
 
 
-def get_industry_insights(industry: str) -> list[dict]:
-    industry = industry.lower() if industry else "default"
-    module_config = INDUSTRY_MODULES.get(industry, INDUSTRY_MODULES["default"])
-
-    insight_templates = {
-        "founder": [
-            {"type": "growth", "title": "Growth Opportunity", "description": "Revenue increased 23% this quarter - maintain momentum", "priority": "success"},
-            {"type": "risk", "title": "Risk Alert", "description": "Burn rate acceleration detected - review spending", "priority": "warning"},
-            {"type": "action", "title": "Strategic Action", "description": "Consider board meeting to discuss Series A readiness", "priority": "info"},
-        ],
-        "finance": [
-            {"type": "positive", "title": "Revenue Milestone", "description": "Monthly recurring revenue up 15% - ahead of projections", "priority": "success"},
-            {"type": "warning", "title": "Cost Alert", "description": "Operating expenses trending 10% above budget", "priority": "warning"},
-            {"type": "action", "title": "Cash Flow", "description": "Recommended review of receivables collection process", "priority": "info"},
-        ],
-        "operations": [
-            {"type": "efficiency", "title": "Process Improvement", "description": "Workflow optimization can reduce costs by 18%", "priority": "success"},
-            {"type": "alert", "title": "Bottleneck Detected", "description": "Approval queue averaging 3 days - consider automation", "priority": "warning"},
-            {"type": "insight", "title": "Resource Planning", "description": "Current utilization at 72% - room for efficiency gains", "priority": "info"},
-        ],
-        "productivity": [
-            {"type": "positive", "title": "Team Performance", "description": "Sprint velocity improved 12% this month", "priority": "success"},
-            {"type": "warning", "title": "Capacity Alert", "description": "Several team members at 90%+ capacity", "priority": "warning"},
-            {"type": "action", "title": "Skill Development", "description": "Recommend training program for technical skills", "priority": "info"},
-        ],
-        "workflow": [
-            {"type": "success", "title": "Automation Win", "description": "Automated workflows saving 15 hours/week", "priority": "success"},
-            {"type": "alert", "title": "Documentation Gap", "description": "Process documentation incomplete in 3 areas", "priority": "warning"},
-            {"type": "insight", "title": "Integration Health", "description": "All critical integrations operating normally", "priority": "info"},
-        ]
-    }
-
-    all_insights = []
-    for module, config in module_config.items():
-        module_insights = insight_templates.get(module, insight_templates["founder"])
-        for i, insight in enumerate(module_insights):
-            all_insights.append({
-                "id": f"{module}_{i}",
-                "type": insight["type"],
-                "title": insight["title"],
-                "description": insight["description"],
-                "priority": insight["priority"],
-                "category": module,
-                "action_items": [
-                    f"Review {module} dashboard",
-                    "Schedule team sync",
-                    "Update action plan"
-                ],
-                "metrics": {m: 0 for m in config["metrics"][:3]},
-                "created_at": datetime.utcnow().isoformat()
-            })
-
-    return all_insights
-
-
 @router.get("/insights")
 async def get_dashboard_insights(
     industry: str | None = Query(None),
@@ -314,7 +259,9 @@ async def get_dashboard_insights(
     organization = db.organizations.find_one({"_id": ObjectId(org_id) if ObjectId.is_valid(org_id) else org_id})
     org_industry = industry or (organization.get("industry") if organization else None)
 
-    insights = get_industry_insights(org_industry or "default")
+    # The old canned insight templates ("Revenue increased 23%", ...) were made-up figures, not data. There is nothing real to
+    # report from here, so this returns no insights rather than invented ones.
+    insights: list[dict] = []
 
     if module:
         insights = [i for i in insights if i["category"] == module]
@@ -351,7 +298,6 @@ async def get_dashboard_modules(
                 "id": module_id,
                 "title": config["title"],
                 "metrics": config["metrics"],
-                "insights_count": len(get_industry_insights(org_industry or "default"))
             }
             for module_id, config in modules.items()
         ]

@@ -808,7 +808,7 @@ export default function KPISuggestionsCard() {
                           }));
                         } catch {}
                       }
-                      router.push("/dashboard/data");
+                      router.push("/dashboard/profile?section=data");
                     }}
                     className="h-7 px-2.5 text-[10px] w-full"
                   >
@@ -872,7 +872,7 @@ export default function KPISuggestionsCard() {
                 <Button
                   size="sm"
                   variant="default"
-                  onClick={() => router.push("/dashboard/data")}
+                  onClick={() => router.push("/dashboard/profile?section=data")}
                   className="h-8 px-4 text-xs"
                 >
                   <Upload className="w-3.5 h-3.5" />

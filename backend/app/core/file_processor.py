@@ -408,6 +408,10 @@ async def process_file(
         )
     )
 
+    # an owner's financial file updates the Financial Metrics card by itself
+    from .finance_auto import auto_extract_after_upload, uploader_from_id
+    asyncio.create_task(auto_extract_after_upload(file_id, org_id, uploader_from_id(user_id)))
+
     return {
         "file_id": file_id,
         "filename": filename,

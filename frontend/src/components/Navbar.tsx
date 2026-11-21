@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Menu, X, ChevronRight } from "lucide-react";
 import Link from "next/link";
+import { ThemeToggleInline } from "@/components/ThemeToggleInline";
 
 export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
@@ -49,6 +50,7 @@ export default function Navbar() {
         </div>
 
         <div className="hidden md:flex items-center gap-4">
+          <ThemeToggleInline />
           <Link
             href="/login"
             className="text-sm text-text-muted hover:text-foreground transition-colors cursor-pointer"
@@ -64,12 +66,16 @@ export default function Navbar() {
           </Link>
         </div>
 
-        <button
-          className="md:hidden text-foreground cursor-pointer"
-          onClick={() => setMobileOpen(!mobileOpen)}
-        >
-          {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-        </button>
+        <div className="flex items-center gap-3 md:hidden">
+          <ThemeToggleInline />
+          <button
+            className="text-foreground cursor-pointer"
+            aria-label={mobileOpen ? "Close menu" : "Open menu"}
+            onClick={() => setMobileOpen(!mobileOpen)}
+          >
+            {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+          </button>
+        </div>
       </nav>
 
       {mobileOpen && (

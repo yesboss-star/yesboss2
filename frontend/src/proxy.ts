@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { LANDING_PATH } from "./lib/landing";
 
 const protectedRoutes = ["/dashboard", "/onboarding", "/tasks", "/goals"];
 const authRoutes = ["/login", "/signup"];
@@ -42,11 +43,11 @@ export async function proxy(request: NextRequest) {
   }
 
   if (isAuthRoute && hasAuth) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+    return NextResponse.redirect(new URL(LANDING_PATH, request.url));
   }
 
   if (isOnboardingRoute && orgCompleted) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+    return NextResponse.redirect(new URL(LANDING_PATH, request.url));
   }
 
   const response = NextResponse.next();

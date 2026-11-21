@@ -58,23 +58,29 @@ export default function JournalPanel({
   return (
     <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-label="Journal insights">
       <button aria-label="Close panel" className="absolute inset-0 cursor-default bg-black/40 backdrop-blur-[1px]" onClick={onClose} />
-      <aside className="relative flex h-full w-full flex-col border-l border-border bg-background shadow-2xl md:w-[70vw] md:max-w-[1000px]">
-        <header className="flex items-center justify-between gap-3 border-b border-border px-5 py-3.5">
-          <div className="flex min-w-0 items-center gap-2.5">
+      <aside className="relative flex h-full w-full flex-col border-l-[2.5px] border-outline bg-background shadow-2xl md:w-[70vw] md:max-w-[1000px]">
+        <header className="flex items-center justify-between gap-3 border-b-[2.5px] border-outline bg-surface px-5 py-3.5">
+          <div className="flex min-w-0 items-center gap-3">
             {tab === "overview" ? (
-              <GeminiSpark className="h-6 w-6" />
+              <span className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-full border-[2.5px] border-outline bg-highlight text-on-highlight">
+                <GeminiSpark className="h-5 w-5" />
+              </span>
             ) : (
               <button
                 onClick={() => onTab("overview")}
                 aria-label="Back to overview"
-                className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-text-muted transition-colors hover:bg-surface hover:text-foreground"
+                className="grid h-10 w-10 flex-shrink-0 cursor-pointer place-items-center rounded-full border-[2.5px] border-outline bg-surface text-foreground shadow-[3px_3px_0_var(--shadow-hard)] transition-all hover:-translate-x-px hover:-translate-y-px"
               >
                 <ChevronLeft className="h-5 w-5" />
               </button>
             )}
-            <h2 className="truncate text-base font-semibold text-foreground">{tab === "overview" ? "Journal insights" : detailTitle}</h2>
+            <h2 className="truncate text-lg font-bold text-foreground">{tab === "overview" ? "Journal insights" : detailTitle}</h2>
           </div>
-          <button onClick={onClose} aria-label="Close" className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-text-muted hover:bg-surface hover:text-foreground">
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="grid h-10 w-10 flex-shrink-0 cursor-pointer place-items-center rounded-full border-[2.5px] border-outline bg-surface text-foreground shadow-[3px_3px_0_var(--shadow-hard)] transition-all hover:-translate-x-px hover:-translate-y-px"
+          >
             <X className="h-4 w-4" />
           </button>
         </header>

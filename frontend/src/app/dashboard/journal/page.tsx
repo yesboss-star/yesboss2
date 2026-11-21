@@ -15,6 +15,7 @@ import { DailyCheckin, RecapNudge } from "@/components/journal/ChatNudges";
 import GeminiSpark from "@/components/journal/GeminiSpark";
 import MessageChips from "@/components/journal/MessageChips";
 import { journalApi, type EntryRow } from "@/lib/journalApi";
+import { clearJournalHandoff, readJournalHandoff } from "@/lib/journalHandoff";
 import {
   AudioLines,
   Check,
@@ -100,12 +101,17 @@ export default function JournalPage() {
 
   const [panel, setPanel] = useState<PanelState>(initialPanel);
   const deepLinked = useRef(false);
-  const [mode, setMode] = useState<Mode>(() => (loadPrefs().mode === "talk" ? "talk" : "write"));
+  // text sent over from Let's Talk waits in the box, unsent (and Write mode opens so it can be seen)
+  const [handoff] = useState(readJournalHandoff);
+  const [mode, setMode] = useState<Mode>(() => (!handoff && loadPrefs().mode === "talk" ? "talk" : "write"));
   const [lang, setLang] = useState<LangId>(() => {
     const saved = loadPrefs().lang;
     return LANGUAGES.some((item) => item.id === saved) ? (saved as LangId) : "auto";
   });
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(handoff);
+  useEffect(() => {
+    clearJournalHandoff(); // used once: a refresh does not bring the text back
+  }, []);
   const [isAsking, setIsAsking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);

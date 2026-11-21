@@ -425,6 +425,11 @@ async def upload_and_analyze(
         )
     )
 
+    # an owner's financial file updates the Financial Metrics card by itself
+    from ..core.finance_auto import auto_extract_after_upload
+
+    asyncio.create_task(auto_extract_after_upload(file_id, organization_id, current_user))
+
     return {
         "file_id": file_id,
         "filename": file.filename,
@@ -633,6 +638,10 @@ async def upload_from_url(
         await store_embeddings_in_qdrant("documents", embeddings, payloads)
     except Exception as e:
         logger.warning(f"Embedding failed for URL upload: {e}")
+
+    from ..core.finance_auto import auto_extract_after_upload
+
+    asyncio.create_task(auto_extract_after_upload(file_id, organization_id, current_user))
 
     return {
         "file_id": file_id,
@@ -918,6 +927,9 @@ async def delete_file(
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
         db.documents.delete_one({"file_id": file_id})
+        from ..core.memory import aforget_document
+
+        await aforget_document(file_id)  # its searchable text goes too, so answers can no longer quote it
         return {"success": True, "message": f"File '{doc.get('filename', 'unknown')}' deleted"}
 
     file_path = f.get("file_path")

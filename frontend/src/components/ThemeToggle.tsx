@@ -9,7 +9,9 @@ export function ThemeToggle() {
   const setTheme = useUIStore((s) => s.setTheme);
   const pathname = usePathname();
 
-  if (pathname?.startsWith("/dashboard")) return null;
+  // The dashboard has its own toggle in the header, and the landing page puts one inside its navbar
+  // (a floating one would sit under that fixed navbar and could not be clicked).
+  if (pathname === "/" || pathname?.startsWith("/dashboard")) return null;
 
   return (
     <button

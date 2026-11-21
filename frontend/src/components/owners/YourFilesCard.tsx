@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import { InlineConfirm } from "@/components/ui/InlineConfirm";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { getAuthHeaders } from "@/lib/utils";
@@ -62,6 +63,8 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
   const { organization } = useOrganizationStore();
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [loading, setLoading] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null); // what went wrong with a download, a re-analyse or an upload
+  const [loaded, setLoaded] = useState(false); // false until the first answer, so an empty list is never shown while it is still on its way
   const [search, setSearch] = useState("");
   const [deleting, setDeleting] = useState<string | null>(null);
   const [uploading, setUploading] = useState<UploadStatus[]>([]);
@@ -89,10 +92,10 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
           const body = await res.json();
           detail = body.detail || detail;
         } catch {}
-        alert(detail);
+        setActionError(detail);
       }
     } catch {
-      alert("Network error. Please try again.");
+      setActionError("Network error. Please try again.");
     } finally {
       setReAnalyzing(null);
     }
@@ -109,7 +112,7 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
           const body = await res.json();
           detail = body.detail || detail;
         } catch {}
-        alert(detail);
+        setActionError(detail);
         return;
       }
       const blob = await res.blob();
@@ -119,7 +122,7 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
       window.open(url, "_blank");
       setTimeout(() => window.URL.revokeObjectURL(url), 60000);
     } catch {
-      alert("Failed to open document");
+      setActionError("Failed to open document");
     }
   };
 
@@ -134,7 +137,7 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
           const body = await res.json();
           detail = body.detail || detail;
         } catch {}
-        alert(detail);
+        setActionError(detail);
         return;
       }
       const blob = await res.blob();
@@ -147,7 +150,7 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
       a.remove();
       window.URL.revokeObjectURL(url);
     } catch {
-      alert("Download failed");
+      setActionError("Download failed");
     }
   };
 
@@ -161,8 +164,12 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
       .then((data) => {
         setFiles(data.files || []);
         setLoading(false);
+        setLoaded(true);
       })
-      .catch(() => setLoading(false));
+      .catch(() => {
+        setLoading(false);
+        setLoaded(true);
+      });
   }, [organization?.id]);
 
   useEffect(() => {
@@ -170,7 +177,6 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
   }, [organization?.id, loadFiles]);
 
   const handleDelete = async (fileId: string) => {
-    if (!confirm("Delete this file? This cannot be undone.")) return;
     setDeleting(fileId);
     try {
       const res = await fetch(
@@ -321,10 +327,10 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
           const body = await res.json();
           detail = body.detail || detail;
         } catch {}
-        alert(detail);
+        setActionError(detail);
       }
     } catch {
-      alert("Network error. Please try again.");
+      setActionError("Network error. Please try again.");
     } finally {
       setRenaming(false);
     }
@@ -366,7 +372,7 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
               <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
             </button>
             <Badge variant="outline" className="text-xs">
-              {files.length} file{files.length !== 1 ? "s" : ""}
+              {loaded ? `${files.length} file${files.length !== 1 ? "s" : ""}` : "Loading…"}
             </Badge>
           </div>
         </div>
@@ -376,6 +382,14 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
         </CardDescription>
       </CardHeader>
       <CardContent>
+        {actionError && (
+          <p role="alert" className="mb-3 flex items-start gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+            <span className="flex-1">{actionError}</span>
+            <button type="button" onClick={() => setActionError(null)} className="cursor-pointer font-bold underline">
+              Dismiss
+            </button>
+          </p>
+        )}
         <div
           onDragOver={(e) => {
             e.preventDefault();
@@ -463,7 +477,7 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
           />
         </div>
 
-        {loading ? (
+        {loading || !loaded ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-6 h-6 animate-spin text-primary" />
           </div>
@@ -613,18 +627,23 @@ export function YourFilesCard({ onFilesChanged }: { onFilesChanged?: () => void 
                   >
                     <ExternalLink className="w-4 h-4" />
                   </button>
-                  <button
-                    onClick={() => handleDelete(file.id)}
-                    disabled={deleting === file.id}
-                    className="p-2 rounded-lg hover:bg-rose-500/10 transition-colors cursor-pointer"
-                    title="Delete file"
-                  >
-                    {deleting === file.id ? (
-                      <Loader2 className="w-4 h-4 text-rose-400 animate-spin" />
-                    ) : (
-                      <Trash2 className="w-4 h-4 text-rose-400" />
+                  <InlineConfirm
+                    onConfirm={() => handleDelete(file.id)}
+                    trigger={(arm) => (
+                      <button
+                        onClick={arm}
+                        disabled={deleting === file.id}
+                        className="p-2 rounded-lg hover:bg-rose-500/10 transition-colors cursor-pointer"
+                        title="Delete file"
+                      >
+                        {deleting === file.id ? (
+                          <Loader2 className="w-4 h-4 text-rose-400 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-4 h-4 text-rose-400" />
+                        )}
+                      </button>
                     )}
-                  </button>
+                  />
                 </div>
               </div>
             ))}

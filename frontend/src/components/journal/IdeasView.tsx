@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { Plus, Search, Trash2 } from "lucide-react";
+import { InlineConfirm } from "@/components/ui/InlineConfirm";
 import { journalApi, type Idea, type IdeaStatus } from "@/lib/journalApi";
-import { Chip, Empty, ErrorNote, GhostButton, Panel, PrimaryButton, SourceLinks, Spinner, formatDate, inputClass, useLoader } from "./shared";
+import { Chip, Empty, ErrorNote, GhostButton, Panel, PrimaryButton, SourceLinks, Spinner, formatDate, inputClass, itemCard, useLoader } from "./shared";
 
 const STATUSES: { id: IdeaStatus; label: string }[] = [
   { id: "thought", label: "Thought" },
@@ -26,18 +27,27 @@ function IdeaCard({ idea, orgId, onChanged, onOpen }: { idea: Idea; orgId: strin
     }
   };
 
+  // choosing "Experiment" asks how many days until the review, on the page (empty means no reminder)
+  const [askDays, setAskDays] = useState(false);
+  const [days, setDays] = useState("30");
+
   const changeStatus = (status: IdeaStatus) => {
-    const body: Record<string, unknown> = { status };
     if (status === "experiment") {
-      const raw = window.prompt("Review this experiment after how many days? (leave empty for no reminder)", "30");
-      const days = Number(raw);
-      if (raw && Number.isFinite(days) && days > 0) body.experiment_days = Math.round(days);
+      setAskDays(true);
+      return;
     }
+    void update({ status });
+  };
+
+  const startExperiment = () => {
+    const n = Number(days);
+    const body: Record<string, unknown> = { status: "experiment" };
+    if (days.trim() && Number.isFinite(n) && n > 0) body.experiment_days = Math.round(n);
+    setAskDays(false);
     void update(body);
   };
 
   const remove = async () => {
-    if (!window.confirm("Remove this idea from the vault?")) return;
     try {
       await journalApi(`/ideas/${idea._id}`, orgId, { method: "DELETE" });
       onChanged();
@@ -47,7 +57,7 @@ function IdeaCard({ idea, orgId, onChanged, onOpen }: { idea: Idea; orgId: strin
   };
 
   return (
-    <div className="rounded-xl border border-border bg-background p-3">
+    <div className={itemCard}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="mb-1 flex flex-wrap items-center gap-1.5">
@@ -57,9 +67,15 @@ function IdeaCard({ idea, orgId, onChanged, onOpen }: { idea: Idea; orgId: strin
           </div>
           <p className="text-sm text-foreground">{idea.title}</p>
         </div>
-        <button onClick={() => void remove()} aria-label="Remove idea" className="cursor-pointer text-text-muted hover:text-rose-400">
-          <Trash2 className="h-4 w-4" />
-        </button>
+        <InlineConfirm
+          label="Remove?"
+          onConfirm={() => void remove()}
+          trigger={(arm) => (
+            <button onClick={arm} aria-label="Remove idea" className="cursor-pointer text-text-muted hover:text-rose-400">
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
+        />
       </div>
 
       <div className="mt-2 flex flex-wrap gap-1.5" role="radiogroup" aria-label="Idea stage">
@@ -69,8 +85,8 @@ function IdeaCard({ idea, orgId, onChanged, onOpen }: { idea: Idea; orgId: strin
             role="radio"
             aria-checked={idea.status === id}
             onClick={() => idea.status !== id && changeStatus(id)}
-            className={`cursor-pointer rounded-full border px-2.5 py-0.5 text-[11px] transition-colors ${
-              idea.status === id ? "border-primary bg-primary text-white" : "border-border text-text-muted hover:border-primary/40"
+            className={`cursor-pointer rounded-full border-2 px-2.5 py-0.5 text-[11px] transition-colors ${
+              idea.status === id ? "border-outline bg-highlight font-bold text-on-highlight" : "border-outline bg-surface text-foreground hover:bg-surface-light"
             }`}
           >
             {label}
@@ -78,8 +94,24 @@ function IdeaCard({ idea, orgId, onChanged, onOpen }: { idea: Idea; orgId: strin
         ))}
       </div>
 
+      {askDays && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border-2 border-dashed border-outline bg-surface-light px-3 py-2 text-xs">
+          <label htmlFor={`days-${idea._id}`} className="font-medium">Review this experiment after how many days? (empty for no reminder)</label>
+          <input
+            id={`days-${idea._id}`}
+            type="number"
+            min={1}
+            value={days}
+            onChange={(e) => setDays(e.target.value)}
+            className="w-20 rounded-lg border-2 border-outline bg-surface px-2 py-1"
+          />
+          <GhostButton onClick={startExperiment}>Start experiment</GhostButton>
+          <GhostButton onClick={() => setAskDays(false)}>Cancel</GhostButton>
+        </div>
+      )}
+
       {idea.connection_note && (
-        <p className="mt-2 rounded-lg bg-primary/5 px-3 py-2 text-xs text-foreground">{idea.connection_note}</p>
+        <p className="mt-2 rounded-xl border-2 border-dashed border-outline bg-surface-light px-3 py-2 text-xs text-foreground">{idea.connection_note}</p>
       )}
       {idea.connections.length > 0 && <SourceLinks sources={idea.connections} onOpen={onOpen} />}
       {(idea.links?.goal_ids?.length ?? 0) > 0 && (
@@ -168,8 +200,8 @@ export default function IdeasView({ orgId, onOpen }: { orgId: string; onOpen: (s
               <button
                 key={id}
                 onClick={() => setFilter(id)}
-                className={`cursor-pointer rounded-full border px-3 py-1 text-xs transition-colors ${
-                  filter === id ? "border-primary bg-primary/10 text-primary" : "border-border text-text-muted hover:border-primary/40"
+                className={`cursor-pointer rounded-full border-2 px-3 py-1 text-xs transition-colors ${
+                  filter === id ? "border-outline bg-highlight font-bold text-on-highlight" : "border-outline bg-surface text-foreground hover:bg-surface-light"
                 }`}
               >
                 {label}

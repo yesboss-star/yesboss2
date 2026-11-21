@@ -273,6 +273,8 @@ export const useTaskStore = create<TaskState>()(
           const raw = result.task.assignee_id;
           const task = {
             ...result.task,
+            // the API answers with _id only: keep `id`, or the next action on this task (Approve) posts to /tasks/undefined/...
+            id: result.task._id || result.task.id,
             assignee_id: Array.isArray(raw) ? raw : (raw ? [raw] : []),
           };
           set((state) => ({
@@ -299,6 +301,7 @@ export const useTaskStore = create<TaskState>()(
           const raw = result.task.assignee_id;
           const task = {
             ...result.task,
+            id: result.task._id || result.task.id,
             assignee_id: Array.isArray(raw) ? raw : (raw ? [raw] : []),
           };
           set((state) => ({

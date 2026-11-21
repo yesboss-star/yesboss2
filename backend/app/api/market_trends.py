@@ -131,89 +131,12 @@ async def get_market_news(
             "source": "google_news",
         }
 
-    from ..core.prompt_engine import PERSONA_INSTRUCTIONS
-    market_persona = PERSONA_INSTRUCTIONS.get("market_analyst", "You are a market research analyst.")
-    system_prompt = (
-        f"{market_persona} "
-        f"Focus on the {industry_name} industry. "
-        "Return ONLY a valid JSON array of article objects. No markdown, no explanation."
-    )
-
-    user_prompt = (
-        f"Generate 5 realistic market trend articles for a business in the {industry_name} industry"
-        + (f" specifically in {vertical}" if vertical else "")
-        + """. Every article MUST describe a market trend, shift, or signal that is actively driving or expected to drive revenue growth, market expansion, or competitive advantage for businesses in this space — not generic news.
-
-Focus areas to bias toward:
-- emerging customer demand, behavior shifts, or new buyer segments
-- technology, AI, or automation adoption that improves margins or unlocks new products
-- regulatory or policy changes opening up market opportunity
-- capital flows, M&A, or funding momentum signaling where the market is going
-- distribution, channel, or partnership shifts (e.g., marketplaces, platforms)
-- pricing, packaging, or business model innovations that expand the TAM
-- macro or industry indicators (e.g., CAGR, market size growth) that confirm tailwinds
-
-Each article must have these exact fields:
-- title: compelling headline framing a growth-driving trend (e.g., "AI-Powered Personalization Lifts DTC Conversion 32%" not "Company X Releases Feature Y")
-- description: 1-2 sentence summary that explicitly states WHY this trend creates a growth opportunity for a business in this industry and roughly how big the impact is
-- source: real publication name (e.g., Bloomberg, TechCrunch, Reuters, Forbes, McKinsey, Gartner, HBR)
-- url: A REAL, VERIFIABLE news URL from a well-known publication that matches the article content
-- published_at: ISO date string within the last 7 days
-- category: array of category strings (use growth-driver tags like "demand", "technology", "regulation", "investment", "distribution", "pricing", "macro")
-- image_url: ""
-- growth_impact: short string (max 80 chars) summarizing the specific growth lever
-
-Return a JSON array. Example:
-[
-  {
-    "title": "AI-Powered Personalization Lifts DTC E-commerce Conversion 32%",
-    "description": "Brands deploying real-time AI personalization see a 32% lift in conversion and 18% higher AOV.",
-    "source": "TechCrunch",
-    "url": "https://techcrunch.com/2026/05/28/ai-personalization-dtc-conversion",
-    "published_at": "2026-05-28T10:00:00Z",
-    "category": ["technology", "demand"],
-    "image_url": "",
-    "growth_impact": "2x LTV via personalization"
-  }
-]"""
-    )
-
-    try:
-        response = await get_ai_response(
-            prompt=user_prompt,
-            system_prompt=system_prompt,
-            temperature=0.7,
-            max_tokens=3000,
-        )
-
-        articles = parse_articles_from_ai(response)
-
-        if articles:
-            now = datetime.utcnow()
-            for article in articles:
-                if not article.get("published_at"):
-                    article["published_at"] = (now - timedelta(hours=len(articles))).isoformat()
-                article.setdefault("source", "Market Analysis")
-                title_q = urllib.parse.quote(article.get("title", industry_name))
-                article["url"] = f"https://news.google.com/search?q={title_q}"
-                article.setdefault("category", [industry_name])
-                article.setdefault("image_url", "")
-                article.setdefault("growth_impact", "")
-
-            return {
-                "query": query_description,
-                "total": len(articles),
-                "articles": articles,
-                "source": "ai",
-            }
-    except Exception as e:
-        logger.warning(f"AI news generation failed: {e}")
-
+    # No real headlines were found. Never ask the AI to write articles: report that nothing was found.
     return {
         "query": query_description,
         "total": 0,
         "articles": [],
-        "source": "fallback",
+        "source": "none",
     }
 
 

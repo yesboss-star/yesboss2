@@ -109,17 +109,20 @@ class ZohoCalendar:
         attendees: list[dict[str, str]],
     ) -> str | None:
         import json
-        eventdata = {
+        eventdata: dict = {
             "title": title,
-            "richtext_description": description,
             "dateandtime": {
                 "timezone": timezone,
                 "start": start_dt,
                 "end": end_dt,
             },
-            "attendees": [{"email": a["email"], "status": "NEEDS-ACTION"} for a in attendees],
             "reminders": [{"action": "popup", "minutes": -10}],
         }
+        # Zoho refuses a null description and an empty attendee list (it wants 1 to 50), so send each only when it has something
+        if description:
+            eventdata["richtext_description"] = description
+        if attendees:
+            eventdata["attendees"] = [{"email": a["email"], "status": "NEEDS-ACTION"} for a in attendees]
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.post(
@@ -137,13 +140,22 @@ class ZohoCalendar:
 
     @staticmethod
     async def delete_event(user_token: str, calendar_uid: str, event_id: str) -> bool:
+        headers = {"Authorization": f"Zoho-oauthtoken {user_token}"}
+        url = f"{settings.ZOHO_CALENDAR_API_URL}/calendars/{calendar_uid}/events/{event_id}"
         try:
             async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.delete(
-                    f"{settings.ZOHO_CALENDAR_API_URL}/calendars/{calendar_uid}/events/{event_id}",
-                    headers={"Authorization": f"Zoho-oauthtoken {user_token}"},
-                )
-                return resp.status_code in (200, 204)
+                # Zoho answers a delete with 400 unless it carries the event's current etag, so read that first.
+                # (Without it every cancel failed quietly and the event stayed on the calendar, invites included.)
+                etag = None
+                got = await client.get(url, headers=headers)
+                if got.status_code == 200:
+                    data = got.json()
+                    events = data.get("events") if isinstance(data, dict) else None
+                    etag = (events or [{}])[0].get("etag")
+                resp = await client.delete(url, headers={**headers, **({"etag": str(etag)} if etag else {})})
+                if resp.status_code in (200, 204):
+                    return True
+                logger.warning("Delete event failed: %s %s", resp.status_code, resp.text)
         except Exception as e:
             logger.warning("delete_event error: %s", e)
         return False

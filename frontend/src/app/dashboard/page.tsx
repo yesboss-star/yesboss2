@@ -6,13 +6,12 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useUIStore } from "@/stores/uiStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { useGoalStore } from "@/stores/goalStore";
-import { Loader2, Sparkles, TrendingUp, Users, CheckSquare, Flag, Calendar, Clock, CheckCircle, AlertCircle, Lightbulb, BarChart3, Target, Activity, FileText, Zap, Upload, Trash2, ChevronDown, ChevronRight } from "lucide-react";
+import { Loader2, Sparkles, TrendingUp, Users, CheckSquare, Flag, Calendar, Clock, CheckCircle, AlertCircle, BarChart3, Target, Activity, FileText, Zap } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Badge, Button } from "@/components/ui";
 import GoalModal from "@/components/GoalModal";
 import DashboardView from "@/components/owners/DashboardView";
-import CalendarBooking from "@/components/owners/CalendarBooking";
-import MeetingUploadModal from "@/components/owners/MeetingUploadModal";
+import DailyBrief from "@/components/capture/DailyBrief";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { fetchDeduped, getAuthHeaders } from "@/lib/utils";
 
@@ -126,11 +125,6 @@ export default function DashboardPage() {
     onTaskCreated: handleWsTaskCreated,
   });
 
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [showBooking, setShowBooking] = useState(false);
-  const [meetingHistory, setMeetingHistory] = useState<any[]>([]);
-  const [meetingsLoading, setMeetingsLoading] = useState(false);
-  const [expandedTitles, setExpandedTitles] = useState<Set<string>>(new Set());
 
   
   const getKpiIcon = (iconName: string) => {
@@ -182,25 +176,6 @@ export default function DashboardPage() {
     }
   }, [organization?.id, fetchGoals, fetchKPI, role]);
 
-  const fetchMeetingHistory = useCallback(async () => {
-    if (!organization?.id) return;
-    setMeetingsLoading(true);
-    try {
-      const emailParam = role === "employee" && user?.email ? `&email=${encodeURIComponent(user.email)}` : "";
-      const res = await fetch(`${API_URL}/meetings/history?organization_id=${organization.id}&limit=50${emailParam}`, {
-        credentials: "include",
-        headers: getAuthHeaders(),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setMeetingHistory(data.meetings || []);
-      }
-    } catch {
-    } finally {
-      setMeetingsLoading(false);
-    }
-  }, [organization?.id, role, user?.email]);
-
   useEffect(() => {
     if (role === "employee" && organization?.id) {
       fetchEmployeeData();
@@ -233,32 +208,6 @@ export default function DashboardPage() {
   const handleReviewDetails = (reviewId: string) => {
     router.push(`/tasks/${reviewId}`);
   };
-
-  const handleDeleteMeeting = async (meetingId: string) => {
-    try {
-      const orgId = organization?.id;
-      if (!orgId) return;
-      const res = await fetch(`${API_URL}/meetings/${meetingId}?organization_id=${orgId}`, {
-        method: "DELETE",
-        credentials: "include",
-        headers: getAuthHeaders(),
-      });
-      if (res.ok) {
-        setMeetingHistory((prev) => prev.filter((m) => m.id !== meetingId));
-      } else {
-        const errData = await res.json().catch(() => ({}));
-        console.error("Delete failed:", res.status, errData);
-      }
-    } catch (e) {
-      console.error("Delete error:", e);
-    }
-  };
-
-  useEffect(() => {
-    if (organization?.id && role === "employee") {
-      fetchMeetingHistory();
-    }
-  }, [organization?.id, role, fetchMeetingHistory]);
 
   if (loading) {
     return (
@@ -315,11 +264,11 @@ export default function DashboardPage() {
     const highPriorityCount = assignedTasks.filter(t => t.priority === "high" || t.priority === "urgent").length;
     const pendingCount = pendingReviews.length;
     const insights = [];
-    if (highPriorityCount > 0) insights.push({ text: `You have ${highPriorityCount} high-priority tasks due soon. Consider prioritizing these first.`, type: "warning" as const });
-    if (taskCount > 5) insights.push({ text: `You're managing ${taskCount} tasks. Your AI suggests breaking down complex items into smaller steps.`, type: "info" as const });
-    if (pendingCount > 0) insights.push({ text: `You have ${pendingCount} items waiting for your review. Timely approvals keep the team moving forward.`, type: "success" as const });
-    if (taskCount <= 3) insights.push({ text: "Your workload is balanced. Great time to check in with your manager on upcoming priorities.", type: "success" as const });
-    if (insights.length === 0) insights.push({ text: "All caught up! Your AI assistant is ready to help with your next priority.", type: "info" as const });
+    // facts from your own tasks only: counts, never advice
+    if (highPriorityCount > 0) insights.push({ text: `${highPriorityCount} of your tasks ${highPriorityCount === 1 ? "is" : "are"} high priority.`, type: "warning" as const });
+    if (taskCount > 0) insights.push({ text: `${taskCount} task${taskCount === 1 ? " is" : "s are"} assigned to you.`, type: "info" as const });
+    if (pendingCount > 0) insights.push({ text: `${pendingCount} item${pendingCount === 1 ? " is" : "s are"} waiting for your review.`, type: "info" as const });
+    if (insights.length === 0) insights.push({ text: "Nothing is assigned to you right now.", type: "info" as const });
     return insights;
   };
 
@@ -346,6 +295,8 @@ export default function DashboardPage() {
             </p>
           </div>
         </div>
+
+        <DailyBrief />
 
         {role === "employee" && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -475,104 +426,6 @@ export default function DashboardPage() {
           </Card>
         )}
 
-        {role === "employee" && (
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Upload className="w-5 h-5 text-primary" />
-                  <CardTitle>Meeting Notes</CardTitle>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button size="sm" variant="primary" onClick={() => setShowUploadModal(true)} className="cursor-pointer">
-                    <Upload className="w-4 h-4" />
-                    Upload Meeting
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => setShowBooking(true)} className="cursor-pointer">
-                    <Calendar className="w-4 h-4" />
-                    Book Meeting
-                  </Button>
-                </div>
-              </div>
-              <CardDescription>Upload meeting notes to auto-create tasks via AI</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {meetingsLoading ? (
-                <div className="flex items-center justify-center py-4">
-                  <Loader2 className="w-5 h-5 animate-spin text-primary" />
-                </div>
-              ) : meetingHistory.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-6 text-center">
-                  <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-3">
-                    <Upload className="w-6 h-6 text-primary/60" />
-                  </div>
-                  <p className="text-sm text-text-muted">No meetings uploaded yet</p>
-                  <p className="text-xs text-text-muted/60 mt-1">Upload meeting notes to extract tasks automatically</p>
-                </div>
-              ) : (() => {
-                const grouped = meetingHistory.reduce((acc, m) => {
-                  const key = m.title || "Untitled";
-                  (acc[key] = acc[key] || []).push(m);
-                  return acc;
-                }, {} as Record<string, any[]>);
-                const sortedGroups = (Object.entries(grouped) as [string, any[]][]).sort(([, a], [, b]) => {
-                  const latestA = Math.max(...a.map((x: any) => new Date(x.created_at || 0).getTime()));
-                  const latestB = Math.max(...b.map((x: any) => new Date(x.created_at || 0).getTime()));
-                  return latestB - latestA;
-                });
-                const toggleTitle = (t: string) => {
-                  setExpandedTitles(prev => {
-                    const next = new Set(prev);
-                    next.has(t) ? next.delete(t) : next.add(t);
-                    return next;
-                  });
-                };
-                return (
-                  <div className="space-y-1">
-                    {sortedGroups.map(([title, meetings]) => {
-                      const isExpanded = expandedTitles.has(title);
-                      const latest = meetings[0];
-                      return (
-                        <div key={title} className="rounded-xl border border-border/50 overflow-hidden">
-                          <button
-                            onClick={() => toggleTitle(title)}
-                            className="w-full flex items-center gap-3 p-3 bg-surface hover:bg-surface/80 transition-colors cursor-pointer text-left"
-                          >
-                            {isExpanded ? <ChevronDown className="w-4 h-4 text-text-muted flex-shrink-0" /> : <ChevronRight className="w-4 h-4 text-text-muted flex-shrink-0" />}
-                            <FileText className="w-4 h-4 text-primary flex-shrink-0" />
-                            <span className="text-sm font-medium flex-1 truncate">{title}</span>
-                            <Badge variant="outline" className="text-xs flex-shrink-0">{meetings.length}</Badge>
-                            {latest.created_at && (
-                              <span className="text-[10px] text-text-muted flex-shrink-0">{new Date(latest.created_at).toLocaleDateString()}</span>
-                            )}
-                          </button>
-                          {isExpanded && (
-                            <div className="border-t border-border/50">
-                              {meetings.map((m: any, mi) => (
-                                <div key={m.id || m._id || mi} className="flex items-center gap-3 px-3 py-2.5 pl-12 bg-surface/50 border-b border-border/30 last:border-0">
-                                  <div className="flex-1 min-w-0">
-                                    <p className="text-xs text-text-muted">
-                                      {m.task_count || 0} tasks · {m.created_at ? new Date(m.created_at).toLocaleDateString() : ""}
-                                    </p>
-                                  </div>
-                                  <Badge variant="outline" className="text-[10px] flex-shrink-0">{m.task_count || 0}</Badge>
-                                  <button onClick={(e) => { e.stopPropagation(); handleDeleteMeeting(m.id); }} className="p-1 rounded-lg hover:bg-rose-500/10 text-text-muted hover:text-rose-400 transition-colors cursor-pointer flex-shrink-0">
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
-            </CardContent>
-          </Card>
-        )}
-
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2">
@@ -589,7 +442,7 @@ export default function DashboardPage() {
           <CardContent>
             <div className="space-y-3">
               {(role === "employee" ? getEmployeeInsights() : [
-                { text: kpiData?.completion_rate ? `${kpiData.completion_rate.formatted} task completion rate — ${kpiData.completion_rate.change}` : "Loading insights...", type: "info" as const },
+                { text: kpiData?.completion_rate ? `${kpiData.completion_rate.formatted} task completion rate — ${kpiData.completion_rate.change}` : "No insights are available yet.", type: "info" as const },
                 {text: kpiData?.goal_completion_rate ? `Goal completion at ${kpiData.goal_completion_rate.formatted} — ${kpiData.goal_completion_rate.change}` : null, type: "success" as const},
                 {text: kpiData?.team_size ? `${kpiData.team_size.formatted} team members ${kpiData.team_size.change}` : null, type: "info" as const},
               ].filter(i => i.text !== null) as { text: string; type: "success" | "warning" | "info" }[]).map((insight, i) => (
@@ -602,50 +455,10 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {role === "employee" && (
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <Lightbulb className="w-5 h-5 text-primary" />
-                <CardTitle>Workflow Suggestions</CardTitle>
-              </div>
-              <CardDescription>
-                AI-powered recommendations to optimize your productivity.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {[
-                  "Based on your workload, prioritize high-urgency tasks first and batch similar work together.",
-                  "Consider blocking 2 hours daily for deep work on complex tasks.",
-                  "Review your task deadlines and update statuses to keep your pipeline accurate.",
-                  "Taking short breaks between tasks improves focus and decision quality.",
-                ].map((suggestion, i) => (
-                  <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-surface hover:bg-surface-light transition-colors">
-                    <Lightbulb className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
-                    <p className="text-sm text-text-muted">{suggestion}</p>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
       </div>
       )}
 
       {role === "owner" && <GoalModal isOpen={showGoalModal} onClose={() => setShowGoalModal(false)} />}
-      <MeetingUploadModal
-        open={showUploadModal}
-        onOpenChange={setShowUploadModal}
-        onSuccess={() => fetchMeetingHistory()}
-      />
-      {showBooking && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowBooking(false)}>
-          <div className="w-full max-w-lg mx-4" onClick={(e) => e.stopPropagation()}>
-            <CalendarBooking onClose={() => setShowBooking(false)} />
-          </div>
-        </div>
-      )}
     </DashboardLayout>
   );
 }

@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, Badge, Button } from "@/components/ui";
+import { Badge, Button } from "@/components/ui";
 import { TrendingUp, AlertTriangle, Loader2, RefreshCw, ArrowRight, DollarSign, Target, ExternalLink, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { getAuthHeaders } from "@/lib/utils";
@@ -80,22 +80,16 @@ export default function MarketImpactCard({ orgId }: { orgId?: string }) {
 
   if (loading) {
     return (
-      <Card>
-        <CardContent className="p-4 flex items-center justify-center py-8">
-          <Loader2 className="w-5 h-5 animate-spin text-primary" />
-        </CardContent>
-      </Card>
+      <div className="flex items-center justify-center p-6">
+        <Loader2 className="w-5 h-5 animate-spin text-primary" />
+      </div>
     );
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-primary" />
-            <CardTitle>Market Impact</CardTitle>
-          </div>
+    <div className="space-y-3 p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-text-muted">AI-analyzed market trends and their impact on your business</p>
           <div className="flex items-center gap-2">
             <button
               onClick={() => fetchImpact(true)}
@@ -113,12 +107,9 @@ export default function MarketImpactCard({ orgId }: { orgId?: string }) {
               Full Analysis <ArrowRight className="w-3 h-3 ml-1" />
             </Button>
           </div>
-        </div>
-        <CardDescription>AI-analyzed market trends and their impact on your business</CardDescription>
-      </CardHeader>
-      <CardContent>
+      </div>
         {impacts.length === 0 ? (
-          <p className="text-xs text-text-muted text-center py-4">No market impact data available yet.</p>
+          <p className="text-sm text-text-muted">No market news has been found for your industry yet. Press refresh to look again. Nothing is shown unless it comes from a real news source.</p>
         ) : (
           <div className="space-y-3">
             {summary && (
@@ -180,7 +171,6 @@ export default function MarketImpactCard({ orgId }: { orgId?: string }) {
             </div>
           </div>
         )}
-      </CardContent>
-    </Card>
+    </div>
   );
 }

@@ -1,9 +1,9 @@
 import logging
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from ..core.database import get_database
+from ..core.finance_auto import save_metrics
 from ..core.financial_parser import compute_trend, extract_financial_metrics
 from ..dependencies.auth import get_current_user_optional
 
@@ -25,22 +25,26 @@ async def extract_metrics(
         raise HTTPException(status_code=400, detail="organization_id required")
 
     doc = None
+    metrics: dict = {"document_type": "other", "notes": "No financial data found"}
     if file_id:
         doc = db.documents.find_one({"file_id": file_id, "org_id": organization_id})
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
+        metrics = await extract_financial_metrics(doc.get("text") or doc.get("summary") or "", doc.get("filename", "unknown"))
     else:
-        doc = db.documents.find_one(
-            {"org_id": organization_id},
-            sort=[("created_at", -1)],
-        )
-        if not doc:
+        # No file chosen: read the newest documents until one really holds financial figures. The latest upload
+        # is often a pipeline or a meeting note, and reading that as a P&L would invent numbers.
+        candidates = list(db.documents.find({"org_id": organization_id}).sort("created_at", -1).limit(6))
+        if not candidates:
             raise HTTPException(status_code=404, detail="No documents found for this org")
+        for candidate in candidates:
+            result = await extract_financial_metrics(candidate.get("text") or candidate.get("summary") or "", candidate.get("filename", "unknown"))
+            if result.get("document_type") != "other":
+                doc, metrics = candidate, result
+                break
+        doc = doc or candidates[0]
 
-    text = doc.get("text") or doc.get("summary") or ""
     filename = doc.get("filename", "unknown")
-
-    metrics = await extract_financial_metrics(text, filename)
     if metrics.get("document_type") == "other":
         return {
             "extracted": False,
@@ -48,25 +52,8 @@ async def extract_metrics(
             "notes": metrics.get("notes", "No financial data found"),
         }
 
-    stored = {
-        "organization_id": organization_id,
-        "file_id": doc.get("file_id"),
-        "filename": filename,
-        "extracted_at": datetime.utcnow(),
-        "metrics": metrics,
-    }
-    db.financial_metrics.insert_one(stored)
-    current_id = stored["_id"]  # ObjectId from insert
-    stored["_id"] = str(stored["_id"])
-
-    # Compute trend vs previous entry (exclude current by ObjectId)
-    prev = db.financial_metrics.find_one(
-        {"organization_id": organization_id, "_id": {"$ne": current_id}},
-        sort=[("extracted_at", -1)],
-    )
-    trend = {}
-    if prev:
-        trend = compute_trend(metrics, prev.get("metrics", {}))
+    # one record per file, trend against the previous different file (shared with the automatic read after upload)
+    _, trend = save_metrics(db, organization_id, doc, metrics)
 
     return {
         "extracted": True,

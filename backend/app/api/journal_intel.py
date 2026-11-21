@@ -405,6 +405,24 @@ async def explore_what_if(data: WhatIfIn, organization_id: str, current_user=Dep
     return {"analysis": result}
 
 
+class BrainstormIn(BaseModel):
+    topic: str
+
+
+@router.post("/brainstorm")
+async def brainstorm_topic(data: BrainstormIn, organization_id: str, current_user=Depends(get_current_user)):
+    """Five ways to start thinking about a topic. Nothing is saved: each idea is added to the vault or made a task only when the person chooses."""
+    db, uid = _db(), _uid(current_user)
+    topic = data.topic.strip()
+    if not topic:
+        raise HTTPException(status_code=400, detail="Tell me what you want to think through")
+    context = await _org_context(db, organization_id, uid, getattr(current_user, "email", None))
+    ideas = await intel.brainstorm(topic[:600], context)
+    if not ideas:
+        raise HTTPException(status_code=502, detail="Couldn't come up with ideas right now. Please try again.")
+    return {"topic": topic[:600], "ideas": ideas}
+
+
 # ---------------------------------------------------------------------------
 # Idea vault
 # ---------------------------------------------------------------------------

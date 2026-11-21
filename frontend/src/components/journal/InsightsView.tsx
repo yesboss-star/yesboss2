@@ -15,6 +15,7 @@ import {
   SourceLinks,
   Spinner,
   formatDate,
+  itemCard,
   moodEmoji,
   useLoader,
 } from "./shared";
@@ -31,7 +32,7 @@ export function WeekStrip({ series }: { series: MoodDay[] }) {
   return (
     <div className="grid grid-cols-7 gap-1.5">
       {days.map(({ key, label, row }) => (
-        <div key={key} className="flex flex-col items-center gap-1 rounded-xl bg-background py-2" title={row?.mood ? `Mood ${row.mood} of 5` : "No mood yet"}>
+        <div key={key} className="flex flex-col items-center gap-1 rounded-xl border-2 border-outline bg-background py-2" title={row?.mood ? `Mood ${row.mood} of 5` : "No mood yet"}>
           <span className="text-[10px] text-text-muted">{label}</span>
           <span className={`text-xl ${row?.mood ? "" : "text-text-muted opacity-40"}`}>{moodEmoji(row?.mood)}</span>
         </div>
@@ -139,8 +140,13 @@ export default function InsightsView({
     }
   };
 
-  const feedback = async (pattern: Pattern, action: "dismiss" | "correct") => {
-    const note = action === "correct" ? window.prompt("What is closer to the truth? (optional)") ?? "" : "";
+  // "Not quite right" opens a small note box under that pattern (optional), instead of a browser prompt
+  const [correcting, setCorrecting] = useState<string | null>(null);
+  const [correction, setCorrection] = useState("");
+
+  const feedback = async (pattern: Pattern, action: "dismiss" | "correct", note = "") => {
+    setCorrecting(null);
+    setCorrection("");
     try {
       await journalApi(`/patterns/${pattern._id}/feedback`, orgId, { method: "POST", body: { action, note } });
       patterns.reload();
@@ -175,7 +181,7 @@ export default function InsightsView({
               </div>
             )}
             {mood.data?.patterns.map((pattern) => (
-              <div key={pattern.trigger} className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-sm text-foreground">
+              <div key={pattern.trigger} className="rounded-2xl border-2 border-outline bg-[#FFD93D] p-3.5 text-sm font-semibold text-[#111]">
                 <Chip tone="warn">Possible pattern</Chip>
                 <p className="mt-1.5">{pattern.text}</p>
               </div>
@@ -201,14 +207,27 @@ export default function InsightsView({
         ) : (
           <div className="space-y-3">
             {patterns.data?.patterns.map((pattern) => (
-              <div key={pattern._id} className="rounded-xl border border-border bg-background p-3">
+              <div key={pattern._id} className={itemCard}>
                 <p className="text-sm text-foreground">{pattern.text}</p>
                 <SourceLinks sources={pattern.sources} onOpen={onOpen} />
                 <div className="mt-2 flex flex-wrap gap-2">
                   <GhostButton onClick={() => onAsk(`Let's explore this pattern: ${pattern.theme}. What might be behind it?`)}>Explore this</GhostButton>
-                  <GhostButton onClick={() => void feedback(pattern, "correct")}>Not quite right</GhostButton>
+                  <GhostButton onClick={() => setCorrecting(pattern._id)}>Not quite right</GhostButton>
                   <GhostButton onClick={() => void feedback(pattern, "dismiss")}>Not a pattern</GhostButton>
                 </div>
+                {correcting === pattern._id && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <input
+                      value={correction}
+                      onChange={(e) => setCorrection(e.target.value)}
+                      placeholder="What is closer to the truth? (optional)"
+                      aria-label="What is closer to the truth?"
+                      className="min-w-[14rem] flex-1 rounded-2xl border-2 border-outline bg-surface px-3 py-1.5 text-xs"
+                    />
+                    <GhostButton onClick={() => void feedback(pattern, "correct", correction.trim())}>Send</GhostButton>
+                    <GhostButton onClick={() => setCorrecting(null)}>Cancel</GhostButton>
+                  </div>
+                )}
               </div>
             ))}
           </div>

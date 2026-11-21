@@ -1,9 +1,10 @@
 "use client";
 
+import { InlineConfirm } from "@/components/ui/InlineConfirm";
 import { useState } from "react";
 import { Lightbulb, Scale, Trash2 } from "lucide-react";
 import { journalApi, type Decision, type WhatIfItem, type WhatIfResult } from "@/lib/journalApi";
-import { Chip, Empty, ErrorNote, GhostButton, Panel, PrimaryButton, Spinner, formatDate, inputClass, useLoader } from "./shared";
+import { Chip, Empty, ErrorNote, GhostButton, Panel, PrimaryButton, Spinner, formatDate, inputClass, itemCard, useLoader } from "./shared";
 
 interface Draft {
   question: string;
@@ -101,7 +102,7 @@ function WhatIfExplorer({ orgId, onSaveDraft }: { orgId: string; onSaveDraft: (d
                 </ul>
               </div>
             )}
-            {result.first_step && <p className="rounded-xl bg-primary/5 px-3 py-2 text-sm text-foreground">A low-risk first step: {result.first_step}</p>}
+            {result.first_step && <p className="rounded-2xl border-2 border-dashed border-outline bg-surface-light px-3 py-2 text-sm text-foreground">A low-risk first step: {result.first_step}</p>}
             <p className="text-[11px] text-text-muted">This is a thinking aid, not a forecast.</p>
             <GhostButton
               onClick={() =>
@@ -166,7 +167,7 @@ function DecisionForm({ orgId, draft, onSaved, onCancel }: { orgId: string; draf
         <input value={form.expected_outcome} onChange={set("expected_outcome")} placeholder="What outcome do you expect? e.g. revenue +20% in 3 months" className={inputClass} />
         <label className="flex items-center gap-2 text-xs text-text-muted">
           Remind me to review on
-          <input type="date" value={form.review_on} onChange={set("review_on")} className="rounded-lg border border-border bg-background px-2 py-1 text-sm text-foreground" />
+          <input type="date" value={form.review_on} onChange={set("review_on")} className="rounded-xl border-2 border-outline bg-surface px-2 py-1 text-sm text-foreground" />
         </label>
         <ErrorNote message={error} />
         <div className="flex gap-2">
@@ -200,7 +201,6 @@ function DecisionCard({ decision, orgId, onChanged }: { decision: Decision; orgI
   };
 
   const remove = async () => {
-    if (!window.confirm("Delete this decision?")) return;
     try {
       await journalApi(`/decisions/${decision._id}`, orgId, { method: "DELETE" });
       onChanged();
@@ -210,7 +210,7 @@ function DecisionCard({ decision, orgId, onChanged }: { decision: Decision; orgI
   };
 
   return (
-    <div className="rounded-xl border border-border bg-background p-3">
+    <div className={itemCard}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="mb-1 flex flex-wrap items-center gap-2">
@@ -222,9 +222,14 @@ function DecisionCard({ decision, orgId, onChanged }: { decision: Decision; orgI
           </div>
           <p className="text-sm font-medium text-foreground">{decision.question}</p>
         </div>
-        <button onClick={() => void remove()} aria-label="Delete decision" className="cursor-pointer text-text-muted hover:text-rose-400">
-          <Trash2 className="h-4 w-4" />
-        </button>
+        <InlineConfirm
+          onConfirm={() => void remove()}
+          trigger={(arm) => (
+            <button onClick={arm} aria-label="Delete decision" className="cursor-pointer text-text-muted hover:text-rose-400">
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
+        />
       </div>
       <div className="mt-2 space-y-1 text-xs text-text-muted">
         {decision.preferred && (

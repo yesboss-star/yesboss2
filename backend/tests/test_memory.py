@@ -292,3 +292,22 @@ def test_reindex_can_be_limited_to_one_person_and_run_twice(offline_db):
     memory.reindex(offline_db.db, user_ids=[ALICE])
     assert count() == before
     assert recall(BOB, ORG, "hiring private thoughts") == []
+
+
+def test_a_deleted_documents_vectors_are_removed_so_it_cannot_be_quoted():
+    from qdrant_client.models import PointStruct
+
+    qdrant.create_collection("documents", 1536)
+    keep, gone = "file-keep", "file-gone"
+    for fid in (keep, gone):
+        for i in range(3):
+            qdrant.client.upsert("documents", points=[PointStruct(id=int(hashlib.md5(f"{fid}{i}".encode()).hexdigest()[:8], 16), vector=fake_embedding(f"{fid} chunk {i}"),
+                                                                payload={"file_id": fid, "chunk_text": f"{fid} chunk {i}"})])
+    assert qdrant.client.count("documents").count == 6
+    memory.forget_document(gone)
+    assert qdrant.client.count("documents").count == 3
+    remaining = {p.payload["file_id"] for p in qdrant.client.scroll("documents", limit=10)[0]}
+    assert remaining == {keep}
+    memory.forget_document(None)  # nothing to do, and no error
+    memory.forget_document("never-existed")
+    assert qdrant.client.count("documents").count == 3

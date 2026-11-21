@@ -32,6 +32,7 @@ class OrgMemberCreate(BaseModel):
 
 class OrgMemberUpdate(BaseModel):
     full_name: str | None = None
+    email: str | None = None
     role: str | None = None
     department: str | None = None
     manager_email: str | None = None
@@ -332,6 +333,54 @@ async def list_org_members(organization_id: str | None = None, current_user = De
         m["_id"] = str(m["_id"])
     return {"members": members, "total": len(members)}
 
+# Where a person's email is used as THEIR identity. Fixing a wrong email on the org chart must move all of these,
+# or the person's tasks and notifications stay behind on an address that is not theirs.
+_EMAIL_REFERENCES: list[tuple[str, str, list[str]]] = [
+    ("tasks", "organization_id", ["assignee_email", "assignee_id"]),
+    ("goals", "organization_id", ["assignee_email", "assignee_id"]),
+    ("meetings", "organization_id", ["attendees", "participants", "created_by"]),
+    ("notifications", "organization_id", ["user_id"]),
+    ("task_followups", "org_id", ["assignee_email"]),
+    ("commitments", "org_id", ["owner_email"]),
+    ("org_chart_members", "organization_id", ["manager_email"]),
+]
+
+
+def _swap_email(value, old_lower: str, new: str):
+    def one(item):
+        return new if isinstance(item, str) and item.strip().lower() == old_lower else item
+
+    if isinstance(value, list):
+        out: list = []
+        for item in map(one, value):
+            if item not in out:
+                out.append(item)
+        return out
+    return one(value)
+
+
+def cascade_member_email(db, org_id: str, old: str, new: str) -> dict[str, int]:
+    """Move every use of `old` to `new` inside one organization. Returns how many records changed per collection."""
+    old_lower = old.strip().lower()
+    pattern = {"$regex": f"^{re.escape(old_lower)}$", "$options": "i"}
+    changed: dict[str, int] = {}
+    for collection, org_field, fields in _EMAIL_REFERENCES:
+        count = 0
+        for doc in db[collection].find({org_field: org_id, "$or": [{f: pattern} for f in fields]}):
+            patch = {}
+            for field in fields:
+                if field in doc:
+                    swapped = _swap_email(doc[field], old_lower, new)
+                    if swapped != doc[field]:
+                        patch[field] = swapped
+            if patch:
+                db[collection].update_one({"_id": doc["_id"]}, {"$set": patch})
+                count += 1
+        if count:
+            changed[collection] = count
+    return changed
+
+
 @router.put("/members/{member_id}")
 async def update_org_member(
     member_id: str,
@@ -353,16 +402,42 @@ async def update_org_member(
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}
     update_data["updated_at"] = datetime.utcnow()
 
+    org_id = member.get("organization_id")
+    old_email = (member.get("email") or "").strip()
+    new_email = ""
+    if "email" in update_data:
+        new_email = str(update_data.pop("email")).strip().lower()
+        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", new_email):
+            raise HTTPException(status_code=422, detail="That is not a valid email address")
+        if new_email == old_email.lower():
+            new_email = ""  # unchanged
+        else:
+            taken = db.org_chart_members.find_one({
+                "organization_id": org_id,
+                "_id": {"$ne": ObjectId(member_id)},
+                "email": {"$regex": f"^{re.escape(new_email)}$", "$options": "i"},
+            })
+            if taken:
+                raise HTTPException(status_code=409, detail="Someone else on the org chart already has that email")
+            update_data["email"] = new_email
+
     db.org_chart_members.update_one(
         {"_id": ObjectId(member_id)},
         {"$set": update_data}
     )
 
+    moved: dict[str, int] = {}
+    if new_email and old_email:
+        moved = cascade_member_email(db, org_id, old_email, new_email)
+
     member = db.org_chart_members.find_one({"_id": ObjectId(member_id)})
     if not member:
         raise HTTPException(status_code=404, detail="Member not found")
     member["_id"] = str(member["_id"])
-    return {"member": member}
+    out: dict = {"member": member}
+    if new_email:
+        out["email_changed"] = {"from": old_email, "to": new_email, "moved": moved}
+    return out
 
 @router.delete("/members/{member_id}")
 async def delete_org_member(member_id: str, current_user = Depends(get_current_user)):

@@ -1,5 +1,6 @@
 "use client";
 
+import MemberEmailEditor from "@/components/owners/MemberEmailEditor";
 import { useEffect, useState, useRef } from "react";
 import { useOrgChartStore, OrgMember } from "@/stores/orgChartStore";
 import { useTaskStore } from "@/stores/taskStore";
@@ -439,11 +440,18 @@ export default function OrchestrationView() {
     }
   };
 
-  const handleDeleteMember = async (memberId: string) => {
-    if (confirm("Remove this member from the org chart?")) {
-      await deleteMember(memberId, organization?.id);
-      fetchMemberStatus(organization?.id);
-    }
+  // removing someone asks first, in a dialog on the page
+  const [memberToRemove, setMemberToRemove] = useState<{ id: string; name: string } | null>(null);
+  const handleDeleteMember = (memberId: string) => {
+    const hit = members.find((m) => m.id === memberId);
+    setMemberToRemove({ id: memberId, name: hit?.full_name || hit?.email || "this member" });
+  };
+  const confirmRemoveMember = async () => {
+    if (!memberToRemove) return;
+    const { id } = memberToRemove;
+    setMemberToRemove(null);
+    await deleteMember(id, organization?.id);
+    fetchMemberStatus(organization?.id);
   };
 
   const getInitialView = () => {
@@ -903,6 +911,18 @@ export default function OrchestrationView() {
         </div>
       </Modal>
 
+      <Modal open={!!memberToRemove} onOpenChange={(open) => { if (!open) setMemberToRemove(null); }} title="Remove from the org chart">
+        <div className="p-6 space-y-4">
+          <p className="text-sm">
+            Remove <strong>{memberToRemove?.name}</strong> from the org chart? Their tasks and goals stay where they are.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setMemberToRemove(null)} className="cursor-pointer">Keep</Button>
+            <Button onClick={() => void confirmRemoveMember()} className="cursor-pointer bg-rose-500 hover:bg-rose-600">Remove</Button>
+          </div>
+        </div>
+      </Modal>
+
       <Modal open={showAssignModal} onOpenChange={setShowAssignModal} title="Assign Org Chart Task">
         <div className="p-6 space-y-4">
           <div className="flex items-center gap-3">
@@ -1065,6 +1085,12 @@ export default function OrchestrationView() {
                     </div>
                   </div>
                 )}
+                <MemberEmailEditor
+                  key={selectedMember.id}
+                  member={selectedMember}
+                  orgId={organization?.id}
+                  onChanged={(email) => setSelectedMember({ ...selectedMember, email })}
+                />
                 {selectedMember.department && (
                   <div className="flex items-center gap-3 p-3 rounded-xl bg-surface border border-border/50">
                     <Building2 className="w-4 h-4 text-text-muted flex-shrink-0" />

@@ -35,10 +35,10 @@ export function useLoader<T>(load: () => Promise<T>, key: string) {
 
 export function Panel({ title, hint, action, children }: { title: string; hint?: string; action?: ReactNode; children: ReactNode }) {
   return (
-    <section className="rounded-2xl border border-border bg-surface p-4">
+    <section className="glass rounded-3xl p-5">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+          <h2 className="text-base font-bold text-foreground">{title}</h2>
           {hint && <p className="mt-0.5 text-xs text-text-muted">{hint}</p>}
         </div>
         {action}
@@ -50,21 +50,24 @@ export function Panel({ title, hint, action, children }: { title: string; hint?:
 
 export function Chip({ children, tone = "default" }: { children: ReactNode; tone?: "default" | "primary" | "warn" | "good" }) {
   const tones = {
-    default: "bg-background text-text-muted border-border",
-    primary: "bg-primary/10 text-primary border-primary/20",
-    warn: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-    good: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+    default: "bg-surface text-foreground",
+    primary: "bg-[#C9A7FF] text-[#111]",
+    warn: "bg-[#FFD93D] text-[#111]",
+    good: "bg-[#B6F36B] text-[#111]",
   };
-  return <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${tones[tone]}`}>{children}</span>;
+  return <span className={`inline-flex items-center rounded-full border-2 border-outline px-2.5 py-0.5 text-[11px] font-bold ${tones[tone]}`}>{children}</span>;
 }
 
+/** One row inside a panel: an idea, a decision, a recap, a pattern. */
+export const itemCard = "rounded-2xl border-2 border-outline bg-background p-3.5";
+
 export function Empty({ children }: { children: ReactNode }) {
-  return <p className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-sm text-text-muted">{children}</p>;
+  return <p className="rounded-2xl border-2 border-dashed border-outline px-4 py-6 text-center text-sm text-text-muted">{children}</p>;
 }
 
 export function ErrorNote({ message }: { message: string | null }) {
   if (!message) return null;
-  return <p className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{message}</p>;
+  return <p className="rounded-2xl border-2 border-outline bg-[#FF9FA0] px-3 py-2 text-xs font-semibold text-[#111]">{message}</p>;
 }
 
 export function Spinner() {
@@ -79,7 +82,7 @@ export function PrimaryButton(props: React.ButtonHTMLAttributes<HTMLButtonElemen
   return (
     <button
       {...props}
-      className={`inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-full bg-primary px-4 py-2 text-sm font-medium text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-50 ${props.className ?? ""}`}
+      className={`inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-full border-[2.5px] border-outline bg-highlight px-4 py-2 text-sm font-bold text-on-highlight shadow-[3px_3px_0_var(--shadow-hard)] transition-all hover:-translate-x-px hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none ${props.className ?? ""}`}
     />
   );
 }
@@ -88,13 +91,13 @@ export function GhostButton(props: React.ButtonHTMLAttributes<HTMLButtonElement>
   return (
     <button
       {...props}
-      className={`inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-text-muted transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 ${props.className ?? ""}`}
+      className={`inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-full border-2 border-outline bg-surface px-3 py-1.5 text-xs font-bold text-foreground transition-all hover:-translate-x-px hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-50 ${props.className ?? ""}`}
     />
   );
 }
 
 export const inputClass =
-  "w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-text-muted focus:border-primary focus:outline-none";
+  "w-full rounded-2xl border-2 border-outline bg-surface px-3.5 py-2 text-sm text-foreground placeholder:text-text-muted focus:shadow-[3px_3px_0_var(--shadow-hard)] focus:outline-none";
 
 export function formatDate(value: string | null | undefined) {
   if (!value) return "";
@@ -113,12 +116,12 @@ export function SourceLinks({ sources, onOpen }: { sources: SourceRef[]; onOpen:
             key={source.entry_id}
             onClick={() => onOpen(source.session_id as string)}
             title={source.snippet}
-            className="cursor-pointer rounded-full border border-border px-2.5 py-0.5 text-[11px] text-text-muted transition-colors hover:border-primary/40 hover:text-primary"
+            className="cursor-pointer rounded-full border-2 border-outline bg-surface px-2.5 py-0.5 text-[11px] font-bold text-foreground transition-colors hover:bg-highlight hover:text-on-highlight"
           >
             {formatDate(source.date)} ↗
           </button>
         ) : (
-          <span key={source.entry_id} title={source.snippet} className="rounded-full border border-border px-2.5 py-0.5 text-[11px] text-text-muted">
+          <span key={source.entry_id} title={source.snippet} className="rounded-full border-2 border-outline px-2.5 py-0.5 text-[11px] font-bold text-text-muted">
             {formatDate(source.date)}
           </span>
         )
@@ -138,8 +141,8 @@ export function Rating({ label, value, onChange }: { label: string; value: numbe
             role="radio"
             aria-checked={value === n}
             onClick={() => onChange(n)}
-            className={`h-8 w-8 cursor-pointer rounded-full border text-xs transition-colors ${
-              value === n ? "border-primary bg-primary text-white" : "border-border text-text-muted hover:border-primary/40"
+            className={`h-8 w-8 cursor-pointer rounded-full border-2 border-outline text-xs font-bold transition-colors ${
+              value === n ? "bg-highlight text-on-highlight" : "bg-surface text-foreground hover:bg-surface-light"
             }`}
           >
             {n}
@@ -165,7 +168,7 @@ export class SectionBoundary extends Component<{ children: ReactNode; resetKey: 
   render() {
     if (!this.state.failed) return this.props.children;
     return (
-      <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 p-4 text-sm text-rose-300">
+      <div className="rounded-2xl border-2 border-outline bg-[#FF9FA0] p-4 text-sm font-semibold text-[#111]">
         <p>Something went wrong while showing this section.</p>
         <button onClick={() => this.setState({ failed: false })} className="mt-2 cursor-pointer text-xs underline">
           Try again
@@ -182,6 +185,8 @@ export const MOOD_FACES = [
   { value: 4, emoji: "🙂", label: "Good" },
   { value: 5, emoji: "😄", label: "Great" },
 ] as const;
+
+const FACE_COLOURS = ["#FF7A6B", "#FFB36B", "#FFD93D", "#B6F36B", "#7CC8FF"];
 
 export const moodEmoji = (value: number | null | undefined) =>
   value === null || value === undefined ? "·" : MOOD_FACES[Math.min(4, Math.max(0, Math.round(value) - 1))].emoji;
@@ -209,9 +214,10 @@ export function MoodFaces({
           title={label}
           disabled={disabled}
           onClick={() => onPick(mood)}
-          className={`flex flex-1 cursor-pointer items-center justify-center rounded-2xl border transition-all disabled:cursor-not-allowed disabled:opacity-60 ${
+          style={{ background: FACE_COLOURS[mood - 1] }}
+          className={`flex flex-1 cursor-pointer items-center justify-center rounded-2xl border-2 border-outline transition-all disabled:cursor-not-allowed disabled:opacity-60 ${
             size === "lg" ? "h-14 text-3xl" : "h-11 text-2xl"
-          } ${value === mood ? "scale-105 border-primary bg-primary/15" : "border-transparent bg-background hover:scale-105 hover:border-border"}`}
+          } ${value === mood ? "-translate-y-0.5 scale-105 shadow-[3px_3px_0_var(--shadow-hard)]" : "opacity-80 hover:scale-105 hover:opacity-100"}`}
         >
           {emoji}
         </button>

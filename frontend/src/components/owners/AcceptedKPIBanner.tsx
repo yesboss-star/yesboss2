@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { BarChart3, RefreshCw, Loader2 } from "lucide-react";
 import { Button, Badge } from "@/components/ui";
 import { useKPIStore } from "@/stores/kpiStore";
@@ -31,17 +31,9 @@ export default function AcceptedKPIBanner() {
   const [loading, setLoading] = useState(false);
   const mountedRef = useRef(true);
 
-  const valuesFromKPIs = useMemo(() => {
-    const map: Record<string, KPIValue> = {};
-    for (const kpi of acceptedKPIs) {
-      if (kpi.formatted) {
-        map[kpi.key] = { value: kpi.value ?? 0, formatted: kpi.formatted };
-      }
-    }
-    return map;
-  }, [acceptedKPIs]);
-
-  const mergedValues = useMemo(() => ({ ...valuesFromKPIs, ...values }), [valuesFromKPIs, values]);
+  // Only values read from the data just now are shown. The figure saved when a KPI was accepted can be old
+  // (or a model's guess), so it is never put on the dashboard as if it were live.
+  const mergedValues = values;
 
   useEffect(() => {
     mountedRef.current = true;

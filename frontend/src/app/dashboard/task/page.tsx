@@ -9,16 +9,18 @@ import { useGoalStore } from "@/stores/goalStore";
 import { useOrgChartStore } from "@/stores/orgChartStore";
 import DashboardLayout from "@/components/DashboardLayout";
 import { GoalSection } from "@/components/owners/DashboardView";
-import TaskCard from "@/components/TaskCard";
+import TaskBoardCard, { firstAssignee, isFinished, needsAttention } from "@/components/TaskBoardCard";
+import QuickAddTask from "@/components/QuickAddTask";
+import TaskSummaryCard from "@/components/TaskSummaryCard";
 import TaskModal from "@/components/TaskModal";
-import { Card, CardContent, Badge, Button, Input } from "@/components/ui";
-import {
-  Plus, LayoutGrid, List, Search, CheckSquare,
-  Clock, AlertCircle, Users, User
-} from "lucide-react";
+import { Button, Input } from "@/components/ui";
+import { cn } from "@/lib/utils";
+import { Plus, Search, Zap, CheckCheck, Users, User, UserX, Flag } from "lucide-react";
 
-type ViewMode = "list" | "board";
-type FilterStatus = "all" | "pending" | "in_progress" | "completed" | "approved";
+const COLUMN_PREVIEW = 8;
+
+const pill =
+  "inline-flex items-center gap-2 rounded-full border-[2.5px] border-outline px-4 py-2 text-sm font-bold shadow-[3px_3px_0_var(--shadow-hard)] transition-all cursor-pointer hover:-translate-x-px hover:-translate-y-px";
 
 export default function TaskPage() {
   const { user, role, loading } = useAuth();
@@ -28,8 +30,12 @@ export default function TaskPage() {
   const { fetchGoals } = useGoalStore();
   const { members, fetchOrgMembers } = useOrgChartStore();
 
-  const [viewMode, setViewMode] = useState<ViewMode>("list");
-  const [filterStatus, setFilterStatus] = useState<FilterStatus>("all");
+  const [onlyAttention, setOnlyAttention] = useState(false);
+  const [onlyApprove, setOnlyApprove] = useState(false);
+  const [onlyUnassigned, setOnlyUnassigned] = useState(false);
+  const [onlyHigh, setOnlyHigh] = useState(false);
+  const [expandedCols, setExpandedCols] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [taskView, setTaskView] = useState<"my" | "team">("my");
@@ -103,22 +109,49 @@ export default function TaskPage() {
     });
   }, [tasks, role, taskView, userEmail, directReportEmails]);
 
+  const emailToName = useMemo(() => {
+    const map = new Map<string, string>();
+    members.forEach((m) => map.set(m.email.toLowerCase(), (m.full_name || "").trim()));
+    return map;
+  }, [members]);
+
+  const assigneeOf = (t: (typeof tasks)[number]) => {
+    const raw = (Array.isArray(t.assignee_id) && t.assignee_id[0]) || t.assignee_email || "";
+    const email = String(raw).toLowerCase();
+    const name = emailToName.get(email) || email.split("@")[0];
+    const first = name.split(/[\s._-]+/)[0] || "";
+    return first ? first.charAt(0).toUpperCase() + first.slice(1) : "";
+  };
+
+  const attentionCount = visibleTasks.filter(needsAttention).length;
+  const approveCount = visibleTasks.filter((t) => t.status === "completed").length;
+  const unassignedCount = visibleTasks.filter((t) => !isFinished(t) && !firstAssignee(t)).length;
+  const highCount = visibleTasks.filter((t) => !isFinished(t) && (t.priority === "high" || t.priority === "urgent")).length;
+  const finishedCount = visibleTasks.filter(isFinished).length;
+
   const filteredTasks = visibleTasks.filter((task) => {
-    if (filterStatus !== "all" && task.status !== filterStatus) return false;
+    if (onlyAttention && !needsAttention(task)) return false;
+    if (onlyApprove && task.status !== "completed") return false;
+    if (onlyUnassigned && (isFinished(task) || firstAssignee(task))) return false;
+    if (onlyHigh && (isFinished(task) || (task.priority !== "high" && task.priority !== "urgent"))) return false;
     if (searchQuery && !task.title.toLowerCase().includes(searchQuery.toLowerCase())) return false;
     return true;
   });
 
-  const taskStats = {
-    total: visibleTasks.length,
-    pending: visibleTasks.filter(t => t.status === "pending").length,
-    inProgress: visibleTasks.filter(t => t.status === "in_progress").length,
-    completed: visibleTasks.filter(t => t.status === "completed").length,
+  const byDue = (a: (typeof tasks)[number], b: (typeof tasks)[number]) => {
+    const da = a.due_date ? new Date(a.due_date).getTime() : Infinity;
+    const db = b.due_date ? new Date(b.due_date).getTime() : Infinity;
+    return (Number.isNaN(da) ? Infinity : da) - (Number.isNaN(db) ? Infinity : db);
   };
 
-  const getColumnTasks = (status: string) => {
-    return filteredTasks.filter(t => t.status === status);
-  };
+  // Done holds finished work: completed tasks (flagged "Needs your OK" until approved) come first, then approved ones.
+  const byRecent = (a: (typeof tasks)[number], b: (typeof tasks)[number]) =>
+    (new Date(b.updated_at).getTime() || 0) - (new Date(a.updated_at).getTime() || 0);
+  const columns = [
+    { key: "todo", title: "To do", head: "bg-[#FFD93D]", empty: "All clear", tasks: filteredTasks.filter((t) => t.status !== "in_progress" && t.status !== "completed" && t.status !== "approved").sort(byDue) },
+    { key: "doing", title: "Doing", head: "bg-[#7CC8FF]", empty: "Nothing in progress", tasks: filteredTasks.filter((t) => t.status === "in_progress").sort(byDue) },
+    { key: "done", title: "Done", head: "bg-[#B6F36B]", empty: "Nothing finished yet", tasks: filteredTasks.filter((t) => t.status === "completed" || t.status === "approved").sort((a, b) => Number(b.status === "completed") - Number(a.status === "completed") || byRecent(a, b)) },
+  ];
 
   if (loading || !user) {
     return null;
@@ -126,7 +159,7 @@ export default function TaskPage() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold">Tasks</h1>
@@ -135,201 +168,156 @@ export default function TaskPage() {
                 ? taskView === "my"
                   ? "Your personal tasks and assignments"
                   : `Tasks from your ${directReports.length} direct report${directReports.length !== 1 ? "s" : ""}`
-                : "Manage and track all tasks across your organization"}
+                : "Everything your team is working on, in one place."}
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            {role === "employee" && directReports.length > 0 && (
-              <div className="flex items-center gap-1 border border-border rounded-lg p-1">
-                <button
-                  onClick={() => setTaskView("my")}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-all cursor-pointer ${
-                    taskView === "my" ? "bg-primary text-white" : "text-text-muted hover:text-foreground"
-                  }`}
-                >
-                  <User className="w-4 h-4" />
-                  My Tasks
-                </button>
-                <button
-                  onClick={() => setTaskView("team")}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-all cursor-pointer ${
-                    taskView === "team" ? "bg-primary text-white" : "text-text-muted hover:text-foreground"
-                  }`}
-                >
-                  <Users className="w-4 h-4" />
-                  Team Tasks
-                </button>
-              </div>
-            )}
-            <Button onClick={() => setShowTaskModal(true)} className="flex items-center gap-2 cursor-pointer">
-              <Plus className="w-4 h-4" />
-              New Task
-            </Button>
-          </div>
+          <Button onClick={() => setShowTaskModal(true)} className="flex items-center gap-2 cursor-pointer">
+            <Plus className="w-4 h-4" />
+            New task
+          </Button>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <Card className="card-hover">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
-                  <CheckSquare className="w-5 h-5 text-blue-400" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold">{taskStats.total}</p>
-                  <p className="text-sm text-text-muted">Total Tasks</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="card-hover">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-yellow-500/10 flex items-center justify-center">
-                  <Clock className="w-5 h-5 text-yellow-400" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold">{taskStats.pending + taskStats.inProgress}</p>
-                  <p className="text-sm text-text-muted">In Progress</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="card-hover">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center">
-                  <CheckSquare className="w-5 h-5 text-emerald-400" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold">{taskStats.completed}</p>
-                  <p className="text-sm text-text-muted">Completed</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="card-hover">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center">
-                  <AlertCircle className="w-5 h-5 text-purple-400" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold">
-                    {visibleTasks.filter(t => t.priority === "urgent" || t.priority === "high").length}
-                  </p>
-                  <p className="text-sm text-text-muted">High Priority</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+          <TaskSummaryCard
+            finished={finishedCount}
+            total={visibleTasks.length}
+            waiting={approveCount}
+            isOwner={role === "owner"}
+            onReview={() => {
+              setOnlyApprove(true);
+              setOnlyAttention(false);
+              setOnlyUnassigned(false);
+              setOnlyHigh(false);
+            }}
+          />
+          {organization?.id && (
+            <QuickAddTask orgId={organization.id} members={members} userEmail={userEmail} isOwner={role === "owner"} onError={setError} />
+          )}
         </div>
 
-        {role === "owner" && <GoalSection />}
-
-        <div className="flex flex-col sm:flex-row items-center gap-4">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+        <div className="flex flex-wrap items-center gap-3">
+          {role === "employee" && directReports.length > 0 && (
+            <div className="inline-flex gap-2" role="tablist" aria-label="Whose tasks">
+              {([["my", "My tasks", User], ["team", "Team tasks", Users]] as const).map(([key, label, Icon]) => (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={taskView === key}
+                  onClick={() => setTaskView(key)}
+                  className={cn(pill, taskView === key ? "bg-highlight text-on-highlight" : "bg-surface text-foreground")}
+                >
+                  <Icon className="w-4 h-4" />
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          <button
+            type="button"
+            aria-pressed={onlyAttention}
+            onClick={() => setOnlyAttention((v) => !v)}
+            className={cn(pill, onlyAttention ? "bg-[#FF7A6B] text-[#111]" : "bg-surface text-foreground")}
+          >
+            <Zap className="w-4 h-4" />
+            {attentionCount} need attention
+          </button>
+          {role === "owner" && (
+            <button
+              type="button"
+              aria-pressed={onlyUnassigned}
+              onClick={() => setOnlyUnassigned((v) => !v)}
+              className={cn(pill, onlyUnassigned ? "bg-[#FF9FD2] text-[#111]" : "bg-surface text-foreground")}
+            >
+              <UserX className="w-4 h-4" />
+              Nobody yet · {unassignedCount}
+            </button>
+          )}
+          <button
+            type="button"
+            aria-pressed={onlyHigh}
+            onClick={() => setOnlyHigh((v) => !v)}
+            className={cn(pill, onlyHigh ? "bg-[#FFD93D] text-[#111]" : "bg-surface text-foreground")}
+          >
+            <Flag className="w-4 h-4" />
+            High priority · {highCount}
+          </button>
+          {role === "owner" && approveCount > 0 && (
+            <button
+              type="button"
+              aria-pressed={onlyApprove}
+              onClick={() => setOnlyApprove((v) => !v)}
+              className={cn(pill, onlyApprove ? "bg-[#C9A7FF] text-[#111]" : "bg-surface text-foreground")}
+            >
+              <CheckCheck className="w-4 h-4" />
+              {approveCount} to approve
+            </button>
+          )}
+          <div className="relative ml-auto w-full sm:w-64">
+            <Search className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 w-4 h-4 text-text-muted" />
             <Input
               type="text"
               placeholder="Search tasks..."
+              aria-label="Search tasks"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-10"
             />
           </div>
-
-          <div className="flex items-center gap-2">
-            <Button
-              variant={filterStatus === "all" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setFilterStatus("all")}
-              className="cursor-pointer"
-            >
-              All
-            </Button>
-            <Button
-              variant={filterStatus === "pending" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setFilterStatus("pending")}
-              className="cursor-pointer"
-            >
-              Pending
-            </Button>
-            <Button
-              variant={filterStatus === "in_progress" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setFilterStatus("in_progress")}
-              className="cursor-pointer"
-            >
-              In Progress
-            </Button>
-            <Button
-              variant={filterStatus === "completed" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setFilterStatus("completed")}
-              className="cursor-pointer"
-            >
-              Done
-            </Button>
-          </div>
-
-          <div className="flex items-center gap-1 border border-border rounded-lg p-1">
-            <button
-              onClick={() => setViewMode("list")}
-              className={`p-2 rounded ${viewMode === "list" ? "bg-surface" : "hover:bg-surface/50"} cursor-pointer`}
-            >
-              <List className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setViewMode("board")}
-              className={`p-2 rounded ${viewMode === "board" ? "bg-surface" : "hover:bg-surface/50"} cursor-pointer`}
-            >
-              <LayoutGrid className="w-4 h-4" />
-            </button>
-          </div>
         </div>
 
-        {viewMode === "list" ? (
-          <div className="space-y-2">
-            {tasksLoading ? (
-              <div className="text-center py-12 text-text-muted">Loading tasks...</div>
-            ) : filteredTasks.length === 0 ? (
-              <div className="text-center py-12">
-                <CheckSquare className="w-12 h-12 text-text-muted mx-auto mb-4" />
-                <h3 className="text-lg font-medium">No tasks found</h3>
-                <p className="text-text-muted mt-1">
-                  {searchQuery || filterStatus !== "all"
-                    ? "Try adjusting your filters"
-                    : "Create your first task to get started"}
-                </p>
-              </div>
-            ) : (
-              filteredTasks.map((task, idx) => (
-                <TaskCard key={task.id || task._id || `task-${idx}`} task={task} showGoal={!!task.goal_id} />
-              ))
-            )}
-          </div>
+        {error && (
+          <p className="rounded-2xl border-2 border-outline bg-rose-500/10 px-4 py-2 text-sm text-rose-400" role="alert">
+            {error}
+          </p>
+        )}
+
+        {tasksLoading && tasks.length === 0 ? (
+          <div className="text-center py-12 text-text-muted">Loading tasks...</div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            {["pending", "in_progress", "completed", "approved"].map((status) => {
-              const columnTasks = getColumnTasks(status);
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
+            {columns.map((col) => {
+              const expanded = expandedCols.includes(col.key);
+              const shown = expanded ? col.tasks : col.tasks.slice(0, COLUMN_PREVIEW);
               return (
-                <div key={status} className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-medium text-sm capitalize">{status.replace("_", " ")}</h3>
-                    <Badge variant="outline">{columnTasks.length}</Badge>
-                  </div>
-                  <div className="space-y-2">
-                    {columnTasks.map((task) => (
-                      <TaskCard key={task.id || task._id} task={task} />
+                <section key={col.key} aria-label={col.title} className="glass rounded-3xl p-3.5 min-w-0">
+                  <header className={cn("mb-3.5 flex items-center gap-2.5 rounded-2xl border-[2.5px] border-[#111] px-4 py-2.5 text-[#111]", col.head)}>
+                    <h2 className="text-lg font-bold">{col.title}</h2>
+                    <span className="ml-auto rounded-full border-2 border-[#111] bg-white px-2.5 text-sm font-extrabold">{col.tasks.length}</span>
+                  </header>
+                  <div className="space-y-3">
+                    {shown.map((task, idx) => (
+                      <TaskBoardCard
+                        key={task.id || task._id || `task-${idx}`}
+                        task={task}
+                        assignee={assigneeOf(task)}
+                        members={members}
+                        isOwner={role === "owner"}
+                        onError={setError}
+                      />
                     ))}
+                    {shown.length === 0 && (
+                      <p className="py-6 text-center text-sm font-semibold text-text-muted">
+                        {searchQuery || onlyAttention || onlyApprove || onlyUnassigned || onlyHigh ? "No matching tasks" : col.empty}
+                      </p>
+                    )}
                   </div>
-                </div>
+                  {col.tasks.length > COLUMN_PREVIEW && (
+                    <button
+                      type="button"
+                      onClick={() => setExpandedCols((cur) => (cur.includes(col.key) ? cur.filter((k) => k !== col.key) : [...cur, col.key]))}
+                      className="mt-3 w-full cursor-pointer py-2 text-sm font-bold text-text-muted hover:text-foreground"
+                    >
+                      {expanded ? "Show fewer" : `Show all ${col.tasks.length}`}
+                    </button>
+                  )}
+                </section>
               );
             })}
           </div>
         )}
+
+        {role === "owner" && <GoalSection />}
       </div>
 
       <TaskModal isOpen={showTaskModal} onClose={() => setShowTaskModal(false)} />

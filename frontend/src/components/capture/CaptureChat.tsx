@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { useGoalStore } from "@/stores/goalStore";
@@ -10,15 +11,25 @@ import { useOrgChartStore } from "@/stores/orgChartStore";
 import { useSessionStore, type SessionMessage, type ClarifyingQuestion, type DelegateParams, type GeneratedSubTask, type BookingParams, type BookingSlot, delegateAssigneeLabel } from "@/stores/sessionStore";
 import {
   Sparkles, MessageSquare, Plus, Edit3, Trash2, Paperclip, AtSign,
-  Loader2, Send, Lightbulb, Check, ArrowRight, ChevronLeft, Square, Volume2, Mic,
+  Loader2, Send, Lightbulb, Check, ArrowRight, Square, Volume2, Mic, BookOpen,
+  Menu, X, FileText, ClipboardList, ListChecks, Image as ImageIcon,
+  CalendarDays, CalendarPlus, FileUp, Flag, BookMarked, PieChart as PieChartIcon, TrendingUp, Search,
 } from "lucide-react";
 import DelegatePreviewCard from "@/components/DelegatePreviewCard";
-import { VOICE_LANGUAGES } from "@/components/capture/voice";
+import { VOICE_LANGUAGES, VOICE_LANG_KEY } from "@/components/capture/voice";
+import NeedActionCard from "@/components/capture/NeedActionCard";
+import MeetingsHub from "@/components/capture/MeetingsHub";
+import { InsightChartCard } from "@/components/charts/TaskCharts";
+import BrainstormCard, { type BrainstormIdea } from "@/components/capture/BrainstormCard";
+import { JournalSavedCard } from "@/components/capture/JournalCards";
+import JournalHub from "@/components/capture/JournalHub";
+import { useMyWork } from "@/hooks/useMyWork";
+import { journalApi } from "@/lib/journalApi";
+import { cn, getAuthHeaders } from "@/lib/utils";
 import MeetingNotesCard from "@/components/capture/MeetingNotesCard";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { useJournalSpeaker } from "@/hooks/useJournalSpeaker";
 import {
-  Card, CardHeader, CardTitle, CardContent,
   Badge, Button,
 } from "@/components/ui";
 
@@ -264,51 +275,104 @@ function QuestionCard({ question, onAnswer, onSkip, disabled, questionNumber, to
 }
 
 type Route = "assistant" | "journal" | "meeting_notes";
-/** Chat messages carry two extra tags that are stored with them: which part is the journal, and a notes capture. */
-type Tagged = SessionMessage & { route?: Route; capture_id?: string };
+/** Chat messages carry extra tags that are stored with them: a notes capture, and (on a reply that suggests the
+ *  Journal) the personal message it is about. `route` marks older replies that were written to the journal. */
+type Tagged = SessionMessage & { route?: Route; capture_id?: string; suggest_journal?: string; need_action?: boolean; card?: CardKind | "brainstorm" | "journal_saved"; ideas?: BrainstormIdea[]; entry_id?: string };
 type SessionLike = { id: string; context: Record<string, string> };
 /** A module-level clock, so event handlers do not call Date.now() inside the component body. */
 const nowMs = () => Date.now();
 
-/** The journal part of a conversation: each reflection and the reply it got (tagged when it was saved).
- *  Reflections written before `since` were removed from the journal and are left out. */
-function journalTranscript(messages: SessionMessage[], since = 0) {
-  const out: { role: string; content: string; timestamp?: number }[] = [];
-  messages.forEach((m, i) => {
-    if (m.role === "assistant" && (m as Tagged).route === "journal" && messages[i - 1]?.role === "user" && (messages[i - 1].timestamp ?? 0) >= since) {
-      for (const x of [messages[i - 1], m]) out.push({ role: x.role, content: x.content || "", timestamp: x.timestamp });
-    }
-  });
-  return out;
-}
+/** The server writes times without a timezone (they are UTC), which a browser would read as local time and be hours out. */
+const utcMs = (iso?: string) => (iso ? Date.parse(/(Z|[+-]\d\d:?\d\d)$/.test(iso) ? iso : `${iso}Z`) || 0 : 0);
 
-/** The three ways of talking. The conversation is the same in all of them; only the bottom of the chat changes. */
-export type ComposerMode = "type" | "upload" | "speak";
+/** "Just now", "5 min ago", "2 h ago", "3 d ago" for the sessions list. */
+const ago = (iso?: string) => {
+  const minutes = Math.max(0, Math.round((nowMs() - (utcMs(iso) || nowMs())) / 60000));
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  return hours < 24 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`;
+};
+
+/** What the menu offers, in four groups. The first three (the Capture group) are also the tiles on an empty chat.
+ *  "compose" entries add a chip to the message bar and wait for your words; the rest answer at once with a card. */
+const MODES = [
+  { id: "mom", group: "Capture", icon: ClipboardList, colour: "#7CC8FF", title: "MOM", sub: "Meeting notes to action items" },
+  { id: "journal", group: "Capture", icon: BookOpen, colour: "#FF9FD2", title: "Journal", sub: "A private note to yourself" },
+  { id: "need", group: "Capture", icon: ListChecks, colour: "#FFD93D", title: "Need action", sub: "What needs your OK or attention" },
+  { id: "journals", group: "Capture", icon: BookMarked, colour: "#FFC2E2", title: "My journals", sub: "Entries, reminders and ideas" },
+  { id: "meetings", group: "Meetings", icon: CalendarDays, colour: "#7CC8FF", title: "Meeting notes", sub: "History, notes, upload and booking" },
+  { id: "book", group: "Meetings", icon: CalendarPlus, colour: "#FFA45C", title: "Book meeting", sub: "Say who, when and what" },
+  { id: "upload", group: "Meetings", icon: FileUp, colour: "#7FE0A0", title: "Upload meeting", sub: "A private note from a file" },
+  { id: "distribution", group: "Insights", icon: PieChartIcon, colour: "#C4A7FF", title: "Task distribution", sub: "Tasks by status" },
+  { id: "goals", group: "Insights", icon: Flag, colour: "#FFD93D", title: "Goal progress", sub: "Progress on each goal" },
+  { id: "completion", group: "Insights", icon: TrendingUp, colour: "#FF8A7A", title: "Task completion", sub: "Completed against total" },
+  { id: "brainstorm", group: "Think", icon: Lightbulb, colour: "#FF9FD2", title: "Brainstorming", sub: "Think an idea through" },
+] as const;
+type ModeId = (typeof MODES)[number]["id"];
+const MODE_GROUPS = ["Capture", "Meetings", "Insights", "Think"] as const;
+const TILE_IDS: readonly string[] = ["mom", "journal", "need"];
+const TILES = MODES.filter((m) => TILE_IDS.includes(m.id));
+/** Everything else, as the pills under the three tiles. */
+const MORE = MODES.filter((m) => !TILE_IDS.includes(m.id));
+
+/** "show my journals", "list my reminders", "show my ideas": a short request to read your own records back, never a note being written.
+ *  Returns which view of your Journal to open, or null when the words are something else. */
+const journalViewFor = (text: string): "journals" | "reminders" | "ideas" | null => {
+  const t = text.trim();
+  if (t.length > 90 || !/\b(show|see|view|list|read|display|open|give|get)\b/i.test(t) || /\b(write|add|save|create|new|set|delete|remove)\b/i.test(t)) return null;
+  if (/\breminders?\b/i.test(t)) return "reminders";
+  if (/\b(idea vault|ideas)\b/i.test(t)) return "ideas";
+  if (/\b(journals?|journal entries|diary)\b/i.test(t)) return "journals";
+  return null;
+};
+
+/** A card the chat can show in place of a written answer. */
+type CardKind = "need" | "meetings" | "distribution" | "goals" | "completion" | "journals" | "reminders" | "ideas";
+const CARD_ASKS: Record<CardKind, { ask: string; reply: string }> = {
+  need: { ask: "What needs my action?", reply: "Here is what needs your action:" },
+  meetings: { ask: "Show my meeting notes", reply: "Here are your meetings. Upload or book one from the buttons:" },
+  journals: { ask: "Show my journals", reply: "Here is your Journal. Only you can see it:" },
+  reminders: { ask: "Show my reminders", reply: "Here are your reminders. Only you can see them:" },
+  ideas: { ask: "Show my ideas", reply: "Here is your Idea vault. Only you can see it:" },
+  distribution: { ask: "Show the task distribution", reply: "Here is the task distribution:" },
+  goals: { ask: "Show the goal progress", reply: "Here is the goal progress:" },
+  completion: { ask: "Show the task completion", reply: "Here is the task completion:" },
+};
+
+/** What a chip on the message bar says and what the box asks for. "upload" reads like MOM, with the file picker opened first. */
+type ComposeMode = "mom" | "upload" | "book" | "brainstorm" | "journal";
+const COMPOSE: Record<ComposeMode, { chip: string; colour: string; icon: typeof ClipboardList; placeholder: string; help: string }> = {
+  mom: { chip: "MOM", colour: "#7CC8FF", icon: ClipboardList, placeholder: "Paste your meeting notes here", help: "Paste your notes, or tap + to attach a Word, Excel or text file. I list the action items, and nothing is assigned until you press Assign." },
+  upload: { chip: "Upload meeting", colour: "#7FE0A0", icon: FileUp, placeholder: "Add a note about the meeting (optional)", help: "Attach a transcript or notes (.txt, .docx, .pdf) or paste them. I read the meeting, keep it in Meeting notes and list the action items." },
+  journal: { chip: "Journal", colour: "#FF9FD2", icon: BookOpen, placeholder: "Write privately…", help: "Write freely, then press Enter. It is saved to your private Journal and nobody else can see it. Afterwards I can set a reminder, only if you ask. Remove the chip to talk normally again." },
+  brainstorm: { chip: "Brainstorming", colour: "#FF9FD2", icon: Lightbulb, placeholder: "What do you want to think through?", help: "Tell me a topic. I give you five ways to start, and each can become a task or go to your Idea vault. Nothing is saved until you press a button." },
+  book: { chip: "Book meeting", colour: "#FFA45C", icon: CalendarPlus, placeholder: "e.g. Meeting with Rahul tomorrow at 3pm about the launch", help: "Say who, when and what. I find a time that works and show it to you. Nothing is booked, and nobody is invited, until you press the time." },
+};
+
+/** The round buttons at the ends of the message bar. */
+const roundButton =
+  "grid h-11 w-11 flex-shrink-0 cursor-pointer place-items-center rounded-full border-2 border-outline text-foreground transition-all hover:-translate-x-px hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-50";
+
+const firstNameOf = (user: { displayName?: string | null; email?: string | null } | null) => {
+  const word = (user?.displayName || user?.email?.split("@")[0] || "").split(/[\s._-]+/)[0];
+  return word ? word.charAt(0).toUpperCase() + word.slice(1) : "";
+};
+const greetingFor = (hour: number, name: string) => `${hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening"}${name ? `, ${name}` : ""}`;
 
 const ACCEPTED_EXTENSIONS = [".pdf", ".docx", ".txt", ".csv", ".xlsx", ".xls", ".png", ".jpg", ".jpeg"];
 
-/** `mode`: which way of talking is open. `visible`: the chat is on screen (it stays mounted while hidden).
- *  `voiceLang`: the spoken language, chosen on the Speak screen. `onListeningChange`: tells the option buttons when the mic is on.
- *  `incoming`: a question sent in from elsewhere (it goes to the journal companion). */
-export default function CaptureChat({
-  incoming,
-  mode = "type",
-  visible = true,
-  voiceLang,
-  onVoiceLangChange,
-  onListeningChange,
-}: {
-  incoming?: { id: number; text: string } | null;
-  mode?: ComposerMode;
-  visible?: boolean;
-  voiceLang: string;
-  onVoiceLangChange: (code: string) => void;
-  onListeningChange?: (listening: boolean) => void;
-}) {
+/** The Let's Talk conversation: a greeting and three tiles when it is empty, one message bar at the bottom always. */
+export default function CaptureChat({ extras, topSlot }: { extras?: ReactNode; /** shown above the greeting, only while the page is empty */ topSlot?: ReactNode } = {}) {
+  const router = useRouter();
+  // "MOM" chosen from the menu or the tiles: the next message is read as meeting notes, whatever it says
+  const [composeMode, setComposeMode] = useState<ComposeMode | null>(null);
+  // MOM and Upload meeting both read what you give them as meeting notes
+  const readsAsNotes = composeMode === "mom" || composeMode === "upload";
+  const [sessionSearch, setSessionSearch] = useState("");
+  const [menu, setMenu] = useState<"mode" | "attach" | null>(null);
+  const [voiceLang, setVoiceLang] = useState<string>("en-IN");
   const [messages, setMessages] = useState<SessionMessage[]>([]);
-  // where each journal reply was saved, so it can be taken back out; kept for this visit only
-  const [journalSaved, setJournalSaved] = useState<Record<string, { entryId: string; status: "saved" | "removed" | "failed" }>>({});
-  const journalSinceRef = useRef(0);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -321,7 +385,8 @@ export default function CaptureChat({
   const [renameValue, setRenameValue] = useState("");
   const [pendingQuestion, setPendingQuestion] = useState<ClarifyingQuestion | null>(null);
   const [questionCount, setQuestionCount] = useState(0);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sessionsOpen, setSessionsOpen] = useState(false); // the sessions drawer on a narrow screen
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [taskImportPreview, setTaskImportPreview] = useState<any>(null);
   const [taskImportLoading, setTaskImportLoading] = useState(false);
   const [taskImportConfirming, setTaskImportConfirming] = useState(false);
@@ -341,9 +406,6 @@ export default function CaptureChat({
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
   const [suggestions, setSuggestions] = useState<any[] | null>(null);
-  const [sessionInsights, setSessionInsights] = useState<any[]>([]);
-  const [sessionInsightsOpen, setSessionInsightsOpen] = useState(false);
-  const [sessionInsightsLoading, setSessionInsightsLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const isFirstRender = useRef(true);
@@ -351,52 +413,16 @@ export default function CaptureChat({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const mentionListRef = useRef<HTMLDivElement>(null);
   const lastRouteRef = useRef<Route>("assistant");
+  // set by "Talk it through here": the next message skips the Journal suggestion
+  const skipJournalSuggestionRef = useRef(false);
   const { listening, liveText, startListening, stopListening } = useVoiceInput();
   // journal replies can be read aloud, as in the Journal page's Talk mode
   const speaker = useJournalSpeaker();
   const { user, role } = useAuth();
   const { organization } = useOrganizationStore();
-  const { goals } = useGoalStore();
-  const { tasks } = useTaskStore();
   const { members } = useOrgChartStore();
 
-  const directReportEmails = useMemo(() => {
-    const email = user?.email?.toLowerCase() || "";
-    return new Set(
-      members
-        .filter((m: any) => (m.manager_email || "").toLowerCase() === email)
-        .map((m: any) => m.email.toLowerCase())
-    );
-  }, [members, user?.email]);
-
-  const myTasks = useMemo(() => {
-    if (role === "owner") return tasks;
-    const email = user?.email?.toLowerCase() || "";
-    return tasks.filter((t) => {
-      const ae = (t as any).assignee_email;
-      const assigneeEmails = Array.isArray(ae)
-        ? ae.map((x: any) => String(x).toLowerCase())
-        : [String(ae || "").toLowerCase()];
-      const assigneeIds = t.assignee_id || [];
-      const inAssignees = assigneeIds.some((id) => id.toLowerCase() === email);
-      const inDirectReports = assigneeIds.some((id) => directReportEmails.has(id.toLowerCase()));
-      return (
-        assigneeEmails.includes(email) ||
-        inAssignees ||
-        assigneeEmails.some((e: string) => directReportEmails.has(e)) ||
-        inDirectReports
-      );
-    });
-  }, [tasks, role, user?.email, directReportEmails]);
-
-  const myGoals = useMemo(() => {
-    if (role === "owner") return goals;
-    const email = user?.email?.toLowerCase() || "";
-    return goals.filter((g) => {
-      const ids = g.assignee_id || [];
-      return ids.some((id) => id.toLowerCase() === email);
-    });
-  }, [goals, role, user?.email]);
+  const { myTasks, myGoals, ready: workReady } = useMyWork();
   const { addKPI } = useKPIStore();
   const {
     sessions, activeSessionId, createSession,
@@ -411,9 +437,6 @@ export default function CaptureChat({
     initRef.current = true;
     const orgId = organization.id;
     useSessionStore.getState().fetchSessions(orgId, "assistant");
-    useOrgChartStore.getState().fetchOrgMembers(orgId);
-    useGoalStore.getState().fetchGoals(orgId);
-    useTaskStore.getState().fetchTasks(orgId);
   }, [organization?.id]);
 
   useEffect(() => {
@@ -423,6 +446,27 @@ export default function CaptureChat({
   }, [mentionOpen, members?.length, organization?.id]);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
+
+  const hasMessages = messages.length > 0;
+  // booking cards whose time has been booked (saved on the confirming message, so it holds after a reload too)
+  const closedCards = useMemo(() => new Set(messages.map((m) => m.booked_card).filter((n): n is number => typeof n === "number")), [messages]);
+  // with no messages the message bar sits under the greeting and its menus open downwards; once chatting it sits at the bottom
+  const menuPos = hasMessages ? "bottom-full mb-2" : "top-full mt-2";
+
+  // the sessions list: searched by title, newest first, grouped by day
+  const sessionGroups = useMemo(() => {
+    const q = sessionSearch.trim().toLowerCase();
+    const midnight = new Date(nowMs());
+    midnight.setHours(0, 0, 0, 0);
+    const today = midnight.getTime();
+    const at = (x: { updated_at?: string; created_at?: string }) => utcMs(x.updated_at || x.created_at);
+    const rows = sessions.filter((x) => !q || (x.title || "").toLowerCase().includes(q)).sort((a, b) => at(b) - at(a));
+    return ([
+      ["Today", rows.filter((x) => at(x) >= today)],
+      ["Yesterday", rows.filter((x) => at(x) < today && at(x) >= today - 864e5)],
+      ["Earlier", rows.filter((x) => at(x) < today - 864e5)],
+    ] as [string, typeof rows][]).filter(([, group]) => group.length);
+  }, [sessions, sessionSearch]);
 
   useEffect(() => {
     if (activeSession) {
@@ -437,7 +481,8 @@ export default function CaptureChat({
     }
     const container = chatEndRef.current?.parentElement;
     if (container) {
-      container.scrollTop = container.scrollHeight;
+      // a chat follows its newest message; the empty screen (brief, tiles) always starts at its top
+      container.scrollTop = messages.length ? container.scrollHeight : 0;
     }
   }, [messages]);
 
@@ -483,18 +528,36 @@ export default function CaptureChat({
     startListening((t) => setInput((prev) => (prev ? `${prev.trimEnd()} ${t}` : t)), { lang: voiceLang, continuous: true });
   };
 
+  // remember the spoken language between visits (storage can be blocked, so never rely on it)
   useEffect(() => {
-    onListeningChange?.(listening);
-  }, [listening, onListeningChange]);
+    try {
+      const stored = localStorage.getItem(VOICE_LANG_KEY);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage can only be read after hydration
+      if (stored && VOICE_LANGUAGES.some((l) => l.code === stored)) setVoiceLang(stored);
+    } catch { /* ignore */ }
+  }, []);
 
-  // opening Type puts the cursor in the box; leaving Speak (or closing the chat) stops the microphone
+  const chooseVoiceLang = (code: string) => {
+    setVoiceLang(code);
+    try { localStorage.setItem(VOICE_LANG_KEY, code); } catch { /* ignore */ }
+  };
+
+  // the menus in the message bar close on a click elsewhere or Escape
   useEffect(() => {
-    if (visible && mode === "type") {
-      const timer = setTimeout(() => inputRef.current?.focus(), 60);
-      return () => clearTimeout(timer);
-    }
-    if (mode !== "speak" || !visible) stopListening();
-  }, [mode, visible, stopListening]);
+    if (!menu) return;
+    const close = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest?.("[data-menu-root]")) setMenu(null);
+    };
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenu(null);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [menu]);
 
   const ensureSession = async () => {
     if (activeSession) return activeSession;
@@ -794,64 +857,152 @@ export default function CaptureChat({
     }
   };
 
-  /** A personal reflection: the same private journal companion the Journal page uses, saved to the journal. */
-  const handleJournal = async (userMsg: string, updated: SessionMessage[], s: SessionLike) => {
-    lastRouteRef.current = "journal";
+  /** A personal message: nothing is saved from here. The reply offers the Journal (the text goes across to its text
+   *  box, unsent) or carrying on here with the assistant. */
+  const suggestJournal = (text: string, updated: SessionMessage[], s: SessionLike) => {
+    lastRouteRef.current = "assistant";
+    const reply: Tagged = {
+      role: "assistant",
+      content: "That sounds personal. Your **Journal** is the private place for it, and nothing here has been saved. Want to write it there?",
+      is_answer: true,
+      timestamp: nowMs(),
+      suggest_journal: text,
+    };
+    setMessages([...updated, reply]);
+    addMessage(s.id, reply);
+  };
+
+  /** "Write in Journal" on a personal message: the words go into the Journal chip, and nothing is saved until you press Enter. */
+  const openJournalWith = (text: string) => {
+    setComposeMode("journal");
+    setInput(text);
+    setTimeout(() => inputRef.current?.focus(), 30);
+  };
+
+  /** "Talk it through here": the next message goes to the assistant even though it reads as personal. */
+  const talkItThroughHere = () => {
+    skipJournalSuggestionRef.current = true;
+    void sendMessage("Let's talk it through here.");
+  };
+
+  /** Needs-action, meeting notes and the three charts, as a card in the chat (no AI call: it is your own data). */
+  const showCard = async (kind: CardKind, askedText?: string) => {
+    if (loading) return;
+    const s = activeSession || (await ensureSession());
+    if (!s) return;
+    const { ask, reply } = CARD_ASKS[kind];
+    const asked: SessionMessage = { role: "user", content: askedText || ask, timestamp: nowMs() };
+    const card: Tagged = {
+      role: "assistant",
+      content: kind === "distribution" || kind === "goals" || kind === "completion"
+        ? `${reply.slice(0, -1)}${role === "owner" ? "" : " for your own tasks"}:`
+        : reply,
+      is_answer: true,
+      timestamp: nowMs() + 1,
+      card: kind,
+    };
+    setMessages([...messages, asked, card]);
+    addMessage(s.id, asked);
+    addMessage(s.id, card);
+  };
+
+  /** Brainstorming: five ways to start on a topic, as a card. The AI only suggests; each idea is saved when you press its button. */
+  const handleBrainstorm = async (topic: string) => {
+    if (!organization?.id) return;
+    const s = activeSession || (await ensureSession());
+    if (!s) return;
+    const asked: SessionMessage = { role: "user", content: topic, timestamp: nowMs() };
+    const base = [...messages, asked];
+    setMessages([...base, { role: "assistant", content: "", is_loading: true, timestamp: nowMs() }]);
+    addMessage(s.id, asked);
+    if (s.title === "New Chat" || s.title === "Dashboard Chat") renameSession(s.id, topic.slice(0, 50));
     setLoading(true);
-    setMessages([...updated, { role: "assistant", content: "", is_loading: true, timestamp: nowMs() }]);
     try {
-      const res = await fetch(`${API_URL}/assistant/ask`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: userMsg,
-          mode: "journal",
-          session_id: s.id,
-          session_context: s.context,
-          context: { user_email: user?.email, organization_id: organization?.id, role: role || "owner" },
-          conversation_history: updated.map((m) => ({ role: m.role, content: m.content || "" })).slice(-10),
-        }),
-      });
-      if (!res.ok) throw new Error("Journal request failed");
-      const data = await res.json();
-      // a task request inside a reflection still waits for confirmation, exactly as in the Journal page
-      const reply: Tagged =
-        data.type === "delegate_preview" && data.delegate_params
-          ? {
-              role: "assistant",
-              content: data.answer || `I can assign "${data.delegate_params.title}". Confirm below.`,
-              is_delegate: true,
-              delegate_params: data.delegate_params,
-              generated_sub_tasks: data.generated_sub_tasks || [],
-              timestamp: nowMs(),
-            }
-          : {
-              role: "assistant",
-              content:
-                (data.type === "question" && data.question?.text) ||
-                [data.answer, data.follow_up].filter(Boolean).join("\n\n") ||
-                "I'm here. Tell me a little more.",
-              is_answer: data.type !== "question",
-              timestamp: nowMs(),
-            };
-      reply.route = "journal"; // marks which part of this conversation is the journal
-      setMessages([...updated, reply]);
+      const { ideas } = await journalApi<{ topic: string; ideas: BrainstormIdea[] }>("/brainstorm", organization.id, { method: "POST", body: { topic } });
+      const reply: Tagged = {
+        role: "assistant",
+        content: `Here are five ways to start thinking about **${topic.replace(/[.?!]+$/, "")}**:`,
+        is_answer: true,
+        timestamp: nowMs(),
+        card: "brainstorm",
+        ideas,
+      };
+      setMessages([...base, reply]);
       addMessage(s.id, reply);
-      // keep the private journal log in step: one entry per conversation, like the Journal page
-      const synced = await fetch(`${API_URL}/journal/sync?organization_id=${encodeURIComponent(organization?.id || "")}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: s.id, organization_id: organization?.id, messages: journalTranscript([...updated, reply], journalSinceRef.current) }),
-      }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-      const entryId: string | undefined = synced?.entry?._id;
-      if (entryId) setJournalSaved((prev) => ({ ...prev, [String(reply.timestamp)]: { entryId, status: "saved" } }));
-    } catch {
-      const errMsg: SessionMessage = { role: "assistant", content: "I couldn't reach your journal just now. Please try again.", timestamp: nowMs() };
-      setMessages([...updated, errMsg]);
+    } catch (err) {
+      const errMsg: SessionMessage = { role: "assistant", content: (err as Error).message || "I couldn't come up with ideas just now. Please try again.", timestamp: nowMs() };
+      setMessages([...base, errMsg]);
       addMessage(s.id, errMsg);
     } finally {
       setLoading(false);
     }
+  };
+
+  /** Journal: the note is saved to your private Journal (the AI reads it for mood and themes, so it can also come back as context).
+   *  The chat keeps only a placeholder and a card that reads the entry back, so the private text is not copied into the chat history. */
+  const handleJournalEntry = async (text: string) => {
+    if (!organization?.id || !text) return;
+    const s = activeSession || (await ensureSession());
+    if (!s) return;
+    const shown: SessionMessage = { role: "user", content: text, timestamp: nowMs() };
+    const base = [...messages, shown];
+    setMessages([...base, { role: "assistant", content: "", is_loading: true, timestamp: nowMs() }]);
+    addMessage(s.id, { role: "user", content: "📓 Journal entry (private, kept only in your Journal)", timestamp: nowMs() });
+    if (s.title === "New Chat" || s.title === "Dashboard Chat") renameSession(s.id, "Journal");
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/journal?organization_id=${encodeURIComponent(organization.id)}`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        credentials: "include",
+        body: JSON.stringify({ content: text, type: "journal" }),
+      });
+      if (!res.ok) throw new Error("save failed");
+      const { entry } = await res.json();
+      const reply: Tagged = { role: "assistant", content: "Saved to your private Journal. Only you can see it.", is_answer: true, timestamp: nowMs(), card: "journal_saved", entry_id: entry._id };
+      setMessages([...base, reply]);
+      addMessage(s.id, reply);
+    } catch {
+      const errMsg: SessionMessage = { role: "assistant", content: "I couldn't save that to your Journal just now. Your words are still in the box above, so please try again.", timestamp: nowMs() };
+      setMessages([...messages, errMsg]);
+      setInput(text);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /** A tile or a menu entry. Journal opens its own page (with what is typed so far, unsent). */
+  const pickMode = (id: ModeId) => {
+    setMenu(null);
+    if (id === "mom" || id === "book" || id === "upload" || id === "brainstorm" || id === "journal") {
+      setComposeMode(id);
+      if (id === "upload") setTimeout(() => openPicker("document"), 30);
+      else setTimeout(() => inputRef.current?.focus(), 30);
+    } else {
+      void showCard(id);
+    }
+  };
+
+  // A link from the Dashboard (?mode=brainstorm | need | journal | book) opens that tool once, then tidies the address.
+  const deepLinkDone = useRef(false);
+  useEffect(() => {
+    if (deepLinkDone.current || !organization?.id || !role) return;
+    const mode = new URLSearchParams(window.location.search).get("mode");
+    // "Need action" reads your tasks, so it waits for the first read instead of showing "nothing needs you" while they load
+    if (mode === "need" && !workReady) return;
+    deepLinkDone.current = true;
+    if (!mode) return;
+    window.history.replaceState(null, "", window.location.pathname);
+    if (mode === "brainstorm" || mode === "need" || mode === "journal" || mode === "book") pickMode(mode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once, when the page and the person are known
+  }, [organization?.id, role, workReady]);
+
+  const openPicker = (kind: "document" | "image") => {
+    setMenu(null);
+    const el = fileInputRef.current;
+    if (!el) return;
+    el.accept = kind === "image" ? ".png,.jpg,.jpeg" : ".pdf,.docx,.txt,.csv,.xlsx,.xls";
+    el.click();
   };
 
   /** Meeting notes: saved privately, read for decisions and action items, and shown as tasks to assign. */
@@ -918,46 +1069,32 @@ export default function CaptureChat({
     return hit?.full_name || email;
   };
 
-  /** Takes a reflection back out of the journal. The next message is sorted afresh instead of continuing it. */
-  const removeFromJournal = async (entryId: string) => {
-    try {
-      const res = await fetch(`${API_URL}/journal/${entryId}`, { method: "DELETE" });
-      if (!res.ok && res.status !== 404) throw new Error("remove failed");
-      journalSinceRef.current = nowMs();
-      lastRouteRef.current = "assistant";
-      setJournalSaved((prev) => Object.fromEntries(Object.entries(prev).map(([k, v]) => [k, v.entryId === entryId ? { ...v, status: "removed" as const } : v])));
-    } catch {
-      setJournalSaved((prev) => Object.fromEntries(Object.entries(prev).map(([k, v]) => [k, v.entryId === entryId ? { ...v, status: "failed" as const } : v])));
-    }
-  };
-
-  /** A follow-up from the Journals tab goes to the journal companion, as it does on the Journal page. */
-  const sendToJournal = async (text: string) => {
-    if (loading) return;
-    const s = activeSession || (await ensureSession());
-    if (!s) return;
-    const userMsgObj: SessionMessage = { role: "user", content: text, timestamp: nowMs() };
-    const updated = [...messages, userMsgObj];
-    setMessages(updated);
-    addMessage(s.id, userMsgObj);
-    await handleJournal(text, updated, s);
-  };
-
-  const lastIncomingRef = useRef(0);
-  useEffect(() => {
-    if (!incoming) return;
-    const timer = setTimeout(() => {
-      if (lastIncomingRef.current === incoming.id) return;
-      lastIncomingRef.current = incoming.id;
-      void sendToJournal(incoming.text);
-    }, 0);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per incoming question
-  }, [incoming?.id]);
-
   const sendMessage = async (overrideText?: string) => {
     const rawText = typeof overrideText === "string" ? overrideText : input;
     if ((!rawText.trim() && !attachedFile) || loading) return;
+    // "Journal" was chosen: the words are a private note. The chip stays on, so several notes can follow one another.
+    if (composeMode === "journal" && !attachedFile && typeof overrideText !== "string") {
+      setInput("");
+      return handleJournalEntry(rawText.trim());
+    }
+    // "show my journals" and the like: your own entries as a list (typed words only, and never while the Journal chip is on)
+    const journalView = !composeMode && !attachedFile && typeof overrideText !== "string" ? journalViewFor(rawText) : null;
+    if (journalView) {
+      setInput("");
+      return showCard(journalView, rawText.trim());
+    }
+    // "Brainstorming" was chosen: the words are the topic
+    if (composeMode === "brainstorm" && !attachedFile && typeof overrideText !== "string") {
+      setComposeMode(null);
+      setInput("");
+      return handleBrainstorm(rawText.trim());
+    }
+    // "Book meeting" was chosen: the words go to the assistant as a booking request, which answers with free slots to pick from
+    if (composeMode === "book" && !attachedFile && typeof overrideText !== "string") {
+      setComposeMode(null);
+      const words = rawText.trim();
+      return sendMessage(/\b(book|schedule|set up|arrange)\b/i.test(words) ? words : `Book a meeting ${words}`);
+    }
     const userMsg = rawText.trim();
     setInput("");
     setSuggestions(null);
@@ -984,7 +1121,8 @@ export default function CaptureChat({
         setLoading(true);
         try {
           const result = await uploadAttachedFile();
-          if (result && result.fileId && (await routeMessage(result.textPreview || fileName, { hasFile: true })) === "meeting_notes") {
+          if (result && result.fileId && (readsAsNotes || (await routeMessage(result.textPreview || fileName, { hasFile: true })) === "meeting_notes")) {
+            setComposeMode(null);
             // a file of meeting notes: read it like pasted notes
             const fileMsg: SessionMessage = { role: "user", content: `📎 Uploaded: **${fileName}**`, timestamp: nowMs() };
             const base = [...messages, fileMsg];
@@ -1039,6 +1177,13 @@ export default function CaptureChat({
       if (autoTitle) renameSession(s.id, autoTitle);
     }
 
+    // "MOM" was chosen: these words are meeting notes, whatever they say
+    if (readsAsNotes) {
+      setComposeMode(null);
+      await handleMeetingNotes({ text: userMsg }, updated, s);
+      return;
+    }
+
     if (isKpiIntent(userMsg) && organization?.id) {
       const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant")?.content;
       const title = extractKpiTitleFromAssistant(lastAssistant || "") || userMsg.replace(/add|track|make|create|set|turn|convert|this|as|a|kpi/gi, "").trim();
@@ -1064,11 +1209,12 @@ export default function CaptureChat({
       }
     }
 
-    // Capture: a reflection goes to the private journal and meeting notes become tasks to assign. Questions,
-    // task and meeting requests, and everything else stay with the assistant, exactly as in Let's Talk.
-    const route = await routeMessage(userMsg);
+    // Meeting notes become tasks to assign. A personal reflection is never saved from here: Let's Talk only
+    // suggests the Journal, which the person opens on purpose. Everything else stays with the assistant.
+    const route = skipJournalSuggestionRef.current ? "assistant" : await routeMessage(userMsg);
+    skipJournalSuggestionRef.current = false;
     if (route === "journal") {
-      await handleJournal(userMsg, updated, s);
+      suggestJournal(userMsg, updated, s);
       return;
     }
     if (route === "meeting_notes") {
@@ -1469,30 +1615,38 @@ export default function CaptureChat({
     setSuggestionGoalCreated(false);
   };
 
-  const bookSlot = async (slot: BookingSlot) => {
+  /** Pressing a time on a booking card is the confirmation. It books through its own endpoint, not through the AI,
+   *  so exactly the time that was pressed is booked, and nothing is booked from a chat request alone. */
+  const bookSlot = async (slot: BookingSlot, params: BookingParams, cardId: number) => {
     const s = activeSession || (await ensureSession());
-    if (!s) return;
-    const text = slot.date ? `book the meeting on ${slot.date} at ${slot.start}` : `book the meeting at ${slot.start}`;
-    const userMsg: SessionMessage = { role: "user", content: text, timestamp: Date.now() };
+    if (!s || !organization?.id) return;
+    const when = `${slot.date ? `${slot.date} ` : ""}${slot.start}`;
+    const userMsg: SessionMessage = { role: "user", content: `Yes, book ${when}`, timestamp: Date.now() };
     const updated = [...messages, userMsg];
     setMessages(updated);
     addMessage(s.id, userMsg);
     setLoading(true);
     try {
-      const data = await apiAsk(text);
-      if (!data) return;
-      let resultMsg: SessionMessage;
-      if (data.type === "answer" && data.answer) {
-        resultMsg = { role: "assistant", content: data.answer, is_answer: true, timestamp: Date.now() };
-      } else if (data.type === "meeting_booking" && data.booking_params) {
-        resultMsg = { role: "assistant", content: data.answer || "", is_booking: true, booking_params: data.booking_params, timestamp: Date.now() };
-      } else {
-        resultMsg = { role: "assistant", content: data.answer || "Done! Check your calendar.", is_answer: true, timestamp: Date.now() };
-      }
+      const res = await fetch(`${API_URL}/assistant/confirm-booking`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        credentials: "include",
+        body: JSON.stringify({
+          organization_id: organization.id,
+          booking_params: { ...params, available_slots: undefined, booking_result: undefined },
+          slot,
+        }),
+      });
+      if (!res.ok) throw new Error("booking failed");
+      const data = await res.json();
+      const resultMsg: SessionMessage =
+        data.type === "meeting_booking" && data.booking_params
+          ? { role: "assistant", content: data.answer || "", is_booking: true, booking_params: data.booking_params, timestamp: Date.now() }
+          : { role: "assistant", content: data.answer || "Booked. Check your calendar.", is_answer: true, timestamp: Date.now(), ...(data.booking_result?.booked ? { booked_card: cardId } : {}) };
       setMessages([...updated, resultMsg]);
       addMessage(s.id, resultMsg);
     } catch {
-      const errMsg: SessionMessage = { role: "assistant", content: "Couldn't book that slot. Try again?", timestamp: Date.now() };
+      const errMsg: SessionMessage = { role: "assistant", content: "I couldn't book that time, and nothing was booked. Please try again.", timestamp: Date.now() };
       setMessages([...updated, errMsg]);
       addMessage(s.id, errMsg);
     } finally {
@@ -1807,49 +1961,6 @@ export default function CaptureChat({
     setActionItemsCreated(false);
   };
 
-  const fetchSessionInsights = async () => {
-    if (!organization?.id || sessionInsightsOpen) return;
-    setSessionInsightsLoading(true);
-    setSessionInsightsOpen(true);
-    try {
-      const res = await fetch(`${API_URL}/sessions/insights/${organization.id}?limit=20`, {
-        headers: { "Content-Type": "application/json" },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setSessionInsights(data.insights || []);
-      }
-    } catch {
-      // silent
-    } finally {
-      setSessionInsightsLoading(false);
-    }
-  };
-
-  const confirmSessionInsight = async (insightId: string) => {
-    try {
-      await fetch(`${API_URL}/sessions/insights/confirm?insight_id=${insightId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      setSessionInsights((prev) => prev.filter((i) => i._id !== insightId));
-    } catch {
-      // silent
-    }
-  };
-
-  const dismissSessionInsight = async (insightId: string) => {
-    try {
-      await fetch(`${API_URL}/sessions/insights/dismiss?insight_id=${insightId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      setSessionInsights((prev) => prev.filter((i) => i._id !== insightId));
-    } catch {
-      // silent
-    }
-  };
-
   const handleNewSession = async () => {
     if (!organization?.id) return;
     await createSession(organization.id, "New Chat", "assistant");
@@ -1870,180 +1981,195 @@ export default function CaptureChat({
     }
   };
 
+  /** The sessions column (desktop) and the same list in a drawer (narrow screens). */
+  const renderSessions = (afterPick?: () => void) => (
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <h2 className="mr-auto text-base font-bold">Sessions</h2>
+        <button
+          type="button"
+          onClick={() => { handleNewSession(); afterPick?.(); }}
+          className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border-2 border-outline bg-highlight px-3 py-1.5 text-xs font-bold text-on-highlight shadow-[2px_2px_0_var(--shadow-hard)]"
+        >
+          <Plus className="h-3.5 w-3.5" /> New
+        </button>
+      </div>
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
+        <label htmlFor="session-search" className="sr-only">Search sessions</label>
+        <input
+          id="session-search"
+          value={sessionSearch}
+          onChange={(e) => setSessionSearch(e.target.value)}
+          placeholder="Search sessions"
+          className="w-full rounded-full border-2 border-outline bg-surface py-2 pl-10 pr-4 text-sm font-medium placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-highlight"
+        />
+      </div>
+      <div className="custom-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pb-2">
+        {sessions.length === 0 && (
+          <p className="rounded-[20px] border-2 border-dashed border-outline px-4 py-8 text-center text-sm text-text-muted">No sessions yet. Your chats appear here.</p>
+        )}
+        {sessions.length > 0 && sessionGroups.length === 0 && (
+          <p className="px-1 text-sm text-text-muted">Nothing matches &ldquo;{sessionSearch}&rdquo;.</p>
+        )}
+        {sessionGroups.map(([label, rows]) => (
+          <section key={label} aria-label={label}>
+            <h3 className="mb-1.5 px-1 text-[11px] font-bold uppercase tracking-widest text-text-muted">{label}</h3>
+            <ul className="space-y-1.5">
+              {rows.map((sess) => {
+                const active = sess.id === activeSessionId;
+                return (
+                  <li key={sess.id} className={cn("group flex items-center gap-1 rounded-2xl border-2 border-outline pr-1.5", active ? "bg-highlight text-on-highlight" : "bg-surface")}>
+                    {renamingId === sess.id ? (
+                      <form
+                        className="flex min-w-0 flex-1 items-center gap-1 p-1.5"
+                        onSubmit={(e) => { e.preventDefault(); handleRenameConfirm(sess.id); }}
+                      >
+                        <label htmlFor={`rename-${sess.id}`} className="sr-only">Rename session</label>
+                        <input
+                          id={`rename-${sess.id}`}
+                          autoFocus
+                          value={renameValue}
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          className="min-w-0 flex-1 rounded-xl border-2 border-outline bg-surface px-2.5 py-1.5 text-sm font-bold text-foreground focus:outline-none"
+                        />
+                        <button type="submit" aria-label="Save name" className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full"><Check className="h-4 w-4" /></button>
+                        <button type="button" aria-label="Cancel" onClick={() => setRenamingId(null)} className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full"><X className="h-4 w-4" /></button>
+                      </form>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          aria-current={active ? "true" : undefined}
+                          onClick={() => { setActiveSession(sess.id); setMessages(sess.messages); afterPick?.(); }}
+                          className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 px-3 py-2.5 text-left"
+                        >
+                          <MessageSquare className="h-4 w-4 flex-shrink-0 opacity-70" />
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-bold">{sess.title}</span>
+                            <span className="block text-[11px] opacity-70">{ago(sess.updated_at || sess.created_at)} · {sess.messages.length} message{sess.messages.length === 1 ? "" : "s"}</span>
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Rename ${sess.title}`}
+                          onClick={() => { setRenamingId(sess.id); setRenameValue(sess.title); setConfirmDeleteId(null); }}
+                          className="flex h-8 w-8 flex-shrink-0 cursor-pointer items-center justify-center rounded-full opacity-70 hover:opacity-100"
+                        >
+                          <Edit3 className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={confirmDeleteId === sess.id ? `Confirm delete ${sess.title}` : `Delete ${sess.title}`}
+                          onClick={() => {
+                            if (confirmDeleteId !== sess.id) return setConfirmDeleteId(sess.id);
+                            handleDeleteSession(sess.id);
+                            setConfirmDeleteId(null);
+                          }}
+                          className={cn("flex h-8 flex-shrink-0 cursor-pointer items-center justify-center rounded-full", confirmDeleteId === sess.id ? "bg-rose-500 px-2.5 text-[11px] font-bold text-white" : "w-8 opacity-70 hover:opacity-100")}
+                        >
+                          {confirmDeleteId === sess.id ? "Delete?" : <Trash2 className="h-3.5 w-3.5" />}
+                        </button>
+                      </>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+
   return (
-    <Card className="flex flex-col h-full min-h-[520px]">
-      <CardHeader className="flex-shrink-0 pb-2">
-        <div className="flex items-center gap-2">
-          <MessageSquare className="w-5 h-5 text-primary" />
-          <CardTitle>Let&apos;s Talk</CardTitle>
-          <Badge variant="default" className="text-[10px] ml-2">Real-time</Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="flex-1 flex min-h-0 p-0">
-        {/* Session Sidebar */}
-        <div className={`${sidebarOpen ? "w-52" : "w-0"} flex-shrink-0 border-r border-border bg-surface/20 flex flex-col overflow-hidden transition-all duration-200`}>
-          <div className="p-2.5 border-b border-border flex items-center gap-2">
-            <button
-              onClick={() => setSidebarOpen(false)}
-              className="p-1 rounded hover:bg-surface-light text-text-muted hover:text-foreground transition-colors cursor-pointer flex-shrink-0"
-              title="Collapse sidebar"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            {sidebarOpen && (
-              <button
-                onClick={handleNewSession}
-                className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs font-medium transition-colors cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                New Session
-              </button>
-            )}
+    <div className="mx-auto flex h-full min-h-[520px] w-full max-w-5xl gap-6">
+      <aside aria-label="Sessions" className="hidden w-64 flex-shrink-0 md:block">
+        {renderSessions()}
+      </aside>
+
+      {sessionsOpen && (
+        <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-label="Sessions">
+          <button type="button" aria-label="Close sessions" className="absolute inset-0 cursor-default bg-black/40" onClick={() => setSessionsOpen(false)} />
+          <div className="absolute inset-y-0 left-0 w-[min(20rem,85vw)] border-r-[2.5px] border-outline bg-background p-4">
+            {renderSessions(() => setSessionsOpen(false))}
           </div>
-          {sidebarOpen && (
-            <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5 custom-scrollbar">
-              {sessions.length === 0 && (
-                <p className="px-3 py-3 text-xs text-text-muted text-center">No sessions yet</p>
-              )}
-              {sessions.map((s) => (
-                <div
-                  key={s.id}
-                  onClick={() => { setActiveSession(s.id); setMessages(s.messages); }}
-                  className={`group flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs cursor-pointer transition-all ${
-                    s.id === activeSessionId
-                      ? "bg-primary/15 text-foreground border border-primary/30"
-                      : "hover:bg-surface-light text-text-muted border border-transparent"
-                  }`}
-                >
-                  <MessageSquare className="w-3 h-3 flex-shrink-0" />
-                  {renamingId === s.id ? (
-                    <input
-                      value={renameValue}
-                      onChange={(e) => setRenameValue(e.target.value)}
-                      onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") handleRenameConfirm(s.id); }}
-                      onBlur={() => handleRenameConfirm(s.id)}
-                      className="flex-1 bg-surface border border-border rounded px-1 py-0.5 text-[11px] outline-none"
-                      autoFocus
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                  ) : (
-                    <span className="flex-1 truncate">{s.title}</span>
-                  )}
-                  <div className="hidden group-hover:flex items-center gap-0.5">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setRenamingId(s.id); setRenameValue(s.title); }}
-                      className="p-0.5 rounded hover:bg-surface-light text-text-muted hover:text-foreground cursor-pointer"
-                    >
-                      <Edit3 className="w-3 h-3" />
-                    </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleDeleteSession(s.id); }}
-                      className="p-0.5 rounded hover:bg-surface-light text-text-muted hover:text-rose-400 cursor-pointer"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          {sidebarOpen && (
-            <div className="border-t border-border">
-              <button
-                onClick={fetchSessionInsights}
-                className="flex items-center gap-2 w-full px-3 py-2 text-xs text-text-muted hover:text-foreground hover:bg-surface-light/50 transition-colors cursor-pointer"
-              >
-                <Lightbulb className="w-3.5 h-3.5" />
-                <span>Past Insights</span>
-                {sessionInsightsLoading && <Loader2 className="w-3 h-3 animate-spin ml-auto" />}
-                {!sessionInsightsOpen && !sessionInsightsLoading && <span className="ml-auto text-[10px] text-primary">Show</span>}
-              </button>
-              {sessionInsightsOpen && (
-                <div className="max-h-[200px] overflow-y-auto p-1.5 space-y-1 custom-scrollbar">
-                  {sessionInsights.length === 0 && !sessionInsightsLoading && (
-                    <p className="px-2 py-2 text-[10px] text-text-muted text-center">No pending insights</p>
-                  )}
-                  {sessionInsights.map((insight: any) => (
-                    <div key={insight._id} className="group flex items-start gap-1.5 px-2 py-1.5 rounded-lg bg-surface/30 text-[10px]">
-                      <span className="flex-1 text-text-muted leading-relaxed line-clamp-2">{insight.summary}</span>
-                      <div className="hidden group-hover:flex items-center gap-0.5 flex-shrink-0">
-                        <button
-                          onClick={() => confirmSessionInsight(insight._id)}
-                          className="p-0.5 rounded hover:bg-emerald-500/20 text-text-muted hover:text-emerald-400 cursor-pointer"
-                          title="Mark as done"
-                          aria-label={`Confirm insight: ${(insight.summary || "").slice(0, 60)}`}
-                        >
-                          <Check className="w-3 h-3" />
-                        </button>
-                        <button
-                          onClick={() => dismissSessionInsight(insight._id)}
-                          className="p-0.5 rounded hover:bg-rose-500/20 text-text-muted hover:text-rose-400 cursor-pointer"
-                          title="Dismiss"
-                          aria-label={`Dismiss insight: ${(insight.summary || "").slice(0, 60)}`}
-                        >
-                          <span className="text-[11px] font-bold leading-none" aria-hidden="true">×</span>
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  {sessionInsights.length > 0 && (
-                    <button
-                      onClick={() => setSessionInsightsOpen(false)}
-                      className="w-full text-[10px] text-text-muted hover:text-foreground text-center pt-1 cursor-pointer"
-                    >
-                      Collapse
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
+        </div>
+      )}
+
+      <div className="flex h-full min-w-0 max-w-3xl flex-1 flex-col">
+        <div className="order-0 flex flex-shrink-0 items-center justify-between pb-2 md:hidden">
+          <button
+            type="button"
+            onClick={() => setSessionsOpen(true)}
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border-2 border-outline bg-surface px-3 py-1.5 text-xs font-bold shadow-[2px_2px_0_var(--shadow-hard)]"
+          >
+            <MessageSquare className="h-3.5 w-3.5" /> Sessions <span className="rounded-full bg-highlight px-1.5 text-on-highlight">{sessions.length}</span>
+          </button>
+          {hasMessages && (
+            <button type="button" onClick={handleNewSession} className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border-2 border-outline bg-surface px-3 py-1.5 text-xs font-bold">
+              <Plus className="h-3.5 w-3.5" /> New chat
+            </button>
           )}
         </div>
-        {!sidebarOpen && (
-          <div className="flex-shrink-0 w-8 flex flex-col items-center pt-2 border-r border-border bg-surface/20">
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="p-1.5 rounded hover:bg-surface-light text-text-muted hover:text-foreground transition-colors cursor-pointer"
-              title="Expand sidebar"
-            >
-              <ChevronLeft className="w-4 h-4 rotate-180" />
-            </button>
+
+        {!hasMessages && topSlot && <div className="order-0 flex-shrink-0 pb-3 empty:hidden">{topSlot}</div>}
+
+        {!hasMessages && (
+          <div className="order-0 flex-shrink-0 pb-4 pt-1 text-center">
+            <h1 suppressHydrationWarning className="text-[28px] font-bold leading-tight text-accent md:text-4xl">
+              {greetingFor(new Date(nowMs()).getHours(), firstNameOf(user))}
+            </h1>
+            <p className="mt-1 text-text-muted">What&apos;s on your mind?</p>
           </div>
         )}
 
-        {/* Main Chat Area */}
-        <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar min-h-0">
-            {messages.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-full text-center px-4">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary/20 to-purple-500/20 flex items-center justify-center mb-4">
-                  <Sparkles className="w-6 h-6 text-primary" />
-                </div>
-                <h2 className="text-lg font-semibold text-foreground mb-1">What's on your mind?</h2>
-                <p className="text-sm text-text-muted font-medium max-w-md mb-6">
-                  Ask a question, assign a task, book a meeting, write down your day, or paste meeting notes. I work out which it
-                  is. Everything you write here is private to you; only a task you assign reaches the person it is for.
-                </p>
-                <div className="flex flex-wrap gap-2 justify-center">
-                  {[
-                    "What should I focus on this week?",
-                    "How are my goals tracking?",
-                    "Ask Priya to send the revised quote by Friday",
-                    "Book a meeting with @Rahul tomorrow at 4pm",
-                    "Today was long, but I'm glad we shipped the release.",
-                  ].map((prompt) => (
+        <div className="custom-scrollbar order-2 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain pb-4 pt-4">
+          {!hasMessages && (
+            <>
+              {extras}
+              <div className="mt-auto space-y-3">
+                <div role="group" aria-label="Quick starts" className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                  {TILES.map(({ id, icon: Icon, colour, title, sub }) => (
                     <button
-                      key={prompt}
+                      key={id}
                       type="button"
-                      onClick={() => setInput(prompt)}
-                      className="text-xs px-3 py-1.5 rounded-lg bg-surface border border-border/50 hover:border-primary/30 hover:bg-surface-light transition-colors text-text-muted cursor-pointer"
+                      onClick={() => pickMode(id)}
+                      style={{ background: colour }}
+                      className="flex cursor-pointer items-center gap-2.5 rounded-[20px] border-2 border-outline p-2 text-left text-[#111111] shadow-[3px_3px_0_var(--shadow-hard)] transition-all hover:-translate-x-px hover:-translate-y-px sm:flex-col sm:items-start sm:gap-2 sm:p-2.5"
                     >
-                      {prompt}
+                      <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full border-2 border-[#111111] bg-white">
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0 flex-1 sm:flex-none">
+                        <span className="block text-sm font-bold leading-tight">{title}</span>
+                        <span className="block text-xs leading-snug opacity-80">{sub}</span>
+                      </span>
                     </button>
                   ))}
                 </div>
+                <div role="group" aria-label="More" className="flex flex-wrap items-center gap-2">
+                  <p className="w-full text-[11px] font-bold uppercase tracking-widest text-text-muted">More</p>
+                  {MORE.map(({ id, icon: Icon, colour, title }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => pickMode(id)}
+                      className="inline-flex cursor-pointer items-center gap-2 rounded-full border-2 border-outline bg-surface py-1.5 pl-1.5 pr-3.5 text-sm font-bold shadow-[2px_2px_0_var(--shadow-hard)] transition-all hover:-translate-x-px hover:-translate-y-px"
+                    >
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-outline text-[#111111]" style={{ background: colour }}>
+                        <Icon className="h-3.5 w-3.5" />
+                      </span>
+                      {title}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-text-muted">
+                  Or just ask a question, assign a task or book a meeting: I work out which it is. What you write here is private to you; only a task you assign reaches the person it is for.
+                </p>
               </div>
-            )}
+            </>
+          )}
             {messages.map((msg, i) => {
               if (msg.is_loading) {
                 if (isStreaming) return null;
@@ -2088,18 +2214,55 @@ export default function CaptureChat({
                   >
                     {msg.role === "assistant" ? (
                       msg.is_delegate && msg.delegate_params ? (
-                        <DelegatePreviewCard
-                          params={msg.delegate_params}
-                          subTasks={msg.generated_sub_tasks || []}
-                          onConfirm={(selected) => confirmDelegate(msg, selected)}
-                          disabled={loading}
-                        />
+                        <div className="space-y-3">
+                          {msg.content && <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />}
+                          <DelegatePreviewCard
+                            params={msg.delegate_params}
+                            subTasks={msg.generated_sub_tasks || []}
+                            onConfirm={(selected) => confirmDelegate(msg, selected)}
+                            disabled={loading}
+                          />
+                        </div>
                       ) : msg.is_booking && msg.booking_params ? (
-                        <BookingCard
-                          params={msg.booking_params}
-                          onBook={(slot) => bookSlot(slot)}
-                          disabled={loading}
-                        />
+                        <div className="space-y-3">
+                          {msg.content && <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />}
+                          <BookingCard
+                            params={msg.booking_params}
+                            onBook={(slot) => bookSlot(slot, msg.booking_params as BookingParams, msg.timestamp)}
+                            disabled={loading || closedCards.has(msg.timestamp)}
+                            done={closedCards.has(msg.timestamp)}
+                          />
+                        </div>
+                      ) : (msg as Tagged).need_action || (msg as Tagged).card === "need" ? (
+                        <div className="space-y-3">
+                          <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                          <NeedActionCard isOwner={role === "owner"} userEmail={user?.email || ""} />
+                        </div>
+                      ) : (msg as Tagged).card === "brainstorm" && organization?.id ? (
+                        <div className="space-y-3">
+                          <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                          <BrainstormCard orgId={organization.id} ideas={(msg as Tagged).ideas || []} />
+                        </div>
+                      ) : (msg as Tagged).card === "journal_saved" && organization?.id && (msg as Tagged).entry_id ? (
+                        <div className="space-y-3">
+                          <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                          <JournalSavedCard orgId={organization.id} entryId={(msg as Tagged).entry_id as string} />
+                        </div>
+                      ) : ((msg as Tagged).card === "journals" || (msg as Tagged).card === "reminders" || (msg as Tagged).card === "ideas") && organization?.id ? (
+                        <div className="space-y-3">
+                          <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                          <JournalHub orgId={organization.id} initialTab={(msg as Tagged).card === "reminders" ? "reminders" : (msg as Tagged).card === "ideas" ? "ideas" : "entries"} />
+                        </div>
+                      ) : (msg as Tagged).card === "meetings" ? (
+                        <div className="space-y-3">
+                          <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                          {organization?.id && <MeetingsHub orgId={organization.id} nameFor={nameForEmail} />}
+                        </div>
+                      ) : (msg as Tagged).card === "distribution" || (msg as Tagged).card === "goals" || (msg as Tagged).card === "completion" ? (
+                        <div className="space-y-3">
+                          <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                          <InsightChartCard kind={(msg as Tagged).card as "distribution" | "goals" | "completion"} tasks={myTasks} goals={myGoals} own={role !== "owner"} />
+                        </div>
                       ) : (msg as Tagged).capture_id ? (
                         <div className="space-y-3">
                           <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
@@ -2130,24 +2293,25 @@ export default function CaptureChat({
                             {speaker.activeId === String(msg.timestamp) && speaker.status !== "idle" ? "Stop" : "Listen"}
                           </button>
                         )}
-                        {journalSaved[String(msg.timestamp)] && (
-                          <span className="inline-flex items-center gap-1.5 text-xs text-text-muted" role="status">
-                            {journalSaved[String(msg.timestamp)].status === "removed" ? (
-                              "Removed from your journal"
-                            ) : (
-                              <>
-                                {journalSaved[String(msg.timestamp)].status === "failed" ? "Couldn't remove it." : "Saved to your journal ·"}
-                                <button
-                                  type="button"
-                                  onClick={() => void removeFromJournal(journalSaved[String(msg.timestamp)].entryId)}
-                                  className="cursor-pointer text-primary hover:underline"
-                                >
-                                  {journalSaved[String(msg.timestamp)].status === "failed" ? "Try again" : "Remove"}
-                                </button>
-                              </>
-                            )}
-                          </span>
-                        )}
+                      </div>
+                    )}
+                    {msg.role === "assistant" && (msg as Tagged).suggest_journal && (
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openJournalWith((msg as Tagged).suggest_journal as string)}
+                          className="inline-flex cursor-pointer items-center gap-2 rounded-full border-2 border-outline bg-highlight px-4 py-1.5 text-sm font-bold text-on-highlight shadow-[3px_3px_0_var(--shadow-hard)] transition-all hover:-translate-x-px hover:-translate-y-px"
+                        >
+                          <BookOpen className="h-4 w-4" /> Write in Journal
+                        </button>
+                        <button
+                          type="button"
+                          disabled={loading}
+                          onClick={() => talkItThroughHere()}
+                          className="inline-flex cursor-pointer items-center gap-2 rounded-full border-2 border-outline bg-surface px-4 py-1.5 text-sm font-bold text-foreground shadow-[3px_3px_0_var(--shadow-hard)] transition-all hover:-translate-x-px hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Talk it through here
+                        </button>
                       </div>
                     )}
                   </div>
@@ -2175,6 +2339,7 @@ export default function CaptureChat({
           )}
           <div ref={chatEndRef} />
           </div>
+        <div className="order-2 flex-shrink-0 empty:hidden">
         {suggestions && suggestions.length > 0 && !loading && (
           <div className="flex-shrink-0 px-4 py-2 border-t border-border/50">
             <div
@@ -2511,49 +2676,33 @@ export default function CaptureChat({
             </div>
           </div>
         )}
-        <div className="flex flex-col px-4 pb-4 pt-2 border-t border-border flex-shrink-0">
+        </div>
+        <div
+          className={cn("relative z-30 flex flex-shrink-0 flex-col", hasMessages ? "order-3 pt-2" : "order-1")}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragging(false);
+            const file = e.dataTransfer.files?.[0];
+            if (file) attachFile(file);
+          }}
+        >
           {attachedFile && (
-            <div className="flex items-center gap-2 mb-2 px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20 text-xs">
-              <Paperclip className="w-3.5 h-3.5 text-primary" />
-              <span className="flex-1 truncate text-foreground">{attachedFile.name}</span>
+            <div className="mb-2 flex items-center gap-2 rounded-full border-2 border-outline bg-surface px-3.5 py-1.5 text-xs font-bold">
+              <Paperclip className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="flex-1 truncate">{attachedFile.name}</span>
               <button
+                type="button"
                 onClick={removeAttachedFile}
-                className="p-0.5 rounded hover:bg-surface-light text-text-muted hover:text-rose-400 cursor-pointer"
+                aria-label="Remove the attached file"
+                className="grid h-5 w-5 cursor-pointer place-items-center rounded-full hover:bg-surface-light"
               >
-                X
+                <X className="h-3.5 w-3.5" />
               </button>
-            </div>
-          )}
-          {mode === "upload" && !attachedFile && (
-            <div
-              role="button"
-              tabIndex={0}
-              aria-label="Choose a file to upload"
-              onClick={() => fileInputRef.current?.click()}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  fileInputRef.current?.click();
-                }
-              }}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDragging(true);
-              }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragging(false);
-                const file = e.dataTransfer.files?.[0];
-                if (file) attachFile(file);
-              }}
-              className={`mb-3 flex cursor-pointer flex-col items-center gap-1 rounded-3xl border-2 border-dashed border-outline px-4 py-6 text-center transition-colors focus:outline-none focus:ring-2 focus:ring-highlight ${
-                dragging ? "bg-highlight text-on-highlight" : "bg-surface-light hover:bg-highlight/40"
-              }`}
-            >
-              <Paperclip className="h-7 w-7" />
-              <p className="text-sm font-bold">Drop a file here, or click to choose</p>
-              <p className="text-xs text-text-muted">PDF, Word, text, CSV, Excel or an image</p>
             </div>
           )}
           {dropError && (
@@ -2561,48 +2710,125 @@ export default function CaptureChat({
               {dropError}
             </p>
           )}
-          {mode === "speak" && (
-            <div className="mb-2 flex items-center gap-4 rounded-3xl border-2 border-outline bg-surface-light px-4 py-3">
+          {composeMode && (
+            <p className="mb-2 px-2 text-xs font-semibold text-text-muted">{COMPOSE[composeMode].help}</p>
+          )}
+          {listening && (
+            <p className="mb-2 animate-pulse px-2 text-xs font-bold text-rose-400" role="status">
+              Listening… {liveText ? `“${liveText}”` : "start speaking"}
+            </p>
+          )}
+
+          {/* wide: one row. narrow: the text box takes the whole first row and the buttons sit under it */}
+          <div className={cn("relative flex flex-wrap items-end gap-2 rounded-[28px] border-[2.5px] border-outline bg-surface p-2 shadow-[4px_4px_0_var(--shadow-hard)] transition-colors sm:flex-nowrap", dragging && "bg-highlight")}>
+            <div className="relative flex-shrink-0" data-menu-root>
               <button
                 type="button"
-                onClick={toggleMic}
-                aria-label={listening ? "Stop listening" : "Start speaking"}
-                className={`flex h-16 w-16 flex-shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-outline shadow-[3px_3px_0_var(--shadow-hard)] transition-all ${
-                  listening ? "animate-pulse bg-rose-500 text-white" : "bg-highlight text-on-highlight hover:-translate-x-px hover:-translate-y-px"
-                }`}
+                aria-label="Choose what to do: capture, meetings or insights"
+                aria-haspopup="menu"
+                aria-expanded={menu === "mode"}
+                onClick={() => setMenu(menu === "mode" ? null : "mode")}
+                className={cn(roundButton, menu === "mode" || composeMode ? "bg-highlight text-on-highlight" : "bg-surface-light")}
               >
-                {listening ? <Square className="h-6 w-6" /> : <Mic className="h-7 w-7" />}
+                <Menu className="h-5 w-5" />
               </button>
-              <div className="min-w-0 flex-1 space-y-1">
-                <p className="line-clamp-2 text-sm font-bold" role="status">
-                  {listening ? (liveText ? `"${liveText}"` : "Listening... start speaking") : "Tap the mic and speak"}
-                </p>
-                <p className="text-xs text-text-muted">Your words appear in the box below. Check them, then press Send.</p>
-                <select
-                  value={voiceLang}
-                  onChange={(e) => onVoiceLangChange(e.target.value)}
-                  disabled={listening}
-                  aria-label="Spoken language"
-                  className="h-8 cursor-pointer rounded-full border-2 border-outline bg-surface px-3 text-xs font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-highlight disabled:opacity-50"
-                >
-                  {VOICE_LANGUAGES.map((l) => (
-                    <option key={l.code} value={l.code}>
-                      {l.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {menu === "mode" && (
+                <div role="menu" className={cn("absolute left-0 z-50 w-72 overflow-hidden rounded-[22px] border-[2.5px] border-outline bg-surface shadow-[4px_4px_0_var(--shadow-hard)]", menuPos)}>
+                  <div className="max-h-[min(55vh,24rem)] overflow-y-auto overscroll-contain">
+                    {MODE_GROUPS.map((group) => (
+                      <div key={group} role="group" aria-label={group}>
+                        <p className="bg-surface-light/60 px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-widest text-text-muted">{group}</p>
+                        {MODES.filter((m) => m.group === group).map(({ id, icon: Icon, colour, title, sub }) => (
+                          <button
+                            key={id}
+                            type="button"
+                            role="menuitem"
+                            onClick={() => pickMode(id)}
+                            className="flex w-full cursor-pointer items-center gap-3 border-b border-border px-3.5 py-2.5 text-left last:border-b-0 hover:bg-surface-light"
+                          >
+                            <span className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-full border-2 border-outline text-[#111]" style={{ background: colour }}>
+                              <Icon className="h-4 w-4" />
+                            </span>
+                            <span>
+                              <span className="block text-sm font-bold">{title}</span>
+                              <span className="block text-xs text-text-muted">{sub}</span>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2 border-t-2 border-outline bg-surface-light/60 px-3.5 py-2.5">
+                    <label htmlFor="voice-language" className="text-xs font-bold text-text-muted">Voice language</label>
+                    <select
+                      id="voice-language"
+                      value={voiceLang}
+                      onChange={(e) => chooseVoiceLang(e.target.value)}
+                      disabled={listening}
+                      className="min-w-0 flex-1 cursor-pointer rounded-full border-2 border-outline bg-surface px-2.5 py-1 text-xs font-bold text-foreground focus:outline-none disabled:opacity-50 [&>option]:bg-surface [&>option]:text-foreground"
+                    >
+                      {VOICE_LANGUAGES.map((l) => (
+                        <option key={l.code} value={l.code}>
+                          {l.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-          <div className="flex gap-2 items-end">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".pdf,.docx,.txt,.csv,.xlsx,.xls,.png,.jpg,.jpeg"
-            className="hidden"
-            onChange={handleAttachFile}
-          />
-          <div className="relative flex-1">
+
+            <div className="relative flex-shrink-0" data-menu-root>
+              <button
+                type="button"
+                aria-label="Attach a document or an image"
+                aria-haspopup="menu"
+                aria-expanded={menu === "attach"}
+                onClick={() => setMenu(menu === "attach" ? null : "attach")}
+                className={cn(roundButton, menu === "attach" || attachedFile ? "bg-highlight text-on-highlight" : "bg-surface-light")}
+              >
+                <Plus className="h-5 w-5" />
+              </button>
+              {menu === "attach" && (
+                <div role="menu" className={cn("absolute left-0 z-50 w-64 overflow-hidden rounded-[22px] border-[2.5px] border-outline bg-surface shadow-[4px_4px_0_var(--shadow-hard)]", menuPos)}>
+                  {([
+                    { kind: "document", icon: FileText, colour: "#7CC8FF", title: "Document", sub: "PDF, Word, Excel or text" },
+                    { kind: "image", icon: ImageIcon, colour: "#FF9FD2", title: "Image", sub: "A photo or screenshot" },
+                  ] as const).map(({ kind, icon: Icon, colour, title, sub }) => (
+                    <button
+                      key={kind}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => openPicker(kind)}
+                      className="flex w-full cursor-pointer items-center gap-3 border-b border-border px-3.5 py-3 text-left last:border-b-0 hover:bg-surface-light"
+                    >
+                      <span className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-full border-2 border-outline text-[#111]" style={{ background: colour }}>
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <span>
+                        <span className="block text-sm font-bold">{title}</span>
+                        <span className="block text-xs text-text-muted">{sub}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <input ref={fileInputRef} type="file" accept={ACCEPTED_EXTENSIONS.join(",")} className="hidden" onChange={handleAttachFile} />
+
+            <div className="relative order-first min-w-0 basis-full sm:order-none sm:flex-1 sm:basis-0">
+              {composeMode && (() => {
+                const { chip, colour, icon: ChipIcon } = COMPOSE[composeMode];
+                return (
+                  <span style={{ background: colour }} className="mb-1 ml-1 inline-flex items-center gap-1.5 rounded-full border-2 border-outline py-0.5 pl-2.5 pr-1 text-xs font-extrabold text-[#111]">
+                    <ChipIcon className="h-3.5 w-3.5" /> {chip}
+                    <button type="button" onClick={() => setComposeMode(null)} aria-label={`Remove ${chip}`} className="grid h-4 w-4 cursor-pointer place-items-center rounded-full hover:bg-white/60">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                );
+              })()}
             {mentionOpen && mentionSuggestions.length > 0 && (
               <div
                 ref={mentionListRef}
@@ -2683,11 +2909,6 @@ export default function CaptureChat({
                 </div>
               </div>
             )}
-            {listening && mode !== "speak" && (
-              <p className="absolute bottom-full left-0 mb-1 text-xs text-primary animate-pulse" role="status">
-                Listening… {liveText ? `“${liveText}”` : "start speaking"}
-              </p>
-            )}
             <textarea
               ref={inputRef}
               rows={1}
@@ -2732,23 +2953,37 @@ export default function CaptureChat({
                   sendMessage();
                 }
               }}
-              placeholder={mode === "upload" ? "Add a note about the file (optional)" : mode === "speak" ? "Your words appear here: check them, then press Send" : "Type your message. Shift+Enter adds a new line."}
-              className="w-full min-h-[40px] max-h-[200px] resize-none px-4 py-2.5 rounded-xl bg-surface border border-border text-sm text-foreground placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+              placeholder={composeMode ? COMPOSE[composeMode].placeholder : attachedFile ? "Add a note about the file (optional)" : "Ask or write anything"}
+              className="max-h-[200px] min-h-[40px] w-full resize-none bg-transparent px-2 py-2.5 text-sm text-foreground placeholder:text-text-muted focus:outline-none"
             />
+            </div>
+
+            {input.trim() || attachedFile ? (
+              <button
+                type="button"
+                onClick={() => sendMessage()}
+                disabled={loading}
+                aria-label="Send"
+                className={cn(roundButton, "bg-primary text-on-primary shadow-[2px_2px_0_var(--shadow-hard)]")}
+              >
+                <Send className="h-5 w-5" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={toggleMic}
+                aria-label={listening ? "Stop listening" : "Dictate"}
+                title={listening ? "Stop listening" : "Dictate"}
+                className={cn(roundButton, "ml-auto sm:ml-0", listening ? "animate-pulse bg-rose-500 text-white" : "bg-surface-light")}
+              >
+                {listening ? <Square className="h-4 w-4" /> : <Mic className="h-5 w-5" />}
+              </button>
+            )}
           </div>
-          <Button
-            onClick={() => sendMessage()}
-            disabled={loading || (!input.trim() && !attachedFile)}
-            size="icon"
-            className="cursor-pointer flex-shrink-0"
-          >
-            <Send className="w-4 h-4" />
-          </Button>
+
         </div>
         </div>
-        </div>
-      </CardContent>
-    </Card>
+    </div>
   );
 }
 
@@ -2756,13 +2991,19 @@ function BookingCard({
   params,
   onBook,
   disabled,
+  done,
 }: {
   params: BookingParams;
   onBook: (slot: BookingSlot) => void;
   disabled?: boolean;
+  /** a time on this card has been booked: the card is closed */
+  done?: boolean;
 }) {
   const slots = params.available_slots || [];
   const booked = params.booking_result?.booked;
+  // a proposal: the first time is the one asked for, and nothing is booked until a time is pressed
+  const confirming = !!params.booking_result?.needs_confirmation;
+  const people = params.attendee_emails?.length || 0;
 
   if (booked) {
     const r = params.booking_result;
@@ -2787,21 +3028,29 @@ function BookingCard({
 
   return (
     <div className="rounded-2xl bg-surface border border-border p-4 space-y-3 min-w-[280px] max-w-[420px]">
-      <p className="text-[10px] font-medium text-text-muted uppercase tracking-wider">Available Slots</p>
+      <p className="text-[10px] font-medium text-text-muted uppercase tracking-wider">{confirming ? "Confirm a time" : "Available Slots"}</p>
+      {confirming && (
+        <p className="text-sm font-bold">
+          {params.title || "Meeting"} <span className="font-normal text-text-muted">· {people} attendee{people === 1 ? "" : "s"}</span>
+        </p>
+      )}
       <div className="grid grid-cols-2 gap-2">
         {slots.slice(0, 8).map((slot, i) => (
           <button
             key={i}
             onClick={() => onBook(slot)}
             disabled={disabled}
-            className="px-3 py-2 rounded-lg bg-primary/10 hover:bg-primary/20 border border-primary/20 text-sm font-medium text-primary transition-all cursor-pointer disabled:opacity-50"
+            className={cn(
+              "px-3 py-2 rounded-lg border text-sm font-medium transition-all cursor-pointer disabled:opacity-50",
+              confirming && i === 0 ? "border-outline bg-highlight text-on-highlight font-bold" : "bg-primary/10 hover:bg-primary/20 border-primary/20 text-primary",
+            )}
           >
             {slot.date ? `${slot.date.slice(5)} ` : ""}
             {slot.start} – {slot.end}
           </button>
         ))}
       </div>
-      <p className="text-[10px] text-text-muted">Click a slot to book instantly</p>
+      <p className="text-[10px] text-text-muted">{done ? "Booked. Ask again to book another time." : confirming ? "Nothing is booked or sent until you press a time." : "Pressing a time books it and sends the invites."}</p>
     </div>
   );
 }

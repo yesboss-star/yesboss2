@@ -108,8 +108,9 @@ async def generate_default_goals(
         return goals
 
     except Exception as e:
-        logger.error(f"AI goal generation failed: {e}. Using fallback templates.")
-        return _fallback_goals(industry, micro_vertical, count)
+        # No template goals ("Increase MRR by 20%", ...): they are not this company's goals, so none is better than made-up ones.
+        logger.error(f"AI goal generation failed: {e}. No starter goals were created.")
+        return []
 
 
 def _fallback_goals(industry: str, micro_vertical: str, count: int = 5) -> list[dict[str, Any]]:

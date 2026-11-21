@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useState, useRef } from "react";
 import { auth } from "@/lib/firebase";
 import { installAuthFetch } from "@/lib/authFetch";
-import { User, onAuthStateChanged, onIdTokenChanged, signOut as firebaseSignOut, getIdToken } from "firebase/auth";
+import { User, onAuthStateChanged, onIdTokenChanged, signOut as firebaseSignOut, getIdToken, getIdTokenResult } from "firebase/auth";
 import { useUserStore } from "@/stores/userStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
 
@@ -60,7 +60,10 @@ async function clearAuthCookies() {
 // accounts/sessions on the same browser, so stale values leak another user's
 // org/goals/tasks into the next sign-in. We wipe them whenever the signed-in
 // user changes (and on sign-out).
+const LAST_UID_KEY = "yesboss_last_uid"; // who the stored data belongs to; cleared with it, so sign-out forgets it too
+
 const USER_SCOPED_STORAGE_KEYS = [
+  LAST_UID_KEY,
   "yesboss_id_token",
   "yesboss_user",
   "yesboss_role",
@@ -175,14 +178,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         lastUidRef.current = firebaseUser.uid;
 
-        // New user signed in — wipe any previous user's persisted org/goals/tasks/
-        // journal so their data can never leak into this session.
-        clearUserScopedStorage();
-        useOrganizationStore.getState().clearOrganization();
+        // A DIFFERENT user signed in — wipe the previous user's persisted org/goals/tasks/journal so their
+        // data can never leak into this session. The same user reloading the page is not wiped: that used to
+        // delete their sign-in token at every load, so the first requests of every page went out with no token
+        // and came back 401 until a fresh one arrived. A missing marker counts as "different" (safe default).
+        const sameUser = localStorage.getItem(LAST_UID_KEY) === firebaseUser.uid;
+        if (!sameUser) {
+          clearUserScopedStorage();
+          useOrganizationStore.getState().clearOrganization();
+        }
+        localStorage.setItem(LAST_UID_KEY, firebaseUser.uid);
 
         const token = await getIdToken(firebaseUser);
         localStorage.setItem("yesboss_id_token", token);
-        const result = await establishSession(token);
+        let result = await establishSession(token);
+        if (!result?.success) {
+          // one slow or failed call (it gives up after 5 seconds) must not decide who you are: try once more
+          await new Promise((resolve) => setTimeout(resolve, 1200));
+          result = await establishSession(token);
+        }
 
         if (result?.success) {
           localStorage.removeItem("yesboss_token");
@@ -193,8 +207,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setLastLoginAt(new Date().toISOString());
           await resolveOrganization(token);
         } else {
-          const cached = localStorage.getItem("yesboss_role");
-          setRole(cached === "owner" ? "owner" : "employee");
+          // The backend could not be reached just now. This used to read a saved role that had just been wiped
+          // (clearUserScopedStorage), so it always gave "employee": an owner was shown the employee screens with no
+          // organization. The sign-in token itself carries the role, so use that, and still look the organization up.
+          let fallback: UserRole = "employee";
+          try {
+            fallback = (await getIdTokenResult(firebaseUser)).claims.role === "owner" ? "owner" : "employee";
+          } catch {
+            // keep the least-privileged role when even the token cannot be read
+          }
+          setRole(fallback);
+          await resolveOrganization(token);
         }
       } else {
         lastUidRef.current = null;

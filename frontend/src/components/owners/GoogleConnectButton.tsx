@@ -1,5 +1,6 @@
 "use client";
 
+import { InlineConfirm } from "@/components/ui/InlineConfirm";
 import { useEffect, useState } from "react";
 import { useGoogleStore } from "@/stores/googleStore";
 import { Loader2, CheckCircle, Plug } from "lucide-react";
@@ -19,9 +20,7 @@ export default function GoogleConnectButton() {
   };
 
   const handleDisconnect = async () => {
-    if (window.confirm("Disconnect Google integration? Tasks and calendar will stop syncing.")) {
-      await disconnect();
-    }
+    await disconnect();
   };
 
   if (loading && !connected) {
@@ -41,12 +40,19 @@ export default function GoogleConnectButton() {
           <span className="text-sm text-emerald-400 font-medium">Connected</span>
           {email && <span className="text-xs text-text-muted">({email})</span>}
         </div>
-        <button
-          onClick={handleDisconnect}
-          className="text-xs text-text-muted hover:text-rose-400 transition-colors cursor-pointer underline underline-offset-2"
-        >
-          Disconnect
-        </button>
+        <InlineConfirm
+          label="Disconnect"
+          warning="Tasks and calendar will stop syncing."
+          onConfirm={() => void handleDisconnect()}
+          trigger={(arm) => (
+            <button
+              onClick={arm}
+              className="text-xs text-text-muted hover:text-rose-400 transition-colors cursor-pointer underline underline-offset-2"
+            >
+              Disconnect
+            </button>
+          )}
+        />
       </div>
     );
   }

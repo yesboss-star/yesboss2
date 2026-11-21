@@ -1,5 +1,6 @@
 "use client";
 
+import { InlineConfirm } from "@/components/ui/InlineConfirm";
 import { useCallback, useEffect, useState } from "react";
 import { Check, Copy, MessageSquare, Mail, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui";
@@ -51,7 +52,6 @@ export function ForwardAddress() {
   };
 
   const replace = async () => {
-    if (!window.confirm("Get a new address? The old one stops working, so update any forwarding rule that uses it.")) return;
     setBusy(true);
     try {
       setInfo(await call("/address/regenerate", "POST"));
@@ -86,9 +86,17 @@ export function ForwardAddress() {
                   {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                   {copied ? "Copied" : "Copy"}
                 </Button>
-                <Button size="sm" variant="ghost" onClick={replace} disabled={busy}>
-                  <RefreshCw className="h-3.5 w-3.5" /> New address
-                </Button>
+                <InlineConfirm
+                  label="Get new address"
+                  keepLabel="Keep this one"
+                  warning="The old one stops working, so update any forwarding rule that uses it."
+                  onConfirm={() => void replace()}
+                  trigger={(arm) => (
+                    <Button size="sm" variant="ghost" onClick={arm} disabled={busy}>
+                      <RefreshCw className="h-3.5 w-3.5" /> New address
+                    </Button>
+                  )}
+                />
               </div>
             </>
           ) : (

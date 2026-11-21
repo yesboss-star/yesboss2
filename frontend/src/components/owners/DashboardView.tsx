@@ -13,6 +13,8 @@ import { useReportStore } from "@/stores/reportStore";
 import { useAIDashboardAdaptation } from "@/hooks/useAIDashboardAdaptation";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import GoalModal from "@/components/GoalModal";
+import { ChartHeading, StatusDonut, CompletionLine } from "@/components/charts/TaskCharts";
+import DailyBrief from "@/components/capture/DailyBrief";
 import TaskModal from "@/components/TaskModal";
 
 import {
@@ -29,16 +31,9 @@ import {
   Badge, Button, Input, Modal, ModalHeader, ModalTitle,
   ModalClose, ModalContent, ModalFooter,
 } from "@/components/ui";
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart as RePieChart, Pie, Cell, LineChart as ReLineChart, Line,
-  AreaChart, Area, Legend
-} from "recharts";
 import { fetchDeduped, getAuthHeaders } from "@/lib/utils";
 import KPISuggestionsCard from "@/components/owners/KPISuggestionsCard";
 import AcceptedKPIBanner from "@/components/owners/AcceptedKPIBanner";
-import MeetingUploadModal from "@/components/owners/MeetingUploadModal";
-import CalendarBooking from "@/components/owners/CalendarBooking";
 import MarketImpactCard from "@/components/owners/MarketImpactCard";
 import CheckInModal from "@/components/owners/CheckInModal";
 import IndustryBenchmarksCard from "@/components/owners/IndustryBenchmarksCard";
@@ -1130,7 +1125,7 @@ function DepartmentGoalRow({
   onAssign: (goal: any, role: "defaulter" | "reviewer", member: { id: string; full_name: string; email: string } | null) => void;
   savingKey: string | null;
 }) {
-  const progress = goal.progress ?? (goal.status === "completed" ? 100 : goal.status === "active" ? 60 : 20);
+  const progress = goal.progress ?? 0;
   const taskCounts = goal.task_counts ?? { total: 0, completed: 0, in_progress: 0, pending: 0 };
   const getPriorityColor = (priority: string) => {
     switch (priority) {
@@ -2980,15 +2975,15 @@ function WeeklyReportGenerator() {
         </ModalFooter>
       </Modal>
 
-      <div className="p-4 space-y-4">
+      <div className="space-y-4 p-6">
           {/* Template section */}
-          <div className="p-4 rounded-xl bg-surface border border-border/50 space-y-3">
+          <div className="space-y-3 rounded-2xl border border-border bg-surface-light p-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <FileText className="w-4 h-4 text-primary" />
                 <span className="text-sm font-medium">Custom Template</span>
               </div>
-              {template && (
+              {template ? (
                 <Button
                   size="sm"
                   variant="ghost"
@@ -2998,6 +2993,30 @@ function WeeklyReportGenerator() {
                 >
                   Remove
                 </Button>
+              ) : (
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={templateUploading}
+                    className="h-8 cursor-pointer px-4 shadow-[3px_3px_0_var(--shadow-hard)]"
+                  >
+                    {templateUploading ? (
+                      <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                    ) : (
+                      <Upload className="w-3 h-3 mr-1" />
+                    )}
+                    {templateUploading ? "Uploading..." : "Upload Template"}
+                  </Button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".docx"
+                    onChange={handleFileSelect}
+                    className="hidden"
+                  />
+                </>
               )}
             </div>
 
@@ -3030,30 +3049,6 @@ function WeeklyReportGenerator() {
                 <p className="text-xs text-text-muted">
                   No custom template. Upload a .docx file to customize your report format.
                 </p>
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={templateUploading}
-                    className="cursor-pointer"
-                  >
-                    {templateUploading ? (
-                      <Loader2 className="w-3 h-3 animate-spin mr-1" />
-                    ) : (
-                      <Upload className="w-3 h-3 mr-1" />
-                    )}
-                    {templateUploading ? "Uploading..." : "Upload Template"}
-                  </Button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".docx"
-                    onChange={handleFileSelect}
-                    className="hidden"
-                  />
-                </div>
-
                 {/* Placeholder help */}
                 <div>
                   <button
@@ -3080,22 +3075,17 @@ function WeeklyReportGenerator() {
           </div>
 
           {/* Generate section */}
-          <div className="flex items-center justify-between p-4 rounded-xl bg-gradient-to-br from-primary/5 to-purple-500/5 border border-primary/10">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                <FileText className="w-5 h-5 text-primary" />
-              </div>
-              <div>
-                <p className="text-sm font-medium">Weekly Business Report</p>
-                <p className="text-xs text-text-muted">
-                  Goals, tasks, department breakdown, and completion rates
-                </p>
-              </div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Weekly Business Report</p>
+              <p className="text-xs text-text-muted">
+                Goals, tasks, department breakdown, and completion rates
+              </p>
             </div>
             <Button
               onClick={handleGenerate}
               disabled={generating || !orgId}
-              className="cursor-pointer"
+              className="h-9 cursor-pointer px-4 text-foreground shadow-[3px_3px_0_var(--shadow-hard)]"
               size="sm"
             >
               {generating ? (
@@ -3119,7 +3109,7 @@ function WeeklyReportGenerator() {
                 ].map((stat, i) => {
                   const Icon = stat.icon;
                   return (
-                    <div key={i} className="p-3 rounded-xl bg-surface border border-border/50">
+                    <div key={i} className="rounded-2xl border border-border bg-surface-light p-3">
                       <Icon className={`w-4 h-4 ${stat.color} mb-1`} />
                       <p className="text-lg font-bold">{stat.value}</p>
                       <p className="text-[10px] text-text-muted">{stat.label}</p>
@@ -3269,128 +3259,71 @@ function DataCharts({ goals, tasks }: { goals: any[]; tasks?: any[] }) {
   const allTasks = tasks || chartTasks;
 
   const taskStatusData = [
-    { name: "Completed", value: allTasks.filter((t: any) => t.status === "completed").length, color: "#10b981" },
+    { name: "Completed", value: allTasks.filter((t: any) => t.status === "completed" || t.status === "approved").length, color: "#10b981" },
     { name: "In Progress", value: allTasks.filter((t: any) => t.status === "in_progress").length, color: "#0ea5e9" },
     { name: "Pending", value: allTasks.filter((t: any) => t.status === "pending").length, color: "#eab308" },
   ].filter((d) => d.value > 0);
 
   const goalProgressData = goals.slice(0, 8).map((g) => ({
+    fullName: g.title || "Goal",
     name: g.title?.length > 15 ? g.title.substring(0, 15) + "..." : g.title || "Goal",
     progress: g.progress ?? 0,
   }));
 
-  const COLORS = ["#0ea5e9", "#10b981", "#eab308", "#f97316", "#8b5cf6", "#ec4899"];
-
   if (allTasks.length === 0 && goals.length === 0) return null;
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div className="grid grid-cols-1 gap-5 p-6 md:grid-cols-2">
       {taskStatusData.length > 0 && (
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <PieChartIcon className="w-5 h-5 text-primary" />
-              <CardTitle>Task Distribution</CardTitle>
-            </div>
-            <CardDescription>Real-time breakdown of all task statuses</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <RePieChart>
-                  <Pie
-                    data={taskStatusData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={5}
-                    dataKey="value"
-                    label={({ name, value }) => `${name}: ${value}`}
-                  >
-                    {taskStatusData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                  <Legend />
-                </RePieChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="glass rounded-3xl p-5">
+          <ChartHeading icon={PieChartIcon} title="Task Distribution" note="Real-time breakdown of all task statuses" />
+          <div className="flex flex-wrap items-center justify-center gap-5">
+            <StatusDonut data={taskStatusData} />
+            <ul className="space-y-1.5 text-sm">
+              {taskStatusData.map((d) => (
+                <li key={d.name} className="flex items-center gap-2">
+                  <i className="h-3 w-3 rounded border border-outline" style={{ background: d.color }} />
+                  {d.name}
+                  <b>{d.value}</b>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
       )}
 
       {goalProgressData.length > 0 && (
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <BarChart3 className="w-5 h-5 text-primary" />
-              <CardTitle>Goal Progress</CardTitle>
-            </div>
-            <CardDescription>Completion percentage per goal</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={goalProgressData} layout="vertical" margin={{ top: 5, right: 30, left: 80, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                  <XAxis type="number" domain={[0, 100]} tick={{ fill: "#64748b", fontSize: 11 }} />
-                  <YAxis dataKey="name" type="category" tick={{ fill: "#64748b", fontSize: 10 }} width={90} />
-                  <Tooltip
-                    contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: "8px" }}
-                    formatter={(value: any) => [`${value}%`, "Progress"]}
-                  />
-                  <Bar dataKey="progress" radius={[0, 6, 6, 0]}>
-                    {goalProgressData.map((_, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="glass rounded-3xl p-5">
+          <ChartHeading icon={Flag} title="Goal Progress" note="Completion percentage per goal" />
+          <div className="space-y-3">
+            {goalProgressData.map((g, i) => (
+              <div key={i} title={`${g.fullName}: ${g.progress}%`}>
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="truncate">{g.name}</span>
+                  <b>{g.progress}%</b>
+                </div>
+                <div className="mt-1 h-2 overflow-hidden rounded-full border border-border/60 bg-background">
+                  <div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(100, Math.max(0, g.progress))}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {taskStatusData.length > 0 && (
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <TrendingUp className="w-5 h-5 text-primary" />
-              <CardTitle>Task Completion</CardTitle>
-            </div>
-            <CardDescription>Completed vs total tasks</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart
-                  data={[
-                    { name: "Pending", value: taskStatusData.find((d) => d.name === "Pending")?.value || 0 },
-                    { name: "In Progress", value: taskStatusData.find((d) => d.name === "In Progress")?.value || 0 },
-                    { name: "Completed", value: taskStatusData.find((d) => d.name === "Completed")?.value || 0 },
-                  ]}
-                  margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                  <XAxis dataKey="name" tick={{ fill: "#64748b", fontSize: 11 }} />
-                  <YAxis tick={{ fill: "#64748b", fontSize: 11 }} />
-                  <Tooltip
-                    contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: "8px" }}
-                  />
-                  <Area type="monotone" dataKey="value" stroke="#0ea5e9" fill="url(#colorGradient)" strokeWidth={2} />
-                  <defs>
-                    <linearGradient id="colorGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0.05} />
-                    </linearGradient>
-                  </defs>
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="md:col-span-2">
+          <div className="glass rounded-3xl p-5">
+            <ChartHeading icon={TrendingUp} title="Task Completion" note="Completed vs total tasks" />
+            <CompletionLine
+              points={[
+                { name: "Pending", value: taskStatusData.find((d) => d.name === "Pending")?.value || 0 },
+                { name: "In Progress", value: taskStatusData.find((d) => d.name === "In Progress")?.value || 0 },
+                { name: "Complete", value: taskStatusData.find((d) => d.name === "Completed")?.value || 0 },
+              ]}
+            />
+          </div>
+        </div>
       )}
     </div>
   );
@@ -3450,53 +3383,13 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
   }, [orgId, fetchEscalations]);
 
   const searchParams = useSearchParams();
-  const [showMeetingModal, setShowMeetingModal] = useState(false);
-  const [showBookingModal, setShowBookingModal] = useState(false);
   const [showCheckInModal, setShowCheckInModal] = useState(false);
-  const [meetingHistory, setMeetingHistory] = useState<any[]>([]);
-  const [meetingHistoryLoading, setMeetingHistoryLoading] = useState(false);
-  const [expandedTitles, setExpandedTitles] = useState<Set<string>>(new Set());
-  const [confirmDeleteMeeting, setConfirmDeleteMeeting] = useState<{ id: string; title: string } | null>(null);
 
   useEffect(() => {
     if (searchParams?.get("checkin") === "true" && orgId) {
       setShowCheckInModal(true);
     }
   }, [searchParams, orgId]);
-
-  const fetchMeetingHistory = useCallback(async () => {
-    if (!orgId) return;
-    setMeetingHistoryLoading(true);
-    try {
-      const res = await fetch(`${API_URL}/meetings/history?organization_id=${orgId}&limit=50`, { headers: getAuthHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        setMeetingHistory(data.meetings || []);
-      }
-    } catch {} finally {
-      setMeetingHistoryLoading(false);
-    }
-  }, [orgId]);
-
-  useEffect(() => {
-    if (orgId) fetchMeetingHistory();
-  }, [orgId, fetchMeetingHistory]);
-
-  const handleDeleteMeeting = useCallback(async (meetingId: string) => {
-    if (!orgId) return;
-    try {
-      const res = await fetch(`${API_URL}/meetings/${meetingId}?organization_id=${orgId}`, {
-        method: "DELETE",
-        credentials: "include",
-        headers: getAuthHeaders(),
-      });
-      if (res.ok) {
-        setMeetingHistory((prev) => prev.filter((m: any) => m.id !== meetingId));
-      }
-    } catch (e) {
-      console.error("Delete meeting error:", e);
-    }
-  }, [orgId]);
 
   const [dismissedSetupCards, setDismissedSetupCards] = useState<Set<string>>(() => {
     if (typeof window === "undefined") return new Set();
@@ -3548,7 +3441,7 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
       icon: Network,
       accent: "from-emerald-500/20 to-teal-500/20",
       isDone: memberCount > 0,
-      onClick: () => router.push("/dashboard/orchestration"),
+      onClick: () => router.push("/dashboard/profile?section=org-chart"),
     },
   ];
 
@@ -3575,38 +3468,33 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
 
   const activeGoalCount = goals.filter(g => g.status === "active").length;
   const urgentGoals = goals.filter(g => g.priority === "urgent").length;
-  const meetingCount = meetingHistory.length;
 
   const goalsBadge = urgentGoals > 0
     ? `${urgentGoals} urgent`
     : activeGoalCount > 0
       ? `${activeGoalCount} active`
       : undefined;
-  const meetingsBadge = meetingCount > 0 ? `${meetingCount} meetings` : undefined;
 
   const goalsExpanded = urgentGoals > 0 || activeGoalCount === 0;
   const analyticsExpanded = false;
-  const meetingsExpanded = meetingCount > 0;
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
-      <div className="flex items-center justify-between">
-        <div>
+    <div className="mx-auto max-w-5xl space-y-5 text-sm animate-in fade-in duration-300">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
           <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-foreground to-primary bg-clip-text text-transparent">
             Executive Dashboard
           </h1>
-          <p className="text-text-muted mt-1">
+          <p className="mt-1 text-sm text-text-muted">
             {organization?.name
               ? `${organization.name} — ${organization.industry || "Business"}${organization.micro_vertical ? ` — ${organization.micro_vertical}` : ""}`
               : "Your business command center"}
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
-            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-xs text-emerald-400">Live</span>
-          </div>
-        </div>
+        <span className="flex flex-shrink-0 items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-500">
+          <i className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
+          Live
+        </span>
       </div>
 
       {SHOW_EXTRA_DASHBOARD_SECTIONS && aiSummary && (
@@ -3667,104 +3555,12 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
         </Card>
       )}
 
+      {/* the day's brief, counted from real tasks; its buttons open the matching tool in Let's Talk */}
+      <DailyBrief />
+
       <AcceptedKPIBanner />
 
-      <CollapsibleSection
-        title="Meeting Notes"
-        icon={Upload}
-        badge={meetingsBadge}
-        defaultExpanded={meetingsExpanded}
-        actions={
-          <>
-            <Button size="sm" variant="primary" onClick={() => setShowMeetingModal(true)} className="cursor-pointer">
-              <Upload className="w-4 h-4" />
-              Upload Meeting
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => setShowBookingModal(true)} className="cursor-pointer">
-              <Calendar className="w-4 h-4" />
-              Book Meeting
-            </Button>
-          </>
-        }
-      >
-        <div className="p-6">
-          <CardDescription className="mb-4">Upload meeting notes to auto-create tasks via AI</CardDescription>
-          {meetingHistoryLoading ? (
-            <div className="flex items-center justify-center py-4">
-              <Loader2 className="w-5 h-5 animate-spin text-primary" />
-            </div>
-          ) : meetingHistory.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-6 text-center">
-              <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-3">
-                <Upload className="w-6 h-6 text-primary/60" />
-              </div>
-              <p className="text-sm text-text-muted">No meetings uploaded yet</p>
-              <p className="text-xs text-text-muted/60 mt-1">Upload meeting notes to extract tasks automatically</p>
-            </div>
-          ) : (() => {
-            const grouped = meetingHistory.reduce((acc: Record<string, any[]>, m: any) => {
-              const key = m.title || "Untitled";
-              (acc[key] = acc[key] || []).push(m);
-              return acc;
-            }, {} as Record<string, any[]>);
-            const sortedGroups = Object.entries(grouped).sort(([, a], [, b]) => {
-              const latestA = Math.max(...a.map((x: any) => new Date(x.created_at || 0).getTime()));
-              const latestB = Math.max(...b.map((x: any) => new Date(x.created_at || 0).getTime()));
-              return latestB - latestA;
-            });
-            const toggleTitle = (t: string) => {
-              setExpandedTitles(prev => {
-                const next = new Set(prev);
-                next.has(t) ? next.delete(t) : next.add(t);
-                return next;
-              });
-            };
-            return (
-              <div className="space-y-1">
-                {sortedGroups.map(([title, meetings]) => {
-                  const isExpanded = expandedTitles.has(title);
-                  const latest = meetings[0];
-                  return (
-                    <div key={title} className="rounded-xl border border-border/50 overflow-hidden">
-                      <button
-                        onClick={() => toggleTitle(title)}
-                        className="w-full flex items-center gap-3 p-3 bg-surface hover:bg-surface/80 transition-colors cursor-pointer text-left"
-                      >
-                        {isExpanded ? <ChevronDown className="w-4 h-4 text-text-muted flex-shrink-0" /> : <ChevronRight className="w-4 h-4 text-text-muted flex-shrink-0" />}
-                        <FileText className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm font-medium flex-1 truncate">{title}</span>
-                        <Badge variant="outline" className="text-xs flex-shrink-0">{meetings.length}</Badge>
-                        {latest.created_at && (
-                          <span className="text-[10px] text-text-muted flex-shrink-0">{new Date(latest.created_at).toLocaleDateString()}</span>
-                        )}
-                      </button>
-                      {isExpanded && (
-                        <div className="border-t border-border/50">
-                          {meetings.map((m: any) => (
-                            <div key={m.id} className="flex items-center gap-3 px-3 py-2.5 pl-12 bg-surface/50 border-b border-border/30 last:border-0">
-                              <div className="flex-1 min-w-0">
-                                <p className="text-xs text-text-muted">
-                                  {m.task_count || 0} tasks · {m.created_at ? new Date(m.created_at).toLocaleDateString() : ""}
-                                </p>
-                              </div>
-                              <Badge variant="outline" className="text-[10px] flex-shrink-0">{m.task_count || 0}</Badge>
-                              <button onClick={(e) => { e.stopPropagation(); setConfirmDeleteMeeting({ id: m.id, title: m.title || "Untitled meeting" }); }} className="p-1 rounded-lg hover:bg-rose-500/10 text-text-muted hover:text-rose-400 transition-colors cursor-pointer flex-shrink-0">
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })()}
-        </div>
-      </CollapsibleSection>
-
-      <CollapsibleSection title="Progress" icon={BarChart3} defaultExpanded={false}>
+      <CollapsibleSection title="Progress" icon={BarChart3} defaultExpanded>
         <DataCharts goals={goals} />
       </CollapsibleSection>
 
@@ -3861,50 +3657,12 @@ export default function DashboardView({ onCreateGoal }: { onCreateGoal?: () => v
         </CollapsibleSection>
       )}
 
-      <MeetingUploadModal
-        open={showMeetingModal}
-        onOpenChange={setShowMeetingModal}
-        onSuccess={() => fetchMeetingHistory()}
-      />
-
       <CheckInModal
         open={showCheckInModal}
         onOpenChange={setShowCheckInModal}
         orgId={orgId}
       />
 
-      {showBookingModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowBookingModal(false)}>
-          <div className="w-full max-w-lg mx-4" onClick={(e) => e.stopPropagation()}>
-            <CalendarBooking onClose={() => setShowBookingModal(false)} />
-          </div>
-        </div>
-      )}
-
-      <Modal open={!!confirmDeleteMeeting} onOpenChange={(open) => { if (!open) setConfirmDeleteMeeting(null); }} size="sm">
-        <ModalHeader>
-          <ModalTitle>Confirm Delete</ModalTitle>
-          <ModalClose />
-        </ModalHeader>
-        <ModalContent>
-          <p className="text-sm text-text-muted">
-            Are you sure you want to delete <strong>{confirmDeleteMeeting?.title}</strong>?
-          </p>
-        </ModalContent>
-        <ModalFooter>
-          <Button variant="outline" onClick={() => setConfirmDeleteMeeting(null)}>Cancel</Button>
-          <Button
-            onClick={async () => {
-              if (!confirmDeleteMeeting) return;
-              await handleDeleteMeeting(confirmDeleteMeeting.id);
-              setConfirmDeleteMeeting(null);
-            }}
-            className="bg-rose-500 hover:bg-rose-600 cursor-pointer"
-          >
-            Delete
-          </Button>
-        </ModalFooter>
-      </Modal>
     </div>
   );
 }

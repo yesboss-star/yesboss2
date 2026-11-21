@@ -34,32 +34,36 @@ async def analyze_market_impact(db: Any, org_id: str, refresh_trends: bool = Fal
 
     trends: list[dict[str, Any]] = list(db.market_trends.find({"organization_id": org_id}).sort("published_at", -1).limit(10))
     if not trends:
-        from ..core.ai_client import get_ai_response
-        prompt = (
-            f"Generate 5 realistic market trend articles for a business in the {industry} industry"
-            + (f" specifically in {micro_vertical}" if micro_vertical else "")
-            + """. Each article must have: title, description, source, url, published_at, category, growth_impact.
-Return ONLY a valid JSON array. No markdown."""
-        )
+        # Only real headlines are ever used. If none are stored yet, try the news feed once; if that
+        # finds nothing, say so instead of asking the AI to make up articles.
         try:
-            response = await get_ai_response(prompt, temperature=0.7, max_tokens=2500)
-            import re
-            match = re.search(r'\[.*\]', response, re.DOTALL)
-            if match:
-                trends = json.loads(match.group())
-                if isinstance(trends, list):
-                    for t in trends:
-                        t["organization_id"] = org_id
-                        t["created_at"] = datetime.utcnow()
-                        db.market_trends.insert_one(t)
+            from ..api.market_trends import fetch_google_news
+            fresh = await fetch_google_news(industry, micro_vertical)
+            for article in fresh or []:
+                article["organization_id"] = org_id
+                article["created_at"] = datetime.utcnow()
+                db.market_trends.insert_one(article)
+            trends = list(db.market_trends.find({"organization_id": org_id}).sort("published_at", -1).limit(10))
         except Exception as e:
-            logger.warning(f"Market trend generation failed: {e}")
+            logger.warning(f"Could not load market news: {e}")
             trends = []
+    if not trends:
+        return {
+            "organization_id": org_id,
+            "generated_at": datetime.utcnow(),
+            "industry": industry,
+            "micro_vertical": micro_vertical,
+            "impacts": [],
+            "summary": "",
+            "trend_count": 0,
+        }
 
-    goals = list(db.goals.find({"organization_id": org_id}).sort("created_at", -1).limit(20))
-    tasks = list(db.tasks.find({"organization_id": org_id}).sort("created_at", -1).limit(50))
-    total_tasks = len(tasks)
-    completed_tasks = len([t for t in tasks if t.get("status") == "completed"])
+    # Real totals over everything the company has, not a sample of the newest few (a sample once reported
+    # "0% task completion" for a company that had finished a third of its work).
+    total_tasks = db.tasks.count_documents({"organization_id": org_id})
+    completed_tasks = db.tasks.count_documents({"organization_id": org_id, "status": {"$in": ["completed", "approved"]}})
+    active_goals = db.goals.count_documents({"organization_id": org_id, "status": "active"})
+    completed_goals = db.goals.count_documents({"organization_id": org_id, "status": "completed"})
 
     from ..core.ai_client import get_ai_response
     trends_summary = []
@@ -70,8 +74,9 @@ Return ONLY a valid JSON array. No markdown."""
         f"Analyze these market trends for a {industry} company"
         + (f" ({micro_vertical})" if micro_vertical else "")
         + f".\n\nCompany context:\n"
-        f"- Active goals: {len([g for g in goals if g.get('status') == 'active'])}"
-        f"\n- Completed goals: {len([g for g in goals if g.get('status') == 'completed'])}"
+        f"- Active goals: {active_goals}"
+        f"\n- Completed goals: {completed_goals}"
+        f"\n- Tasks finished: {completed_tasks} of {total_tasks}"
         f"\n- Task completion rate: {round((completed_tasks / total_tasks * 100), 1) if total_tasks > 0 else 0}%"
         f"\n\nMarket trends:\n" + "\n".join(trends_summary) +
         "\n\nFor each trend, assess: impact_level (high/medium/low), growth_opportunity (1 sentence), "
@@ -116,9 +121,11 @@ Return ONLY a valid JSON array. No markdown."""
     try:
         existing = db.market_impacts.find_one({"organization_id": org_id})
         if existing:
-            existing["_id"] = str(existing["_id"])
-            existing["snapshot_date"] = existing.get("generated_at", now)
-            db.market_impact_history.insert_one(existing)
+            # the history copy is a new record (it must not reuse the current one's id), and the update
+            # has to match on the real id, not a string version of it
+            snapshot = {k: v for k, v in existing.items() if k != "_id"}
+            snapshot["snapshot_date"] = existing.get("generated_at", now)
+            db.market_impact_history.insert_one(snapshot)
             db.market_impacts.update_one({"_id": existing["_id"]}, {"$set": doc})
         else:
             db.market_impacts.insert_one(doc)

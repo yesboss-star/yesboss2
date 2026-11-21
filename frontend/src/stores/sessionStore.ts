@@ -78,6 +78,8 @@ export interface SessionMessage {
   is_answer?: boolean;
   is_booking?: boolean;
   booking_params?: BookingParams;
+  /** set on the message that confirms a booking: the booking card with this timestamp has been used */
+  booked_card?: number;
   is_delegate?: boolean;
   delegate_params?: DelegateParams | null;
   generated_sub_tasks?: GeneratedSubTask[];

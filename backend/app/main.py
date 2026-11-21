@@ -136,6 +136,7 @@ from .api.upload import router as upload_router
 from .api.websocket import router as websocket_router
 from .api.weekly_review import public_router as weekly_review_public_router
 from .api.weekly_review import router as weekly_review_router
+from .api.mail_digest import router as mail_digest_router
 from .api.zoho_auth import router as zoho_auth_router
 from .api.zoho_calendar import router as zoho_calendar_router
 from .api.zoho_cliq import router as zoho_cliq_router
@@ -381,6 +382,7 @@ app.include_router(push_subscriptions_router, prefix="/api/v1/push", tags=["Push
 app.include_router(zoho_auth_router, prefix="/api/v1/zoho", tags=["Zoho Auth"])
 app.include_router(zoho_calendar_router, prefix="/api/v1/zoho/calendar", tags=["Zoho Calendar"], dependencies=[Depends(require_tenant)])
 app.include_router(zoho_cliq_router, prefix="/api/v1/zoho/cliq", tags=["Zoho Cliq"])
+app.include_router(mail_digest_router, prefix="/api/v1/mail", tags=["Mail Summary"], dependencies=[Depends(require_tenant)])
 app.include_router(google_auth_router, prefix="/api/v1/google", tags=["Google Auth"])
 app.include_router(google_calendar_router, prefix="/api/v1/google/calendar", tags=["Google Calendar"], dependencies=[Depends(require_tenant)])
 app.include_router(check_ins_router, prefix="/api/v1/organizations", tags=["Check-Ins"], dependencies=[Depends(require_tenant)])

@@ -225,6 +225,26 @@ async def aindex(items: list[dict[str, Any]]) -> dict[str, int]:
         return {"indexed": 0, "failed": len(items)}
 
 
+def forget_document(file_id: Any) -> None:
+    """Remove an uploaded document's vectors, so a file that was deleted can no longer be quoted in answers."""
+    if not file_id:
+        return
+    try:
+        from qdrant_client.models import FieldCondition, Filter, FilterSelector, MatchValue
+
+        client = get_qdrant_client()
+        if client is None:
+            return
+        client.delete(collection_name="documents", points_selector=FilterSelector(filter=Filter(
+            must=[FieldCondition(key="file_id", match=MatchValue(value=str(file_id)))])))
+    except Exception as e:  # the file is already gone from the database; a vector clean-up failure must not undo that
+        logger.warning("memory: forget document %s failed: %s", file_id, redact_secrets(e))
+
+
+async def aforget_document(file_id: Any) -> None:
+    await asyncio.to_thread(forget_document, file_id)
+
+
 async def aforget(kind: str, source_id: Any) -> None:
     try:
         await asyncio.to_thread(forget, kind, source_id)

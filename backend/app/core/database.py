@@ -152,6 +152,8 @@ def _ensure_indexes(db: Database):
         db.zoho_tokens.create_index("user_id", unique=True)
         db.zoho_tokens.create_index("org_id")
 
+        db.mail_digests.create_index("user_id", unique=True)
+
         db.google_tokens.create_index("user_id", unique=True)
         db.google_tokens.create_index("org_id")
 

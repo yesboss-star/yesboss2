@@ -116,7 +116,7 @@ export default function RemindersView({ orgId, onOpen }: { orgId: string; onOpen
             ) : (
               <div className="space-y-2">
                 {active.map((reminder) => (
-                  <div key={reminder._id} className="flex items-start justify-between gap-3 rounded-xl border border-border bg-background p-3">
+                  <div key={reminder._id} className="flex items-start justify-between gap-3 rounded-2xl border-2 border-outline bg-background p-3.5">
                     <div className="min-w-0">
                       <p className="text-sm text-foreground">{reminder.text}</p>
                       <p className="mt-0.5 text-[11px] text-text-muted">{describe(reminder)}</p>

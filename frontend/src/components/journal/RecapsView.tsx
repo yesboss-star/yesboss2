@@ -13,7 +13,7 @@ interface RecapResponse {
 function RecapCard({ recap, labels, onOpen }: { recap: Recap; labels: Record<string, string>; onOpen: (sessionId: string) => void }) {
   const sourceById = new Map(recap.sources.map((source) => [source.entry_id, source]));
   return (
-    <div className="rounded-xl border border-border bg-background p-4">
+    <div className="rounded-2xl border-2 border-outline bg-background p-4">
       <div className="mb-3 flex items-center gap-2">
         <Chip tone={recap.period === "weekly" ? "primary" : "default"}>{recap.period === "weekly" ? "Weekly recap" : "Daily recap"}</Chip>
         <span className="text-xs text-text-muted">{recap.range_key.includes("..") ? recap.range_key.replace("..", " to ") : formatDate(recap.range_key)}</span>

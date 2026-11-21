@@ -1,5 +1,6 @@
 "use client";
 
+import { InlineConfirm } from "@/components/ui/InlineConfirm";
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -83,10 +84,8 @@ export default function TaskDetailPage() {
   };
 
   const handleDelete = async () => {
-    if (confirm("Are you sure you want to delete this task?")) {
-      await deleteTask(taskId);
-      router.push("/tasks");
-    }
+    await deleteTask(taskId);
+    router.push("/tasks");
   };
 
   const getStatusColor = (status: string) => {
@@ -174,9 +173,16 @@ export default function TaskDetailPage() {
                 Approve
               </Button>
             )}
-            <Button variant="ghost" onClick={handleDelete} className="cursor-pointer text-red-400 hover:text-red-500">
-              <Trash2 className="w-4 h-4" />
-            </Button>
+            <InlineConfirm
+              label="Delete task"
+              warning="Delete this task?"
+              onConfirm={() => void handleDelete()}
+              trigger={(arm) => (
+                <Button variant="ghost" onClick={arm} className="cursor-pointer text-red-400 hover:text-red-500">
+                  <Trash2 className="w-4 h-4" />
+                </Button>
+              )}
+            />
           </div>
         </div>
 

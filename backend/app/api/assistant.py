@@ -944,6 +944,16 @@ async def _build_delegate_preview(parsed: dict, db, org_id: str | None):
     return delegate_params, generated_sub_tasks, None
 
 
+def _delegate_preview_text(delegate_params: dict[str, Any]) -> str:
+    """What the chat says above a task/goal preview. The model's own wording is not used here: it tends to say
+    "Done, I've created…" while nothing exists yet. Nothing is created until the person presses Assign."""
+    kind = {"goal": "goal", "both": "task and goal"}.get(delegate_params.get("item_type"), "task")
+    return (
+        f"I've drafted **\"{delegate_params['title']}\"** as a {kind} for **{delegate_params['assignee_name']}**. "
+        "Nothing is created yet: choose the steps you want and press Assign."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Chat (owner-friendly, in-character responses for "chat" intent)
 # ---------------------------------------------------------------------------
@@ -1161,6 +1171,11 @@ async def _book_provider_event(
             if eid:
                 event_ids["zoho"] = eid
 
+    # The organizer's own event is the booking. If the calendar did not accept it, stop here: no copies on other
+    # people's calendars, so nobody is left holding half a meeting.
+    if not any(k in event_ids for k in ("zoho", "google")):
+        return {}
+
     for email in attendee_emails:
         if email == organizer_email:
             continue
@@ -1205,9 +1220,10 @@ async def handle_meeting_booking(booking_params: dict, db, org_id: str, user_id:
     date_str = booking_params.get("date", "") or ""
     date_start = booking_params.get("date_start", "") or ""
     date_end = booking_params.get("date_end", "") or ""
-    duration = int(booking_params.get("duration_minutes", 60))
-    title = booking_params.get("title", "Meeting")
-    description = booking_params.get("description", "")
+    duration = int(booking_params.get("duration_minutes") or 60)
+    # a missing value can arrive as None (a booking card sent back to us), which is not the same as "not given"
+    title = booking_params.get("title") or "Meeting"
+    description = booking_params.get("description") or ""
     preferred_time = booking_params.get("preferred_time", "")
     auto = bool(booking_params.get("auto", False))
     recurrence = booking_params.get("recurrence") or {}
@@ -1333,6 +1349,7 @@ async def handle_meeting_booking(booking_params: dict, db, org_id: str, user_id:
             "booked": False,
             "message": f"No available slots {('between ' + scope) if (date_start and date_end) else ('on ' + (date_str or 'that date'))} for a {duration}-minute meeting. Try another date.",
             "available_slots": [],
+            "attendees": attendee_emails,
         }
 
     # Decide which slot to book
@@ -1350,6 +1367,7 @@ async def handle_meeting_booking(booking_params: dict, db, org_id: str, user_id:
                 "booked": False,
                 "message": f"The time {preferred_time} is busy. Here are available slots:",
                 "available_slots": all_slots[:8],
+                "attendees": attendee_emails,
             }
     elif auto or len(all_slots) == 1:
         chosen = all_slots[0]
@@ -1359,6 +1377,27 @@ async def handle_meeting_booking(booking_params: dict, db, org_id: str, user_id:
             "booked": False,
             "message": f"Found {len(all_slots)} available slot(s):",
             "available_slots": all_slots[:8],
+            "attendees": attendee_emails,
+        }
+
+    # Booking sends calendar invites to other people, so nothing is booked from a request alone: the proposed time goes back
+    # first (with other free times), and the person pressing a time books it through /assistant/confirm-booking.
+    if not booking_params.get("confirmed"):
+        repeats = max(1, int(recurrence.get("count", 1))) if recurrence and recurrence.get("frequency") else 1
+        repeat_note = f", repeating {repeats} times" if repeats > 1 else ""
+        others = [s for s in all_slots if s is not chosen][:7]
+        return {
+            "booked": False,
+            "needs_confirmation": True,
+            "title": title,
+            "attendees": attendee_emails,
+            "slot": chosen,
+            "count": repeats,
+            "available_slots": [chosen, *others],
+            "message": (
+                f"I can book **\"{title}\"** on {chosen['date']} at {chosen['start']}{repeat_note} with "
+                f"{len(attendee_emails)} attendee(s). Nothing is booked or sent until you press a time below."
+            ),
         }
 
     # Build instances (recurring expands a bounded series)
@@ -1378,11 +1417,15 @@ async def handle_meeting_booking(booking_params: dict, db, org_id: str, user_id:
             })
 
     booked_records = []
+    not_booked = 0
     for inst in instances:
         event_ids = await _book_provider_event(
             db, org_id, organizer_email, organizer_token, is_google, ref_tz_name,
             inst, title, description, attendee_emails, att_tokens,
         )
+        if not any(k in event_ids for k in ("zoho", "google")):
+            not_booked += 1  # the calendar did not accept it: no record, no notification, no "booked"
+            continue
         iso_start = _slot_iso(inst["date"], inst["start"], ref_tz_name)
         iso_end = _slot_iso(inst["date"], inst["end"], ref_tz_name)
         booked_records.append({
@@ -1413,9 +1456,17 @@ async def handle_meeting_booking(booking_params: dict, db, org_id: str, user_id:
                 meeting_doc["google_event_id"] = event_ids["google"]
             if "zoho" in event_ids:
                 meeting_doc["zoho_event_id"] = event_ids["zoho"]
+            # each attendee's own calendar copy, so cancelling the meeting later can remove those too
+            copies = {k: v for k, v in event_ids.items() if "@" in k}
+            if copies:
+                meeting_doc["event_ids"] = copies
             db.meetings.insert_one(meeting_doc)
         except Exception as e:
             logger.warning(f"Failed to persist meeting record: {e}")
+
+    # nothing was accepted by the calendar: say so, and tell nobody that a meeting was booked
+    if not booked_records:
+        return {"error": "Your calendar did not accept the meeting, so nothing was booked and nobody was invited. Please try again in a moment."}
 
     try:
         from ..core.notification_service import create_and_deliver
@@ -1424,7 +1475,7 @@ async def handle_meeting_booking(booking_params: dict, db, org_id: str, user_id:
                 user_id=email, org_id=org_id,
                 type="meeting_booked",
                 title=f"Meeting: {title}",
-                message=f"Booked {instances[0]['date']} at {instances[0]['start']}",
+                message=f"Booked {booked_records[0]['slot']['date']} at {booked_records[0]['slot']['start']}",
             ))
     except Exception:
         pass
@@ -1437,9 +1488,14 @@ async def handle_meeting_booking(booking_params: dict, db, org_id: str, user_id:
         "end": first["end"],
         "attendees": attendee_emails,
         "slot": first["slot"],
-        "count": len(instances),
+        "count": len(booked_records),
+        "not_booked": not_booked,
         "series_id": series_id,
-        "message": f"Booked {len(instances)} occurrence(s)." if len(instances) > 1 else "Booked.",
+        "message": (
+            f"Booked {len(booked_records)} of {len(instances)} occurrence(s); the calendar did not accept {not_booked}."
+            if not_booked
+            else (f"Booked {len(instances)} occurrence(s)." if len(instances) > 1 else "Booked.")
+        ),
     }
 
 
@@ -1489,6 +1545,7 @@ async def _cancel_meeting(db, org_id: str, meeting_meta: dict) -> dict[str, Any]
                     provider_token = ("zoho", ztoken)
 
     event_ids = meeting.get("event_ids") or {}
+    calendar_removed = False  # true only when the calendar service confirmed a delete, so callers can be honest about it
     if provider_token:
         provider, token = provider_token
         try:
@@ -1497,13 +1554,13 @@ async def _cancel_meeting(db, org_id: str, meeting_meta: dict) -> dict[str, Any]
                 if cal:
                     gid = meeting.get("google_event_id")
                     if gid:
-                        await GoogleCalendar.delete_event(token, cal, gid)
+                        calendar_removed = bool(await GoogleCalendar.delete_event(token, cal, gid)) or calendar_removed
             else:
                 cal = await ZohoCalendar.get_default_calendar_uid(token)
                 if cal:
                     zid = meeting.get("zoho_event_id")
                     if zid:
-                        await ZohoCalendar.delete_event(token, cal, zid)
+                        calendar_removed = bool(await ZohoCalendar.delete_event(token, cal, zid)) or calendar_removed
         except Exception:
             pass
 
@@ -1518,11 +1575,11 @@ async def _cancel_meeting(db, org_id: str, meeting_meta: dict) -> dict[str, Any]
             if prov == "google":
                 cal = await GoogleCalendar.get_primary_calendar_id(t)
                 if cal:
-                    await GoogleCalendar.delete_event(t, cal, eid)
+                    calendar_removed = bool(await GoogleCalendar.delete_event(t, cal, eid)) or calendar_removed
             else:
                 cal = await ZohoCalendar.get_default_calendar_uid(t)
                 if cal:
-                    await ZohoCalendar.delete_event(t, cal, eid)
+                    calendar_removed = bool(await ZohoCalendar.delete_event(t, cal, eid)) or calendar_removed
         except Exception:
             pass
 
@@ -1544,7 +1601,7 @@ async def _cancel_meeting(db, org_id: str, meeting_meta: dict) -> dict[str, Any]
     except Exception:
         pass
 
-    return {"title": title, "meeting_id": str(meeting["_id"])}
+    return {"title": title, "meeting_id": str(meeting["_id"]), "calendar_removed": calendar_removed}
 
 
 def _parse_time_to_hhmm(text: str) -> str | None:
@@ -1594,6 +1651,8 @@ async def _try_deterministic_booking(
     bp.pop("auto", None)
     bp.pop("available_slots", None)
     bp.pop("booking_result", None)
+    # the person typed the time themselves, in answer to the booking question: that is the confirmation
+    bp["confirmed"] = True
 
     try:
         result = await handle_meeting_booking(bp, db, org_id, organizer_email or "")
@@ -1604,6 +1663,7 @@ async def _try_deterministic_booking(
     if result.get("error"):
         return {"type": "answer", "answer": f"I couldn't book the meeting: {result['error']}"}
 
+    bp.pop("confirmed", None)  # the confirmation was for this one request, never carried on the card
     bp["attendee_emails"] = result.get("attendees", [])
     bp["available_slots"] = result.get("available_slots")
     bp["booking_result"] = result
@@ -2831,7 +2891,8 @@ User: "What should I focus on this week?"
 
 User: "send this to Prafullata and add it as task to her" (after discussing hiring 6 marketing interns)
 → Check conversation history — see the context is about hiring marketing interns
-→ Output delegate: {"type":"delegate","assignee_name":"Prafullata","title":"Hire 6 marketing interns","description":"Draft job post and initiate hiring for 6 marketing interns, 10k/month stipend, 6 months duration","priority":"medium","answer":"Done! I've created a task **\"Hire 6 marketing interns\"** for **Prafullata**. She'll see it on her dashboard. 🎉"}
+→ Output delegate: {"type":"delegate","assignee_name":"Prafullata","title":"Hire 6 marketing interns","description":"Draft job post and initiate hiring for 6 marketing interns, 10k/month stipend, 6 months duration","priority":"medium","answer":"I'll draft a task **\"Hire 6 marketing interns\"** for **Prafullata** for you to review. It is only created once you confirm."}
+→ NEVER write "Done", "I've created" or "assigned" in a delegate answer: the person still has to review and press Assign, so nothing exists yet.
 
 User: "assign the Q4 report to John"
 → If John is a known team member and Q4 report context is in conversation history → delegate
@@ -2841,7 +2902,7 @@ User: "assign the Q4 report to John"
 
 When the user asks to book/schedule a meeting (e.g. "add meeting with @john next Tuesday", "schedule a call with @sarah", "book a meeting with team", "schedule a weekly sync", "reschedule the meeting to Thursday 3pm", "cancel the meeting"), you must:
 
-1. **Extract all available info from their message first.** If they gave you attendees, date, time, and duration all in one message, do NOT ask any clarifying questions — just book it. The `Current date` line at the top tells you today's date. Use it to resolve relative dates like "today", "tomorrow", "next Tuesday", "this Friday" into absolute YYYY-MM-DD.
+1. **Extract all available info from their message first.** If they gave you attendees, date, time, and duration all in one message, do NOT ask any clarifying questions — just output the meeting_booking. The system shows the person the proposed time and only books after they press it, so never say a meeting is booked or invites are sent in your `answer`. The `Current date` line at the top tells you today's date. Use it to resolve relative dates like "today", "tomorrow", "next Tuesday", "this Friday" into absolute YYYY-MM-DD.
 
 2. Ask ONE clarifying question at a time via the "question" format — ONLY if something is truly missing:
    - who should attend? (if not clear from @mentions)
@@ -2872,9 +2933,9 @@ When the user asks to book/schedule a meeting (e.g. "add meeting with @john next
 
 ## MEETING BOOKING RESPONSE FORMAT
 
-{"type":"meeting_booking","booking_params":{"attendee_names":["John Smith","Sarah Jones"],"date":"2026-06-23","duration_minutes":60,"title":"Sprint Review","preferred_time":"15:00","description":"Weekly sprint sync"},"answer":"I found availability at 3 PM on Tuesday. Let me book it for you!"}
+{"type":"meeting_booking","booking_params":{"attendee_names":["John Smith","Sarah Jones"],"date":"2026-06-23","duration_minutes":60,"title":"Sprint Review","preferred_time":"15:00","description":"Weekly sprint sync"},"answer":"I'll check 3 PM on Tuesday for you."}
 
-Range + auto example: {"type":"meeting_booking","booking_params":{"attendee_names":["John Smith"],"date_start":"2026-06-22","date_end":"2026-06-26","duration_minutes":30,"title":"Check-in","auto":true},"answer":"I'll find the first free slot next week and book it."}
+Range + auto example: {"type":"meeting_booking","booking_params":{"attendee_names":["John Smith"],"date_start":"2026-06-22","date_end":"2026-06-26","duration_minutes":30,"title":"Check-in","auto":true},"answer":"I'll look for the first free slot next week and show it to you."}
 
 ## RESPONSE FORMATS
 
@@ -3177,12 +3238,7 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
                         answer=preview_error,
                         session_id=request.session_id,
                     )
-                answer_text = parsed.get("answer") or (
-                    f"I can assign **\"{delegate_params['title']}\"** as a "
-                    f"{'goal' if delegate_params['item_type'] == 'goal' else 'task'}"
-                    f"{' and goal' if delegate_params['item_type'] == 'both' else ''} to "
-                    f"**{delegate_params['assignee_name']}**."
-                )
+                answer_text = _delegate_preview_text(delegate_params)
                 return AskResponse(
                     type="delegate_preview",
                     answer=answer_text,
@@ -3242,7 +3298,10 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
 
                 # Not booked — return available slots
                 slots = booking_result.get("available_slots", [])
-                if not slots:
+                if booking_result.get("needs_confirmation"):
+                    # a proposal: the card shows the times, so the text only explains and asks
+                    answer_text = booking_result.get("message", "Press a time to confirm.")
+                elif not slots:
                     answer_text = booking_result.get("message", "No available slots on that date.")
                 else:
                     slot_lines = []
@@ -3293,6 +3352,8 @@ async def smart_ask(request: AskRequest, current_user = Depends(get_current_user
                     "title": mt.get("title", "Meeting"),
                     "description": mt.get("description", ""),
                     "auto": bool(mt.get("auto", False)),
+                    # moving a named meeting to a time the person gave is already an explicit request
+                    "confirmed": True,
                 }
                 existing = await _find_meeting_by_title(db, org_id, mt.get("title", ""))
                 if existing and existing.get("attendees"):
@@ -3638,12 +3699,7 @@ async def ask_stream(request: AskRequest, user: dict = Depends(get_current_user_
                         metadata["type"] = "answer"
                         metadata["answer"] = preview_error
                     else:
-                        answer_text = parsed.get("answer") or (
-                            f"I can assign **\"{delegate_params['title']}\"** as a "
-                            f"{'goal' if delegate_params['item_type'] == 'goal' else 'task'}"
-                            f"{' and goal' if delegate_params['item_type'] == 'both' else ''} to "
-                            f"**{delegate_params['assignee_name']}**."
-                        )
+                        answer_text = _delegate_preview_text(delegate_params)
                         metadata["type"] = "delegate_preview"
                         metadata["answer"] = answer_text
                         metadata["delegate_params"] = delegate_params
@@ -3670,6 +3726,7 @@ async def ask_stream(request: AskRequest, user: dict = Depends(get_current_user_
                             "title": mt.get("title", "Meeting"),
                             "description": mt.get("description", ""),
                             "auto": bool(mt.get("auto", False)),
+                            "confirmed": True,  # moving a named meeting to a time the person gave is already an explicit request
                         }
                         existing = await _find_meeting_by_title(db, org_id, mt.get("title", ""))
                         if existing and existing.get("attendees"):
@@ -3749,6 +3806,65 @@ async def ask_stream(request: AskRequest, user: dict = Depends(get_current_user_
         yield "event: done\ndata: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+class ConfirmBookingRequest(BaseModel):
+    organization_id: str
+    booking_params: BookingParams
+    slot: BookingSlot
+
+
+@router.post("/confirm-booking")
+async def confirm_booking(request: ConfirmBookingRequest, current_user=Depends(get_current_user)):
+    """The person pressed a time on a booking card. This is the only place a chat booking is made:
+    a request in the chat only ever proposes a time (see handle_meeting_booking)."""
+    from ..dependencies.tenant import assert_org_access
+
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+    await assert_org_access(db, request.organization_id, current_user)
+    _, user_email = _resolve_identity(current_user)
+    if not user_email:
+        raise HTTPException(status_code=401, detail="Sign in to book a meeting")
+
+    bp = request.booking_params.model_dump(exclude={"available_slots", "booking_result"})
+    # the card carries the attendees as emails; the slot they pressed replaces any date range and preferred time
+    bp["attendee_names"] = list(bp.get("attendee_emails") or [])
+    bp["date"] = request.slot.date or bp.get("date") or ""
+    bp["date_start"] = ""
+    bp["date_end"] = ""
+    bp["preferred_time"] = request.slot.start
+    bp["auto"] = False
+    bp["confirmed"] = True
+
+    result = await handle_meeting_booking(bp, db, request.organization_id, user_email)
+    if result.get("error"):
+        return {"type": "answer", "answer": f"I couldn't book the meeting: {result['error']}"}
+    if result.get("booked"):
+        slot = result.get("slot", {})
+        count = result.get("count", 1)
+        repeat_note = f" — {count} occurrences" if count and count > 1 else ""
+        return {
+            "type": "answer",
+            "answer": (
+                f"✅ Meeting **\"{result['title']}\"** booked on {slot.get('date', '')} at {slot.get('start', '')}"
+                f"{repeat_note} with {len(result.get('attendees', []))} attendee(s). Everyone will get a calendar invite."
+            ),
+            "booking_result": result,
+        }
+    # that time is no longer free: show what is
+    card = {k: v for k, v in bp.items() if k not in ("attendee_names", "confirmed")}
+    card.update(
+        attendee_emails=result.get("attendees") or bp.get("attendee_emails", []),
+        available_slots=result.get("available_slots"),
+        booking_result=result,
+    )
+    return {
+        "type": "meeting_booking",
+        "answer": result.get("message", "That time is no longer free. Pick another:"),
+        "booking_params": card,
+    }
 
 
 @router.post("/bulk-create-tasks")

@@ -42,6 +42,7 @@ import {
 } from "@/lib/onboarding-data";
 import { downloadDocumentTemplate } from "@/lib/documentTemplates";
 import { isSafeRedirect } from "@/lib/safeRedirect";
+import { LANDING_PATH } from "@/lib/landing";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
@@ -380,7 +381,7 @@ function OwnerOnboardingContent() {
               localStorage.setItem("yesboss_user", JSON.stringify(updatedUser));
               document.cookie = `yesboss_user=${JSON.stringify(updatedUser)}; path=/; max-age=86400; SameSite=Lax`;
             }
-            router.push("/dashboard");
+            router.push(LANDING_PATH);
           } else {
             setExistingOrg(org);
             if (data.primary_owner) {
@@ -765,7 +766,7 @@ function OwnerOnboardingContent() {
         document.cookie = `yesboss_user=${JSON.stringify(updatedUser)}; path=/; max-age=86400; SameSite=Lax`;
       }
 
-      router.push("/dashboard");
+      router.push(LANDING_PATH);
     } catch (err) {
       console.error("Failed to join existing org:", err);
       alert("Failed to join organization. Please try again.");
@@ -1915,7 +1916,7 @@ function OwnerOnboardingContent() {
                     try { localStorage.removeItem("yesboss_pending_redirect"); } catch {}
                     router.push(redirect);
                   } else {
-                    router.push("/dashboard");
+                    router.push(LANDING_PATH);
                   }
                 }}
                 className="flex-1 py-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all cursor-pointer hover:shadow-lg hover:shadow-accent/25 flex items-center justify-center gap-2"

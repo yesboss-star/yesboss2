@@ -537,7 +537,7 @@ async def list_goals(
         {"$group": {
             "_id": "$goal_id",
             "total": {"$sum": 1},
-            "completed": {"$sum": {"$cond": [{"$eq": ["$status", "completed"]}, 1, 0]}},
+            "completed": {"$sum": {"$cond": [{"$in": ["$status", ["completed", "approved"]]}, 1, 0]}},
             "in_progress": {"$sum": {"$cond": [{"$eq": ["$status", "in_progress"]}, 1, 0]}},
             "pending": {"$sum": {"$cond": [{"$eq": ["$status", "pending"]}, 1, 0]}},
         }}

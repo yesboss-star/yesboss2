@@ -16,6 +16,7 @@ import {
   RecaptchaVerifier,
 } from "firebase/auth";
 import { initRecaptcha, sendSignInOtp, resetRecaptcha } from "@/lib/phoneAuth";
+import { LANDING_PATH } from "@/lib/landing";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
 
@@ -81,7 +82,7 @@ function LoginContent() {
         return pending;
       }
     } catch {}
-    return "/dashboard";
+    return LANDING_PATH;
   };
 
   const finalizeLogin = async (uid: string, email: string) => {

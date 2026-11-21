@@ -22,6 +22,18 @@ SCOPE_CLIQ_USERS = "ZohoCliq.Users.READ"
 
 FULL_SCOPE = f"{SCOPE_MAIL_TASKS},{SCOPE_CALENDAR_CALENDARS},{SCOPE_CALENDAR_EVENTS},{SCOPE_CALENDAR_FREEBUSY},{SCOPE_CLIQ_WEBHOOKS},{SCOPE_CLIQ_MESSAGES},{SCOPE_CLIQ_CHANNELS},{SCOPE_CLIQ_USERS}"
 
+# Reading the inbox is its own, opt-in permission: it is asked for only when a person chooses
+# "Connect my inbox", never as part of the normal Zoho connection (tasks / calendar / Cliq).
+SCOPE_MAIL_READ = "ZohoMail.messages.READ"
+SCOPE_MAIL_ACCOUNTS = "ZohoMail.accounts.READ"
+MAIL_SCOPE = f"{SCOPE_MAIL_READ},{SCOPE_MAIL_ACCOUNTS}"
+
+
+def has_mail_scope(scope: str | None) -> bool:
+    """True when a stored/granted scope string includes permission to read mail (Zoho separates by comma or space)."""
+    granted = {s.strip() for s in (scope or "").replace(" ", ",").split(",") if s.strip()}
+    return SCOPE_MAIL_READ in granted
+
 # Use settings for accounts URL (defaults to India DC: accounts.zoho.in)
 # so OAuth tokens match the API data center (mail.zoho.in, calendar.zoho.in)
 print("*** ZOHO BASE LOADED ***")
@@ -41,13 +53,14 @@ class ZohoOAuth:
 
     # ── Public helpers ──────────────────────────────────────────────
 
-    def get_auth_url(self, state: str | None = None, redirect_uri: str | None = None) -> str:
+    def get_auth_url(self, state: str | None = None, redirect_uri: str | None = None, with_mail: bool = False) -> str:
         state = state or secrets.token_urlsafe(32)
         rd = redirect_uri or _ZOHO_REDIRECT_URI
+        scope = f"{FULL_SCOPE},{MAIL_SCOPE}" if with_mail else FULL_SCOPE
         params = (
             f"client_id={_ZOHO_CLIENT_ID}"
             f"&redirect_uri={quote(rd, safe='')}"
-            f"&scope={FULL_SCOPE}"
+            f"&scope={scope}"
             f"&response_type=code"
             f"&access_type=offline"
             f"&state={state}"
@@ -117,6 +130,8 @@ class ZohoOAuth:
             "scope": token_data.get("scope", FULL_SCOPE),
             "connected_at": datetime.utcnow().isoformat(),
         }
+        # recomputed on every connect: a normal reconnect drops mail reading, "Connect my inbox" turns it on
+        doc["mail_enabled"] = has_mail_scope(doc["scope"])
         try:
             existing = self.db.zoho_tokens.find_one({"user_id": user_id})
             if existing:
