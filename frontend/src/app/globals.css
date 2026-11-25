@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
 
 /* "Pop" theme: bold tiles, thick outlines, hard offset shadows, yellow highlights.
@@ -103,7 +103,7 @@
   --color-highlight: var(--highlight);
   --color-on-highlight: var(--on-highlight);
   --color-outline: var(--outline);
-  --font-sans: 'Space Grotesk', 'Inter', var(--font-geist-sans), system-ui, sans-serif;
+  --font-sans: 'Manrope', 'Inter', var(--font-geist-sans), system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', var(--font-geist-mono), monospace;
 }
  

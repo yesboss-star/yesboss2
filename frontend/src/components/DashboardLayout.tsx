@@ -44,14 +44,14 @@ const navItems: NavItem[] = [
   { icon: User, label: "Profile", href: "/dashboard/profile", alsoActive: ["/dashboard/settings", "/dashboard/data"] },
 ];
 
-const visibleNavItems = navItems.filter((item) => !item.hidden);
-
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, role, signOut } = useAuth();
   const { sidebarOpen, mobileSidebarOpen, setSidebarOpen, setMobileSidebarOpen } = useUIStore();
   const { organization, avatarUrl, avatarStyle, setAvatarUrl } = useOrganizationStore();
   const pathname = usePathname();
   const [isMobile, setIsMobile] = useState(false);
+  // On a computer the sidebar has three entries; Profile lives in the avatar menu (top right). On a phone it stays in the sidebar.
+  const visibleNavItems = navItems.filter((item) => !item.hidden && (isMobile || item.href !== "/dashboard/profile"));
 
   // Load avatar from DB on mount — always source from API, not stale local state
   useEffect(() => {
@@ -248,11 +248,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                       <User className="w-4 h-4" /> Profile
                     </Link>
                   </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
-                    <Link href="/dashboard/settings">
-                      <Settings className="w-4 h-4" /> Settings
-                    </Link>
-                  </DropdownMenuItem>
+                  {/* the Profile page already holds the settings, so on a computer this menu has just Profile and Sign out */}
+                  {isMobile && (
+                    <DropdownMenuItem asChild>
+                      <Link href="/dashboard/settings">
+                        <Settings className="w-4 h-4" /> Settings
+                      </Link>
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={signOut} className="text-rose-400">
                     <LogOut className="w-4 h-4" /> Sign out

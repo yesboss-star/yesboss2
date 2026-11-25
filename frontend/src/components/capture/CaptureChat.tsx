@@ -13,7 +13,7 @@ import {
   Sparkles, MessageSquare, Plus, Edit3, Trash2, Paperclip, AtSign,
   Loader2, Send, Lightbulb, Check, ArrowRight, Square, Volume2, Mic, BookOpen,
   Menu, X, FileText, ClipboardList, ListChecks, Image as ImageIcon,
-  CalendarDays, CalendarPlus, FileUp, Flag, BookMarked, PieChart as PieChartIcon, TrendingUp, Search,
+  CalendarDays, CalendarPlus, FileUp, Flag, BookMarked, PieChart as PieChartIcon, TrendingUp, Search, Inbox,
 } from "lucide-react";
 import DelegatePreviewCard from "@/components/DelegatePreviewCard";
 import { VOICE_LANGUAGES, VOICE_LANG_KEY } from "@/components/capture/voice";
@@ -313,8 +313,14 @@ type ModeId = (typeof MODES)[number]["id"];
 const MODE_GROUPS = ["Capture", "Meetings", "Insights", "Think"] as const;
 const TILE_IDS: readonly string[] = ["mom", "journal", "need"];
 const TILES = MODES.filter((m) => TILE_IDS.includes(m.id));
-/** Everything else, as the pills under the three tiles. */
-const MORE = MODES.filter((m) => !TILE_IDS.includes(m.id));
+/** "Your Inbox Today": a pill that opens your private inbox summary in a window. It is not a chat mode, so it is not in MODES. */
+const INBOX_PILL = { id: "inbox", icon: Inbox, colour: "#B6F36B", title: "Your Inbox Today" } as const;
+/** Everything else, as the pills under the three tiles. The inbox pill follows the meeting tools. */
+const MORE = (() => {
+  const rest = MODES.filter((m) => !TILE_IDS.includes(m.id));
+  const at = rest.findIndex((m) => m.id === "upload") + 1;
+  return [...rest.slice(0, at), INBOX_PILL, ...rest.slice(at)];
+})();
 
 /** "show my journals", "list my reminders", "show my ideas": a short request to read your own records back, never a note being written.
  *  Returns which view of your Journal to open, or null when the words are something else. */
@@ -364,6 +370,7 @@ const ACCEPTED_EXTENSIONS = [".pdf", ".docx", ".txt", ".csv", ".xlsx", ".xls", "
 
 /** The Let's Talk conversation: a greeting and three tiles when it is empty, one message bar at the bottom always. */
 export default function CaptureChat({ extras, topSlot }: { extras?: ReactNode; /** shown above the greeting, only while the page is empty */ topSlot?: ReactNode } = {}) {
+  const [inboxOpen, setInboxOpen] = useState(false);
   const router = useRouter();
   // "MOM" chosen from the menu or the tiles: the next message is read as meeting notes, whatever it says
   const [composeMode, setComposeMode] = useState<ComposeMode | null>(null);
@@ -972,8 +979,12 @@ export default function CaptureChat({ extras, topSlot }: { extras?: ReactNode; /
   };
 
   /** A tile or a menu entry. Journal opens its own page (with what is typed so far, unsent). */
-  const pickMode = (id: ModeId) => {
+  const pickMode = (id: ModeId | "inbox") => {
     setMenu(null);
+    if (id === "inbox") {
+      setInboxOpen(true);
+      return;
+    }
     if (id === "mom" || id === "book" || id === "upload" || id === "brainstorm" || id === "journal") {
       setComposeMode(id);
       if (id === "upload") setTimeout(() => openPicker("document"), 30);
@@ -2127,7 +2138,19 @@ export default function CaptureChat({ extras, topSlot }: { extras?: ReactNode; /
         <div className="custom-scrollbar order-2 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain pb-4 pt-4">
           {!hasMessages && (
             <>
-              {extras}
+              {inboxOpen && (
+                <div role="dialog" aria-modal="true" aria-label="Your Inbox Today" className="fixed inset-0 z-[70] flex items-end justify-center bg-black/60 sm:items-center sm:p-4" onClick={() => setInboxOpen(false)}>
+                  <div className="max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-t-3xl border-[2.5px] border-outline bg-background p-4 shadow-[6px_6px_0_var(--shadow-hard)] sm:rounded-3xl" onClick={(e) => e.stopPropagation()}>
+                    <div className="mb-3 flex items-center justify-between">
+                      <p className="text-base font-extrabold text-foreground">Your Inbox Today</p>
+                      <button type="button" onClick={() => setInboxOpen(false)} aria-label="Close" className="grid h-9 w-9 cursor-pointer place-items-center rounded-full border-2 border-outline bg-surface text-foreground">
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    {extras}
+                  </div>
+                </div>
+              )}
               <div className="mt-auto space-y-3">
                 <div role="group" aria-label="Quick starts" className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
                   {TILES.map(({ id, icon: Icon, colour, title, sub }) => (

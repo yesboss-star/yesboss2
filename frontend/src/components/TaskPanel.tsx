@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Loader2, MessageSquare, Send, Sparkles, Trash2, Users, X } from "lucide-react";
+import { ArrowRight, ChevronLeft, Clock, Loader2, MessageSquare, Plus, Send, Sparkles, Trash2, Users, X } from "lucide-react";
 import { useTaskStore, type Task } from "@/stores/taskStore";
 import type { OrgMember } from "@/stores/orgChartStore";
 import FollowupThread from "@/components/FollowupThread";
@@ -439,7 +439,7 @@ export default function TaskPanel({ taskId, onClose, isOwner, userEmail, userId,
 
       <FollowupThread taskId={task.id} />
 
-      <TaskAI key={task.id} taskId={task.id} goalTitle={goal?.title} />
+      <TaskAI key={task.id} taskId={task.id} userKey={(userEmail || userId || "me").toLowerCase()} goalTitle={goal?.title} />
 
       {canEdit && (
         <div className="flex justify-end border-t-2 border-outline/30 pt-4">
@@ -464,27 +464,92 @@ export default function TaskPanel({ taskId, onClose, isOwner, userEmail, userId,
   );
 }
 
-/** Task AI: answers questions about this one task and its goal. It cannot change anything. */
-function TaskAI({ taskId, goalTitle }: { taskId: string; goalTitle?: string }) {
-  const [turns, setTurns] = useState<Turn[]>([]);
+/* ---------- Task AI chats are kept in this browser, one set per person and per task ---------- */
+
+interface Chat {
+  id: string;
+  at: number;
+  turns: Turn[];
+}
+
+const AI_STORE = "yesboss-task-ai";
+const AI_MAX_CHATS = 20;
+
+/** Earlier chats of one task, for one person. Storage can be blocked (private window): then the chat works for this visit only. */
+function loadChats(userKey: string, taskId: string): Chat[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const all = JSON.parse(window.localStorage.getItem(`${AI_STORE}:${userKey}`) || "{}");
+    return Array.isArray(all[taskId]) ? all[taskId] : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveChats(userKey: string, taskId: string, chats: Chat[]) {
+  try {
+    const all = JSON.parse(window.localStorage.getItem(`${AI_STORE}:${userKey}`) || "{}");
+    all[taskId] = chats.filter((c) => c.turns.length > 0).slice(-AI_MAX_CHATS);
+    window.localStorage.setItem(`${AI_STORE}:${userKey}`, JSON.stringify(all));
+  } catch {
+    /* the chat still works, it is just not kept */
+  }
+}
+
+/** Clock and id helpers live outside the component, so the component itself stays free of Date.now and Math.random. */
+const nowMs = () => Date.now();
+const newChatId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+let turnCounter = 0;
+const newTurnId = () => Date.now() * 1000 + (++turnCounter % 1000);
+
+function whenText(at: number): string {
+  const minutes = Math.max(0, Math.round((nowMs() - at) / 60000));
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 1440) return `${Math.round(minutes / 60)} h ago`;
+  return new Date(at).toLocaleDateString();
+}
+
+const smallButton = "inline-flex cursor-pointer items-center gap-1.5 rounded-full border-2 border-outline bg-surface px-2.5 py-1 text-xs font-bold";
+
+/** Task AI: answers questions about this one task and its goal. It cannot change anything.
+ *  Chats are kept per task: History (top right) lists the earlier ones, and a refresh no longer loses the chat. */
+function TaskAI({ taskId, userKey, goalTitle }: { taskId: string; userKey: string; goalTitle?: string }) {
+  const [chats, setChats] = useState<Chat[]>(() => loadChats(userKey, taskId));
+  const [view, setView] = useState<"chat" | "history" | string>("chat"); // a chat id means: reading that earlier chat
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const seq = useRef(0);
+  const chatsRef = useRef(chats);
+
+  const commit = (next: Chat[]) => {
+    chatsRef.current = next;
+    setChats(next);
+    saveChats(userKey, taskId, next);
+  };
+
+  const current = chats[chats.length - 1];
+  const reading = view !== "chat" && view !== "history" ? chats.find((c) => c.id === view) : undefined;
+  const turns = reading ? reading.turns : view === "chat" ? current?.turns ?? [] : [];
+  const past = chats.filter((c) => c.turns.length > 0).slice().reverse();
 
   useEffect(() => {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [turns.length, thinking]);
+  }, [turns.length, thinking, view]);
 
   const ask = async (raw: string) => {
     const question = raw.trim();
     if (!question || thinking) return;
-    const history = turns.map((t) => ({ role: t.role, text: t.text }));
     setInput("");
     setProblem(null);
-    setTurns((cur) => [...cur, { id: ++seq.current, role: "user", text: question }]);
+    setView("chat");
+    const base = chatsRef.current.length ? chatsRef.current : [{ id: newChatId(), at: nowMs(), turns: [] as Turn[] }];
+    const target = base[base.length - 1];
+    const history = target.turns.map((t) => ({ role: t.role, text: t.text }));
+    const addTo = (list: Chat[], turn: Turn) => list.map((c) => (c.id === target.id ? { ...c, turns: [...c.turns, turn] } : c));
+    commit(addTo(base, { id: newTurnId(), role: "user", text: question }));
     setThinking(true);
     try {
       const res = await fetch(`${API_URL}/tasks/${taskId}/ask`, {
@@ -494,7 +559,7 @@ function TaskAI({ taskId, goalTitle }: { taskId: string; goalTitle?: string }) {
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(typeof body.detail === "string" ? body.detail : "Task AI could not answer. Please try again.");
-      setTurns((cur) => [...cur, { id: ++seq.current, role: "ai", text: String(body.answer || "") }]);
+      commit(addTo(chatsRef.current, { id: newTurnId(), role: "ai", text: String(body.answer || "") }));
     } catch (err) {
       setProblem((err as Error).message);
     } finally {
@@ -502,7 +567,22 @@ function TaskAI({ taskId, goalTitle }: { taskId: string; goalTitle?: string }) {
     }
   };
 
+  const startNew = () => {
+    if (!current || current.turns.length === 0) return setView("chat");
+    commit([...chats, { id: newChatId(), at: nowMs(), turns: [] }]);
+    setProblem(null);
+    setView("chat");
+  };
+
+  const continueChat = (id: string) => {
+    const pick = chats.find((c) => c.id === id);
+    if (!pick) return;
+    commit([...chats.filter((c) => c.id !== id), pick]);
+    setView("chat");
+  };
+
   const quick = ["What should I do next?", goalTitle ? "Why does this matter for the goal?" : "Why does this matter?", "What could block this?", "Draft a status update"];
+  const firstQuestion = (c: Chat) => c.turns.find((t) => t.role === "user")?.text || "Chat";
 
   return (
     <section aria-label="Task AI" className="space-y-3 rounded-[22px] border-[2.5px] border-outline bg-surface-light/60 p-3.5">
@@ -510,73 +590,127 @@ function TaskAI({ taskId, goalTitle }: { taskId: string; goalTitle?: string }) {
         <span className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-full border-2 border-outline bg-highlight text-on-highlight">
           <Sparkles className="h-4 w-4" />
         </span>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h3 className="text-sm font-bold">Task AI</h3>
           <p className="truncate text-xs text-text-muted">{goalTitle ? `Knows this task and its goal, ${goalTitle}` : "Knows this task"}</p>
         </div>
+        {view === "chat" && current && current.turns.length > 0 && (
+          <button type="button" onClick={startNew} disabled={thinking} aria-label="Start a new chat" title="New chat" className={cn(smallButton, "px-2 disabled:opacity-50")}>
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => setView(view === "history" ? "chat" : "history")}
+          aria-pressed={view === "history"}
+          aria-label="Chat history of this task"
+          className={cn(smallButton, view === "history" && "bg-highlight text-on-highlight")}
+        >
+          <Clock className="h-3.5 w-3.5" /> History{past.length > 0 && <span className="opacity-70">{past.length}</span>}
+        </button>
       </div>
 
-      {turns.length > 0 && (
-        <div ref={listRef} className="max-h-72 space-y-3 overflow-y-auto overscroll-contain pr-1" aria-live="polite">
-          {turns.map((t) =>
-            t.role === "user" ? (
-              <div key={t.id} className="flex justify-end">
-                <div className="max-w-[85%] rounded-[18px] rounded-br-md border-2 border-outline bg-[#FF7A6B] px-3.5 py-2 text-sm font-bold text-[#111]">{t.text}</div>
-              </div>
-            ) : (
-              <div key={t.id} className="flex items-start gap-2">
-                <span className="mt-0.5 grid h-6 w-6 flex-shrink-0 place-items-center rounded-full border-2 border-outline bg-highlight text-on-highlight">
-                  <Sparkles className="h-3 w-3" />
-                </span>
-                <p className="min-w-0 flex-1 whitespace-pre-wrap text-sm leading-relaxed">{t.text}</p>
-              </div>
-            )
+      {view === "history" ? (
+        <div className="space-y-2" aria-label="Earlier chats about this task">
+          {past.length === 0 ? (
+            <p className="rounded-2xl border-2 border-dashed border-outline px-3 py-5 text-center text-sm text-text-muted">No chats about this task yet. Ask something and it is kept here.</p>
+          ) : (
+            <ul className="max-h-72 space-y-2 overflow-y-auto overscroll-contain pr-1">
+              {past.map((c) => (
+                <li key={c.id}>
+                  <button type="button" onClick={() => setView(c.id)} className="w-full cursor-pointer rounded-2xl border-2 border-outline bg-surface px-3 py-2 text-left">
+                    <span className="block truncate text-sm font-bold">{firstQuestion(c)}</span>
+                    <span className="block text-xs text-text-muted">
+                      {whenText(c.at)} · {c.turns.length} message{c.turns.length === 1 ? "" : "s"}
+                      {c.id === current?.id ? " · current chat" : ""}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
-          {thinking && (
-            <p className="flex items-center gap-2 pl-1 text-xs text-text-muted">
-              <Loader2 className="h-4 w-4 animate-spin" /> Thinking…
+        </div>
+      ) : (
+        <>
+          {reading && (
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" onClick={() => setView("history")} className={smallButton}>
+                <ChevronLeft className="h-3.5 w-3.5" /> History
+              </button>
+              <span className="text-xs text-text-muted">{whenText(reading.at)}</span>
+              {reading.id !== current?.id && (
+                <button type="button" onClick={() => continueChat(reading.id)} className={cn(smallButton, "ml-auto bg-highlight text-on-highlight")}>
+                  Continue this chat
+                </button>
+              )}
+            </div>
+          )}
+
+          {turns.length > 0 && (
+            <div ref={listRef} className="max-h-72 space-y-3 overflow-y-auto overscroll-contain pr-1" aria-live="polite">
+              {turns.map((t) =>
+                t.role === "user" ? (
+                  <div key={t.id} className="flex justify-end">
+                    <div className="max-w-[85%] rounded-[18px] rounded-br-md border-2 border-outline bg-[#FF7A6B] px-3.5 py-2 text-sm font-bold text-[#111]">{t.text}</div>
+                  </div>
+                ) : (
+                  <div key={t.id} className="flex items-start gap-2">
+                    <span className="mt-0.5 grid h-6 w-6 flex-shrink-0 place-items-center rounded-full border-2 border-outline bg-highlight text-on-highlight">
+                      <Sparkles className="h-3 w-3" />
+                    </span>
+                    <p className="min-w-0 flex-1 whitespace-pre-wrap text-sm leading-relaxed">{t.text}</p>
+                  </div>
+                )
+              )}
+              {thinking && !reading && (
+                <p className="flex items-center gap-2 pl-1 text-xs text-text-muted">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Thinking…
+                </p>
+              )}
+            </div>
+          )}
+
+          {problem && (
+            <p role="alert" className="rounded-xl border-2 border-outline bg-rose-500/10 px-3 py-2 text-xs text-rose-400">
+              {problem}
             </p>
           )}
-        </div>
-      )}
 
-      {problem && (
-        <p role="alert" className="rounded-xl border-2 border-outline bg-rose-500/10 px-3 py-2 text-xs text-rose-400">
-          {problem}
-        </p>
-      )}
+          {turns.length === 0 && !reading && (
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Ask Task AI">
+              {quick.map((q) => (
+                <button key={q} type="button" onClick={() => void ask(q)} disabled={thinking} className="cursor-pointer rounded-full border-2 border-outline bg-surface px-3 py-1.5 text-left text-xs font-bold disabled:opacity-60">
+                  {q}
+                </button>
+              ))}
+            </div>
+          )}
 
-      {turns.length === 0 && (
-        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Ask Task AI">
-          {quick.map((q) => (
-            <button key={q} type="button" onClick={() => void ask(q)} disabled={thinking} className="cursor-pointer rounded-full border-2 border-outline bg-surface px-3 py-1.5 text-left text-xs font-bold disabled:opacity-60">
-              {q}
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              // writing in an old chat continues that chat
+              if (reading && reading.id !== current?.id) continueChat(reading.id);
+              void ask(input);
+            }}
+          >
+            <label htmlFor="tp-ai" className="sr-only">
+              Ask Task AI
+            </label>
+            <input id="tp-ai" value={input} maxLength={500} onChange={(e) => setInput(e.target.value)} placeholder="Ask about this task or its goal" className={field} />
+            <button
+              type="submit"
+              aria-label="Send to Task AI"
+              disabled={!input.trim() || thinking}
+              className="grid h-11 w-11 flex-shrink-0 cursor-pointer place-items-center rounded-full border-2 border-outline bg-primary text-on-primary disabled:opacity-50"
+            >
+              <Send className="h-4 w-4" />
             </button>
-          ))}
-        </div>
+          </form>
+          <p className="text-[11px] text-text-muted">Task AI can read this task and its goal. It cannot change anything.</p>
+        </>
       )}
-
-      <form
-        className="flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void ask(input);
-        }}
-      >
-        <label htmlFor="tp-ai" className="sr-only">
-          Ask Task AI
-        </label>
-        <input id="tp-ai" value={input} maxLength={500} onChange={(e) => setInput(e.target.value)} placeholder="Ask about this task or its goal" className={field} />
-        <button
-          type="submit"
-          aria-label="Send to Task AI"
-          disabled={!input.trim() || thinking}
-          className="grid h-11 w-11 flex-shrink-0 cursor-pointer place-items-center rounded-full border-2 border-outline bg-primary text-on-primary disabled:opacity-50"
-        >
-          <Send className="h-4 w-4" />
-        </button>
-      </form>
-      <p className="text-[11px] text-text-muted">Task AI can read this task and its goal. It cannot change anything.</p>
     </section>
   );
 }

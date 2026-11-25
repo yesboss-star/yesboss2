@@ -71,7 +71,7 @@ export default function InboxSummary({ orgId }: { orgId: string }) {
   const { createTask } = useTaskStore();
   const { connected, mailEnabled, connecting, checkStatus, connect } = useZohoStore();
 
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true); // it is shown inside the Your Inbox Today window, so it starts open
   const [digest, setDigest] = useState<Digest | null>(null);
   const [loading, setLoading] = useState(false);
   const [added, setAdded] = useState<Record<string, boolean>>({});
@@ -93,7 +93,13 @@ export default function InboxSummary({ orgId }: { orgId: string }) {
     }
   }, []);
 
-  // the mailbox is only read when the person opens the card (and has allowed it)
+  // the mailbox is read when the window opens (and only once the person has allowed it)
+  useEffect(() => {
+    if (!mailEnabled) return;
+    const timer = setTimeout(() => void load(), 0);
+    return () => clearTimeout(timer);
+  }, [mailEnabled, load]);
+
   const toggle = () => {
     const next = !open;
     setOpen(next);
