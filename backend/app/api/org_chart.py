@@ -822,10 +822,10 @@ async def remind_members(
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
 
-    from ..dependencies.scope import is_org_member
+    from ..dependencies.scope import assert_org_owner
 
-    if not await is_org_member(db, org_id, current_user):
-        raise HTTPException(status_code=403, detail="Access denied")
+    # Sending reminder emails in the company's name is an owner action.
+    await assert_org_owner(db, org_id, current_user, "Only the owner can send reminders")
 
     # Normalize requested emails to those that are members and not integrated
     # Reuse status logic

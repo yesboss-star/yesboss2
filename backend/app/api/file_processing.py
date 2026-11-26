@@ -10,7 +10,7 @@ from ..core.file_processor import (
     search_documents,
 )
 from ..dependencies.auth import get_current_user
-from ..dependencies.scope import is_org_member
+from ..dependencies.scope import is_org_member, is_org_owner, user_id as _caller_uid
 
 logger = logging.getLogger("yesboss.file_processing_api")
 router = APIRouter()
@@ -21,6 +21,22 @@ async def _require_org_member(db, org_id: str, current_user) -> None:
         return
     if not await is_org_member(db, org_id, current_user):
         raise HTTPException(status_code=403, detail="Access denied")
+
+
+async def _scoped_user_id(db, org_id: str, requested: str | None, current_user) -> str | None:
+    """Which uploader's documents this caller may read. Never the id the client sent, unless the caller is the owner.
+
+    * the shared "temp" bucket (documents added before a company exists) belongs to whoever uploaded them,
+      so every person only ever sees their own;
+    * in a real company the owner may look at everything (or at one person's files);
+    * every other member only sees the files they uploaded themselves, the same rule /upload applies.
+    """
+    uid = _caller_uid(current_user)
+    if not org_id or org_id == "temp":
+        return uid
+    if await is_org_owner(db, org_id, current_user):
+        return requested or None
+    return uid
 
 
 def _fetch_org_context(org_id: str) -> dict:
@@ -58,6 +74,7 @@ async def process_uploaded_file(
     current_user = Depends(get_current_user),
 ):
     await _require_org_member(get_database(), org_id, current_user)
+    user_id = _caller_uid(current_user) or user_id
 
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required")
@@ -111,6 +128,7 @@ async def batch_process_files(
     current_user = Depends(get_current_user),
 ):
     await _require_org_member(get_database(), org_id, current_user)
+    user_id = _caller_uid(current_user) or user_id
 
     if len(files) > 10:
         raise HTTPException(status_code=400, detail="Maximum 10 files at once")
@@ -164,6 +182,7 @@ async def search_org_documents(
     if not org_id or not query:
         raise HTTPException(status_code=400, detail="org_id and query are required")
 
+    user_id = await _scoped_user_id(get_database(), org_id, user_id, current_user)
     results = await search_documents(org_id, query, limit, provider, user_id=user_id)
     return {"results": results, "count": len(results)}
 
@@ -175,6 +194,7 @@ async def get_document_types(
     current_user = Depends(get_current_user),
 ):
     await _require_org_member(get_database(), org_id, current_user)
+    user_id = await _scoped_user_id(get_database(), org_id, user_id, current_user)
 
     from ..core.qdrant import get_qdrant_client
 
@@ -215,6 +235,7 @@ async def get_organization_document_context(
 
     if not org_id:
         raise HTTPException(status_code=400, detail="org_id is required")
+    user_id = await _scoped_user_id(get_database(), org_id, user_id, current_user)
     return await get_org_document_context(org_id, max_docs=max_docs, user_id=user_id)
 
 
@@ -247,14 +268,15 @@ async def ask_documents(request: AskDocumentsRequest, current_user = Depends(get
     from ..core.file_processor import get_org_document_context
     from ..core.intelligence import extract_document_insights as _unused  # noqa: F401
 
-    overview = await get_org_document_context(request.org_id, max_docs=15, user_id=request.user_id)
+    scoped_user_id = await _scoped_user_id(get_database(), request.org_id, request.user_id, current_user)
+    overview = await get_org_document_context(request.org_id, max_docs=15, user_id=scoped_user_id)
 
     search_results = await search_documents(
         request.org_id,
         request.question,
         top_k=request.top_k,
         provider=request.provider,
-        user_id=request.user_id,
+        user_id=scoped_user_id,
     )
 
     chunk_block_parts = []

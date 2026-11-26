@@ -47,6 +47,29 @@ def _clean(value: Any) -> str | None:
     return text
 
 
+def _collect_org_ids(node: Any, found: set[str], max_nodes: int = 5000, max_depth: int = 8) -> None:
+    """Every organization id anywhere in a JSON body, however deeply it is nested (for example
+    ``{"context": {"organization_id": ...}}`` or a list of items that each carry one). Looking only at the top
+    level let a caller put another company's id one level down and skip the membership check."""
+    stack: list[tuple[Any, int]] = [(node, 0)]
+    seen = 0
+    while stack and seen < max_nodes:
+        current, depth = stack.pop()
+        seen += 1
+        if isinstance(current, dict):
+            for key, value in current.items():
+                if key in ORG_KEYS:
+                    cleaned = _clean(value)
+                    if cleaned:
+                        found.add(cleaned)
+                if isinstance(value, (dict, list)) and depth < max_depth:
+                    stack.append((value, depth + 1))
+        elif isinstance(current, list) and depth < max_depth:
+            for item in current:
+                if isinstance(item, (dict, list)):
+                    stack.append((item, depth + 1))
+
+
 async def _requested_org_ids(request: Request) -> set[str]:
     found: set[str] = set()
     for key in ORG_KEYS:
@@ -57,21 +80,18 @@ async def _requested_org_ids(request: Request) -> set[str]:
 
     content_type = (request.headers.get("content-type") or "").lower()
     try:
-        if "application/json" in content_type:
-            raw = await request.body()
-            if raw:
-                payload = json.loads(raw)
-                if isinstance(payload, dict):
-                    for key in ORG_KEYS:
-                        value = _clean(payload.get(key))
-                        if value:
-                            found.add(value)
-        elif "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
+        if "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
             form = await request.form()
             for key in ORG_KEYS:
                 value = _clean(form.get(key))
                 if value:
                     found.add(value)
+        else:
+            # JSON, or a body whose content type does not say so: read it either way, so the check cannot be
+            # skipped by sending a different Content-Type header.
+            raw = await request.body()
+            if raw:
+                _collect_org_ids(json.loads(raw), found)
     except (ValueError, UnicodeDecodeError):
         pass  # malformed body: the route's own validation will reject it
     return found

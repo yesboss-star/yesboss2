@@ -514,7 +514,8 @@ async def process_meeting(
     participant_list = []
 
     if zoho_event_id:
-        event = db.calendar_events.find_one({"zoho_event_id": zoho_event_id})
+        # only an event of the caller's own company: an event id alone must not open another company's calendar
+        event = db.calendar_events.find_one({"zoho_event_id": zoho_event_id, "organization_id": org_id})
         if not event:
             raise HTTPException(status_code=404, detail="Calendar event not found. Sync your calendar first.")
         raw_text = event.get("description", "")

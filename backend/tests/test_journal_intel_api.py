@@ -37,6 +37,12 @@ def api(offline_db, monkeypatch):
 
     monkeypatch.setattr(intel, "analyze_content", no_llm)
     monkeypatch.setattr(intel, "index_entry", no_index)
+    # the journal routes now check company membership, so the two test people really belong to the test company
+    offline_db.db.organizations.insert_one({"_id": ORG, "name": "Org One", "owner_id": "uid-owner"})
+    offline_db.db.users.insert_many([
+        {"uid": A.uid, "email": A.email, "organization_id": ORG},
+        {"uid": B.uid, "email": B.email, "organization_id": ORG},
+    ])
     client = TestClient(app)
     client.as_user = lambda u: who.__setitem__("u", u)
     client.db = offline_db.db
@@ -74,7 +80,8 @@ def test_users_cannot_see_or_touch_each_others_journal_data(api):
     assert api.delete(f"{P}/ideas/{iid}{q()}").status_code == 404
     api.as_user(A)
     assert len(api.get(f"{P}/reminders{q()}").json()["reminders"]) == 1
-    assert api.get(f"{P}/reminders?organization_id=other-org").json()["reminders"] == []
+    # another company's id is now refused outright (it used to come back as an empty list)
+    assert api.get(f"{P}/reminders?organization_id=other-org").status_code == 403
 
 
 def test_bad_ids_and_dates_do_not_500(api):

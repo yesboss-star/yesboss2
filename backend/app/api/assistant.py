@@ -1695,6 +1695,18 @@ def _resolve_identity(current_user) -> tuple[str | None, str | None]:
     return user_id, user_email
 
 
+async def _document_scope(db, org_id: str, user_id: str | None, user_email: str | None) -> str | None:
+    """Whose uploaded documents may feed this person's answer: all of the company's for an owner, only their own for
+    everyone else (the same rule /upload applies). Returns the uploader id to filter by, or None for no filter."""
+    from types import SimpleNamespace
+
+    from ..dependencies.scope import is_org_owner
+
+    if (user_id or user_email) and await is_org_owner(db, org_id, SimpleNamespace(id=user_id, uid=user_id, email=user_email)):
+        return None
+    return user_id or "__no_user__"
+
+
 async def _gather_org_snapshot(db, org_id: str, user_id: str | None = None, user_email: str | None = None) -> dict[str, Any]:
     """Collect a small JSON snapshot of everything we know about the org.
 
@@ -1728,7 +1740,7 @@ async def _gather_org_snapshot(db, org_id: str, user_id: str | None = None, user
 
     try:
         from ..core.file_processor import get_org_document_context
-        doc_ctx = await get_org_document_context(org_id, max_docs=20)
+        doc_ctx = await get_org_document_context(org_id, max_docs=20, user_id=await _document_scope(db, org_id, user_id, user_email))
         snap["documents"] = doc_ctx
     except Exception as e:
         logger.warning("doc snapshot failed: %s", e)
@@ -2076,7 +2088,7 @@ async def _build_ask_prompt(
     if db is not None and org_id:
         try:
             from ..core.file_processor import search_documents
-            search_results = await search_documents(org_id, text, top_k=3)
+            search_results = await search_documents(org_id, text, top_k=3, user_id=await _document_scope(db, org_id, user_id, user_email))
             if search_results:
                 chunks = []
                 for r in search_results:
@@ -2209,7 +2221,7 @@ class DiagnoseRequest(BaseModel):
 
 
 @router.post("/diagnose-data")
-async def diagnose_data(request: DiagnoseRequest):
+async def diagnose_data(request: DiagnoseRequest, current_user=Depends(get_current_user)):
     """Look at what data the org has, decide if it's enough to answer
     the user's question, and (if not) request specific uploads."""
     text = (request.message or "").strip()
@@ -2225,7 +2237,9 @@ async def diagnose_data(request: DiagnoseRequest):
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
-    snap = await _gather_org_snapshot(db, org_id)
+    snap = await _gather_org_snapshot(
+        db, org_id, user_id=getattr(current_user, "id", None), user_email=getattr(current_user, "email", None)
+    )
 
     # Truncate the snapshot for the prompt
     compact = {
@@ -2589,9 +2603,9 @@ async def assistant_chat(request: ChatRequest, current_user = Depends(get_curren
         }
 
 
-async def _async_snapshot(db, org_id: str) -> dict[str, Any]:
+async def _async_snapshot(db, org_id: str, user_id: str | None = None, user_email: str | None = None) -> dict[str, Any]:
     """Async wrapper around the snapshot collector (kept for symmetry)."""
-    return await _gather_org_snapshot(db, org_id)
+    return await _gather_org_snapshot(db, org_id, user_id=user_id, user_email=user_email)
 
 
 # ---------------------------------------------------------------------------

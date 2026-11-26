@@ -14,6 +14,7 @@ import logging
 from typing import Iterable
 
 from bson import ObjectId
+from fastapi import HTTPException
 
 logger = logging.getLogger("yesboss.scope")
 
@@ -140,3 +141,14 @@ async def email_is_org_member(db, org_id: str, email: str) -> bool:
     from types import SimpleNamespace
 
     return await is_org_member(db, org_id, SimpleNamespace(id=None, uid=None, email=email))
+
+
+async def assert_org_owner(db, org_id: str | None, user, detail: str = "Only the owner can do this") -> None:
+    """Fail closed: 401 without a signed-in user, 403 unless the user is a primary owner or co-owner of org_id.
+
+    Employees can move their own work forward, but approving, reviewing, reopening and deleting stay with the owner.
+    """
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not org_id or not await is_org_owner(db, str(org_id), user):
+        raise HTTPException(status_code=403, detail=detail)

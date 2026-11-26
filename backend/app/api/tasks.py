@@ -883,12 +883,18 @@ async def delete_task(task_id: str, current_user = Depends(get_current_user_opti
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    if current_user and getattr(current_user, 'id', None):
-        t_org_id = task.get("organization_id", "")
-        if not await _is_org_owner(db, t_org_id, current_user.id):
-            user_email = (getattr(current_user, 'email', '') or '').lower().strip()
-            if not is_person_involved(task, getattr(current_user, 'id', None), user_email):
-                raise HTTPException(status_code=403, detail="Access denied")
+    # The owner can delete any task. Someone who only works on a task cannot delete it; a person may remove a task
+    # they created themselves, until it is approved (an approved task is the company's record of finished work).
+    if not current_user or not getattr(current_user, 'id', None):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    from ..dependencies.scope import is_org_owner as _is_owner
+
+    if not await _is_owner(db, task.get("organization_id", ""), current_user):
+        mine = {str(current_user.id).strip(), (getattr(current_user, 'email', '') or '').lower().strip()}
+        created_by = str(task.get("created_by") or "").strip()
+        own_open_task = bool(created_by) and (created_by in mine or created_by.lower() in mine) and task.get("status") != "approved"
+        if not own_open_task:
+            raise HTTPException(status_code=403, detail="Only the owner can delete this task")
 
     if task:
         raw_assignees = task.get("assignee_id", [])
@@ -1090,18 +1096,11 @@ async def approve_task(task_id: str, current_user = Depends(get_current_user_opt
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
 
-        if current_user and getattr(current_user, "id", None):
-            t_org_id = task.get("organization_id", "")
-            if not await _is_org_owner(db, t_org_id, current_user.id):
-                user_email = (getattr(current_user, "email", "") or "").lower().strip()
-                assignee_ids = [str(a).lower().strip() for a in (task.get("assignee_id") or [])]
-                if (
-                    task.get("created_by") != current_user.id
-                    and (task.get("assignee_email") or "").lower().strip() != user_email
-                    and (task.get("assigned_to") or "").lower().strip() != user_email
-                    and user_email not in assignee_ids
-                ):
-                    raise HTTPException(status_code=403, detail="Access denied")
+        # Approving is the owner's decision. An assignee or creator can finish their work (/complete) but never
+        # sign it off themselves.
+        from ..dependencies.scope import assert_org_owner
+
+        await assert_org_owner(db, task.get("organization_id", ""), current_user, "Only the owner can approve a task")
 
         user_id = getattr(current_user, 'id', None) or str(current_user) if current_user else None
 

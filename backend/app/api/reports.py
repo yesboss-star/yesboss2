@@ -14,7 +14,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 
 from ..core.database import get_database
 from ..dependencies.auth import get_current_user_optional
-from ..dependencies.scope import is_org_member, is_org_owner
+from ..dependencies.scope import assert_org_owner, is_org_member, is_org_owner
 
 router = APIRouter()
 logger = logging.getLogger("yesboss.reports")
@@ -694,6 +694,9 @@ async def upload_template_file(
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
 
+    # The company's report template is shared by everyone, so only an owner may replace or remove it.
+    await assert_org_owner(db, organization_id, current_user, "Only the owner can change the report template")
+
     if not file.filename or not file.filename.lower().endswith(".docx"):
         raise HTTPException(status_code=400, detail="Only .docx files are accepted")
 
@@ -777,6 +780,8 @@ async def delete_template(
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
+
+    await assert_org_owner(db, organization_id, current_user, "Only the owner can change the report template")
 
     result = db.files.delete_one({"organization_id": organization_id, "category": "report_template"})
     return {"success": result.deleted_count > 0}

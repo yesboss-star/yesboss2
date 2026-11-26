@@ -10,6 +10,7 @@ from pydantic import BaseModel, field_validator
 
 from ..core.config import settings
 from ..core.database import get_database
+from ..core.invites import is_invited, require_invite
 from ..core.firebase_admin import (
     create_user,
     delete_user,
@@ -241,6 +242,7 @@ async def _resolve_user_role(db, user) -> str:
 @router.post("/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 async def signup(request: SignupRequest):
     try:
+        require_invite(request.email, get_database())
         existing = get_user_by_email(request.email)
         if existing:
             raise HTTPException(
@@ -363,6 +365,7 @@ async def send_otp(request: SendOTPRequest):
             raise HTTPException(status_code=400, detail="Email is required for OTP verification")
 
         email = request.email.strip().lower()
+        require_invite(email, db)
 
         otp = f"{secrets.randbelow(1000000):06d}"
         expires_at = datetime.utcnow() + timedelta(minutes=10)
@@ -710,6 +713,11 @@ async def sync_user(request: SyncUserRequest, current_user=Depends(get_current_u
             logger.info("User synced (updated): %s", request.email)
             actual_role = existing_role
         else:
+            # Invite-only beta: a brand-new account must be invited (existing users never reach this branch).
+            # Google / phone sign-ups are created in Firebase directly by the browser, so this is where we stop them.
+            if not is_invited(request.email, db):
+                delete_user(request.uid)
+                require_invite(request.email, db)
             role_val = request.role if request.role else "employee"
             user_doc = {
                 "uid": request.uid,

@@ -248,8 +248,12 @@ def _owned_org_ids(db: Any, user: Any) -> list[str]:
 
 
 async def _authorize_thread_admin(db: Any, thread: dict[str, Any], user: Any) -> None:
-    role = await _role_for(db, user)
-    if role == "owner":
+    # Owner means owner of THE THREAD'S company. A user whose role field says "owner" (anyone can pick that when they
+    # sign up) must not be able to manage another company's threads.
+    from ..dependencies.scope import is_org_owner
+
+    org_id = str(thread.get("org_id") or "")
+    if org_id and await is_org_owner(db, org_id, user):
         return
     email = _requester_email(user)
     if await _is_manager_of(db, email, str(thread.get("assignee_email") or "")):
@@ -301,6 +305,12 @@ async def list_threads(
     risk_view = False
     if role == "owner":
         risk_view = True
+        if org_id:
+            from ..dependencies.scope import is_org_owner
+
+            # only a company you really own: the role field alone says nothing about which company
+            if not await is_org_owner(db, str(org_id), current_user):
+                raise HTTPException(status_code=403, detail="Access denied")
         if assignee:
             query["assignee_email"] = assignee.strip().lower()
         if not org_id:

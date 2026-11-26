@@ -117,6 +117,16 @@ class Settings:
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development").lower()
     ADMIN_API_KEY: str = os.getenv("ADMIN_API_KEY", "")
+    # Invite-only beta: while INVITE_ONLY=true only invited people can create a new account (see core/invites.py).
+    # INVITED_EMAILS and INVITED_DOMAINS are comma separated lists. Leave INVITE_ONLY unset or false to open sign-up.
+    INVITE_ONLY: bool = os.getenv("INVITE_ONLY", "false").lower() == "true"
+    INVITED_EMAILS: str = os.getenv("INVITED_EMAILS", "")
+    INVITED_DOMAINS: str = os.getenv("INVITED_DOMAINS", "")
+    # Invite-only beta: while INVITE_ONLY=true only invited people can create a new account (see core/invites.py).
+    # INVITED_EMAILS and INVITED_DOMAINS are comma separated lists. Leave INVITE_ONLY unset or false to open sign-up.
+    INVITE_ONLY: bool = os.getenv("INVITE_ONLY", "false").lower() == "true"
+    INVITED_EMAILS: str = os.getenv("INVITED_EMAILS", "")
+    INVITED_DOMAINS: str = os.getenv("INVITED_DOMAINS", "")
     # Set to false for local/offline runs: the scheduler sends reminders, digests and imports
     # for EVERY organization in the connected database.
     SCHEDULER_ENABLED: bool = os.getenv("SCHEDULER_ENABLED", "true").lower() == "true"

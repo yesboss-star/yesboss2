@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from ..api.websocket import manager as ws_manager
 from ..core.database import get_database
 from ..dependencies.auth import get_current_user, get_current_user_optional
+from ..dependencies.scope import assert_org_owner, is_org_owner
 from ..dependencies.tenant import assert_goal_access
 
 router = APIRouter()
@@ -831,13 +832,20 @@ async def update_goal(goal_id: str, goal: GoalUpdate, current_user = Depends(get
     if not old_goal_doc:
         raise HTTPException(status_code=404, detail="Goal not found")
 
-    if current_user and getattr(current_user, 'id', None):
-        g_org_id = old_goal_doc.get("organization_id", "")
-        if not await _is_org_owner(db, g_org_id, current_user.id):
-            from ..core.identity import is_person_involved
-            user_email = (getattr(current_user, 'email', '') or '').lower().strip()
-            if not is_person_involved(old_goal_doc, current_user.id, user_email):
-                raise HTTPException(status_code=403, detail="Access denied")
+    if not current_user or not getattr(current_user, 'id', None):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    g_org_id = old_goal_doc.get("organization_id", "")
+    if not await is_org_owner(db, g_org_id, current_user):
+        from ..core.identity import is_person_involved
+        user_email = (getattr(current_user, 'email', '') or '').lower().strip()
+        if not is_person_involved(old_goal_doc, current_user.id, user_email):
+            raise HTTPException(status_code=403, detail="Access denied")
+        # Moving a goal to "completed" is the approval, and a completed goal can only be reopened by the owner. Without
+        # this an assignee could approve their own goal through this route (the /review route has its own rules).
+        if goal.status == "completed" or (old_goal_doc.get("status") == "completed" and goal.status):
+            raise HTTPException(status_code=403, detail="Only the owner can approve or reopen a goal")
+        if goal.reviewer_id is not None or goal.reviewer_name is not None:
+            raise HTTPException(status_code=403, detail="Only the owner can choose who reviews a goal")
 
     update_data = {}
     for k, v in goal.model_dump().items():
@@ -982,6 +990,25 @@ async def review_goal(goal_id: str, request: ReviewRequest, current_user = Depen
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required")
 
+    if not await is_org_owner(db, org_id, current_user):
+        def _ids(*fields):
+            out = set()
+            for f in fields:
+                raw = goal.get(f)
+                for item in (raw if isinstance(raw, (list, tuple)) else [raw]):
+                    if item:
+                        out.add(str(item).strip().lower())
+            return out
+
+        me = {str(user_id).strip().lower()}
+        if getattr(current_user, "email", None):
+            me.add(str(current_user.email).strip().lower())
+        reviewers = _ids("reviewer_id", "reviewer_email")
+        assignees = _ids("assignee_id", "assignee_email")
+        # a reviewer the owner chose may review, but nobody reviews their own work
+        if not (me & reviewers) or (me & assignees):
+            raise HTTPException(status_code=403, detail="Only the owner or the chosen reviewer can review a goal")
+
     if request.action not in ("approve", "reject"):
         raise HTTPException(status_code=400, detail="Action must be 'approve' or 'reject'")
 
@@ -1097,13 +1124,8 @@ async def delete_goal(goal_id: str, current_user = Depends(get_current_user_opti
     if not goal:
         raise HTTPException(status_code=404, detail="Goal not found")
 
-    if current_user and getattr(current_user, 'id', None):
-        g_org_id = goal.get("organization_id", "")
-        if not await _is_org_owner(db, g_org_id, current_user.id):
-            from ..core.identity import is_person_involved
-            user_email = (getattr(current_user, 'email', '') or '').lower().strip()
-            if not is_person_involved(goal, current_user.id, user_email):
-                raise HTTPException(status_code=403, detail="Access denied")
+    # Deleting a goal also deletes every task under it, so it stays with the owner.
+    await assert_org_owner(db, goal.get("organization_id", ""), current_user, "Only the owner can delete a goal")
 
     if goal:
         assignee_ids = goal.get("assignee_id") or []
