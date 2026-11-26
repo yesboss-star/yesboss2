@@ -248,7 +248,9 @@ cors_origins_str = getattr(settings, "CORS_ORIGINS", "")
 if cors_origins_str:
     allowed_origins = [o.strip() for o in cors_origins_str.split(",") if o.strip()]
 else:
-    allowed_origins = ["*"] if settings.DEBUG else []
+    # "Any website" is only for a developer's laptop. On the live server (ENVIRONMENT=production) a missing CORS_ORIGINS
+    # must mean "nobody else", even if DEBUG was left on.
+    allowed_origins = ["*"] if (settings.DEBUG and settings.ENVIRONMENT != "production") else []
 
 app.add_middleware(
     CORSMiddleware,
