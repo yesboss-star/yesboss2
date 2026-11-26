@@ -18,6 +18,7 @@ import {
 import DelegatePreviewCard from "@/components/DelegatePreviewCard";
 import { VOICE_LANGUAGES, VOICE_LANG_KEY } from "@/components/capture/voice";
 import NeedActionCard from "@/components/capture/NeedActionCard";
+import DailyBrief from "@/components/capture/DailyBrief";
 import MeetingsHub from "@/components/capture/MeetingsHub";
 import { InsightChartCard } from "@/components/charts/TaskCharts";
 import BrainstormCard, { type BrainstormIdea } from "@/components/capture/BrainstormCard";
@@ -2151,6 +2152,8 @@ export default function CaptureChat({ extras, topSlot }: { extras?: ReactNode; /
                   </div>
                 </div>
               )}
+              {/* an employee has no Dashboard, so the day's brief and the evening wrap-up are here, under the message box */}
+              {role === "employee" && <DailyBrief onTool={(mode) => pickMode(mode as ModeId)} />}
               <div className="mt-auto space-y-3">
                 <div role="group" aria-label="Quick starts" className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
                   {TILES.map(({ id, icon: Icon, colour, title, sub }) => (

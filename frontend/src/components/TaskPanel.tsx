@@ -139,7 +139,8 @@ export default function TaskPanel({ taskId, onClose, isOwner, userEmail, userId,
   const createdByMe = !!userId && task.created_by === userId;
   const canEdit = isOwner || mine || createdByMe; // title, department, notes, sharing, delete
   const canMove = isOwner || ((mine || createdByMe) && (status === "pending" || status === "in_progress"));
-  const canApprove = isOwner || (createdByMe && !mine);
+  const canApprove = isOwner; // approving is the owner's decision (the server enforces this too)
+  const canDelete = isOwner || (createdByMe && status !== "approved");
   const current = firstAssignee(task);
   const people = current && !members.some((m) => m.email.toLowerCase() === current.toLowerCase()) ? [{ email: current, full_name: current }, ...members] : members;
   const goal = goals.find((g) => g.id === task.goal_id);
@@ -441,7 +442,7 @@ export default function TaskPanel({ taskId, onClose, isOwner, userEmail, userId,
 
       <TaskAI key={task.id} taskId={task.id} userKey={(userEmail || userId || "me").toLowerCase()} goalTitle={goal?.title} />
 
-      {canEdit && (
+      {canDelete && (
         <div className="flex justify-end border-t-2 border-outline/30 pt-4">
           <InlineConfirm
             label="Delete task"

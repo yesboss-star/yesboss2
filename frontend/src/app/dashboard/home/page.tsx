@@ -13,7 +13,7 @@ export default function HomePage() {
 
   return (
     <DashboardLayout>
-      <div className="h-[calc(100vh-7rem)] md:h-[calc(100vh-8rem)]">
+      <div className="h-[calc(100dvh-7rem-var(--bar,0px))] md:h-[calc(100dvh-8rem)]">
         <CaptureChat
           topSlot={
             // once a day, one tap: everyone gets it, it is private, and it goes away after an answer or a skip

@@ -10,10 +10,14 @@ interface Notification {
   timestamp: string;
 }
 
+export type Skin = "pop" | "aurora" | "paper";
+
 interface UIState {
   sidebarOpen: boolean;
   mobileSidebarOpen: boolean;
   theme: "dark" | "light" | "system";
+  /** the look of the app: Pop (the default), Aurora or Paper */
+  skin: Skin;
   notifications: Notification[];
   unreadCount: number;
   breadcrumbs: { label: string; href?: string }[];
@@ -26,6 +30,7 @@ interface UIState {
   toggleMobileSidebar: () => void;
   setMobileSidebarOpen: (open: boolean) => void;
   setTheme: (theme: "dark" | "light" | "system") => void;
+  setSkin: (skin: Skin) => void;
   addNotification: (notification: Omit<Notification, "id" | "read" | "timestamp">) => void;
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: () => void;
@@ -42,6 +47,7 @@ export const useUIStore = create<UIState>()(
   sidebarOpen: true,
   mobileSidebarOpen: false,
   theme: "dark",
+  skin: "pop",
   notifications: [],
   unreadCount: 0,
   breadcrumbs: [],
@@ -55,6 +61,7 @@ export const useUIStore = create<UIState>()(
     set((state) => ({ mobileSidebarOpen: !state.mobileSidebarOpen })),
   setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),
   setTheme: (theme) => set({ theme }),
+  setSkin: (skin) => set({ skin }),
 
   addNotification: (notification) =>
     set((state) => ({
@@ -96,7 +103,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: "yesboss-ui",
-      partialize: (state) => ({ theme: state.theme }),
+      partialize: (state) => ({ theme: state.theme, skin: state.skin }),
     }
   )
 );

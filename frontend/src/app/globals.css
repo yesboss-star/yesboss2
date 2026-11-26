@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Newsreader:wght@500;600&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
 
 /* "Pop" theme: bold tiles, thick outlines, hard offset shadows, yellow highlights.
@@ -272,4 +272,182 @@ body {
   button, [role="checkbox"] {
     border: 1px solid ButtonText !important;
   }
+}
+
+/* ===== Looks: Pop (the default, above), Aurora and Paper. The look is set on the page as data-skin; light or dark is data-theme. ===== */
+/*
+  Three looks for the whole app: Pop (the project's own theme), Aurora and Paper.
+  Every screen reads the same colour tokens, so a look is a set of tokens plus a few shape rules.
+  The page sets data-skin (pop, aurora, paper) and data-theme (light, dark) on the root element.
+*/
+
+/* soft accent colours used by tiles, chips and badges */
+:root {
+  --c-yellow: #FFD93D;
+  --c-blue: #7CC8FF;
+  --c-pink: #FF9FD2;
+  --c-green: #B6F36B;
+  --c-purple: #C4B5FD;
+  --c-orange: #FFB36B;
+  --c-coral: #FF7A6B;
+}
+
+/* ================================================================ Aurora */
+
+html[data-skin="aurora"][data-theme="dark"] {
+  --background: #0A0F24;
+  --foreground: #EAF0FF;
+  --primary: #7DD3FC;
+  --primary-light: #BAE6FD;
+  --on-primary: #06142B;
+  --accent: #C4A7FF;
+  --accent-hover: #D8C4FF;
+  --surface: #131A38;
+  --surface-light: #1C2549;
+  --border: #2A3566;
+  --border-light: #3B4880;
+  --text-muted: #9AA7D6;
+  --highlight: #5EEAD4;
+  --on-highlight: #04201C;
+  --outline: rgba(150, 170, 255, 0.34);
+  --shadow-hard: rgba(94, 234, 212, 0.3);
+  --c-yellow: #5EEAD4;
+  --c-blue: #7DD3FC;
+  --c-pink: #F0ABFC;
+  --c-green: #86EFAC;
+  --c-purple: #C4B5FD;
+  --c-orange: #FDBA74;
+  --c-coral: #FDA4AF;
+}
+html[data-skin="aurora"][data-theme="light"] {
+  --background: #EEF1FF;
+  --foreground: #1B1F4B;
+  --primary: #4F46E5;
+  --primary-light: #6D66F0;
+  --on-primary: #FFFFFF;
+  --accent: #B026D3;
+  --accent-hover: #8E1AB0;
+  --surface: #FFFFFF;
+  --surface-light: #EEF0FF;
+  --border: #D6DBF7;
+  --border-light: #B9C0EE;
+  --text-muted: #5A6090;
+  --highlight: #7EF0DA;
+  --on-highlight: #08302B;
+  --outline: rgba(79, 70, 229, 0.3);
+  --shadow-hard: rgba(79, 70, 229, 0.25);
+  --c-yellow: #7EF0DA;
+  --c-blue: #A5D8FF;
+  --c-pink: #F5C2FF;
+  --c-green: #BBF7D0;
+  --c-purple: #D8CCFF;
+  --c-orange: #FFD3A8;
+  --c-coral: #FFC1C9;
+}
+html[data-skin="aurora"][data-theme="dark"] body {
+  background-color: #0A0F24;
+  background-image: radial-gradient(900px 520px at 12% -8%, rgba(94, 234, 212, 0.2), transparent 60%), radial-gradient(800px 600px at 96% 0%, rgba(192, 132, 252, 0.24), transparent 56%), radial-gradient(760px 520px at 50% 112%, rgba(125, 211, 252, 0.16), transparent 60%);
+  background-attachment: fixed;
+  background-size: auto;
+}
+html[data-skin="aurora"][data-theme="light"] body {
+  background-color: #EEF1FF;
+  background-image: radial-gradient(900px 520px at 12% -8%, rgba(126, 240, 218, 0.55), transparent 60%), radial-gradient(800px 600px at 96% 0%, rgba(216, 204, 255, 0.8), transparent 56%), radial-gradient(760px 520px at 50% 112%, rgba(165, 216, 255, 0.6), transparent 60%);
+  background-attachment: fixed;
+  background-size: auto;
+}
+
+/* thin glowing edges instead of thick outlines */
+html[data-skin="aurora"] :is(.border-2, .border-\[2\.5px\]) { border-width: 1px; }
+html[data-skin="aurora"] :is(.border-t-2, .border-b-2, .border-l-2, .border-r-2) { border-width: 0; }
+html[data-skin="aurora"] .border-t-2 { border-top-width: 1px; }
+html[data-skin="aurora"] .border-b-2 { border-bottom-width: 1px; }
+html[data-skin="aurora"] .border-l-2 { border-left-width: 1px; }
+html[data-skin="aurora"] .border-r-2 { border-right-width: 1px; }
+html[data-skin="aurora"] [class*="border-t-[2.5"] { border-top-width: 1px; }
+html[data-skin="aurora"] [class*="border-b-[2.5"] { border-bottom-width: 1px; }
+html[data-skin="aurora"] [class*="border-l-[2.5"] { border-left-width: 1px; }
+html[data-skin="aurora"] [class*="border-r-[2.5"] { border-right-width: 1px; }
+html[data-skin="aurora"][data-theme="dark"] [class*="shadow-["] { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04), 0 10px 28px -12px rgba(94, 234, 212, 0.4) !important; }
+html[data-skin="aurora"][data-theme="light"] [class*="shadow-["] { box-shadow: 0 10px 28px -12px rgba(79, 70, 229, 0.32) !important; }
+/* glass */
+html[data-skin="aurora"] .bg-surface { background-color: color-mix(in srgb, var(--surface) 78%, transparent); backdrop-filter: blur(14px) saturate(1.3); }
+html[data-skin="aurora"][data-theme="dark"] .bg-highlight { background-image: linear-gradient(135deg, #5EEAD4, #7DD3FC 55%, #C4B5FD); }
+html[data-skin="aurora"][data-theme="light"] .bg-highlight { background-image: linear-gradient(135deg, #7EF0DA, #A5D8FF 55%, #D8CCFF); }
+html[data-skin="aurora"][data-theme="dark"] .bg-primary { background-image: linear-gradient(135deg, #7DD3FC, #A78BFA); }
+html[data-skin="aurora"][data-theme="light"] .bg-primary { background-image: linear-gradient(135deg, #4F46E5, #9333EA); }
+html[data-skin="aurora"] .text-accent { background-image: linear-gradient(90deg, var(--accent), var(--primary)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* ================================================================ Paper */
+
+html[data-skin="paper"][data-theme="light"] {
+  --background: #F6F5F1;
+  --foreground: #1C1B19;
+  --primary: #1F2A44;
+  --primary-light: #34456B;
+  --on-primary: #FFFFFF;
+  --accent: #9F3A22;
+  --accent-hover: #7C2B17;
+  --surface: #FFFFFF;
+  --surface-light: #EFEDE6;
+  --border: #DDD9CE;
+  --border-light: #C9C4B6;
+  --text-muted: #6B675C;
+  --highlight: #EADFB4;
+  --on-highlight: #2A2618;
+  --outline: #BDB7A8;
+  --shadow-hard: rgba(28, 27, 25, 0.18);
+  --c-yellow: #EEE0A8;
+  --c-blue: #C8DCEC;
+  --c-pink: #EBCFD9;
+  --c-green: #CFE2C6;
+  --c-purple: #D9D3EC;
+  --c-orange: #EDD7BC;
+  --c-coral: #EBBBB0;
+}
+html[data-skin="paper"][data-theme="dark"] {
+  --background: #171614;
+  --foreground: #ECE9E1;
+  --primary: #E7E2D3;
+  --primary-light: #F3EFE3;
+  --on-primary: #171614;
+  --accent: #E8A07E;
+  --accent-hover: #F0B896;
+  --surface: #211F1C;
+  --surface-light: #2B2925;
+  --border: #3A3732;
+  --border-light: #4A463E;
+  --text-muted: #A29D90;
+  --highlight: #C9B66A;
+  --on-highlight: #1A1708;
+  --outline: #4F4A41;
+  --shadow-hard: rgba(0, 0, 0, 0.5);
+  --c-yellow: #D9C77F;
+  --c-blue: #A9C4DA;
+  --c-pink: #D2AEBE;
+  --c-green: #AFC9A3;
+  --c-purple: #BDB3D9;
+  --c-orange: #D9B88F;
+  --c-coral: #D69A8D;
+}
+html[data-skin="paper"] body { background-image: none; }
+
+html[data-skin="paper"] :is(.border-2, .border-\[2\.5px\]) { border-width: 1px; }
+html[data-skin="paper"] .border-t-2 { border-top-width: 1px; }
+html[data-skin="paper"] .border-b-2 { border-bottom-width: 1px; }
+html[data-skin="paper"] .border-l-2 { border-left-width: 1px; }
+html[data-skin="paper"] .border-r-2 { border-right-width: 1px; }
+html[data-skin="paper"] [class*="border-t-[2.5"] { border-top-width: 1px; }
+html[data-skin="paper"] [class*="border-b-[2.5"] { border-bottom-width: 1px; }
+html[data-skin="paper"] [class*="border-l-[2.5"] { border-left-width: 1px; }
+html[data-skin="paper"] [class*="border-r-[2.5"] { border-right-width: 1px; }
+html[data-skin="paper"][data-theme="light"] [class*="shadow-["] { box-shadow: 0 1px 2px rgba(20, 20, 10, 0.06), 0 6px 18px -8px rgba(20, 20, 10, 0.14) !important; }
+html[data-skin="paper"][data-theme="dark"] [class*="shadow-["] { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 20px -10px rgba(0, 0, 0, 0.6) !important; }
+html[data-skin="paper"] [class*="rounded-["] { border-radius: 14px; }
+html[data-skin="paper"] [class*="rounded-t-["] { border-radius: 18px 18px 0 0; }
+html[data-skin="paper"] :is(h1, h2, h3) { font-family: "Newsreader", Georgia, "Times New Roman", serif; font-weight: 600; letter-spacing: -0.01em; }
+html[data-skin="paper"] [class*="hover:-translate"]:hover { transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-skin] * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }

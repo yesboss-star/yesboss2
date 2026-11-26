@@ -26,7 +26,7 @@ const chip = "inline-flex cursor-pointer items-center justify-center gap-2 round
 /** A short brief of the day (and a wrap-up in the evening), written from the person's own tasks and goals.
  *  An owner sees the whole company's tasks; anyone else sees only the tasks they are on. Every line is counted from
  *  the real tasks, so nothing is made up. "Plan tomorrow" only ever moves the person's OWN open tasks, and only when pressed. */
-export default function DailyBrief() {
+export default function DailyBrief({ onTool }: { onTool?: (mode: string) => void } = {}) {
   const router = useRouter();
   const { myTasks: tasks, myGoals: goals, ready, failed, retry, role, email } = useMyWork();
   const isOwner = role === "owner";
@@ -193,10 +193,10 @@ export default function DailyBrief() {
         </div>
       )}
       <div role="group" aria-label="Open in Let's Talk" className="mt-4 border-t-2 border-dashed border-outline pt-3">
-        <p className="mb-2 text-[11px] font-bold uppercase tracking-widest text-text-muted">Open in Let&apos;s Talk</p>
+        <p className="mb-2 text-[11px] font-bold uppercase tracking-widest text-text-muted">{onTool ? "Open a tool" : "Open in Let&apos;s Talk"}</p>
         <div className="flex flex-wrap gap-2">
           {TOOLS.map(({ mode, label, icon: Icon, colour }) => (
-            <button key={mode} type="button" onClick={() => router.push(`/dashboard/home?mode=${mode}`)} style={{ background: colour }} className={cn(chip, "text-[#111111]")}>
+            <button key={mode} type="button" onClick={() => (onTool ? onTool(mode) : router.push(`/dashboard/home?mode=${mode}`))} style={{ background: colour }} className={cn(chip, "text-[#111111]")}>
               <Icon className="h-3.5 w-3.5" /> {label}
             </button>
           ))}

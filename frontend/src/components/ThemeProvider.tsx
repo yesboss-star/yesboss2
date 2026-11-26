@@ -5,6 +5,12 @@ import { useUIStore } from "@/stores/uiStore";
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const theme = useUIStore((s) => s.theme);
+  const skin = useUIStore((s) => s.skin);
+
+  // the look (Pop, Aurora or Paper) is a second attribute next to the light or dark one
+  useEffect(() => {
+    document.documentElement.setAttribute("data-skin", skin);
+  }, [skin]);
 
   useEffect(() => {
     const root = document.documentElement;

@@ -179,9 +179,17 @@ export default function ProfileHub({ initial }: { initial: SectionId }) {
   );
 }
 
+const LOOKS = [
+  { id: "pop", label: "Pop", hint: "Bold tiles and thick outlines", dots: ["#FFD93D", "#7CC8FF", "#FF9FD2"] },
+  { id: "aurora", label: "Aurora", hint: "Soft glass and a gentle glow", dots: ["#5EEAD4", "#7DD3FC", "#C4B5FD"] },
+  { id: "paper", label: "Paper", hint: "Quiet, flat and easy to read", dots: ["#EADFB4", "#C8DCEC", "#EBCFD9"] },
+] as const;
+
 function AppearanceCard() {
   const theme = useUIStore((s) => s.theme);
   const setTheme = useUIStore((s) => s.setTheme);
+  const skin = useUIStore((s) => s.skin);
+  const setSkin = useUIStore((s) => s.setSkin);
   const options = [
     { id: "light", label: "Light", icon: Sun },
     { id: "dark", label: "Dark", icon: Moon },
@@ -189,10 +197,37 @@ function AppearanceCard() {
   ] as const;
   return (
     <Card>
-      <CardContent className="space-y-4 p-1">
+      <CardContent className="space-y-5 p-1">
         <p className="flex items-center gap-2 text-sm text-text-muted">
           <LifeBuoy className="h-4 w-4" /> Choose how YesBoss looks. It is remembered on this device.
         </p>
+        <div>
+          <p className="mb-2 text-xs font-extrabold uppercase tracking-wider text-text-muted">Look</p>
+          <div className="grid gap-3 sm:grid-cols-3" role="radiogroup" aria-label="Look">
+            {LOOKS.map(({ id, label, hint, dots }) => (
+              <button
+                key={id}
+                type="button"
+                role="radio"
+                aria-checked={skin === id}
+                onClick={() => setSkin(id)}
+                className={cn(
+                  "flex cursor-pointer flex-col gap-2 rounded-2xl border-[2.5px] border-outline p-3 text-left transition-all hover:-translate-x-px hover:-translate-y-px",
+                  skin === id ? "bg-highlight text-on-highlight shadow-[3px_3px_0_var(--shadow-hard)]" : "bg-surface text-foreground"
+                )}
+              >
+                <span className="flex gap-1.5" aria-hidden="true">
+                  {dots.map((c) => (
+                    <span key={c} className="h-5 w-5 rounded-full border-2 border-outline" style={{ background: c }} />
+                  ))}
+                </span>
+                <span className="block text-sm font-bold">{label}</span>
+                <span className="block text-xs opacity-80">{hint}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <p className="text-xs font-extrabold uppercase tracking-wider text-text-muted">Light or dark</p>
         <div className="flex flex-wrap gap-3" role="radiogroup" aria-label="Theme">
           {options.map(({ id, label, icon: Icon }) => (
             <button

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUIStore } from "@/stores/uiStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
@@ -18,10 +18,14 @@ import {
   User,
   Building2,
   Zap,
+  MessageCircle,
 } from "lucide-react";
 import { Avatar, Badge, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui";
 import { ThemeToggleInline } from "@/components/ThemeToggleInline";
 import { NotificationDropdown } from "@/components/NotificationDropdown";
+import { LANDING_PATH } from "@/lib/landing";
+import { cn } from "@/lib/utils";
+import { useScrollDown } from "@/hooks/useScrollDown";
 
 interface NavItem {
   icon: React.ElementType;
@@ -44,14 +48,59 @@ const navItems: NavItem[] = [
   { icon: User, label: "Profile", href: "/dashboard/profile", alsoActive: ["/dashboard/settings", "/dashboard/data"] },
 ];
 
+/** An employee on a phone gets three places in a bottom bar: Task, Let's Talk (raised, in the middle) and Profile. */
+const BAR_ITEMS = [
+  { href: "/dashboard/task", label: "Task", icon: Zap, match: ["/dashboard/task"], center: false },
+  { href: "/dashboard/home", label: "Let's Talk", icon: MessageCircle, match: ["/dashboard/home"], center: true },
+  { href: "/dashboard/profile", label: "Profile", icon: User, match: ["/dashboard/profile", "/dashboard/settings", "/dashboard/data"], center: false },
+];
+
+function EmployeeBottomBar({ pathname }: { pathname: string | null }) {
+  return (
+    <nav
+      aria-label="Main"
+      className="fixed inset-x-0 bottom-0 z-40 flex items-end border-t-[2.5px] border-outline bg-surface px-2 pt-2"
+      style={{ paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom, 0px))" }}
+    >
+      {BAR_ITEMS.map(({ href, label, icon: Icon, match, center }) => {
+        const active = match.some((m) => pathname === m || !!pathname?.startsWith(m + "/"));
+        return (
+          <Link key={href} href={href} aria-current={active ? "page" : undefined} className="flex flex-1 cursor-pointer flex-col items-center gap-1 pb-0.5">
+            {center ? (
+              <span className={cn("-mt-8 grid h-16 w-16 place-items-center rounded-full border-[2.5px] border-outline bg-highlight text-on-highlight shadow-[3px_3px_0_var(--shadow-hard)] transition-transform", active && "-translate-y-0.5 ring-4 ring-highlight/30")}>
+                <Icon className="h-7 w-7" strokeWidth={active ? 2.6 : 2.2} />
+              </span>
+            ) : (
+              <span className={cn("grid h-8 w-16 place-items-center rounded-2xl", active ? "border-[2.5px] border-outline bg-highlight text-on-highlight shadow-[2px_2px_0_var(--shadow-hard)]" : "text-text-muted")}>
+                <Icon className="h-5 w-5" strokeWidth={active ? 2.6 : 2.2} />
+              </span>
+            )}
+            <span className={cn("text-xs", active || center ? "font-extrabold text-foreground" : "font-bold text-text-muted")}>{label}</span>
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, role, signOut } = useAuth();
   const { sidebarOpen, mobileSidebarOpen, setSidebarOpen, setMobileSidebarOpen } = useUIStore();
   const { organization, avatarUrl, avatarStyle, setAvatarUrl } = useOrganizationStore();
   const pathname = usePathname();
+  const router = useRouter();
   const [isMobile, setIsMobile] = useState(false);
-  // On a computer the sidebar has three entries; Profile lives in the avatar menu (top right). On a phone it stays in the sidebar.
-  const visibleNavItems = navItems.filter((item) => !item.hidden && (isMobile || item.href !== "/dashboard/profile"));
+  // An employee has no Dashboard: Task, Let's Talk and Profile. On a phone those three sit in a bottom bar instead of the sidebar.
+  const isEmployee = role === "employee";
+  const phoneBar = isEmployee && isMobile;
+  // on a phone the top bar slides away while the page scrolls down and comes back when it scrolls up
+  const hideTop = useScrollDown(phoneBar);
+  // On a computer the sidebar has no Profile entry; it lives in the avatar menu (top right). On a phone an owner still finds it in the sidebar.
+  const visibleNavItems = navItems.filter((item) => !item.hidden && !(isEmployee && item.href === "/dashboard") && (isMobile || item.href !== "/dashboard/profile"));
+
+  useEffect(() => {
+    if (isEmployee && pathname === "/dashboard") router.replace(LANDING_PATH);
+  }, [isEmployee, pathname, router]);
 
   // Load avatar from DB on mount — always source from API, not stale local state
   useEffect(() => {
@@ -186,8 +235,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   );
 
   return (
-    <div className="min-h-screen bg-background">
-      {isMobile && mobileSidebarOpen && (
+    <div className="min-h-screen bg-background" style={{ ["--bar" as string]: phoneBar ? "5.5rem" : "0px", ["--hdr" as string]: hideTop ? "0px" : "4rem" }}>
+      {isMobile && !phoneBar && mobileSidebarOpen && (
         <div
           className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
           onClick={() => setMobileSidebarOpen(false)}
@@ -195,6 +244,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       )}
 
       <aside
+        hidden={phoneBar}
         className={`fixed top-0 left-0 z-50 h-full bg-surface border-r-[2.5px] border-outline transition-all duration-300 ${
           isMobile
             ? `w-72 ${mobileSidebarOpen ? "translate-x-0" : "-translate-x-full"}`
@@ -211,10 +261,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           isMobile ? "ml-0" : sidebarOpen ? "ml-64" : "ml-20"
         }`}
       >
-        <header className="sticky top-0 z-30 bg-surface border-b-[2.5px] border-outline">
+        <header className={cn("sticky top-0 z-30 bg-surface border-b-[2.5px] border-outline transition-transform duration-200", hideTop && "-translate-y-full")}>
           <div className="flex items-center justify-between px-4 md:px-6 py-3">
             <div className="flex items-center gap-4">
-              {isMobile && (
+              {isMobile && !phoneBar && (
                 <button
                   onClick={() => setMobileSidebarOpen(true)}
                   className="p-2 rounded-lg hover:bg-surface text-text-muted hover:text-foreground transition-colors cursor-pointer"
@@ -222,13 +272,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   <Menu className="w-5 h-5" />
                 </button>
               )}
-
+              {phoneBar && (
+                <Link href={LANDING_PATH} className="flex items-center gap-2 cursor-pointer">
+                  <img src="/yesboss-logo.svg" alt="YesBoss" className="w-8 h-8 flex-shrink-0" />
+                  <span className="text-lg font-bold whitespace-nowrap">
+                    Yes<span className="text-primary">Boss</span>
+                  </span>
+                </Link>
+              )}
             </div>
 
             <div className="flex items-center gap-3">
-              <ThemeToggleInline />
+              {!phoneBar && <ThemeToggleInline />}
               <NotificationDropdown />
 
+              {!phoneBar && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button className="cursor-pointer">
@@ -262,12 +320,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+              )}
             </div>
           </div>
         </header>
 
-        <main className="p-4 md:p-6">{children}</main>
+        <main className={cn("p-4 md:p-6", phoneBar && "pb-28")}>{children}</main>
       </div>
+
+      {phoneBar && <EmployeeBottomBar pathname={pathname} />}
     </div>
   );
 }

@@ -16,6 +16,8 @@ import TaskModal from "@/components/TaskModal";
 import TaskPanel from "@/components/TaskPanel";
 import { Button, Input } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { useIsPhone } from "@/hooks/useIsPhone";
+import { useScrollDown } from "@/hooks/useScrollDown";
 import { isAssignedTo, isInShared, matchesFilter, sharedLabel, taskDepartments, type FilterId, type TabId } from "@/lib/taskBoard";
 import { Plus, Search, Zap, CheckCheck, Users, User, UserX, Flag, Layers, Share2, Clock, ListFilter } from "lucide-react";
 
@@ -42,6 +44,11 @@ export default function TaskPage() {
 
 function TaskPageContent() {
   const { user, role, loading } = useAuth();
+  // an employee on a phone gets the Android-style page: filters pinned under the top bar, To do / Doing / Done as tabs, a floating New task button
+  const isPhone = useIsPhone();
+  const phoneEmployee = isPhone && role === "employee";
+  const scrollingDown = useScrollDown(phoneEmployee);
+  const [statusTab, setStatusTab] = useState<"todo" | "doing" | "done">("todo");
   const router = useRouter();
   const { organization } = useOrganizationStore();
   const { tasks, fetchTasks, loading: tasksLoading } = useTaskStore();
@@ -242,7 +249,7 @@ function TaskPageContent() {
             <h1 className="text-2xl md:text-3xl font-bold">Tasks</h1>
             <p className="text-text-muted mt-1">{captions[tab]}</p>
           </div>
-          <Button onClick={() => setShowTaskModal(true)} className="flex items-center gap-2 cursor-pointer">
+          <Button onClick={() => setShowTaskModal(true)} className={cn("flex items-center gap-2 cursor-pointer", phoneEmployee && "hidden")}>
             <Plus className="w-4 h-4" />
             New task
           </Button>
@@ -314,7 +321,11 @@ function TaskPageContent() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3" role="group" aria-label="Show">
+        <div
+          className={cn(phoneEmployee && "sticky z-20 -mx-4 space-y-3 bg-background px-4 pb-3 pt-2 transition-[top] duration-200")}
+          style={phoneEmployee ? { top: "var(--hdr, 0px)" } : undefined}
+        >
+        <div className={cn("flex items-center gap-3", phoneEmployee ? "-mx-4 flex-nowrap overflow-x-auto px-4 pb-1 [scrollbar-width:none]" : "flex-wrap")} role="group" aria-label="Show">
           {filterChips
             .filter((c) => c.show)
             .map(({ id, text, icon: Icon, on }) => (
@@ -323,18 +334,35 @@ function TaskPageContent() {
                 type="button"
                 aria-pressed={filter === id}
                 onClick={() => setFilter(id)}
-                className={cn(pill, filter === id ? on : "bg-surface text-foreground")}
+                className={cn(pill, "shrink-0 whitespace-nowrap", filter === id ? on : "bg-surface text-foreground")}
               >
                 <Icon className="w-4 h-4" />
                 {text} · {counts[id]}
               </button>
             ))}
-          {attentionCount > 0 && filter === "all" && (
+          {attentionCount > 0 && filter === "all" && !phoneEmployee && (
             <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-text-muted">
               <Zap className="w-4 h-4" />
               {attentionCount} due today or late
             </span>
           )}
+        </div>
+        {phoneEmployee && (
+          <div role="tablist" aria-label="Task status" className="flex gap-1 rounded-full border-[2.5px] border-outline bg-surface p-1 shadow-[3px_3px_0_var(--shadow-hard)]">
+            {columns.map((c) => (
+              <button
+                key={c.key}
+                type="button"
+                role="tab"
+                aria-selected={statusTab === c.key}
+                onClick={() => setStatusTab(c.key as "todo" | "doing" | "done")}
+                className={cn("flex-1 cursor-pointer rounded-full px-2 py-2 text-sm font-bold", statusTab === c.key ? "bg-highlight text-on-highlight" : "text-foreground")}
+              >
+                {c.title} <span className="opacity-70">{c.tasks.length}</span>
+              </button>
+            ))}
+          </div>
+        )}
         </div>
 
         {error && (
@@ -347,12 +375,12 @@ function TaskPageContent() {
           <div className="text-center py-12 text-text-muted">Loading tasks...</div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
-            {columns.map((col) => {
+            {columns.filter((c) => !phoneEmployee || c.key === statusTab).map((col) => {
               const expanded = expandedCols.includes(col.key);
               const shown = expanded ? col.tasks : col.tasks.slice(0, COLUMN_PREVIEW);
               return (
                 <section key={col.key} aria-label={col.title} className="glass rounded-3xl p-3.5 min-w-0">
-                  <header className={cn("mb-3.5 flex items-center gap-2.5 rounded-2xl border-[2.5px] border-[#111] px-4 py-2.5 text-[#111]", col.head)}>
+                  <header className={cn("mb-3.5 flex items-center gap-2.5 rounded-2xl border-[2.5px] border-[#111] px-4 py-2.5 text-[#111]", col.head, phoneEmployee && "hidden")}>
                     <h2 className="text-lg font-bold">{col.title}</h2>
                     <span className="ml-auto rounded-full border-2 border-[#111] bg-white px-2.5 text-sm font-extrabold">{col.tasks.length}</span>
                   </header>
@@ -392,6 +420,19 @@ function TaskPageContent() {
 
         {isOwner && <GoalSection />}
       </div>
+
+      {phoneEmployee && (
+        <button
+          type="button"
+          aria-label="New task"
+          onClick={() => setShowTaskModal(true)}
+          className="fixed right-4 z-30 flex h-14 cursor-pointer items-center gap-2 rounded-[20px] border-[2.5px] border-[#111] bg-[#FFD93D] px-4 font-extrabold text-[#111] shadow-[4px_4px_0_#111] transition-all active:translate-x-0.5 active:translate-y-0.5 active:shadow-[2px_2px_0_#111]"
+          style={{ bottom: "calc(6.25rem + env(safe-area-inset-bottom, 0px))" }}
+        >
+          <Plus className="h-6 w-6 flex-shrink-0" />
+          <span className={cn("overflow-hidden whitespace-nowrap transition-all duration-200", scrollingDown ? "max-w-0 opacity-0" : "max-w-28")}>New task</span>
+        </button>
+      )}
 
       <TaskModal isOpen={showTaskModal} onClose={() => setShowTaskModal(false)} />
       {openId && (
