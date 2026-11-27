@@ -18,3 +18,8 @@ self.addEventListener("notificationclick", (event) => {
   const url = event.notification.data?.url || "/dashboard";
   event.waitUntil(clients.openWindow(url));
 });
+
+// Chrome only offers "Install app" when the service worker answers fetches. This one deliberately caches nothing and
+// just lets every request go to the network, so a screen or an answer from one company can never be kept and shown
+// to somebody else.
+self.addEventListener("fetch", () => {});

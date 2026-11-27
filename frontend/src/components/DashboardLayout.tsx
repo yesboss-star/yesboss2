@@ -19,6 +19,7 @@ import {
   Building2,
   Zap,
   MessageCircle,
+  Download,
 } from "lucide-react";
 import { Avatar, Badge, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui";
 import { ThemeToggleInline } from "@/components/ThemeToggleInline";
@@ -26,6 +27,7 @@ import { NotificationDropdown } from "@/components/NotificationDropdown";
 import { LANDING_PATH } from "@/lib/landing";
 import { cn } from "@/lib/utils";
 import { useScrollDown } from "@/hooks/useScrollDown";
+import { useInstallPrompt } from "@/hooks/useInstallPrompt";
 
 interface NavItem {
   icon: React.ElementType;
@@ -95,6 +97,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const phoneBar = isEmployee && isMobile;
   // on a phone the top bar slides away while the page scrolls down and comes back when it scrolls up
   const hideTop = useScrollDown(phoneBar);
+  const { canInstall, install } = useInstallPrompt();
+  // The name is always at the top left: in the top bar on a phone or when the computer sidebar is collapsed, otherwise in the sidebar's own header
+  const showBrand = isMobile || !sidebarOpen;
   // On a computer the sidebar has no Profile entry; it lives in the avatar menu (top right). On a phone an owner still finds it in the sidebar.
   const visibleNavItems = navItems.filter((item) => !item.hidden && !(isEmployee && item.href === "/dashboard") && (isMobile || item.href !== "/dashboard/profile"));
 
@@ -272,8 +277,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   <Menu className="w-5 h-5" />
                 </button>
               )}
-              {phoneBar && (
-                <Link href={LANDING_PATH} className="flex items-center gap-2 cursor-pointer">
+              {showBrand && (
+                <Link href={isEmployee ? LANDING_PATH : "/dashboard"} className="flex items-center gap-2 cursor-pointer">
                   <img src="/yesboss-logo.svg" alt="YesBoss" className="w-8 h-8 flex-shrink-0" />
                   <span className="text-lg font-bold whitespace-nowrap">
                     Yes<span className="text-primary">Boss</span>
@@ -284,6 +289,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
             <div className="flex items-center gap-3">
               {!phoneBar && <ThemeToggleInline />}
+              {canInstall && (
+                <button
+                  onClick={() => void install()}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border-2 border-outline bg-surface px-3 py-1.5 text-sm font-bold text-foreground hover:bg-primary/10"
+                >
+                  <Download className="h-4 w-4" /> Install app
+                </button>
+              )}
               <NotificationDropdown />
 
               {!phoneBar && (
