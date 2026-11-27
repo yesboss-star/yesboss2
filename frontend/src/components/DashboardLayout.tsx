@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUIStore } from "@/stores/uiStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
+import { useNotificationStore } from "@/stores/notificationStore";
 import {
   House,
   LayoutDashboard,
@@ -20,6 +21,7 @@ import {
   Zap,
   MessageCircle,
   Download,
+  Bell,
 } from "lucide-react";
 import { Avatar, Badge, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui";
 import { ThemeToggleInline } from "@/components/ThemeToggleInline";
@@ -51,12 +53,13 @@ const navItems: NavItem[] = [
   { icon: User, label: "Profile", href: "/dashboard/profile", alsoActive: ["/dashboard/settings", "/dashboard/data"] },
 ];
 
-/** On a phone everyone gets a bottom bar. An employee has three places: Task, Let's Talk (raised, in the middle) and Profile.
- *  An owner also has the Dashboard first, and the four sit evenly (nothing is raised). */
+/** On a phone everyone gets a bottom bar with Let's Talk raised in the middle. An employee has three places: Task, Let's Talk
+ *  and Profile (the bell stays in the top bar). An owner has five: Dashboard, Task, Let's Talk, Notifications and Profile. */
 const BAR_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, match: [] as string[], exact: "/dashboard", ownerOnly: true, center: false },
   { href: "/dashboard/task", label: "Task", icon: Zap, match: ["/dashboard/task"], exact: "", ownerOnly: false, center: false },
   { href: "/dashboard/home", label: "Let's Talk", icon: MessageCircle, match: ["/dashboard/home"], exact: "", ownerOnly: false, center: true },
+  { href: "/dashboard/notifications", label: "Notifications", icon: Bell, match: ["/dashboard/notifications"], exact: "", ownerOnly: true, center: false },
   { href: "/dashboard/profile", label: "Profile", icon: User, match: ["/dashboard/profile", "/dashboard/settings", "/dashboard/data"], exact: "", ownerOnly: false, center: false },
 ];
 
@@ -77,27 +80,33 @@ function useRoleHint(): string | null {
 
 function PhoneBottomBar({ pathname, isEmployee }: { pathname: string | null; isEmployee: boolean }) {
   const items = BAR_ITEMS.filter((i) => isEmployee ? !i.ownerOnly : true);
+  const unreadCount = useNotificationStore((st) => st.unreadCount); // kept fresh by NotificationWatcher for the whole app
   return (
     <nav
       aria-label="Main"
       className="fixed inset-x-0 bottom-0 z-40 flex items-end border-t-[2.5px] border-outline bg-surface px-2 pt-2"
       style={{ paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom, 0px))" }}
     >
-      {items.map(({ href, label, icon: Icon, match, exact, center: wantsCenter }) => {
-        const center = wantsCenter && isEmployee;
+      {items.map(({ href, label, icon: Icon, match, exact, center }) => {
+        const badge = href === "/dashboard/notifications" ? unreadCount : 0;
         const active = exact ? pathname === exact : match.some((m) => pathname === m || !!pathname?.startsWith(m + "/"));
         return (
-          <Link key={href} href={href} aria-current={active ? "page" : undefined} className="flex flex-1 cursor-pointer select-none flex-col items-center gap-1 pb-0.5 transition-transform duration-150 active:scale-95">
+          <Link key={href} href={href} aria-current={active ? "page" : undefined} className="flex min-w-0 flex-1 cursor-pointer select-none flex-col items-center gap-1 pb-0.5 transition-transform duration-150 active:scale-95">
             {center ? (
               <span className={cn("-mt-8 grid h-16 w-16 place-items-center rounded-full border-[2.5px] border-outline bg-highlight text-on-highlight shadow-[3px_3px_0_var(--shadow-hard)] transition-transform", active && "-translate-y-0.5 ring-4 ring-highlight/30")}>
                 <Icon className="h-7 w-7" strokeWidth={active ? 2.6 : 2.2} />
               </span>
             ) : (
-              <span className={cn("grid h-8 w-16 place-items-center rounded-2xl transition-colors duration-200", active ? "border-[2.5px] border-outline bg-highlight text-on-highlight shadow-[2px_2px_0_var(--shadow-hard)]" : "text-text-muted")}>
+              <span className={cn("relative grid h-8 w-14 place-items-center rounded-2xl transition-colors duration-200", active ? "border-[2.5px] border-outline bg-highlight text-on-highlight shadow-[2px_2px_0_var(--shadow-hard)]" : "text-text-muted")}>
                 <Icon className="h-5 w-5" strokeWidth={active ? 2.6 : 2.2} />
+                {badge > 0 && (
+                  <span className="absolute -right-0.5 -top-1.5 grid h-4 min-w-4 place-items-center rounded-full border-2 border-surface bg-accent px-1 text-[10px] font-bold leading-none text-white">
+                    {badge > 99 ? "99+" : badge}
+                  </span>
+                )}
               </span>
             )}
-            <span className={cn("text-xs", active || center ? "font-extrabold text-foreground" : "font-bold text-text-muted")}>{label}</span>
+            <span className={cn("max-w-full truncate text-[11px] leading-tight", active || center ? "font-extrabold text-foreground" : "font-bold text-text-muted")}>{label}</span>
           </Link>
         );
       })}
@@ -312,7 +321,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   <Download className="h-4 w-4" /> Install app
                 </button>
               )}
-              <NotificationDropdown />
+              {!(phoneBar && !isEmployee) && <NotificationDropdown />}
 
               {!phoneBar && (
               <DropdownMenu>
