@@ -93,11 +93,11 @@ function PhoneBottomBar({ pathname, isEmployee }: { pathname: string | null; isE
         return (
           <Link key={href} href={href} aria-current={active ? "page" : undefined} className="flex min-w-0 flex-1 cursor-pointer select-none flex-col items-center gap-1 pb-0.5 transition-transform duration-150 active:scale-95">
             {center ? (
-              <span className={cn("-mt-8 grid h-16 w-16 place-items-center rounded-full border-[2.5px] border-outline bg-highlight text-on-highlight shadow-[3px_3px_0_var(--shadow-hard)] transition-transform", active && "-translate-y-0.5 ring-4 ring-highlight/30")}>
+              <span className={cn("-mt-8 grid h-16 w-16 place-items-center rounded-full border-[2.5px] border-outline bg-highlight text-on-highlight shadow-[3px_3px_0_var(--shadow-hard)] transition-all duration-200", active && "-translate-y-0.5 ring-4 ring-highlight/30 tab-pop")}>
                 <Icon className="h-7 w-7" strokeWidth={active ? 2.6 : 2.2} />
               </span>
             ) : (
-              <span className={cn("relative grid h-8 w-14 place-items-center rounded-2xl transition-colors duration-200", active ? "border-[2.5px] border-outline bg-highlight text-on-highlight shadow-[2px_2px_0_var(--shadow-hard)]" : "text-text-muted")}>
+              <span className={cn("relative grid h-8 w-14 place-items-center rounded-2xl border-[2.5px] transition-all duration-200", active ? "border-outline bg-highlight text-on-highlight shadow-[2px_2px_0_var(--shadow-hard)] tab-pop" : "border-transparent text-text-muted")}>
                 <Icon className="h-5 w-5" strokeWidth={active ? 2.6 : 2.2} />
                 {badge > 0 && (
                   <span className="absolute -right-0.5 -top-1.5 grid h-4 min-w-4 place-items-center rounded-full border-2 border-surface bg-accent px-1 text-[10px] font-bold leading-none text-white">

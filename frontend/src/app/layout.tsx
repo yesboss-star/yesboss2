@@ -7,6 +7,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { NotificationWatcher } from "@/components/NotificationWatcher";
 import { NotificationToast } from "@/components/NotificationToast";
 import { PwaSetup } from "@/components/PwaSetup";
+import { AppSplash } from "@/components/AppSplash";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -41,10 +42,14 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
+        {/* Runs before the first paint: if the opening animation already played in this app session, skip it (see AppSplash) */}
+        <script dangerouslySetInnerHTML={{ __html: "try{if(sessionStorage.getItem('yb_splash_done'))document.documentElement.classList.add('no-splash')}catch(e){}" }} />
         <PwaSetup />
+        <AppSplash />
         <ThemeProvider>
           <ThemeToggle />
           <AuthProvider>
