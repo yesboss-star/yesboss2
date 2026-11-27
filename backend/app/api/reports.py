@@ -41,6 +41,7 @@ class ReportRequest(BaseModel):
     period: str = "weekly"
     sections: list[str] | None = None
     organization_id: str | None = None
+    employee_email: str | None = None
     use_template: bool = False
 
 def build_report_content(db, org_id: str, request: ReportRequest) -> dict[str, Any]:
@@ -510,27 +511,23 @@ async def generate_employee_report_endpoint(
     if not org_id:
         raise HTTPException(status_code=400, detail="Organization ID required")
 
-    # Non-owners may only generate reports about themselves.
-    if not await is_org_owner(db, org_id, current_user):
-        employee_email = getattr(current_user, 'email', None)
-        if not employee_email:
+    if not await is_org_member(db, org_id, current_user):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    my_email = (getattr(current_user, 'email', None) or '').strip()
+    asked = (request.employee_email or '').strip()
+    if await is_org_owner(db, org_id, current_user):
+        # An owner may ask for anyone in the company; with no name given the report is about the owner.
+        employee_email = asked or my_email
+    else:
+        # Everyone else may only generate a report about themselves.
+        if asked and asked.lower() != my_email.lower():
             raise HTTPException(status_code=403, detail="Access denied")
-        if request.organization_id and request.organization_id.lower() != employee_email.lower():
-            raise HTTPException(status_code=403, detail="Access denied")
+        employee_email = my_email
+    if not employee_email:
+        raise HTTPException(status_code=400, detail="Could not determine the employee for this report")
 
     from ..core.report_generator import generate_employee_report
-
-    if not request.organization_id:
-        member = db.org_chart_members.find_one({"organization_id": org_id})
-        if member:
-            employee_email = member.get("email")
-        else:
-            email = getattr(current_user, 'email', None) or getattr(current_user, 'id', None)
-            if not email:
-                raise HTTPException(status_code=400, detail="Could not determine employee. Pass organization_id for a specific employee.")
-            employee_email = email
-    else:
-        employee_email = request.organization_id
 
     report = await generate_employee_report(db, org_id, employee_email, request.period)
     return {"report": report}

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowRight, ArrowUp, Check, Mail, Minus, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, Mail, Minus, X } from "lucide-react";
 import { Badge, Button, Checkbox } from "@/components/ui";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import {
@@ -163,13 +163,22 @@ export default function WeeklyReviewPage() {
   return (
     <>
       <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-foreground to-primary bg-clip-text text-transparent">
-            Weekly review
-          </h1>
-          <p className="text-text-muted mt-1">
-            What was decided, what got done, what did not, and what your reports say. Every line shows where it came from.
-          </p>
+        <div className="flex items-start gap-3">
+          <Link
+            href="/dashboard/notifications"
+            aria-label="Back to Alerts"
+            className="mt-1 rounded-lg p-2 text-text-muted transition-colors hover:bg-surface hover:text-foreground"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </Link>
+          <div>
+            <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-foreground to-primary bg-clip-text text-transparent">
+              Weekly review
+            </h1>
+            <p className="text-text-muted mt-1">
+              What was decided, what got done, what did not, and what your reports say. Every line shows where it came from.
+            </p>
+          </div>
         </div>
 
         {canSeeCompany && (

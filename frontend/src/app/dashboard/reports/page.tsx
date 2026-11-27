@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getAuthHeaders } from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
+import { useReportStore } from "@/stores/reportStore";
 import { Card, CardContent, CardHeader, CardTitle, Tabs, TabsList, TabsTrigger, TabsContent, Badge, Button } from "@/components/ui";
 import { BarChart3, Download, FileText, TrendingUp, Users, Loader2, RefreshCw, ArrowLeft, User } from "lucide-react";
 import EmployeeReportCard from "@/components/owners/EmployeeReportCard";
@@ -40,6 +42,10 @@ interface EmployeeReportData {
 
 export default function ReportsPage() {
   const router = useRouter();
+  const { user, role } = useAuth();
+  const isOwner = role === "owner";
+  const { generateReport, downloadReport } = useReportStore();
+  const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -98,18 +104,21 @@ export default function ReportsPage() {
 
   const handleGenerate = async () => {
     setGenerating(true);
+    setMessage(null);
     try {
-      await fetch(`${API_URL}/reports/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({ period: "weekly", organization_id: orgId || undefined }),
-      });
-    } catch {}
-    setGenerating(false);
+      const report = await generateReport("weekly", orgId || undefined);
+      await downloadReport(report.id, "pdf");
+      setMessage({ kind: "ok", text: "Your report is ready and was downloaded as a PDF." });
+    } catch (e) {
+      setMessage({ kind: "error", text: e instanceof Error && e.message ? e.message : "Could not generate the report" });
+    } finally {
+      setGenerating(false);
+    }
   };
 
   const handleGenerateEmployeeReports = async () => {
     setEmpReportsLoading(true);
+    setMessage(null);
     try {
       const res = await fetch(`${API_URL}/reports/generate/all-employees`, {
         method: "POST",
@@ -119,21 +128,30 @@ export default function ReportsPage() {
       if (res.ok) {
         const data = await res.json();
         setEmployeeReports(data.reports || []);
+      } else {
+        const body = await res.json().catch(() => ({}));
+        setMessage({ kind: "error", text: body.detail || "Could not generate the employee reports" });
       }
-    } catch {} finally {
+    } catch {
+      setMessage({ kind: "error", text: "Could not reach the server" });
+    } finally {
       setEmpReportsLoading(false);
     }
   };
 
   const handleGenerateMyReport = async () => {
     setGenSingleLoading(true);
+    setMessage(null);
     try {
       const res = await fetch(`${API_URL}/reports/generate/employee`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({ period: "weekly", organization_id: orgId || undefined }),
+        body: JSON.stringify({ period: "weekly", organization_id: orgId || undefined, employee_email: user?.email || undefined }),
       });
-      if (res.ok) {
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setMessage({ kind: "error", text: body.detail || "Could not generate your report" });
+      } else {
         const data = await res.json();
         if (data.report) {
           setEmployeeReports((prev) => {
@@ -143,7 +161,9 @@ export default function ReportsPage() {
           });
         }
       }
-    } catch {} finally {
+    } catch {
+      setMessage({ kind: "error", text: "Could not reach the server" });
+    } finally {
       setGenSingleLoading(false);
     }
   };
@@ -158,7 +178,7 @@ export default function ReportsPage() {
   return (
     <>
       <div className="max-w-5xl mx-auto">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
           <div className="flex items-center gap-3">
             <button onClick={() => router.push("/dashboard/notifications")} className="p-2 rounded-lg hover:bg-surface text-text-muted hover:text-foreground transition-colors cursor-pointer">
               <ArrowLeft className="w-5 h-5" />
@@ -189,6 +209,15 @@ export default function ReportsPage() {
           </div>
         </div>
 
+        {message && (
+          <p
+            role={message.kind === "error" ? "alert" : "status"}
+            className={`mb-4 rounded-xl border-2 px-4 py-3 text-sm font-semibold ${message.kind === "error" ? "border-rose-500/40 text-rose-400" : "border-emerald-500/40 text-emerald-400"}`}
+          >
+            {message.text}
+          </p>
+        )}
+
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <Loader2 className="w-6 h-6 animate-spin text-text-muted" />
@@ -211,7 +240,7 @@ export default function ReportsPage() {
             </div>
 
             <Tabs defaultValue="overview">
-              <TabsList className="mb-4">
+              <TabsList className="mb-4 max-w-full overflow-x-auto">
                 <TabsTrigger value="overview">Overview</TabsTrigger>
                 <TabsTrigger value="goals">Goals Breakdown</TabsTrigger>
                 <TabsTrigger value="tasks">Tasks Breakdown</TabsTrigger>
@@ -335,6 +364,7 @@ export default function ReportsPage() {
                             {genSingleLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <User className="w-4 h-4" />}
                             {genSingleLoading ? "Generating..." : "My Report"}
                           </Button>
+                          {isOwner && (
                           <Button
                             onClick={handleGenerateEmployeeReports}
                             disabled={empReportsLoading}
@@ -344,6 +374,7 @@ export default function ReportsPage() {
                             {empReportsLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Users className="w-4 h-4" />}
                             {empReportsLoading ? "Generating..." : "All Employees"}
                           </Button>
+                          )}
                         </div>
                       </div>
                     </CardHeader>
@@ -353,7 +384,7 @@ export default function ReportsPage() {
                     <div className="flex flex-col items-center justify-center py-12 text-center">
                       <User className="w-10 h-10 text-text-muted/40 mb-3" />
                       <p className="text-sm text-text-muted">No employee reports generated yet</p>
-                      <p className="text-xs text-text-muted/60 mt-1">Generate a report for yourself or all employees</p>
+                      <p className="text-xs text-text-muted/60 mt-1">{isOwner ? "Generate a report for yourself or all employees" : "Tap My Report to see how your week went"}</p>
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

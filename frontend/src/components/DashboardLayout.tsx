@@ -54,12 +54,12 @@ const navItems: NavItem[] = [
 ];
 
 /** On a phone everyone gets a bottom bar with Let's Talk raised in the middle. An employee has three places: Task, Let's Talk
- *  and Profile (the bell stays in the top bar). An owner has five: Dashboard, Task, Let's Talk, Notifications and Profile. */
+ *  and Profile (the bell stays in the top bar). An owner has five: Dashboard, Task, Let's Talk, Alerts and Profile. */
 const BAR_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, match: [] as string[], exact: "/dashboard", ownerOnly: true, center: false },
   { href: "/dashboard/task", label: "Task", icon: Zap, match: ["/dashboard/task"], exact: "", ownerOnly: false, center: false },
   { href: "/dashboard/home", label: "Let's Talk", icon: MessageCircle, match: ["/dashboard/home"], exact: "", ownerOnly: false, center: true },
-  { href: "/dashboard/notifications", label: "Notifications", icon: Bell, match: ["/dashboard/notifications"], exact: "", ownerOnly: true, center: false },
+  { href: "/dashboard/notifications", label: "Alerts", icon: Bell, match: ["/dashboard/notifications"], exact: "", ownerOnly: true, center: false },
   { href: "/dashboard/profile", label: "Profile", icon: User, match: ["/dashboard/profile", "/dashboard/settings", "/dashboard/data"], exact: "", ownerOnly: false, center: false },
 ];
 
@@ -75,6 +75,25 @@ function useRoleHint(): string | null {
       }
     },
     () => null
+  );
+}
+
+/** An employee's bell on a phone: it opens the Alerts page, the same one an owner reaches from the bottom bar. */
+function AlertsBell() {
+  const unreadCount = useNotificationStore((st) => st.unreadCount);
+  return (
+    <Link
+      href="/dashboard/notifications"
+      aria-label={unreadCount > 0 ? `Alerts, ${unreadCount} unread` : "Alerts"}
+      className="relative cursor-pointer rounded-full border-2 border-outline bg-surface p-2 text-foreground shadow-[3px_3px_0_var(--shadow-hard)] transition-transform active:scale-95"
+    >
+      <Bell className="h-5 w-5" />
+      {unreadCount > 0 && (
+        <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full border-2 border-surface bg-accent px-1 text-[10px] font-bold leading-none text-white">
+          {unreadCount > 99 ? "99+" : unreadCount}
+        </span>
+      )}
+    </Link>
   );
 }
 
@@ -321,7 +340,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   <Download className="h-4 w-4" /> Install app
                 </button>
               )}
-              {!(phoneBar && !isEmployee) && <NotificationDropdown />}
+              {phoneBar ? (isEmployee && <AlertsBell />) : <NotificationDropdown />}
 
               {!phoneBar && (
               <DropdownMenu>

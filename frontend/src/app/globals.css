@@ -467,9 +467,14 @@ html[data-skin="paper"] [class*="hover:-translate"]:hover { transform: none; }
   html, body {
     overscroll-behavior-y: none; /* no pull-down bounce / refresh gesture */
   }
+  html, body {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
   body {
     -webkit-tap-highlight-color: transparent;
-    touch-action: manipulation; /* no double-tap zoom delay */
+    /* Scrolling is allowed; pinch-zoom and double-tap zoom are not (an app should not zoom like a web page) */
+    touch-action: pan-x pan-y;
   }
   nav a, button, [role="button"] {
     -webkit-user-select: none;
