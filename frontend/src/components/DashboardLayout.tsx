@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -28,6 +28,7 @@ import { LANDING_PATH } from "@/lib/landing";
 import { cn } from "@/lib/utils";
 import { useScrollDown } from "@/hooks/useScrollDown";
 import { useInstallPrompt } from "@/hooks/useInstallPrompt";
+import { useIsPhone } from "@/hooks/useIsPhone";
 
 interface NavItem {
   icon: React.ElementType;
@@ -50,30 +51,49 @@ const navItems: NavItem[] = [
   { icon: User, label: "Profile", href: "/dashboard/profile", alsoActive: ["/dashboard/settings", "/dashboard/data"] },
 ];
 
-/** An employee on a phone gets three places in a bottom bar: Task, Let's Talk (raised, in the middle) and Profile. */
+/** On a phone everyone gets a bottom bar. An employee has three places: Task, Let's Talk (raised, in the middle) and Profile.
+ *  An owner also has the Dashboard first, and the four sit evenly (nothing is raised). */
 const BAR_ITEMS = [
-  { href: "/dashboard/task", label: "Task", icon: Zap, match: ["/dashboard/task"], center: false },
-  { href: "/dashboard/home", label: "Let's Talk", icon: MessageCircle, match: ["/dashboard/home"], center: true },
-  { href: "/dashboard/profile", label: "Profile", icon: User, match: ["/dashboard/profile", "/dashboard/settings", "/dashboard/data"], center: false },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, match: [] as string[], exact: "/dashboard", ownerOnly: true, center: false },
+  { href: "/dashboard/task", label: "Task", icon: Zap, match: ["/dashboard/task"], exact: "", ownerOnly: false, center: false },
+  { href: "/dashboard/home", label: "Let's Talk", icon: MessageCircle, match: ["/dashboard/home"], exact: "", ownerOnly: false, center: true },
+  { href: "/dashboard/profile", label: "Profile", icon: User, match: ["/dashboard/profile", "/dashboard/settings", "/dashboard/data"], exact: "", ownerOnly: false, center: false },
 ];
 
-function EmployeeBottomBar({ pathname }: { pathname: string | null }) {
+/** Reads the role saved at sign-in, so the right layout shows on the very first paint instead of flipping after sign-in checks finish. */
+function useRoleHint(): string | null {
+  return useSyncExternalStore(
+    () => () => {},
+    () => {
+      try {
+        return (JSON.parse(localStorage.getItem("yesboss_user") || "null") || {}).role || null;
+      } catch {
+        return null;
+      }
+    },
+    () => null
+  );
+}
+
+function PhoneBottomBar({ pathname, isEmployee }: { pathname: string | null; isEmployee: boolean }) {
+  const items = BAR_ITEMS.filter((i) => isEmployee ? !i.ownerOnly : true);
   return (
     <nav
       aria-label="Main"
       className="fixed inset-x-0 bottom-0 z-40 flex items-end border-t-[2.5px] border-outline bg-surface px-2 pt-2"
       style={{ paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom, 0px))" }}
     >
-      {BAR_ITEMS.map(({ href, label, icon: Icon, match, center }) => {
-        const active = match.some((m) => pathname === m || !!pathname?.startsWith(m + "/"));
+      {items.map(({ href, label, icon: Icon, match, exact, center: wantsCenter }) => {
+        const center = wantsCenter && isEmployee;
+        const active = exact ? pathname === exact : match.some((m) => pathname === m || !!pathname?.startsWith(m + "/"));
         return (
-          <Link key={href} href={href} aria-current={active ? "page" : undefined} className="flex flex-1 cursor-pointer flex-col items-center gap-1 pb-0.5">
+          <Link key={href} href={href} aria-current={active ? "page" : undefined} className="flex flex-1 cursor-pointer select-none flex-col items-center gap-1 pb-0.5 transition-transform duration-150 active:scale-95">
             {center ? (
               <span className={cn("-mt-8 grid h-16 w-16 place-items-center rounded-full border-[2.5px] border-outline bg-highlight text-on-highlight shadow-[3px_3px_0_var(--shadow-hard)] transition-transform", active && "-translate-y-0.5 ring-4 ring-highlight/30")}>
                 <Icon className="h-7 w-7" strokeWidth={active ? 2.6 : 2.2} />
               </span>
             ) : (
-              <span className={cn("grid h-8 w-16 place-items-center rounded-2xl", active ? "border-[2.5px] border-outline bg-highlight text-on-highlight shadow-[2px_2px_0_var(--shadow-hard)]" : "text-text-muted")}>
+              <span className={cn("grid h-8 w-16 place-items-center rounded-2xl transition-colors duration-200", active ? "border-[2.5px] border-outline bg-highlight text-on-highlight shadow-[2px_2px_0_var(--shadow-hard)]" : "text-text-muted")}>
                 <Icon className="h-5 w-5" strokeWidth={active ? 2.6 : 2.2} />
               </span>
             )}
@@ -91,10 +111,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const { organization, avatarUrl, avatarStyle, setAvatarUrl } = useOrganizationStore();
   const pathname = usePathname();
   const router = useRouter();
-  const [isMobile, setIsMobile] = useState(false);
-  // An employee has no Dashboard: Task, Let's Talk and Profile. On a phone those three sit in a bottom bar instead of the sidebar.
-  const isEmployee = role === "employee";
-  const phoneBar = isEmployee && isMobile;
+  const isMobile = useIsPhone();
+  const roleHint = useRoleHint();
+  // An employee has no Dashboard: Task, Let's Talk and Profile. On a phone everyone uses a bottom bar instead of the sidebar.
+  const isEmployee = (role ?? roleHint) === "employee";
+  const phoneBar = isMobile;
   // on a phone the top bar slides away while the page scrolls down and comes back when it scrolls up
   const hideTop = useScrollDown(phoneBar);
   const { canInstall, install } = useInstallPrompt();
@@ -127,12 +148,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       .catch(() => {});
   }, [user?.email]);
 
-  useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 1024);
-    checkMobile();
-    window.addEventListener("resize", checkMobile);
-    return () => window.removeEventListener("resize", checkMobile);
-  }, []);
 
   const isActive = (item: NavItem) => {
     const matches = (href: string) => (href === "/dashboard" ? pathname === href : pathname === href || !!pathname?.startsWith(href + "/"));
@@ -341,7 +356,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <main className={cn("p-4 md:p-6", phoneBar && "pb-28")}>{children}</main>
       </div>
 
-      {phoneBar && <EmployeeBottomBar pathname={pathname} />}
+      {phoneBar && <PhoneBottomBar pathname={pathname} isEmployee={isEmployee} />}
     </div>
   );
 }

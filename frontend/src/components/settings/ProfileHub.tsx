@@ -6,7 +6,6 @@ import {
   Bell, Building2, ChevronLeft, ChevronRight, FolderOpen, LifeBuoy, Lightbulb, Link2, LogOut, MessageSquare, Monitor, Moon,
   Network, Palette, Phone, Plug, Search, Sparkles, Sun, User, Users,
 } from "lucide-react";
-import DashboardLayout from "@/components/DashboardLayout";
 import { Avatar, Card, CardContent } from "@/components/ui";
 import UnderstandingView from "@/components/owners/UnderstandingView";
 import ProfileSections, { type ProfileSection } from "@/components/settings/ProfileSections";
@@ -85,7 +84,7 @@ export default function ProfileHub({ initial }: { initial: SectionId }) {
   const current = ITEMS.find((i) => i.id === section);
 
   return (
-    <DashboardLayout>
+    <>
       <div className="grid gap-6 lg:h-[calc(100vh-7.5rem)] lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)] animate-in fade-in slide-in-from-bottom-2 duration-300">
         {/* the list (on a phone it is the whole page until something is chosen) */}
         <div className={cn("min-w-0 space-y-4 lg:min-h-0 lg:overflow-y-auto lg:pb-2 lg:pr-2", chosen && "hidden lg:block")}>
@@ -175,7 +174,7 @@ export default function ProfileHub({ initial }: { initial: SectionId }) {
           {section === "understanding" && isOwner && <UnderstandingView />}
         </div>
       </div>
-    </DashboardLayout>
+    </>
   );
 }
 

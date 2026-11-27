@@ -8,10 +8,12 @@ import Testimonials from "@/components/Testimonials";
 import FAQ from "@/components/FAQ";
 import CTASection from "@/components/CTASection";
 import Footer from "@/components/Footer";
+import { StandaloneRedirect } from "@/components/StandaloneRedirect";
 
 export default function Home() {
   return (
     <>
+      <StandaloneRedirect />
       <Navbar />
       <HeroSection />
       <Features />

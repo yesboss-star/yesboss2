@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowDown, ArrowRight, ArrowUp, Check, Mail, Minus, X } from "lucide-react";
-import DashboardLayout from "@/components/DashboardLayout";
 import { Badge, Button, Checkbox } from "@/components/ui";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import {
@@ -162,7 +161,7 @@ export default function WeeklyReviewPage() {
   const nothing = !!counts && !tiles.some(([, n]) => Number(n) > 0) && counts.report_changes === 0 && !review?.trends.length;
 
   return (
-    <DashboardLayout>
+    <>
       <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-foreground to-primary bg-clip-text text-transparent">
@@ -295,6 +294,6 @@ export default function WeeklyReviewPage() {
           </>
         ) : null}
       </div>
-    </DashboardLayout>
+    </>
   );
 }

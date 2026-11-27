@@ -7,7 +7,6 @@ import { useOrganizationStore } from "@/stores/organizationStore";
 import { useTaskStore } from "@/stores/taskStore";
 import { useGoalStore } from "@/stores/goalStore";
 import { useOrgChartStore } from "@/stores/orgChartStore";
-import DashboardLayout from "@/components/DashboardLayout";
 import { GoalSection } from "@/components/owners/DashboardView";
 import TaskBoardCard, { firstAssignee, isFinished, needsAttention } from "@/components/TaskBoardCard";
 import QuickAddTask from "@/components/QuickAddTask";
@@ -242,7 +241,7 @@ function TaskPageContent() {
   const filtering = !!searchQuery || filter !== "all" || !!activeDept;
 
   return (
-    <DashboardLayout>
+    <>
       <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
@@ -446,6 +445,6 @@ function TaskPageContent() {
           goals={goals}
         />
       )}
-    </DashboardLayout>
+    </>
   );
 }

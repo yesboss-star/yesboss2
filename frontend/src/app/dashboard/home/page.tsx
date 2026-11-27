@@ -1,7 +1,6 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import DashboardLayout from "@/components/DashboardLayout";
 import CaptureChat from "@/components/capture/CaptureChat";
 import { DailyCheckin } from "@/components/journal/ChatNudges";
 import InboxSummary from "@/components/inbox/InboxSummary";
@@ -12,7 +11,7 @@ export default function HomePage() {
   const { organization } = useOrganizationStore();
 
   return (
-    <DashboardLayout>
+    <>
       <div className="h-[calc(100dvh-7rem-var(--bar,0px))] md:h-[calc(100dvh-8rem)]">
         <CaptureChat
           topSlot={
@@ -29,6 +28,6 @@ export default function HomePage() {
           }
         />
       </div>
-    </DashboardLayout>
+    </>
   );
 }

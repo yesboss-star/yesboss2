@@ -7,7 +7,6 @@ import { useUIStore } from "@/stores/uiStore";
 import { useOrganizationStore } from "@/stores/organizationStore";
 import { useGoalStore } from "@/stores/goalStore";
 import { Loader2, Sparkles, TrendingUp, Users, CheckSquare, Flag, Calendar, Clock, CheckCircle, AlertCircle, BarChart3, Target, Activity, FileText, Zap } from "lucide-react";
-import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Badge, Button } from "@/components/ui";
 import GoalModal from "@/components/GoalModal";
 import DashboardView from "@/components/owners/DashboardView";
@@ -280,7 +279,7 @@ export default function DashboardPage() {
   ];
 
   return (
-    <DashboardLayout>
+    <>
       {role === "owner" ? (
         <DashboardView onCreateGoal={() => setShowGoalModal(true)} />
       ) : (
@@ -459,6 +458,6 @@ export default function DashboardPage() {
       )}
 
       {role === "owner" && <GoalModal isOpen={showGoalModal} onClose={() => setShowGoalModal(false)} />}
-    </DashboardLayout>
+    </>
   );
 }

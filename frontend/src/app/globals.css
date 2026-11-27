@@ -451,3 +451,27 @@ html[data-skin="paper"] [class*="hover:-translate"]:hover { transform: none; }
 @media (prefers-reduced-motion: reduce) {
   html[data-skin] * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* Soft fade when a new page opens inside the dashboard (see app/dashboard/template.tsx). Opacity only. */
+@keyframes page-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.page-fade-in {
+  animation: page-fade-in 180ms ease-out both;
+}
+
+/* App feel, only inside the installed app (never on the website in a browser tab) */
+@media (display-mode: standalone) {
+  html, body {
+    overscroll-behavior-y: none; /* no pull-down bounce / refresh gesture */
+  }
+  body {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation; /* no double-tap zoom delay */
+  }
+  nav a, button, [role="button"] {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}

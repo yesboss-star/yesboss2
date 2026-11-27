@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import DashboardLayout from "@/components/DashboardLayout";
 import { useNotificationStore, Notification } from "@/stores/notificationStore";
 import { Card, CardContent, Badge, Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui";
 import { Bell, CheckCheck, Trash2, Loader2, ArrowLeft, Filter } from "lucide-react";
@@ -92,7 +91,7 @@ export default function NotificationsPage() {
   };
 
   return (
-    <DashboardLayout>
+    <>
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -220,6 +219,6 @@ export default function NotificationsPage() {
           </CardContent>
         </Card>
       </div>
-    </DashboardLayout>
+    </>
   );
 }

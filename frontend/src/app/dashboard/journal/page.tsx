@@ -8,7 +8,6 @@ import { useSessionStore, delegateAssigneeLabel, type GeneratedSubTask, type Ses
 import { getAuthHeaders } from "@/lib/utils";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { SPEEDS, useJournalSpeaker } from "@/hooks/useJournalSpeaker";
-import DashboardLayout from "@/components/DashboardLayout";
 import DelegatePreviewCard from "@/components/DelegatePreviewCard";
 import JournalPanel, { PANEL_TABS, type PanelTab } from "@/components/journal/JournalPanel";
 import { DailyCheckin, RecapNudge } from "@/components/journal/ChatNudges";
@@ -470,7 +469,7 @@ export default function JournalPage() {
   const canType = !!activeSession && !isAsking;
 
   return (
-    <DashboardLayout>
+    <>
       <div className="relative mx-auto flex h-[calc(100vh-7rem)] max-w-3xl flex-col md:h-[calc(100vh-8rem)]">
         {/* Top bar */}
         <header className="flex flex-wrap items-center justify-between gap-2 pb-3">
@@ -864,6 +863,6 @@ export default function JournalPage() {
           </div>
         )}
       </div>
-    </DashboardLayout>
+    </>
   );
 }

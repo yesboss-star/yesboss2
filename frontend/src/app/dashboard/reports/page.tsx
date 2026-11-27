@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getAuthHeaders } from "@/lib/utils";
-import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, Tabs, TabsList, TabsTrigger, TabsContent, Badge, Button } from "@/components/ui";
 import { BarChart3, Download, FileText, TrendingUp, Users, Loader2, RefreshCw, ArrowLeft, User } from "lucide-react";
 import EmployeeReportCard from "@/components/owners/EmployeeReportCard";
@@ -157,7 +156,7 @@ export default function ReportsPage() {
   ] : [];
 
   return (
-    <DashboardLayout>
+    <>
       <div className="max-w-5xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
@@ -369,6 +368,6 @@ export default function ReportsPage() {
           </>
         )}
       </div>
-    </DashboardLayout>
+    </>
   );
 }
